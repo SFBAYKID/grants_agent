@@ -29,14 +29,26 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 ## How Grant is wired (technical)
 
 - **Runtime:** Slack Bolt (Python) in **Socket Mode** — no public URL. Needs `SLACK_BOT_TOKEN` (xoxb),
-  `SLACK_APP_TOKEN` (xapp, `connections:write`), `SLACK_SIGNING_SECRET`, `SLACK_CHANNEL_ID`.
-- **Manifest / scopes:** `config/grant_slack_manifest.yaml` (paste it to create the app).
+  `SLACK_APP_TOKEN` (xapp, `connections:write`), `SLACK_SIGNING_SECRET`, `SLACK_CHANNEL_ID` (all in `.env`).
 - **Code home (when built):** `grant_watch/slack/` — `grant.py` (bot), `digest.py` (message formatting),
   `persequor.py` (handoff). Everything that posts or drafts honors `--dry-run`.
 - **Talking to @Persequor:** Grant posts an approved-send message that mentions @Persequor with the draft
   and recipient; Persequor already handles the actual email. The approval gate lives on Grant's side.
 
+## Live Slack app config (provisioned 2026-07-13 — this is the record; the setup manifest was removed)
+
+- **App:** "Grant", App ID `A0BH657R5M2`, Monarch workspace (`T01DFJLFKE3`). Installed; bot user `grant`.
+- **Icon:** the owl logo (`assets/grant_logo_512.png`). Background color `#0b3d5c`.
+- **Socket Mode:** ON (app-level token `grant-socket-mode`, scope `connections:write`).
+- **Interactivity:** ON. **Events:** `app_mention`, `message.im`. **Slash command:** `/grant`.
+- **Bot scopes (17):** `app_mentions:read`, `chat:write`, `chat:write.public`, `commands`,
+  `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `im:read`,
+  `im:write`, `mpim:history`, `reactions:read`, `reactions:write`, `users:read`, `users:read.email`,
+  `files:write`.
+- **Verified live** (2026-07-13): `auth.test` ok (team Monarch, user grant); `apps.connections.open`
+  returned a `wss://` URL. If scopes change later, edit via the app's App Manifest page and reinstall.
+
 ## Status
 
-`needs-testing` — spec only. Grant's bot code is Phase 3 and is not built yet (awaiting Chase's full
-program description). The manifest and this spec are the setup artifacts Chase needs to provision the app.
+Slack app: `verified` (provisioned, installed, tokens live). Grant's bot code: **not built yet** —
+that is Phase 3 of the build plan.

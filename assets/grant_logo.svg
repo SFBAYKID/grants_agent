@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Grant logo">
-  <!-- Grant app icon: security shield (physical-security focus) + magnifier (watches for fresh grants),
-       gold accent nods to GOLD leads. Deep-navy to teal = trustworthy / calm. Designed to stay legible
-       at small Slack sizes: two shapes, high contrast, no fine detail. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Grant owl logo">
+  <!-- Grant mascot: an owl (the watcher) whose eyes double as concentric scanning rings (the old
+       magnifier/search idea). Cream on navy-teal gradient, gold accents nod to GOLD leads. Flat and
+       bold so it stays readable at small Slack sizes. -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0b3d5c"/>
@@ -9,11 +9,30 @@
     </linearGradient>
   </defs>
   <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bg)"/>
-  <!-- shield -->
-  <path d="M256 116 C300 132 330 140 356 140 C356 252 336 334 256 398 C176 334 156 252 156 140 C182 140 212 132 256 116 Z"
-        fill="#ffffff"/>
-  <!-- magnifier lens -->
-  <circle cx="238" cy="206" r="48" fill="none" stroke="#f5b301" stroke-width="20"/>
-  <!-- magnifier handle -->
-  <line x1="272" y1="240" x2="312" y2="280" stroke="#f5b301" stroke-width="26" stroke-linecap="round"/>
+
+  <!-- ear tufts (drawn first so the head overlaps their base) -->
+  <path d="M176 176 L198 104 L232 168 Z" fill="#f5efe1"/>
+  <path d="M336 176 L314 104 L280 168 Z" fill="#f5efe1"/>
+
+  <!-- owl head + body -->
+  <path d="M256 120 C330 120 372 168 372 236 C372 322 340 402 256 410 C172 402 140 322 140 236 C140 168 182 120 256 120 Z" fill="#f5efe1"/>
+
+  <!-- eyes: white facial discs -->
+  <circle cx="205" cy="232" r="58" fill="#ffffff"/>
+  <circle cx="307" cy="232" r="58" fill="#ffffff"/>
+  <!-- gold scanning rings -->
+  <circle cx="205" cy="232" r="44" fill="none" stroke="#f5b301" stroke-width="9"/>
+  <circle cx="307" cy="232" r="44" fill="none" stroke="#f5b301" stroke-width="9"/>
+  <!-- navy pupils + glint -->
+  <circle cx="205" cy="232" r="23" fill="#0b3d5c"/>
+  <circle cx="307" cy="232" r="23" fill="#0b3d5c"/>
+  <circle cx="214" cy="223" r="7" fill="#ffffff"/>
+  <circle cx="316" cy="223" r="7" fill="#ffffff"/>
+
+  <!-- beak -->
+  <path d="M238 262 L274 262 L256 300 Z" fill="#f5b301"/>
+
+  <!-- suggestion of a wing tuck + feet on a perch -->
+  <path d="M256 320 q-26 30 -8 66 M256 320 q26 30 8 66" fill="none" stroke="#d9cdb4" stroke-width="7" stroke-linecap="round"/>
+  <path d="M226 408 l0 20 M256 410 l0 22 M286 408 l0 20" fill="none" stroke="#f5b301" stroke-width="9" stroke-linecap="round"/>
 </svg>

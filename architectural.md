@@ -47,8 +47,8 @@ grants_agent/
 ├── data/svpp_active_awards_CA_MI_PA_WA.csv   # 75 verified GOLD seed leads
 ├── docs/FINDINGS.md
 ├── docs/grant_lead_source_inventory.md
-├── docs/grant_agent.md       # Grant (Slack bot) spec
-├── config/grant_slack_manifest.yaml          # Slack app manifest
+├── docs/grant_agent.md       # Grant (Slack bot) spec + live app config record
+├── assets/                   # Grant logo (owl) — also set as the Slack app icon
 └── .claude/agents/           # project-scoped agents (grants-ops-guardian, architectural-critic)
 ```
 
@@ -136,7 +136,7 @@ rate-limit; record `verified`/`assumed`/`needs-testing` per source in code and i
 
 ## 5. Grant (the Slack chatbot)
 
-Full spec in `docs/grant_agent.md`; Slack manifest in `config/grant_slack_manifest.yaml`. In short:
+Full spec and the live app's configuration record in `docs/grant_agent.md`. In short:
 Grant posts the weekly digest (new GOLD/SILVER leads, expiring-window alerts), offers per-lead buttons
 ([Draft email] [Mark contacted] [Snooze] [Bad lead]), and on human approval hands the send to @Persequor.
 Grant runs in **Socket Mode** (no public URL). Everything that posts or drafts honors `--dry-run`. Grant

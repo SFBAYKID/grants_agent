@@ -17,6 +17,7 @@
      `assumed` (reasoned but unproven), or `needs-testing` (written but never executed).
    - If a contact or email is **not found**, record `contact_status='not_found'` and let a human
      research it. **Never guess an email address.** A fabricated lead is worse than no lead.
+   - Tell **owner** the honest truth.  He would rather be told the truth then you fabricated the truth.
 
 2. **Type-annotate and note everything.**
    - Every function has full type annotations (params + return). No untyped `dict` blobs passed around —
@@ -88,7 +89,8 @@ Build a **weekly grants checker** that:
 
 - **Grant** — the Slack chatbot persona (the product). Talks to humans and to other Slack agents
   (@Persequor). Posts the weekly digest, runs the approve-to-email flow. Honest, human-in-the-loop,
-  never fabricates. Spec: `docs/grant_agent.md`; Slack manifest: `config/grant_slack_manifest.yaml`.
+  never fabricates. Spec + live app config: `docs/grant_agent.md` (Slack app provisioned 2026-07-13;
+  tokens in `.env`).
 - **grants-ops-guardian** (`.claude/agents/`) — the ONLY thing allowed to operate the DigitalOcean
   droplet, and only via the scoped grants SSH. Use it for any server / production-database operation.
 - **architectural-critic** (`.claude/agents/`) — stress-tests plans and designs before implementation;
