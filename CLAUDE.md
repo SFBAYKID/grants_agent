@@ -111,10 +111,18 @@ affect Chase's other projects.
   they record what is already verified and the gotchas (e.g. SVPP is split across CFDA `16.071` **and**
   `16.710`; query one and you silently lose most leads).
 
-## Current status (2026-07-13)
+## Current status (2026-07-13, end of day)
 
-- `grant_watch.py` is a **v1 scaffold, never executed end-to-end** (`needs-testing`). Its flat `seen`
-  table is superseded by the 4-table schema in `architectural.md` — reconcile on the first refactor.
-- `data/svpp_active_awards_CA_MI_PA_WA.csv` holds 75 real GOLD leads (verified live) to seed the DB.
-- Program logic (pollers, enrichment, Grant, cron) is **not yet built here** — awaiting Chase's full
-  program description before we write it.
+- **Phase 1 built and `verified` live.** The `grant_watch/` package (typed models, 4-table schema,
+  per-source modules, CLI with `--dry-run`) replaced the v1 single-file scaffold, which was deleted.
+  Run it: `python -m grant_watch.cli poll|seed|status`. Tests: `python -m pytest` (18 passing, on
+  recorded fixtures in `tests/fixtures/`).
+- Per-source verification: **usaspending** `verified` (SVPP filter fixed — unfiltered 16.710 was 96%
+  non-school noise; pagination added; 4 states polled); **grants.gov** `verified`; **sam.gov**
+  `verified` with Chase's key; **webs** fetch+parse `verified`, but entity extraction from group-header
+  rows is `needs-testing` until a real security bid appears on the page (capture-day HTML verifiably
+  contained zero security keywords, so 0 matches was correct).
+- DB seeded: 75 CSV GOLD + 75 live GOLD SVPP awards + 96 expired-window watch + 153 grants.gov
+  signals + 4 SILVER RFPs. Dedup `verified` (repeat poll → 0 new).
+- **Grant's Slack app is provisioned and `verified` live** (see `docs/grant_agent.md`); bot code not
+  yet written. Next: Phase 2 (contact enrichment), Phase 3 (Grant + digest + cron).

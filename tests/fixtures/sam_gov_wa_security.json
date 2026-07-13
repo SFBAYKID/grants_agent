@@ -1,0 +1,256 @@
+{
+ "totalRecords": 4,
+ "limit": 100,
+ "offset": 0,
+ "opportunitiesData": [
+  {
+   "noticeId": "da2a384af7314448bf51244890a809e1",
+   "title": "SECURITY FENCING",
+   "solicitationNumber": "SPMYM226Q7478",
+   "fullParentPathName": "DEPT OF DEFENSE.DEFENSE LOGISTICS AGENCY.DLA MARITIME.DLA MARITIME SHIPYARDS.DLA MARITIME - PUGET SOUND",
+   "fullParentPathCode": "097.97AS.DLA MARITIME.DLA MARITIME SHIPYDS.SPMYM2",
+   "postedDate": "2026-07-13",
+   "type": "Solicitation",
+   "baseType": "Solicitation",
+   "archiveType": "auto15",
+   "archiveDate": "2026-07-30",
+   "typeOfSetAsideDescription": "Total Small Business Set-Aside (FAR 19.5)",
+   "typeOfSetAside": "SBA",
+   "responseDeadLine": "2026-07-15T10:00:00-07:00",
+   "naicsCode": "332618",
+   "naicsCodes": [
+    "332618"
+   ],
+   "classificationCode": "5660",
+   "active": "Yes",
+   "award": null,
+   "pointOfContact": [
+    {
+     "fax": "",
+     "type": "primary",
+     "email": "Denise.Quist@dla.mil",
+     "phone": "3604766075",
+     "title": null,
+     "fullName": "DENISE M. QUIST"
+    }
+   ],
+   "description": "https://api.sam.gov/prod/opportunities/v1/noticedesc?noticeid=da2a384af7314448bf51244890a809e1",
+   "organizationType": "OFFICE",
+   "officeAddress": {
+    "zipcode": "98314-5000",
+    "city": "BREMERTON",
+    "countryCode": "USA",
+    "state": "WA"
+   },
+   "placeOfPerformance": {
+    "city": {
+     "code": "66000",
+     "name": "San Diego"
+    },
+    "state": {
+     "code": "CA",
+     "name": "California"
+    },
+    "zip": "92135",
+    "country": {
+     "code": "USA",
+     "name": "UNITED STATES"
+    }
+   },
+   "additionalInfoLink": null,
+   "uiLink": "https://sam.gov/workspace/contract/opp/da2a384af7314448bf51244890a809e1/view",
+   "links": [
+    {
+     "rel": "self",
+     "href": "https://api.sam.gov/prod/opportunities/v2/search?noticeid=da2a384af7314448bf51244890a809e1&limit=1"
+    }
+   ],
+   "resourceLinks": [
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/1fecb5db28ab40a68c96f064b4d2e947/download",
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/82a7bf9c0c2d4c478583b30546c17636/download"
+   ]
+  },
+  {
+   "noticeId": "960a4a806b124301a895cc19ff4efefe",
+   "title": "N--Services to replace manhole covers & security gate",
+   "solicitationNumber": "1305M326Q0184",
+   "fullParentPathName": "COMMERCE, DEPARTMENT OF.NATIONAL OCEANIC AND ATMOSPHERIC ADMINISTRATION.DEPT OF COMMERCE NOAA",
+   "fullParentPathCode": "013.1330.1305M3",
+   "postedDate": "2026-07-10",
+   "type": "Combined Synopsis/Solicitation",
+   "baseType": "Combined Synopsis/Solicitation",
+   "archiveType": "auto15",
+   "archiveDate": "2026-07-31",
+   "typeOfSetAsideDescription": "Total Small Business Set-Aside (FAR 19.5)",
+   "typeOfSetAside": "SBA",
+   "responseDeadLine": "2026-07-16T10:00:00-06:00",
+   "naicsCode": "238990",
+   "naicsCodes": [
+    "238990"
+   ],
+   "classificationCode": "N056",
+   "active": "Yes",
+   "award": null,
+   "pointOfContact": [
+    {
+     "fax": null,
+     "type": "primary",
+     "email": "KIRSTEN.KEEN@NOAA.GOV",
+     "phone": "303-578-6662",
+     "title": null,
+     "fullName": "KEEN, KIRSTEN"
+    }
+   ],
+   "description": "https://api.sam.gov/prod/opportunities/v1/noticedesc?noticeid=960a4a806b124301a895cc19ff4efefe",
+   "organizationType": "OFFICE",
+   "officeAddress": {
+    "zipcode": "98115",
+    "city": "SEATTLE",
+    "countryCode": "USA",
+    "state": "WA"
+   },
+   "placeOfPerformance": {
+    "city": {},
+    "state": {},
+    "country": {}
+   },
+   "additionalInfoLink": null,
+   "uiLink": "https://sam.gov/workspace/contract/opp/960a4a806b124301a895cc19ff4efefe/view",
+   "links": [
+    {
+     "rel": "self",
+     "href": "https://api.sam.gov/prod/opportunities/v2/search?noticeid=960a4a806b124301a895cc19ff4efefe&limit=1"
+    }
+   ],
+   "resourceLinks": [
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/1ab9bebd5e6f46238a700d881cc47680/download",
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/1e5f37003cac4456bbe4c866789d8eb0/download",
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/6ea23b5d3a5b4542bcc32339b788090d/download",
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/72dad82b900146f8ad4b837690f657bb/download",
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/798c1bf91ac24c4e82a565f573034eef/download",
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/89ccb6a7f5814e499a8a05ba69cf9e37/download",
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/e06577333fb14fe8a437770423d47c5b/download",
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/ed53b260191d417b89a693f88ff01721/download"
+   ]
+  },
+  {
+   "noticeId": "5c0e318e5a284b6a82217b3dac14bf5f",
+   "title": "Furnish and Install, Security Cameras",
+   "solicitationNumber": "W911S826QA019 ",
+   "fullParentPathName": "DEPT OF DEFENSE.DEPT OF THE ARMY.AMC.ACC.MISSION INSTALLATION CONTRACTING COMMAND.418TH CSB.W6QM MICC-JB LEWIS-MC CHORD",
+   "fullParentPathCode": "021.2100.AMC.ACC.MICC.418TH CSB.W911S8",
+   "postedDate": "2026-07-10",
+   "type": "Solicitation",
+   "baseType": "Solicitation",
+   "archiveType": "auto15",
+   "archiveDate": "2026-08-06",
+   "typeOfSetAsideDescription": "Total Small Business Set-Aside (FAR 19.5)",
+   "typeOfSetAside": "SBA",
+   "responseDeadLine": "2026-07-22T11:00:00-07:00",
+   "naicsCode": "334310",
+   "naicsCodes": [
+    "334310"
+   ],
+   "classificationCode": "6340",
+   "active": "Yes",
+   "award": null,
+   "pointOfContact": [
+    {
+     "fax": "",
+     "type": "primary",
+     "email": "ana-teresa.p.torres.civ@army.mil",
+     "phone": "5207148268",
+     "title": null,
+     "fullName": "Ana Torres"
+    }
+   ],
+   "description": "https://api.sam.gov/prod/opportunities/v1/noticedesc?noticeid=5c0e318e5a284b6a82217b3dac14bf5f",
+   "organizationType": "OFFICE",
+   "officeAddress": {
+    "zipcode": "98433-9500",
+    "city": "JOINT BASE LEWIS MCCH",
+    "countryCode": "USA",
+    "state": "WA"
+   },
+   "placeOfPerformance": {
+    "state": {
+     "code": "WA",
+     "name": "Washington"
+    },
+    "zip": "98433",
+    "country": {
+     "code": "USA",
+     "name": "UNITED STATES"
+    }
+   },
+   "additionalInfoLink": null,
+   "uiLink": "https://sam.gov/workspace/contract/opp/5c0e318e5a284b6a82217b3dac14bf5f/view",
+   "links": [
+    {
+     "rel": "self",
+     "href": "https://api.sam.gov/prod/opportunities/v2/search?noticeid=5c0e318e5a284b6a82217b3dac14bf5f&limit=1"
+    }
+   ],
+   "resourceLinks": [
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/2b6870d5cbd741f180e73bf974eb5ee6/download",
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/41e7a2ca9889419c89b0db3696057315/download",
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/50d8a3d614c94c24964be688f607ef3e/download",
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/b8b4be70731a439d86617a659a10639b/download",
+    "https://sam.gov/api/prod/opps/v3/opportunities/resources/files/e6eb7f5480bf496e927cf2682132883e/download"
+   ]
+  },
+  {
+   "noticeId": "112d6d48dc9e45309cc7824f8170269a",
+   "title": "Furnish and Install, Security Cameras",
+   "solicitationNumber": "W911S826QA019",
+   "fullParentPathName": "DEPT OF DEFENSE.DEPT OF THE ARMY.AMC.ACC.MISSION INSTALLATION CONTRACTING COMMAND.418TH CSB.W6QM MICC-JB LEWIS-MC CHORD",
+   "fullParentPathCode": "021.2100.AMC.ACC.MICC.418TH CSB.W911S8",
+   "postedDate": "2026-07-10",
+   "type": "Solicitation",
+   "baseType": "Solicitation",
+   "archiveType": "autocustom",
+   "archiveDate": "2027-07-10",
+   "typeOfSetAsideDescription": null,
+   "typeOfSetAside": null,
+   "responseDeadLine": "2026-07-22T11:00:00-07:00",
+   "naicsCode": "334310",
+   "naicsCodes": [
+    "334310"
+   ],
+   "classificationCode": "6350",
+   "active": "Yes",
+   "award": null,
+   "pointOfContact": [
+    {
+     "fax": "",
+     "type": "primary",
+     "email": "ana-teresa.p.torres.civ@army.mil",
+     "phone": "5207148268",
+     "title": null,
+     "fullName": "ANA-TERESA Torres"
+    }
+   ],
+   "description": "https://api.sam.gov/prod/opportunities/v1/noticedesc?noticeid=112d6d48dc9e45309cc7824f8170269a",
+   "organizationType": "OFFICE",
+   "officeAddress": {
+    "zipcode": "98433-9500",
+    "city": "JOINT BASE LEWIS MCCH",
+    "countryCode": "USA",
+    "state": "WA"
+   },
+   "placeOfPerformance": {
+    "streetAddress": "",
+    "zip": ""
+   },
+   "additionalInfoLink": null,
+   "uiLink": "https://sam.gov/workspace/contract/opp/112d6d48dc9e45309cc7824f8170269a/view",
+   "links": [
+    {
+     "rel": "self",
+     "href": "https://api.sam.gov/prod/opportunities/v2/search?noticeid=112d6d48dc9e45309cc7824f8170269a&limit=1"
+    }
+   ],
+   "resourceLinks": null
+  }
+ ]
+}
