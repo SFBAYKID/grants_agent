@@ -91,7 +91,8 @@ CREATE TABLE leads (
   detail_url TEXT,
   raw_json TEXT,
   first_seen TIMESTAMP, last_seen TIMESTAMP,
-  status TEXT DEFAULT 'new',       -- new, surfaced, contacted, replied, opportunity, dead
+  status TEXT DEFAULT 'new',       -- new, surfaced, contacted, snoozed, replied, opportunity, dead
+  status_note TEXT,                -- human feedback, e.g. the [Bad lead] reason (feeds scoring)
   UNIQUE(source, source_item_id)   -- the dedup key
 );
 CREATE TABLE contacts (

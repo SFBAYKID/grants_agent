@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS leads (
   detail_url TEXT,
   raw_json TEXT,
   first_seen TIMESTAMP, last_seen TIMESTAMP,
-  status TEXT DEFAULT 'new',       -- new, surfaced, contacted, replied, opportunity, dead
+  status TEXT DEFAULT 'new',       -- new, surfaced, contacted, snoozed, replied, opportunity, dead
+  status_note TEXT,                -- e.g. the human's [Bad lead] reason — feeds scoring later
   UNIQUE(source, source_item_id)
 );
 CREATE TABLE IF NOT EXISTS contacts (
@@ -62,9 +63,18 @@ def _now() -> str:
 
 
 def connect(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
-    """Open (and create if needed) the database with the canonical schema."""
+    """Open (and create if needed) the database with the canonical schema.
+
+    Also applies tiny in-place migrations for DBs created before a column existed —
+    SQLite has no IF NOT EXISTS for columns, so we check PRAGMA table_info.
+    """
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row  # dict-style access for Slack formatting code
     conn.executescript(_SCHEMA)
+    lead_cols = {r[1] for r in conn.execute("PRAGMA table_info(leads)")}
+    if "status_note" not in lead_cols:  # migration: added in Phase 3 for [Bad lead] reasons
+        conn.execute("ALTER TABLE leads ADD COLUMN status_note TEXT")
+        conn.commit()
     return conn
 
 
@@ -144,3 +154,67 @@ def status_summary(conn: sqlite3.Connection) -> list[tuple[str, str, int]]:
         "SELECT source, lead_grade, COUNT(*) FROM leads GROUP BY source, lead_grade "
         "ORDER BY source, lead_grade"
     ))
+
+
+# ---------------------------------------------------------------- Phase 3: Slack workflow
+
+def digest_leads(conn: sqlite3.Connection, expiring_days: int = 90
+                 ) -> dict[str, list[sqlite3.Row]]:
+    """Rows for the weekly digest, in three buckets:
+      gold      new GOLD leads not yet surfaced (freshest start date first, then $)
+      silver    new SILVER leads not yet surfaced
+      expiring  GOLD leads whose spend window ends within `expiring_days`
+                (use-it-or-lose-it — regardless of surfaced status, but not dead/contacted)
+    """
+    gold = list(conn.execute(
+        "SELECT * FROM leads WHERE lead_grade='gold' AND status='new' "
+        "ORDER BY funds_start DESC, amount DESC"))
+    silver = list(conn.execute(
+        "SELECT * FROM leads WHERE lead_grade='silver' AND status='new' "
+        "ORDER BY funds_end ASC"))
+    expiring = list(conn.execute(
+        "SELECT * FROM leads WHERE lead_grade='gold' "
+        "AND status NOT IN ('dead','contacted') "
+        "AND funds_end IS NOT NULL "
+        "AND date(funds_end) BETWEEN date('now') AND date('now', ?) "
+        "ORDER BY funds_end ASC", (f"+{expiring_days} days",)))
+    return {"gold": gold, "silver": silver, "expiring": expiring}
+
+
+def get_lead(conn: sqlite3.Connection, lead_id: int) -> sqlite3.Row | None:
+    """One lead row by primary key (None when the id is stale/unknown)."""
+    return conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
+
+
+def set_lead_status(conn: sqlite3.Connection, lead_id: int, status: str,
+                    note: str | None = None) -> None:
+    """Move a lead through the triage workflow (surfaced/contacted/snoozed/dead...).
+    `note` records the human's reason (e.g. [Bad lead] feedback for future scoring)."""
+    conn.execute("UPDATE leads SET status = ?, status_note = COALESCE(?, status_note) "
+                 "WHERE id = ?", (status, note, lead_id))
+    conn.commit()
+
+
+def mark_surfaced(conn: sqlite3.Connection, lead_ids: list[int]) -> None:
+    """Flip a batch of just-posted digest leads from 'new' to 'surfaced'."""
+    conn.executemany("UPDATE leads SET status='surfaced' WHERE id=? AND status='new'",
+                     [(i,) for i in lead_ids])
+    conn.commit()
+
+
+def create_outreach(conn: sqlite3.Connection, lead_id: int, draft: str) -> int:
+    """Store a proposed email draft (channel='slack-thread'). Returns outreach id.
+    approved_by/sent_at stay NULL until a human explicitly approves (Constitution 10)."""
+    cur = conn.execute(
+        "INSERT INTO outreach (lead_id, channel, draft) VALUES (?, 'slack-thread', ?)",
+        (lead_id, draft))
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def approve_outreach(conn: sqlite3.Connection, outreach_id: int, approver: str) -> None:
+    """Record the human approval + the moment we handed the send to @Persequor.
+    sent_at here means 'handed off', not 'delivered' — Persequor owns actual delivery."""
+    conn.execute("UPDATE outreach SET approved_by = ?, sent_at = ? WHERE id = ?",
+                 (approver, _now(), outreach_id))
+    conn.commit()

@@ -55,4 +55,4 @@ def test_run_logging(tmp_path: Path) -> None:
     db.log_run(conn, "2026-07-13T00:00:00+00:00",
                RunStats(source="TestSource", items_seen=5, items_new=2, errors=""))
     row = conn.execute("SELECT source, items_seen, items_new FROM runs").fetchone()
-    assert row == ("TestSource", 5, 2)
+    assert tuple(row) == ("TestSource", 5, 2)  # connect() sets row_factory=Row

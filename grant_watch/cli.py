@@ -4,6 +4,7 @@ Usage (from the repo root, venv active):
     python -m grant_watch.cli poll [--source NAME] [--dry-run]
     python -m grant_watch.cli seed
     python -m grant_watch.cli status
+    python -m grant_watch.cli digest [--dry-run]     # weekly Slack digest (cron target)
 
 --dry-run polls and grades but writes NOTHING (no DB rows, no run log) — required by
 CLAUDE.md for anything that will later feed Slack. Errors in one source never abort
@@ -88,6 +89,23 @@ def cmd_status() -> int:
     return 0
 
 
+def cmd_digest(dry_run: bool) -> int:
+    """Post the weekly digest to SLACK_CHANNEL_ID (the Monday-cron entrypoint).
+    Import is local so poll/seed/status never require Slack credentials."""
+    from slack_sdk import WebClient
+
+    from .slack import digest as digest_mod
+
+    channel = os.environ.get("SLACK_CHANNEL_ID", "")
+    if not channel:
+        print("SLACK_CHANNEL_ID is not set in .env", file=sys.stderr)
+        return 1
+    client = WebClient(token=os.environ["SLACK_BOT_TOKEN"]) if not dry_run else None
+    n = digest_mod.post_digest(client, channel, db.connect(), dry_run=dry_run)  # type: ignore[arg-type]
+    print(f"digest: {n} leads shown{' (dry-run)' if dry_run else ''}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse args and dispatch. .env is loaded here so every command sees the keys."""
     load_dotenv()
@@ -100,12 +118,17 @@ def main(argv: list[str] | None = None) -> int:
                         help="poll and grade but write nothing")
     sub.add_parser("seed", help="seed leads from the verified SVPP CSV")
     sub.add_parser("status", help="lead counts by source and grade")
+    p_digest = sub.add_parser("digest", help="post the weekly digest to Slack")
+    p_digest.add_argument("--dry-run", action="store_true",
+                          help="print the blocks; post and write nothing")
 
     args = parser.parse_args(argv)
     if args.command == "poll":
         return cmd_poll(args.source, args.dry_run)
     if args.command == "seed":
         return cmd_seed()
+    if args.command == "digest":
+        return cmd_digest(args.dry_run)
     return cmd_status()
 
 

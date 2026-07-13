@@ -124,5 +124,12 @@ affect Chase's other projects.
   contained zero security keywords, so 0 matches was correct).
 - DB seeded: 75 CSV GOLD + 75 live GOLD SVPP awards + 96 expired-window watch + 153 grants.gov
   signals + 4 SILVER RFPs. Dedup `verified` (repeat poll → 0 new).
-- **Grant's Slack app is provisioned and `verified` live** (see `docs/grant_agent.md`); bot code not
-  yet written. Next: Phase 2 (contact enrichment), Phase 3 (Grant + digest + cron).
+- **Phase 3 built and `verified` live.** `grant_watch/slack/` — digest (pure Block Kit builder +
+  poster), Grant bot (Socket Mode; triage buttons; bad-lead-reason modal; draft → human-approve →
+  @Persequor handoff), `/grant status|digest`. First real digest posted 2026-07-13 (16 leads,
+  statuses flipped to surfaced); Socket Mode boot `verified`. Run the bot:
+  `python -m grant_watch.slack.grant`. Digest cron target: `python -m grant_watch.cli digest`.
+  Outstanding: invite @Grant to the digest channel (posting worked via chat:write.public, but
+  thread reads need membership); set PERSEQUOR_USER_ID in .env so handoffs ping.
+- Next: Phase 2 (contact enrichment — Firecrawl + Claude extraction, not_found never fabricated),
+  then cron on the droplet (Phase 4 tenant).
