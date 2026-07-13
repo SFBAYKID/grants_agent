@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Grant logo">
+  <!-- Grant app icon: security shield (physical-security focus) + magnifier (watches for fresh grants),
+       gold accent nods to GOLD leads. Deep-navy to teal = trustworthy / calm. Designed to stay legible
+       at small Slack sizes: two shapes, high contrast, no fine detail. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b3d5c"/>
+      <stop offset="1" stop-color="#1f8a8c"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- shield -->
+  <path d="M256 116 C300 132 330 140 356 140 C356 252 336 334 256 398 C176 334 156 252 156 140 C182 140 212 132 256 116 Z"
+        fill="#ffffff"/>
+  <!-- magnifier lens -->
+  <circle cx="238" cy="206" r="48" fill="none" stroke="#f5b301" stroke-width="20"/>
+  <!-- magnifier handle -->
+  <line x1="272" y1="240" x2="312" y2="280" stroke="#f5b301" stroke-width="26" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,58 @@
+# Grant — Slack app manifest
+# HOW TO USE: Slack API → Your Apps → Create New App → "From an app manifest" → pick the workspace →
+# paste this YAML. After creating:
+#   1. OAuth & Permissions → Install to Workspace → copy the Bot User OAuth Token (xoxb-...) → SLACK_BOT_TOKEN
+#   2. Basic Information → App-Level Tokens → Generate a token with scope `connections:write` (xapp-...)
+#      → SLACK_APP_TOKEN   (required for Socket Mode; app-level tokens are NOT part of this manifest)
+#   3. Basic Information → Signing Secret → SLACK_SIGNING_SECRET
+#   4. Invite Grant to the digest channel; put that channel's ID in SLACK_CHANNEL_ID
+#
+# Socket Mode is ON, so Grant needs NO public URL — it connects out over the app-level token.
+
+display_information:
+  name: Grant
+  description: Weekly grant-lead watcher for Monarch Connected — surfaces fresh school/city security
+    funding, and helps draft honest, human-approved outreach.
+  background_color: "#0b3d5c"
+
+features:
+  bot_user:
+    display_name: Grant
+    always_online: true
+  slash_commands:
+    - command: /grant
+      description: Ask Grant about leads, the latest digest, or outreach
+      usage_hint: "leads | digest | help"
+      should_escape: false
+
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read      # hear @Grant mentions
+      - chat:write             # post digests, threads, drafts
+      - chat:write.public      # post to a channel without being a member
+      - commands               # the /grant slash command
+      - channels:history       # read messages in public channels it's in (digest channel)
+      - channels:read          # resolve channel names/IDs
+      - groups:history         # same, for private channels
+      - groups:read
+      - im:history             # DM conversations with humans
+      - im:read
+      - im:write               # open/send DMs
+      - mpim:history           # group DMs (human + Grant + @Persequor)
+      - reactions:read         # read 👍/👎 feedback on leads
+      - reactions:write        # acknowledge actions with a reaction
+      - users:read             # identify who approved an outreach
+      - users:read.email       # match approver / rep to Salesforce
+      - files:write            # attach a lead summary or CSV when useful
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention            # someone @Grant ...
+      - message.im             # a human DMs Grant
+  interactivity:
+    is_enabled: true           # Block Kit buttons: [Draft email] [Mark contacted] [Snooze] [Bad lead]
+  org_deploy_enabled: false
+  socket_mode_enabled: true    # no public URL; pair with SLACK_APP_TOKEN (connections:write)
+  token_rotation_enabled: false
