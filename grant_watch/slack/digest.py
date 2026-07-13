@@ -13,7 +13,7 @@ from typing import Any
 
 from slack_sdk import WebClient
 
-from .. import db
+from .. import db, scoring
 
 # Per-bucket caps keep the message under Slack's 50-block limit (3 blocks/lead worst case).
 GOLD_CAP = 8
@@ -77,6 +77,15 @@ def _bucket(blocks: list[dict[str, Any]], title: str, rows: list[sqlite3.Row],
     return [int(r["id"]) for r in shown]
 
 
+def _rank(rows: list[sqlite3.Row]) -> list[sqlite3.Row]:
+    """Quality gate: order GOLD by lead_score (freshness x $ x program fit) so the
+    capped digest always shows the STRONGEST leads, not the first-queried ones."""
+    return sorted(rows,
+                  key=lambda r: scoring.lead_score(r["program"], r["amount"],
+                                                   r["funds_start"] or ""),
+                  reverse=True)
+
+
 def build_digest_blocks(buckets: dict[str, list[sqlite3.Row]]
                         ) -> tuple[list[dict[str, Any]], list[int]]:
     """Pure builder: buckets -> (blocks, ids of every lead shown)."""
@@ -87,7 +96,7 @@ def build_digest_blocks(buckets: dict[str, list[sqlite3.Row]]
     ]
     shown: list[int] = []
     shown += _bucket(blocks, "🥇 New GOLD — just got security money",
-                     buckets["gold"], GOLD_CAP)
+                     _rank(buckets["gold"]), GOLD_CAP)
     shown += _bucket(blocks, "🥈 New SILVER — open RFPs", buckets["silver"], SILVER_CAP)
     shown += _bucket(blocks, "⏳ Expiring windows (<90 days) — use it or lose it",
                      buckets["expiring"], EXPIRING_CAP)

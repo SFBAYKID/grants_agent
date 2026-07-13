@@ -131,5 +131,12 @@ affect Chase's other projects.
   `python -m grant_watch.slack.grant`. Digest cron target: `python -m grant_watch.cli digest`.
   Outstanding: invite @Grant to the digest channel (posting worked via chat:write.public, but
   thread reads need membership); set PERSEQUOR_USER_ID in .env so handoffs ping.
+- **Post-launch fixes (same day, `verified`):** seed-vs-live duplicate reconciliation (75 superseded
+  CSV rows retired; expiring bucket 34→17) and the digest quality gate (`scoring.lead_score` —
+  freshness × dollars × program camera-fit; GOLD bucket shows the top-ranked N, watch never surfaces).
+- **In design (do not build yet):** multi-rep workflow (claim/ownership, territory routing), the
+  Grant↔Persequor outreach handoff (awaiting `persequor_integration_response.md` from the
+  `~/monarch_followup_agent` project), and Salesforce cross-referencing. Chase wants the complete
+  workflow agreed before implementation.
 - Next: Phase 2 (contact enrichment — Firecrawl + Claude extraction, not_found never fabricated),
   then cron on the droplet (Phase 4 tenant).

@@ -60,3 +60,39 @@ def is_fresh(item: RawItem, today: date | None = None) -> bool:
     today = today or date.today()
     start = _parse_date(item.start)
     return start is not None and start >= today - timedelta(days=FRESH_MONTHS * 30)
+
+
+# ---------------------------------------------------------------- quality gate (rank)
+
+# How addressable each program's dollars are with Monarch's catalog (cameras, access
+# control, door hardening). Chase's rule: reps must trust every digest line, so
+# software-heavy programs rank low even at high dollar amounts.
+PROGRAM_FIT: dict[str, float] = {
+    "SVPP": 1.0,    # school physical security — the bullseye
+    "CSSGP": 1.0,   # MI: eligible costs are literally the catalog
+    "PCCD": 1.0,    # PA school safety
+    "NSGP": 0.9,    # nonprofit hardening — near-pure physical security
+    "STOP": 0.5,    # skews software/threat-assessment (docs/FINDINGS.md)
+}
+_DEFAULT_FIT = 0.6      # RFPs and unknown programs: relevant but unproven
+_AMOUNT_NORM = 500_000  # SVPP max award — a natural "full marks" dollar anchor
+
+
+def lead_score(program: str, amount: float | None, start: str,
+               today: date | None = None) -> float:
+    """0..1 rank for the digest: freshness x dollars x program camera-fit.
+
+    Freshness dominates by design (Chase: 'freshness is everything') — a $500K award
+    from 3 years ago ranks below a $100K award from last month.
+    """
+    today = today or date.today()
+    start_d = _parse_date(start)
+    if start_d is None:
+        fresh = 0.3  # unknown start: keep it visible but never above known-fresh leads
+    else:
+        age_months = max(0.0, (today - start_d).days / 30)
+        # 1.0 through 6 months, linear decay to 0.15 by 36 months
+        fresh = 1.0 if age_months <= 6 else max(0.15, 1.0 - (age_months - 6) / 30 * 0.85)
+    dollars = min((amount or 0) / _AMOUNT_NORM, 1.0) if amount and amount > 0 else 0.3
+    fit = PROGRAM_FIT.get((program or "").upper(), _DEFAULT_FIT)
+    return round(fresh * (0.5 + 0.5 * dollars) * fit, 4)

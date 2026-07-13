@@ -70,6 +70,10 @@ def cmd_poll(only_source: str | None, dry_run: bool) -> int:
         new_total += stats.items_new
         print(f"[{name}] {stats.items_seen} items, {stats.items_new} new"
               f"{' (dry-run: nothing written)' if dry_run else ''}")
+    if not dry_run:
+        retired = db.reconcile_seed_duplicates(conn)
+        if retired:
+            print(f"[reconcile] {retired} seed rows superseded by live award rows")
     return 0 if new_total >= 0 else 1
 
 

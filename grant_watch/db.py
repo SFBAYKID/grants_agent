@@ -156,6 +156,29 @@ def status_summary(conn: sqlite3.Connection) -> list[tuple[str, str, int]]:
     ))
 
 
+def reconcile_seed_duplicates(conn: sqlite3.Connection) -> int:
+    """Retire seed-CSV rows that a live poller row has superseded.
+
+    Why: the 2026-07-13 live digest showed the same award twice — once from
+    'seed:svpp_csv' (no award id, no URL) and once from live USASpending. Match is
+    EXACT on normalized entity + amount + funds_end (verified 75/75 seed rows matched
+    this way with zero false lonelies). The live row wins (it carries the award id and
+    deep link); the seed row goes to status='dead' with an explanatory note, preserving
+    history. Returns how many seed rows were retired. Idempotent.
+    """
+    cur = conn.execute("""
+        UPDATE leads SET status = 'dead',
+               status_note = 'superseded by live award row (same entity/amount/window)'
+        WHERE source = 'seed:svpp_csv' AND status != 'dead' AND EXISTS (
+            SELECT 1 FROM leads l
+            WHERE l.source LIKE 'usaspending:%'
+              AND UPPER(TRIM(l.entity_name)) = UPPER(TRIM(leads.entity_name))
+              AND l.amount = leads.amount
+              AND l.funds_end = leads.funds_end)""")
+    conn.commit()
+    return cur.rowcount
+
+
 # ---------------------------------------------------------------- Phase 3: Slack workflow
 
 def digest_leads(conn: sqlite3.Connection, expiring_days: int = 90
