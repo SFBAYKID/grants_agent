@@ -1,18 +1,17 @@
-"""Outreach drafting + the @Persequor handoff (the send is NEVER Grant's to make).
+"""Interim outreach drafting (the send is NEVER Grant's to make).
 
 Honesty rules baked in (CLAUDE.md rule 10): the draft identifies Monarch Connected,
 references only award facts we actually hold in the DB, includes an opt-out, and — with
 contact enrichment not built yet (Phase 2) — carries an explicit RECIPIENT placeholder
-rather than a guessed email address. A human approves in Slack; only then does Grant
-post the handoff message that asks @Persequor to send.
+rather than a guessed email address. Reps copy the draft manually until the real
+Persequor HTTP contract ships (docs/workflow_design.md §4).
 
-The draft is a deterministic template (testable, no LLM variance). A Claude-polish pass
-can layer on in Phase 2 once real contact/context data exists to personalize with.
+The draft is a deterministic template (testable, no LLM variance). Once the contract
+lands, drafting moves to Persequor entirely and this template retires with it.
 """
 
 from __future__ import annotations
 
-import os
 import sqlite3
 
 SENDER_NAME = "Monarch Connected"
@@ -44,16 +43,7 @@ def compose_draft(row: sqlite3.Row) -> str:
     )
 
 
-def persequor_mention() -> str:
-    """A real <@id> mention when PERSEQUOR_USER_ID is configured, else plain text
-    (plain '@Persequor' does not ping — set the id in .env to make handoffs ping)."""
-    uid = os.environ.get("PERSEQUOR_USER_ID", "")
-    return f"<@{uid}>" if uid else "@Persequor"
-
-
-def build_handoff_text(entity: str, approver: str, draft: str) -> str:
-    """The in-thread message that asks Persequor to send the APPROVED draft."""
-    return (
-        f"{persequor_mention()} — approved by <@{approver}>: please send the email "
-        f"below to the appropriate contact at *{entity}*.\n\n```{draft}```"
-    )
+# NOTE: the old Slack-mention handoff (persequor_mention / build_handoff_text) was
+# removed 2026-07-13 — Persequor verifiably drops bot messages, so a mention-based
+# handoff can never work. Its replacement is the HTTP outreach-request contract in
+# docs/workflow_design.md §4, to be built once Chase approves both sides.

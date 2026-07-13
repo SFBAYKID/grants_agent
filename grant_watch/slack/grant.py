@@ -86,10 +86,18 @@ def create_app() -> App:
         reason = view["state"]["values"]["reason_block"]["reason"]["value"] or ""
         db.set_lead_status(db.connect(), lead_id, "dead", note=reason)
 
-    # ---------------------------------------------------------------- draft -> approve
+    # ---------------------------------------------------------------- draft (interim)
     @app.action("grant_draft_email")
     def draft_email(ack: Ack, body: dict[str, Any], client) -> None:
-        """Compose the honest template draft and post it in-thread for review."""
+        """Post the template draft in-thread for the rep to use MANUALLY.
+
+        HONESTY NOTE (architectural-critic C1, 2026-07-13): the automated
+        Grant→Persequor handoff is NOT wired yet — Persequor drops bot messages by
+        design, so the old 'Approve & hand to Persequor' button was a no-op that
+        falsely wrote contacted/sent_at. Until the real HTTP contract ships (see
+        docs/workflow_design.md §4), this button only offers a copyable draft and
+        says so plainly. No status changes, no outreach rows.
+        """
         ack()
         conn = db.connect()
         lead_id = int(body["actions"][0]["value"])
@@ -98,51 +106,12 @@ def create_app() -> App:
             _thread_reply(client, body, f"⚠️ Lead #{lead_id} not found — stale button?")
             return
         draft = persequor.compose_draft(row)
-        outreach_id = db.create_outreach(conn, lead_id, draft)
         _thread_reply(client, body,
-                      f"Draft for *{row['entity_name']}* (review before anything sends):\n"
-                      f"```{draft}```",
-                      extra_blocks=[{
-                          "type": "actions", "block_id": f"outreach-{outreach_id}",
-                          "elements": [
-                              {"type": "button", "action_id": "grant_approve_send",
-                               "style": "primary",
-                               "text": {"type": "plain_text",
-                                        "text": "Approve & hand to Persequor"},
-                               "value": f"{outreach_id}:{lead_id}"},
-                              {"type": "button", "action_id": "grant_discard_draft",
-                               "text": {"type": "plain_text", "text": "Discard"},
-                               "value": f"{outreach_id}:{lead_id}"},
-                          ]}])
-
-    @app.action("grant_approve_send")
-    def approve_send(ack: Ack, body: dict[str, Any], client) -> None:
-        """THE approval gate: only here does the draft move toward an actual send."""
-        ack()
-        conn = db.connect()
-        outreach_id, lead_id = (int(x) for x in body["actions"][0]["value"].split(":"))
-        approver = body["user"]["id"]
-        row = db.get_lead(conn, lead_id)
-        draft_row = conn.execute("SELECT draft FROM outreach WHERE id = ?",
-                                 (outreach_id,)).fetchone()
-        if row is None or draft_row is None:
-            _thread_reply(client, body, "⚠️ Draft or lead vanished — nothing handed off.")
-            return
-        db.approve_outreach(conn, outreach_id, approver)
-        db.set_lead_status(conn, lead_id, "contacted")
-        _thread_reply(client, body,
-                      persequor.build_handoff_text(row["entity_name"], approver,
-                                                   draft_row["draft"]))
-
-    @app.action("grant_discard_draft")
-    def discard_draft(ack: Ack, body: dict[str, Any], client) -> None:
-        ack()
-        outreach_id, _ = (int(x) for x in body["actions"][0]["value"].split(":"))
-        conn = db.connect()
-        conn.execute("DELETE FROM outreach WHERE id = ? AND approved_by IS NULL",
-                     (outreach_id,))
-        conn.commit()
-        _thread_reply(client, body, "🗑️ Draft discarded — nothing was sent.")
+                      f"Draft for *{row['entity_name']}* — copy it into your own email "
+                      f"if you want to send today:\n```{draft}```\n"
+                      f"_Automated hand-off to Persequor isn't wired yet (in design). "
+                      f"If you do send it, click ✅ Mark contacted so the lead is "
+                      f"tracked honestly._")
 
     # ---------------------------------------------------------------- conversation
     @app.event("app_mention")

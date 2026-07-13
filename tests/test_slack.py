@@ -86,13 +86,6 @@ def test_draft_is_honest(tmp_path: Path) -> None:
     assert "2028-09-30" in draft                   # real spend window
 
 
-def test_handoff_text_mentions_persequor_and_approver() -> None:
-    text = persequor.build_handoff_text("Castle Rock SD 401", "U123", "DRAFT BODY")
-    assert "@Persequor" in text or "<@" in text
-    assert "<@U123>" in text
-    assert "DRAFT BODY" in text
-
-
 # ------------------------------------------------------------------ workflow states
 def test_outreach_approval_records_gate(tmp_path: Path) -> None:
     conn = _seeded_conn(tmp_path)
