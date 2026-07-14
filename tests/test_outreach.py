@@ -9,6 +9,7 @@ import pytest
 
 from grant_watch import db, persequor_client
 from grant_watch.enrich.finder import verify_on_page
+from grant_watch.enrich.salesforce import SFMatch, _sosl_term
 from grant_watch.models import Lead, LeadGrade, RawItem
 
 PAGE = """# Castle Rock School District — Staff Directory
@@ -33,6 +34,20 @@ def test_gate_rejects_name_not_on_page() -> None:
 
 def test_gate_rejects_malformed_email() -> None:
     assert not verify_on_page(PAGE, "not-an-email", "Jane Doe")
+
+
+# ------------------------------------------------------------ salesforce (offline bits)
+def test_sosl_term_strips_reserved_punctuation() -> None:
+    # SOSL FIND {...} chokes on these; must be stripped, meaningful words kept.
+    term = _sosl_term("Mt. Morris Consolidated Schools (401) & District")
+    assert "(" not in term and "&" not in term and "." not in term
+    assert "Morris" in term and "Consolidated" in term
+
+
+def test_sf_match_carries_lightning_link() -> None:
+    m = SFMatch(sobject="Account", record_id="001x", name="Monarch", owner="Chase",
+                link="https://x/lightning/r/Account/001x/view", confidence="high")
+    assert "/lightning/r/Account/001x/view" in m.link
 
 
 # ------------------------------------------------------------ roster

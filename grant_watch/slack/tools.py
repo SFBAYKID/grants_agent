@@ -71,6 +71,19 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "salesforce_lookup",
+        "description": "Check whether an awardee already exists in Monarch's Salesforce "
+                       "(Account, Lead, or Opportunity) and return the record link + "
+                       "owner. Use it before drafting outreach so a rep doesn't contact "
+                       "a district a teammate already owns. Uncertain name matches come "
+                       "back as 'possible' — present them as such, never assert.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"entity": {"type": "string"}},
+            "required": ["entity"],
+        },
+    },
+    {
         "name": "make_spreadsheet",
         "description": "Create a real .xlsx file that will be uploaded into this "
                        "Slack thread. rows[0] is the header row. Use when the rep "
@@ -173,10 +186,32 @@ def find_contact(lead_id: int, entity: str, state: str) -> str:
             f"(found on {candidate.source_url}, confidence {candidate.confidence})")
 
 
+def salesforce_lookup(entity: str) -> str:
+    """CRM cross-reference for one entity — honest, link-carrying summary for Grant."""
+    from ..enrich import salesforce
+
+    res = salesforce.lookup(entity)
+    if res.error:
+        return f"ERROR: {res.error} — tell the user you couldn't reach Salesforce."
+    if not res.matched:
+        return f"No Salesforce record found for '{entity}' — looks net-new."
+    lines = []
+    for m in res.matches[:5]:
+        tag = "match" if m.confidence == "high" else "possible match"
+        owner = f", owned by {m.owner}" if m.owner else ""
+        lines.append(f"- {m.sobject} ({tag}): {m.name}{owner} -> {m.link}")
+    return "Salesforce results:\n" + "\n".join(lines)
+
+
 def run_tool(name: str, args: dict[str, Any]) -> tuple[str, str | None]:
     """Dispatch one tool call. Returns (result_text_for_model, file_path_or_None)."""
     if name == "web_search":
         return web_search(str(args.get("query", ""))), None
+    if name == "salesforce_lookup":
+        try:
+            return salesforce_lookup(str(args.get("entity", ""))), None
+        except Exception as exc:
+            return f"ERROR: Salesforce lookup failed ({type(exc).__name__}).", None
     if name == "query_leads":
         return query_leads(str(args.get("sql", ""))), None
     if name == "find_contact":

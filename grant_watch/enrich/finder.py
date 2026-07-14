@@ -116,22 +116,44 @@ def _extract(page_text: str, entity: str, source_url: str) -> ContactCandidate |
                             source_url=source_url, confidence=confidence)
 
 
-def find_contact(entity: str, state: str) -> ContactCandidate | None:
-    """Full pipeline for one entity. Tries up to 3 candidate pages; first verified
-    contact wins. None = not_found (recorded honestly by the caller)."""
-    query = f"{entity} {state} staff directory superintendent technology director email"
-    try:
-        results = _search(query)
-    except (requests.RequestException, RuntimeError):
-        return None
-    for r in results[:3]:
-        url = r.get("url") or ""
-        if not url:
+# Title-targeted searches, most decision-relevant first. Multiple angles because a
+# district site may hide emails on one page but expose them on the staff directory.
+_SEARCH_ANGLES = (
+    '{entity} {state} technology director email',
+    '{entity} {state} superintendent contact email',
+    '{entity} {state} staff directory',
+    '{entity} {state} principal contact',
+)
+
+
+def find_contact(entity: str, state: str, max_pages: int = 6) -> ContactCandidate | None:
+    """Full pipeline for one entity. Runs several title-targeted searches, scrapes the
+    most promising pages, and returns the first VERIFIED contact (prefers higher-value
+    titles). None = not_found (recorded honestly by the caller)."""
+    seen_urls: set[str] = set()
+    candidates: list[ContactCandidate] = []
+    for angle in _SEARCH_ANGLES:
+        query = angle.format(entity=entity, state=state)
+        try:
+            results = _search(query, limit=4)
+        except (requests.RequestException, RuntimeError):
             continue
-        text = _scrape(url)
-        if len(text) < 200:  # empty/blocked page — no evidence to extract from
-            continue
-        candidate = _extract(text, entity, url)
-        if candidate is not None:
-            return candidate
-    return None
+        for r in results:
+            url = r.get("url") or ""
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            if len(seen_urls) > max_pages:
+                break
+            text = _scrape(url)
+            if len(text) < 200:  # empty/blocked page — no evidence
+                continue
+            cand = _extract(text, entity, url)
+            if cand is None:
+                continue
+            if cand.confidence == "high":  # a target-title match — take it immediately
+                return cand
+            candidates.append(cand)  # medium: hold in case nothing better turns up
+        if len(seen_urls) > max_pages:
+            break
+    return candidates[0] if candidates else None
