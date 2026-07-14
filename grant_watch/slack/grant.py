@@ -1,17 +1,17 @@
-"""Grant — the Socket Mode bot: triage buttons, the approve-to-email flow, mentions,
-DMs, and the /grant slash command.
+"""Grant — the Socket Mode bot: drip-thread conversations (LLM + tools), digest
+triage buttons, mentions, DMs, and the /grant slash command.
 
 Run it (long-lived process; needs SLACK_BOT_TOKEN + SLACK_APP_TOKEN in .env):
     python -m grant_watch.slack.grant
 
-Flow per CLAUDE.md rule 10 — Grant PROPOSES, a human APPROVES, Persequor SENDS:
-  [Draft email]     -> compose draft, store in `outreach`, post in-thread with
-                       [Approve & hand to Persequor] [Discard]
-  [Approve...]      -> record approver in `outreach.approved_by`, post the handoff
-                       message mentioning @Persequor, lead -> 'contacted'
-  [Mark contacted]  -> lead status 'contacted'
-  [Snooze]          -> lead status 'snoozed'
-  [Bad lead]        -> modal asks WHY; reason lands in leads.status_note (feeds scoring)
+Conversation rules (Chase, 2026-07-13): reps talk to Grant in THREADS under its
+posts — no @ needed there; @Grant works too and routes to the same brain. Messages
+mentioning @Persequor are ignored (that's their conversation). Friendly always; no
+inline backticks anywhere (Slack renders them red, and red text is banned).
+
+Digest-button flow: [Draft email] posts a copyable draft (the automated Persequor
+handoff ships later — docs/workflow_design.md §4); [Mark contacted] / [Snooze] set
+status; [Bad lead] opens a modal asking WHY (reason lands in leads.status_note).
 """
 
 from __future__ import annotations
@@ -27,13 +27,15 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from .. import db
 from . import digest, persequor
 
+# NOTE: no inline backticks anywhere Grant speaks — Slack renders them as red text,
+# and red text is banned (Chase's rule, 2026-07-13).
 HELP_TEXT = (
-    "I'm *Grant* 🦉 — I watch government security-funding sources weekly and surface "
-    "leads here.\n• `/grant status` — lead counts by source\n"
-    "• `/grant digest` — post the weekly digest now\n"
-    "• Digest buttons: draft an outreach email (a human approves before anything "
-    "sends), mark contacted, snooze, or flag a bad lead.\n"
-    "_I never invent contacts or figures; if I don't know, I say so._"
+    "Hey! I'm *Grant* — I watch government security-funding sources and surface the "
+    "best leads here.\n• /grant status — lead counts by source\n"
+    "• /grant digest — post the full digest now\n"
+    "• Talk to me in any of my lead threads: claim a lead, ask questions, request a "
+    "spreadsheet, or ask me to search for news.\n"
+    "I never invent contacts or figures — if I don't know, I'll say so."
 )
 
 
@@ -114,19 +116,35 @@ def create_app() -> App:
                       f"tracked honestly._")
 
     # ---------------------------------------------------------------- conversation
+    bot_user_id: str = app.client.auth_test()["user_id"]
+    persequor_id: str = os.environ.get("PERSEQUOR_USER_ID", "")
+
     @app.event("app_mention")
-    def on_mention(event: dict[str, Any], say) -> None:
-        say(text=_answer(re.sub(r"<@[^>]+>", "", event.get("text") or "").strip()),
-            thread_ts=event.get("thread_ts") or event["ts"])
+    def on_mention(event: dict[str, Any], say, client) -> None:
+        """Mentions route to the SAME conversational brain as plain thread replies —
+        reps shouldn't need the @, but using it must not degrade the experience."""
+        text = re.sub(r"<@[^>]+>", "", event.get("text") or "").strip()
+        thread_ts = event.get("thread_ts")
+        conn = db.connect()
+        post = db.find_post_by_ts(conn, event["channel"], thread_ts or "")
+        if post is not None:
+            _handle_drip_thread(conn, post, event, say, client)
+        else:
+            # A general question outside a lead thread: answer in a thread on it.
+            _converse_general(text, say, event.get("thread_ts") or event["ts"])
 
     @app.event("message")
     def on_message(event: dict[str, Any], say, client) -> None:
-        """Two cases: DMs (simple Q&A) and thread replies under a drip post (the
-        conversational sales-assist: LLM intents, claims, engagement points)."""
+        """DMs, and plain (no-@) thread replies under a drip post."""
         if event.get("bot_id"):  # never talk to bots — loop guard
             return
+        text = event.get("text") or ""
+        if f"<@{bot_user_id}>" in text:
+            return  # the app_mention handler owns this one — no double replies
+        if persequor_id and f"<@{persequor_id}>" in text:
+            return  # they're talking to Persequor — Grant stays out of it (Chase's rule)
         if event.get("channel_type") == "im":
-            say(text=_answer((event.get("text") or "").strip()))
+            _converse_general(text.strip(), say, None)
             return
         thread_ts = event.get("thread_ts")
         if not thread_ts:
@@ -135,7 +153,7 @@ def create_app() -> App:
         post = db.find_post_by_ts(conn, event["channel"], thread_ts)
         if post is None:
             return  # a thread on someone else's message
-        _handle_drip_thread(conn, post, event, say)
+        _handle_drip_thread(conn, post, event, say, client)
 
     @app.event("reaction_added")
     def on_reaction(event: dict[str, Any]) -> None:
@@ -167,29 +185,30 @@ def create_app() -> App:
     return app
 
 
-def _handle_drip_thread(conn, post, event: dict[str, Any], say) -> None:
-    """A human replied under a drip post: award the point, understand the message,
-    act on the intent, answer in the thread. Any LLM failure degrades to an honest
-    'didn't parse' reply — never to a wrong action."""
+def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
+    """A human spoke in a lead thread: award the point, understand the message,
+    act on the intent, answer in the thread (uploading any files Grant produced).
+    Any LLM failure degrades to an honest reply — never to a wrong action."""
     from . import conversation  # local import: poll/digest paths never need anthropic
 
-    user, text = event["user"], (event.get("text") or "").strip()
+    user = event["user"]
+    text = re.sub(r"<@[^>]+>", "", event.get("text") or "").strip()
     db.record_engagement(conn, int(post["id"]), user, "reply")
     row = db.get_lead(conn, int(post["lead_id"])) if post["lead_id"] else None
     try:
         out = conversation.respond(text, row)
     except Exception as exc:  # API down ≠ silence; reply honestly
         say(text=f"I'm having trouble thinking right now ({type(exc).__name__}) — "
-                 f"try me again in a minute.", thread_ts=post["ts"])
+                 f"give me a minute and try again.", thread_ts=post["ts"])
         return
-    intent, reply = out["intent"], out["reply"]
+    intent, reply, files = out["intent"], out["reply"], out.get("files", [])
 
     if intent == "claim" and row is not None:
         if db.claim_lead(conn, int(row["id"]), user):
             db.record_engagement(conn, int(post["id"]), user, "claim")
             reply = f"It's yours, <@{user}>. {reply}" if reply else f"It's yours, <@{user}>."
         elif row["assigned_to"] and row["assigned_to"] != user:
-            reply = f"Already claimed by <@{row['assigned_to']}> — talk to them first."
+            reply = f"Already claimed by <@{row['assigned_to']}> — worth a quick word with them first."
     elif intent == "snooze" and row is not None:
         db.set_lead_status(conn, int(row["id"]), "snoozed")
     elif intent == "bad_lead" and row is not None:
@@ -198,20 +217,40 @@ def _handle_drip_thread(conn, post, event: dict[str, Any], say) -> None:
         db.record_engagement(conn, int(post["id"]), user, "question")
 
     say(text=reply, thread_ts=post["ts"])
+    for path in files:  # spreadsheets etc. — into the same thread, then cleaned up
+        try:
+            client.files_upload_v2(channel=event["channel"], thread_ts=post["ts"],
+                                   file=path)
+        finally:
+            import contextlib
+            import os as _os
+            with contextlib.suppress(OSError):
+                _os.remove(path)
+
+
+def _converse_general(text: str, say, thread_ts: str | None) -> None:
+    """Friendly LLM reply outside a lead thread (mention or DM), tools included.
+    Falls back to the canned help text if the API is unavailable."""
+    from . import conversation
+
+    try:
+        out = conversation.respond(text, None)
+        say(text=out["reply"], thread_ts=thread_ts)
+    except Exception:
+        say(text=_answer(text.lower()), thread_ts=thread_ts)
 
 
 def _answer(query: str) -> str:
-    """Tiny deterministic Q&A: status/help. Anything it can't answer, it says so
-    honestly rather than improvising (no LLM in the loop yet — Phase 2+)."""
+    """Deterministic fallback Q&A (used when the LLM is unreachable): status/help,
+    honest and friendly, no inline code styling (red text is banned)."""
     if "status" in query:
         lines = [f"• {source} — {grade_}: {count}"
                  for source, grade_, count in db.status_summary(db.connect())]
-        return "Current lead counts:\n" + "\n".join(lines)
+        return "Here's where we stand:\n" + "\n".join(lines)
     if query in ("", "help") or "help" in query:
         return HELP_TEXT
-    return ("I can answer `status` or `help` right now (and `/grant digest` posts the "
-            "digest). Deeper questions come once contact enrichment lands — I won't "
-            "make answers up in the meantime.")
+    return ("My brain's having a slow moment — I can do status or help right now. "
+            "Try me again in a minute for the good stuff.")
 
 
 def _thread_reply(client, body: dict[str, Any], text: str,

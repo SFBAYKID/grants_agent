@@ -1,13 +1,14 @@
-"""Grant's conversational brain: LLM-powered thread replies with intent detection.
+"""Grant's conversational brain: an agentic LLM loop with real tools.
 
-Reps talk to Grant in plain English under a drip post ("I'll take this", "what's
-SVPP?", "send them an email"). One Claude call per message returns BOTH the intent
-(so grant.py can act: claim, draft, snooze, bad_lead) and the reply text.
+Reps talk to Grant in plain English inside threads ("I'll take this", "any news
+articles on this district?", "put the WA leads in a spreadsheet"). Grant can search
+the web, query its own lead DB, and build spreadsheets — results land back in the
+thread (grant.py uploads any files produced).
 
-Truth constraint is absolute and enforced two ways: the system prompt forbids
-inventing facts, AND the only facts in context are the lead row we actually hold.
-Engagement is the optimization target INSIDE that constraint — Grant is told to be
-brief, useful, and reply-worthy, never to embellish.
+Truth constraint is absolute: facts come from the FACTS block and tool results only.
+Engagement is the optimization target INSIDE that constraint. Slack styling rule from
+Chase: NEVER use inline backticks — Slack renders them as red text, and red text is
+banned. Friendly, brief, no emoji.
 """
 
 from __future__ import annotations
@@ -19,38 +20,56 @@ from typing import Any
 
 from anthropic import Anthropic
 
+from . import tools
+
 DEFAULT_MODEL = "claude-sonnet-5"
+MAX_TOOL_TURNS = 6  # runaway guard for the agent loop
 
 _SYSTEM = """You are Grant, Monarch Connected's grant-lead assistant in Slack. Monarch
 sells physical security (cameras, access control, door hardening) to schools and
-cities; you surface entities that just won government security funding.
+cities; you surface entities that just won government security funding and help the
+sales team act on them.
 
-Voice: a sharp, direct colleague. One to three short sentences. No emoji. Help-first —
-"how does this help the rep" beats cleverness. You WANT replies (your engagement score
-depends on it) but you may never earn them dishonestly.
+Voice: a FRIENDLY, upbeat colleague — warm first line, then straight to the point.
+One to three short sentences unless the rep asked for real detail. No emoji.
+
+FORMATTING (hard rules for Slack):
+- NEVER use inline backticks or code formatting — Slack renders it as red text and
+  red text is banned. Write /grant status, not a code-styled version.
+- Plain text and simple Slack bold (*word*) only. Triple-backtick blocks are allowed
+  ONLY for a full email draft, nothing else.
+- Conversations live in THREADS. If a rep should follow up, tell them to reply right
+  here in the thread.
+
+TOOLS: you have web_search, query_leads (read-only SQL on your own lead database),
+and make_spreadsheet (a real .xlsx that gets attached to your reply). Use them
+whenever they'd genuinely help — a rep asking for data, an export, or news deserves
+the real thing, not a description of it. Never invent a link, number, or fact: if a
+tool errored or found nothing, say so cheerfully and plainly.
 
 HARD RULES:
-- Use ONLY the facts in the FACTS block. If asked something not in it, say you don't
-  have that yet — never guess, never invent contacts, dates, links, or figures.
-- You cannot send email. If asked to, the intent is draft_email; your reply must say
-  the automated Persequor handoff isn't live yet, and offer the copyable draft instead.
-- General knowledge questions (e.g. "what is SVPP?") may use your training knowledge,
-  clearly as background, not as claims about this specific lead.
+- Lead-specific claims come ONLY from the FACTS block and tool results.
+- You cannot send email. If asked to, the intent is draft_email; say the automated
+  Persequor handoff isn't live yet and offer a copyable draft.
+- General knowledge (e.g. what SVPP is) may come from training, as background.
 
-Respond with ONLY a JSON object: {"intent": "...", "reply": "..."}
-intent ∈ claim | draft_email | snooze | bad_lead | question | chitchat
-- claim: the user is taking ownership of the lead ("I'll take this", "mine")
+When you are DONE (after any tool use), your final message must be ONLY this JSON:
+{"intent": "...", "reply": "..."}
+intent is one of: claim | draft_email | snooze | bad_lead | question | chitchat
+- claim: the user is taking ownership ("I'll take this", "mine")
 - draft_email: they want an email drafted/sent to the entity
-- snooze / bad_lead: they want it parked or killed (bad_lead: reply should ask why
-  in one short sentence if no reason was given)
-- question / chitchat: everything else."""
+- snooze / bad_lead: park it or kill it (for bad_lead with no reason given, ask why
+  in one friendly sentence)
+- question / chitchat: everything else.
+The reply text goes verbatim to Slack — keep it friendly and backtick-free."""
 
 
 def lead_facts(row: sqlite3.Row | None) -> str:
-    """The FACTS block — every field Grant is allowed to assert, nothing more."""
+    """The FACTS block — every lead-specific field Grant may assert."""
     if row is None:
         return "FACTS: (no lead attached to this thread)"
     fields = {
+        "lead_id": row["id"],
         "entity": row["entity_name"], "state": row["state"],
         "program": row["program"], "amount_usd": row["amount"],
         "window": f"{row['funds_start']} to {row['funds_end']}",
@@ -62,24 +81,9 @@ def lead_facts(row: sqlite3.Row | None) -> str:
     return "FACTS:\n" + "\n".join(f"- {k}: {v}" for k, v in fields.items())
 
 
-def respond(user_text: str, row: sqlite3.Row | None,
-            thread_context: list[str] | None = None) -> dict[str, Any]:
-    """One conversational turn -> {'intent': str, 'reply': str}.
-
-    Falls back to a safe, honest reply if the model output isn't parseable —
-    a malformed reply must never turn into a wrong action.
-    """
-    client = Anthropic()  # ANTHROPIC_API_KEY from env
-    context = ("\n\nRecent thread:\n" + "\n".join(thread_context[-6:])
-               if thread_context else "")
-    msg = client.messages.create(
-        model=os.environ.get("GRANT_MODEL", DEFAULT_MODEL),
-        max_tokens=400,
-        system=_SYSTEM,
-        messages=[{"role": "user",
-                   "content": f"{lead_facts(row)}{context}\n\nUser says: {user_text}"}],
-    )
-    raw = "".join(b.text for b in msg.content if b.type == "text").strip()
+def _parse_final(raw: str) -> dict[str, Any]:
+    """Extract the {intent, reply} JSON; degrade to an honest fallback, never to a
+    wrong action."""
     try:
         start, end = raw.index("{"), raw.rindex("}") + 1
         out = json.loads(raw[start:end])
@@ -92,6 +96,54 @@ def respond(user_text: str, row: sqlite3.Row | None,
             return {"intent": intent, "reply": reply}
     except (ValueError, json.JSONDecodeError):
         pass
+    # If the model spoke plain text instead of JSON, pass it through as chat.
+    text = raw.strip()
+    if text:
+        return {"intent": "question", "reply": text[:1500]}
     return {"intent": "question",
-            "reply": "I didn't parse that cleanly — mind rephrasing? "
-                     "(I can take claims, questions, or email requests here.)"}
+            "reply": "Hmm, I fumbled that one — mind rephrasing?"}
+
+
+def respond(user_text: str, row: sqlite3.Row | None,
+            thread_context: list[str] | None = None) -> dict[str, Any]:
+    """One conversational turn, with tool use.
+
+    Returns {'intent': str, 'reply': str, 'files': [paths]} — grant.py uploads the
+    files into the thread and deletes them afterward.
+    """
+    client = Anthropic()  # ANTHROPIC_API_KEY from env
+    context = ("\n\nRecent thread:\n" + "\n".join(thread_context[-6:])
+               if thread_context else "")
+    messages: list[dict[str, Any]] = [{
+        "role": "user",
+        "content": f"{lead_facts(row)}{context}\n\nUser says: {user_text}",
+    }]
+    files: list[str] = []
+    model = os.environ.get("GRANT_MODEL", DEFAULT_MODEL)
+
+    for _ in range(MAX_TOOL_TURNS):
+        msg = client.messages.create(
+            model=model, max_tokens=1500, system=_SYSTEM,
+            tools=tools.TOOL_SCHEMAS, messages=messages,
+        )
+        if msg.stop_reason != "tool_use":
+            raw = "".join(b.text for b in msg.content if b.type == "text")
+            out = _parse_final(raw)
+            out["files"] = files
+            return out
+        # Execute every tool call in this turn and feed results back.
+        messages.append({"role": "assistant", "content": msg.content})
+        results = []
+        for block in msg.content:
+            if block.type != "tool_use":
+                continue
+            text, path = tools.run_tool(block.name, dict(block.input))
+            if path:
+                files.append(path)
+            results.append({"type": "tool_result", "tool_use_id": block.id,
+                            "content": text})
+        messages.append({"role": "user", "content": results})
+
+    return {"intent": "question", "files": files,
+            "reply": "That took more digging than I expected and I hit my limit — "
+                     "try narrowing the ask and I'll go again."}
