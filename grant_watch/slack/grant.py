@@ -120,10 +120,33 @@ def create_app() -> App:
             thread_ts=event.get("thread_ts") or event["ts"])
 
     @app.event("message")
-    def on_dm(event: dict[str, Any], say) -> None:
-        # Only respond to direct messages from humans (no channels, no bot echo loops).
-        if event.get("channel_type") == "im" and not event.get("bot_id"):
+    def on_message(event: dict[str, Any], say, client) -> None:
+        """Two cases: DMs (simple Q&A) and thread replies under a drip post (the
+        conversational sales-assist: LLM intents, claims, engagement points)."""
+        if event.get("bot_id"):  # never talk to bots — loop guard
+            return
+        if event.get("channel_type") == "im":
             say(text=_answer((event.get("text") or "").strip()))
+            return
+        thread_ts = event.get("thread_ts")
+        if not thread_ts:
+            return  # top-level channel chatter isn't Grant's business
+        conn = db.connect()
+        post = db.find_post_by_ts(conn, event["channel"], thread_ts)
+        if post is None:
+            return  # a thread on someone else's message
+        _handle_drip_thread(conn, post, event, say)
+
+    @app.event("reaction_added")
+    def on_reaction(event: dict[str, Any]) -> None:
+        """A reaction on a drip post is engagement — the cheapest +1 there is."""
+        item = event.get("item") or {}
+        if item.get("type") != "message":
+            return
+        conn = db.connect()
+        post = db.find_post_by_ts(conn, item.get("channel", ""), item.get("ts", ""))
+        if post is not None:
+            db.record_engagement(conn, int(post["id"]), event["user"], "reaction")
 
     @app.command("/grant")
     def slash_grant(ack: Ack, command: dict[str, Any], respond, client) -> None:
@@ -133,10 +156,48 @@ def create_app() -> App:
             conn = db.connect()
             n = digest.post_digest(client, os.environ["SLACK_CHANNEL_ID"], conn)
             respond(f"Posted the digest ({n} leads shown).")
+        elif arg == "stats":
+            stats = db.engagement_stats(db.connect())
+            detail = ", ".join(f"{k}: {v}" for k, v in stats.items() if k != "total")
+            respond(f"Grant's engagement score: *{stats['total']}* points"
+                    f"{f' ({detail})' if detail else ''}.")
         else:
             respond(_answer(arg))
 
     return app
+
+
+def _handle_drip_thread(conn, post, event: dict[str, Any], say) -> None:
+    """A human replied under a drip post: award the point, understand the message,
+    act on the intent, answer in the thread. Any LLM failure degrades to an honest
+    'didn't parse' reply — never to a wrong action."""
+    from . import conversation  # local import: poll/digest paths never need anthropic
+
+    user, text = event["user"], (event.get("text") or "").strip()
+    db.record_engagement(conn, int(post["id"]), user, "reply")
+    row = db.get_lead(conn, int(post["lead_id"])) if post["lead_id"] else None
+    try:
+        out = conversation.respond(text, row)
+    except Exception as exc:  # API down ≠ silence; reply honestly
+        say(text=f"I'm having trouble thinking right now ({type(exc).__name__}) — "
+                 f"try me again in a minute.", thread_ts=post["ts"])
+        return
+    intent, reply = out["intent"], out["reply"]
+
+    if intent == "claim" and row is not None:
+        if db.claim_lead(conn, int(row["id"]), user):
+            db.record_engagement(conn, int(post["id"]), user, "claim")
+            reply = f"It's yours, <@{user}>. {reply}" if reply else f"It's yours, <@{user}>."
+        elif row["assigned_to"] and row["assigned_to"] != user:
+            reply = f"Already claimed by <@{row['assigned_to']}> — talk to them first."
+    elif intent == "snooze" and row is not None:
+        db.set_lead_status(conn, int(row["id"]), "snoozed")
+    elif intent == "bad_lead" and row is not None:
+        db.set_lead_status(conn, int(row["id"]), "dead", note=f"bad lead per <@{user}>: {text}")
+    elif intent == "question":
+        db.record_engagement(conn, int(post["id"]), user, "question")
+
+    say(text=reply, thread_ts=post["ts"])
 
 
 def _answer(query: str) -> str:

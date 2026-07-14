@@ -4,7 +4,8 @@ Usage (from the repo root, venv active):
     python -m grant_watch.cli poll [--source NAME] [--dry-run]
     python -m grant_watch.cli seed
     python -m grant_watch.cli status
-    python -m grant_watch.cli digest [--dry-run]     # weekly Slack digest (cron target)
+    python -m grant_watch.cli digest [--dry-run]     # manual full digest (on demand)
+    python -m grant_watch.cli drip [--force] [--dry-run]   # drip tick (30-min cron target)
 
 --dry-run polls and grades but writes NOTHING (no DB rows, no run log) — required by
 CLAUDE.md for anything that will later feed Slack. Errors in one source never abort
@@ -110,6 +111,24 @@ def cmd_digest(dry_run: bool) -> int:
     return 0
 
 
+def cmd_drip(force: bool, dry_run: bool) -> int:
+    """One drip tick: Grant decides whether to surface one nugget/bulletin now.
+    Designed for a 30-minute cron, Mon-Fri, inside the 8am ET - 5pm PT window."""
+    from slack_sdk import WebClient
+
+    from .slack import drip as drip_mod
+
+    channel = os.environ.get("SLACK_CHANNEL_ID", "")
+    if not channel:
+        print("SLACK_CHANNEL_ID is not set in .env", file=sys.stderr)
+        return 1
+    client = None if dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    outcome = drip_mod.run_drip(client, channel, db.connect(),
+                                force=force, dry_run=dry_run)
+    print(f"drip: {outcome}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse args and dispatch. .env is loaded here so every command sees the keys."""
     load_dotenv()
@@ -122,9 +141,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="poll and grade but write nothing")
     sub.add_parser("seed", help="seed leads from the verified SVPP CSV")
     sub.add_parser("status", help="lead counts by source and grade")
-    p_digest = sub.add_parser("digest", help="post the weekly digest to Slack")
+    p_digest = sub.add_parser("digest", help="post the full digest to Slack (manual)")
     p_digest.add_argument("--dry-run", action="store_true",
                           help="print the blocks; post and write nothing")
+    p_drip = sub.add_parser("drip", help="one drip tick (maybe post one nugget)")
+    p_drip.add_argument("--force", action="store_true",
+                        help="bypass window/cap/jitter pacing (for testing)")
+    p_drip.add_argument("--dry-run", action="store_true",
+                        help="print what would post; write nothing")
 
     args = parser.parse_args(argv)
     if args.command == "poll":
@@ -133,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_seed()
     if args.command == "digest":
         return cmd_digest(args.dry_run)
+    if args.command == "drip":
+        return cmd_drip(args.force, args.dry_run)
     return cmd_status()
 
 

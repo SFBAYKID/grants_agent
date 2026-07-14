@@ -30,6 +30,18 @@ KEYWORDS = (
 ROWS_PER_QUERY = 25  # per-keyword cap; enough for a weekly diff
 
 
+def _iso(us_date: str) -> str:
+    """Grants.gov emits MM/DD/YYYY; store ISO so SQLite date() works (verified live
+    2026-07-13: the US format silently broke every date comparison downstream)."""
+    if not us_date:
+        return ""
+    try:
+        m, d, y = us_date.split("/")
+        return f"{y}-{int(m):02d}-{int(d):02d}"
+    except ValueError:
+        return us_date  # unknown shape: store as-is rather than invent a date
+
+
 def parse_opportunities(payload: dict[str, Any], keyword: str) -> list[RawItem]:
     """Pure parser for one search2 response."""
     out: list[RawItem] = []
@@ -42,8 +54,8 @@ def parse_opportunities(payload: dict[str, Any], keyword: str) -> list[RawItem]:
             state="",  # federal opportunities are nationwide
             program="",
             amount=None,
-            start=opp.get("openDate") or "",
-            end=opp.get("closeDate") or "",
+            start=_iso(opp.get("openDate") or ""),
+            end=_iso(opp.get("closeDate") or ""),
             url=f"https://www.grants.gov/search-results-detail/{opp['id']}",
             raw={"matched_keyword": keyword, "number": opp.get("number")},
         ))

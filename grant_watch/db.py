@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS leads (
   source_item_id TEXT NOT NULL,
   lead_grade TEXT CHECK(lead_grade IN ('gold','silver','watch')),
   entity_name TEXT NOT NULL,
+  title TEXT,                      -- source item title (opportunity name / award desc)
   entity_type TEXT,                -- district, city, nonpublic_school, nonprofit
   state TEXT, county TEXT,
   program TEXT,                    -- SVPP, NSGP, CSSGP, PCCD, STOP, RFP:<platform>
@@ -54,6 +55,28 @@ CREATE TABLE IF NOT EXISTS runs (
   id INTEGER PRIMARY KEY, started TIMESTAMP, finished TIMESTAMP,
   source TEXT, items_seen INT, items_new INT, errors TEXT
 );
+CREATE TABLE IF NOT EXISTS posts (
+  -- every message Grant proactively posts (drip nuggets + bulletins); the thread
+  -- anchor for conversation and the unit engagement points attach to
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL CHECK(kind IN ('nugget','bulletin')),
+  lead_id INTEGER REFERENCES leads(id),
+  channel TEXT NOT NULL,
+  ts TEXT NOT NULL,                -- Slack message ts (thread anchor)
+  style TEXT,                      -- template tag, so engagement can tune phrasing
+  posted_at TIMESTAMP,
+  UNIQUE(channel, ts)
+);
+CREATE TABLE IF NOT EXISTS engagement (
+  -- +1 point each time a HUMAN interacts with a Grant post; deduped per
+  -- (post, user, kind). Grant is incentivized to earn these — never by lying.
+  id INTEGER PRIMARY KEY,
+  post_id INTEGER REFERENCES posts(id),
+  slack_user TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('reply','reaction','claim','question')),
+  at TIMESTAMP,
+  UNIQUE(post_id, slack_user, kind)
+);
 """
 
 
@@ -68,13 +91,22 @@ def connect(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     Also applies tiny in-place migrations for DBs created before a column existed —
     SQLite has no IF NOT EXISTS for columns, so we check PRAGMA table_info.
     """
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10.0)
     conn.row_factory = sqlite3.Row  # dict-style access for Slack formatting code
+    # WAL + busy timeout: the bot, the drip cron, and pollers can now write
+    # concurrently (architectural-critic M8).
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.executescript(_SCHEMA)
     lead_cols = {r[1] for r in conn.execute("PRAGMA table_info(leads)")}
     if "status_note" not in lead_cols:  # migration: added in Phase 3 for [Bad lead] reasons
         conn.execute("ALTER TABLE leads ADD COLUMN status_note TEXT")
-        conn.commit()
+    if "assigned_to" not in lead_cols:  # migration: drip-engine claim/ownership
+        conn.execute("ALTER TABLE leads ADD COLUMN assigned_to TEXT")
+        conn.execute("ALTER TABLE leads ADD COLUMN assigned_at TIMESTAMP")
+    if "title" not in lead_cols:  # migration: bulletins need the opportunity title
+        conn.execute("ALTER TABLE leads ADD COLUMN title TEXT")
+    conn.commit()
     return conn
 
 
@@ -90,19 +122,23 @@ def upsert_lead(conn: sqlite3.Connection, lead: Lead) -> bool:
     try:
         conn.execute(
             """INSERT INTO leads (source, source_item_id, lead_grade, entity_name,
-                                  entity_type, state, program, amount, funds_start,
-                                  funds_end, detail_url, raw_json, first_seen, last_seen)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (it.source, str(it.item_id), lead.grade.value, it.entity, lead.entity_type,
-             it.state, it.program, it.amount, it.start or None, it.end or None,
-             it.url, it.raw_json(), now, now),
+                                  title, entity_type, state, program, amount,
+                                  funds_start, funds_end, detail_url, raw_json,
+                                  first_seen, last_seen)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (it.source, str(it.item_id), lead.grade.value, it.entity, it.title,
+             lead.entity_type, it.state, it.program, it.amount, it.start or None,
+             it.end or None, it.url, it.raw_json(), now, now),
         )
         conn.commit()
         return True
     except sqlite3.IntegrityError:
+        # Known item: refresh last_seen, and backfill title for rows stored before
+        # the title column existed (source data, not invention).
         conn.execute(
-            "UPDATE leads SET last_seen = ? WHERE source = ? AND source_item_id = ?",
-            (now, it.source, str(it.item_id)),
+            "UPDATE leads SET last_seen = ?, title = COALESCE(title, ?) "
+            "WHERE source = ? AND source_item_id = ?",
+            (now, it.title or None, it.source, str(it.item_id)),
         )
         conn.commit()
         return False
@@ -241,3 +277,77 @@ def approve_outreach(conn: sqlite3.Connection, outreach_id: int, approver: str) 
     conn.execute("UPDATE outreach SET approved_by = ?, sent_at = ? WHERE id = ?",
                  (approver, _now(), outreach_id))
     conn.commit()
+
+
+# ---------------------------------------------------------------- drip engine + claims
+
+def claim_lead(conn: sqlite3.Connection, lead_id: int, slack_user: str) -> bool:
+    """First-click ownership. Race-safe conditional UPDATE: exactly one claimer wins
+    (architectural-critic-approved primitive). Dead/snoozed leads can't be claimed."""
+    cur = conn.execute(
+        "UPDATE leads SET assigned_to = ?, assigned_at = ? "
+        "WHERE id = ? AND assigned_to IS NULL AND status NOT IN ('dead','snoozed')",
+        (slack_user, _now(), lead_id))
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def record_post(conn: sqlite3.Connection, kind: str, lead_id: int | None,
+                channel: str, ts: str, style: str) -> int:
+    """Log a proactive Grant post (the thread anchor engagement attaches to)."""
+    cur = conn.execute(
+        "INSERT INTO posts (kind, lead_id, channel, ts, style, posted_at) "
+        "VALUES (?,?,?,?,?,?)", (kind, lead_id, channel, ts, style, _now()))
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def find_post_by_ts(conn: sqlite3.Connection, channel: str, ts: str) -> sqlite3.Row | None:
+    """Look up a Grant post from a thread anchor ts (to attribute engagement)."""
+    return conn.execute("SELECT * FROM posts WHERE channel = ? AND ts = ?",
+                        (channel, ts)).fetchone()
+
+
+def record_engagement(conn: sqlite3.Connection, post_id: int, slack_user: str,
+                      kind: str) -> bool:
+    """+1 point when a human interacts with a post. Deduped per (post, user, kind)
+    so one enthusiastic user can't inflate the score. Returns True if new."""
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO engagement (post_id, slack_user, kind, at) "
+        "VALUES (?,?,?,?)", (post_id, slack_user, kind, _now()))
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def engagement_stats(conn: sqlite3.Connection) -> dict[str, int]:
+    """Grant's score: total points + per-kind breakdown (the tuning signal)."""
+    stats = {"total": conn.execute("SELECT COUNT(*) FROM engagement").fetchone()[0]}
+    for kind, n in conn.execute(
+            "SELECT kind, COUNT(*) FROM engagement GROUP BY kind"):
+        stats[kind] = n
+    return stats
+
+
+def posts_today(conn: sqlite3.Connection, channel: str) -> list[sqlite3.Row]:
+    """Today's proactive posts (UTC day) — the daily-cap input."""
+    return list(conn.execute(
+        "SELECT * FROM posts WHERE channel = ? AND date(posted_at) = date('now') "
+        "ORDER BY posted_at", (channel,)))
+
+
+def nugget_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Unsurfaced GOLD leads eligible for a drip nugget."""
+    return list(conn.execute(
+        "SELECT * FROM leads WHERE lead_grade='gold' AND status='new'"))
+
+
+def bulletin_candidates(conn: sqlite3.Connection, max_age_days: int = 14
+                        ) -> list[sqlite3.Row]:
+    """Fresh grants.gov opportunities not yet posted as a bulletin — program-level
+    news ('application window just opened'), soonest close date first."""
+    return list(conn.execute(
+        "SELECT * FROM leads WHERE source = 'grants.gov' "
+        "AND first_seen >= datetime('now', ?) "
+        "AND id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL) "
+        "AND funds_end != '' AND date(funds_end) >= date('now') "
+        "ORDER BY date(funds_end) ASC", (f"-{max_age_days} days",)))
