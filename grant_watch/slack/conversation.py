@@ -137,13 +137,16 @@ def _parse_final(raw: str) -> dict[str, Any]:
 
 
 def respond(user_text: str, row: sqlite3.Row | None,
-            thread_context: list[str] | None = None) -> dict[str, Any]:
+            thread_context: list[str] | None = None,
+            on_progress: Any = None) -> dict[str, Any]:
     """One conversational turn, with tool use.
 
     Returns {'intent': str, 'reply': str, 'files': [paths]} — grant.py uploads the
-    files into the thread and deletes them afterward.
+    files into the thread and deletes them afterward. on_progress(phrase) is called
+    with short status phrases as tools run, for Grant's live spinner.
     """
     client = Anthropic()  # ANTHROPIC_API_KEY from env
+    say = on_progress or (lambda _msg: None)
     context = ("\n\nRecent thread:\n" + "\n".join(thread_context[-6:])
                if thread_context else "")
     messages: list[dict[str, Any]] = [{
@@ -154,6 +157,7 @@ def respond(user_text: str, row: sqlite3.Row | None,
     model = os.environ.get("GRANT_MODEL", DEFAULT_MODEL)
 
     for _ in range(MAX_TOOL_TURNS):
+        say("Thinking")
         msg = client.messages.create(
             model=model, max_tokens=1500, system=_SYSTEM,
             tools=tools.TOOL_SCHEMAS, messages=messages,
@@ -169,7 +173,7 @@ def respond(user_text: str, row: sqlite3.Row | None,
         for block in msg.content:
             if block.type != "tool_use":
                 continue
-            text, path = tools.run_tool(block.name, dict(block.input))
+            text, path = tools.run_tool(block.name, dict(block.input), say)
             if path:
                 files.append(path)
             results.append({"type": "tool_result", "tool_use_id": block.id,

@@ -17,11 +17,15 @@ import os
 import re
 import sqlite3
 import tempfile
+from collections.abc import Callable
 from typing import Any
 
 import requests
 
 from .. import db
+
+Progress = Callable[[str], None]
+_NOOP: Progress = lambda _msg: None
 
 # Tool schemas passed to the Anthropic API (the model picks; we execute).
 TOOL_SCHEMAS: list[dict[str, Any]] = [
@@ -72,15 +76,32 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "salesforce_lookup",
-        "description": "Check whether an awardee already exists in Monarch's Salesforce "
-                       "(Account, Lead, or Opportunity) and return the record link + "
-                       "owner. Use it before drafting outreach so a rep doesn't contact "
-                       "a district a teammate already owns. Uncertain name matches come "
-                       "back as 'possible' — present them as such, never assert.",
+        "description": "READ-ONLY check of whether an awardee already exists in "
+                       "Monarch's Salesforce (Account/Lead/Opportunity), returning the "
+                       "record link + owner. Matches intelligently on name variations, "
+                       "and on domain/phone if you pass them. Use it before drafting "
+                       "outreach so a rep doesn't contact an org a teammate owns. "
+                       "Uncertain matches come back as 'possible' — say so, never "
+                       "assert. Grant can NEVER change Salesforce, only read it.",
         "input_schema": {
             "type": "object",
-            "properties": {"entity": {"type": "string"}},
+            "properties": {
+                "entity": {"type": "string"},
+                "domain": {"type": "string", "description": "org website, optional"},
+                "phone": {"type": "string", "description": "org phone, optional"},
+            },
             "required": ["entity"],
+        },
+    },
+    {
+        "name": "find_person_linkedin",
+        "description": "Find the likely decision-maker's LinkedIn profile (name, title, "
+                       "profile link) for an org — useful when the website has no email. "
+                       "Returns a PERSON to reach via LinkedIn, never an invented email.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"entity": {"type": "string"}, "state": {"type": "string"}},
+            "required": ["entity", "state"],
         },
     },
     {
@@ -103,8 +124,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 _SELECT_ONLY = re.compile(r"^\s*select\b", re.IGNORECASE)
 
 
-def web_search(query: str) -> str:
+def web_search(query: str, on_progress: Progress | None = None) -> str:
     """Firecrawl search -> compact 'title — url — snippet' lines (max 5)."""
+    (on_progress or _NOOP)("Searching the web")
     key = os.environ.get("FIRECRAWL_API_KEY", "")
     if not key:
         return "ERROR: no search key configured — say you can't search right now."
@@ -163,7 +185,8 @@ def make_spreadsheet(filename: str, rows: list[list[Any]]) -> tuple[str, str]:
     return f"Spreadsheet created ({len(rows)} rows). It will be attached to your reply.", path
 
 
-def find_contact(lead_id: int, entity: str, state: str) -> str:
+def find_contact(lead_id: int, entity: str, state: str,
+                 on_progress: Progress | None = None) -> str:
     """Run enrichment for a lead and persist the outcome (verified or not_found)."""
     from ..enrich import finder  # local import: keeps poll/digest paths light
 
@@ -174,11 +197,12 @@ def find_contact(lead_id: int, entity: str, state: str) -> str:
         c = existing[0]
         return (f"Already on file: {c['name']} ({c['title']}) — {c['email']} "
                 f"(source: {c['source_url']})")
-    candidate = finder.find_contact(entity, state)
+    candidate = finder.find_contact(entity, state, on_progress=on_progress)
     if candidate is None:
         db.mark_contact_not_found(conn, lead_id)
-        return ("No verifiable contact found (email must appear on a page we "
-                "actually fetched). Recorded as not_found — a human can supply one.")
+        return ("No verifiable contact found on their website (email must appear on a "
+                "page we actually fetched). Recorded as not_found — try "
+                "find_person_linkedin for a name, or a human can supply one.")
     db.save_contact(conn, lead_id, candidate.name, candidate.title, candidate.email,
                     candidate.phone, candidate.source_url, candidate.confidence)
     return (f"VERIFIED contact: {candidate.name} ({candidate.title}) — "
@@ -186,42 +210,74 @@ def find_contact(lead_id: int, entity: str, state: str) -> str:
             f"(found on {candidate.source_url}, confidence {candidate.confidence})")
 
 
-def salesforce_lookup(entity: str) -> str:
-    """CRM cross-reference for one entity — honest, link-carrying summary for Grant."""
+def salesforce_lookup(entity: str, domain: str = "", phone: str = "",
+                      on_progress: Progress | None = None) -> str:
+    """Read-only CRM cross-reference — honest, link-carrying summary for Grant."""
     from ..enrich import salesforce
 
-    res = salesforce.lookup(entity)
+    res = salesforce.lookup(entity, domain=domain, phone=phone, on_progress=on_progress)
     if res.error:
         return f"ERROR: {res.error} — tell the user you couldn't reach Salesforce."
     if not res.matched:
         return f"No Salesforce record found for '{entity}' — looks net-new."
     lines = []
-    for m in res.matches[:5]:
+    for m in res.matches[:6]:
         tag = "match" if m.confidence == "high" else "possible match"
+        who = m.company or m.name
         owner = f", owned by {m.owner}" if m.owner else ""
-        lines.append(f"- {m.sobject} ({tag}): {m.name}{owner} -> {m.link}")
-    return "Salesforce results:\n" + "\n".join(lines)
+        lines.append(f"- {m.sobject} ({tag}): {who}{owner} -> {m.link}")
+    extra = (f"\n(+{len(res.matches) - 6} more — worth reviewing)"
+             if len(res.matches) > 6 else "")
+    header = ("One Salesforce result:" if len(res.matches) == 1
+              else f"{len(res.matches)} Salesforce results (review before outreach):")
+    return header + "\n" + "\n".join(lines) + extra
 
 
-def run_tool(name: str, args: dict[str, Any]) -> tuple[str, str | None]:
-    """Dispatch one tool call. Returns (result_text_for_model, file_path_or_None)."""
+def find_person_linkedin(entity: str, state: str,
+                         on_progress: Progress | None = None) -> str:
+    """LinkedIn profile of the likely decision-maker (name/title/link, no email)."""
+    from ..enrich import finder
+
+    person = finder.linkedin_person(entity, state, on_progress=on_progress)
+    if person is None:
+        return "No clear LinkedIn profile found for their decision-maker."
+    role = f", {person['title']}" if person["title"] else ""
+    return (f"LinkedIn: {person['name']}{role} — {person['url']} "
+            f"(reach out via LinkedIn; no email verified)")
+
+
+def run_tool(name: str, args: dict[str, Any],
+             on_progress: Progress | None = None) -> tuple[str, str | None]:
+    """Dispatch one tool call. Returns (result_text_for_model, file_path_or_None).
+    on_progress emits short status phrases for Grant's live spinner."""
+    p = on_progress or _NOOP
     if name == "web_search":
-        return web_search(str(args.get("query", ""))), None
+        return web_search(str(args.get("query", "")), p), None
     if name == "salesforce_lookup":
         try:
-            return salesforce_lookup(str(args.get("entity", ""))), None
+            return salesforce_lookup(str(args.get("entity", "")),
+                                     str(args.get("domain", "")),
+                                     str(args.get("phone", "")), p), None
         except Exception as exc:
             return f"ERROR: Salesforce lookup failed ({type(exc).__name__}).", None
     if name == "query_leads":
+        p("Checking the lead database")
         return query_leads(str(args.get("sql", ""))), None
     if name == "find_contact":
         try:
             return find_contact(int(args.get("lead_id", 0)),
                                 str(args.get("entity", "")),
-                                str(args.get("state", ""))), None
+                                str(args.get("state", "")), p), None
         except Exception as exc:  # enrichment API hiccup -> honest tool error
             return f"ERROR: enrichment failed ({type(exc).__name__}) — say so.", None
+    if name == "find_person_linkedin":
+        try:
+            return find_person_linkedin(str(args.get("entity", "")),
+                                        str(args.get("state", "")), p), None
+        except Exception as exc:
+            return f"ERROR: LinkedIn search failed ({type(exc).__name__}).", None
     if name == "make_spreadsheet":
+        p("Building the spreadsheet")
         return make_spreadsheet(str(args.get("filename", "")),
                                 list(args.get("rows", [])))
     return f"ERROR: unknown tool {name}", None

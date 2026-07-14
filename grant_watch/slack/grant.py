@@ -131,7 +131,8 @@ def create_app() -> App:
             _handle_drip_thread(conn, post, event, say, client)
         else:
             # A general question outside a lead thread: answer in a thread on it.
-            _converse_general(text, say, event.get("thread_ts") or event["ts"])
+            _converse_general(text, client, event["channel"],
+                              event.get("thread_ts") or event["ts"])
 
     @app.event("message")
     def on_message(event: dict[str, Any], say, client) -> None:
@@ -144,7 +145,7 @@ def create_app() -> App:
         if persequor_id and f"<@{persequor_id}>" in text:
             return  # they're talking to Persequor — Grant stays out of it (Chase's rule)
         if event.get("channel_type") == "im":
-            _converse_general(text.strip(), say, None)
+            _converse_general(text.strip(), client, event["channel"], None)
             return
         thread_ts = event.get("thread_ts")
         if not thread_ts:
@@ -185,6 +186,55 @@ def create_app() -> App:
     return app
 
 
+class _Status:
+    """A single Slack message that shows a rotating spinner + a short (<=6 word) phrase
+    while Grant works, then is edited into the final answer — so a rep watches Grant
+    think instead of staring at an empty thread (Chase, 2026-07-14). Every Slack call
+    is wrapped: a spinner hiccup must never break the turn."""
+
+    _FRAMES = ("/", "—", "\\", "|")
+
+    def __init__(self, client, channel: str, thread_ts: str | None):
+        self._client = client
+        self._channel = channel
+        self._thread_ts = thread_ts
+        self._i = 0
+        self.ts: str | None = None
+
+    def start(self) -> None:
+        try:
+            r = self._client.chat_postMessage(channel=self._channel,
+                                              thread_ts=self._thread_ts,
+                                              text="/ Thinking…")
+            self.ts = r["ts"]
+        except Exception:
+            self.ts = None
+
+    def update(self, phrase: str) -> None:
+        if not self.ts:
+            return
+        self._i = (self._i + 1) % len(self._FRAMES)
+        try:
+            self._client.chat_update(channel=self._channel, ts=self.ts,
+                                     text=f"{self._FRAMES[self._i]} {phrase}…")
+        except Exception:
+            pass
+
+    def finalize(self, text: str) -> None:
+        """Replace the spinner with the final answer (or post it if the spinner died)."""
+        if self.ts:
+            try:
+                self._client.chat_update(channel=self._channel, ts=self.ts, text=text)
+                return
+            except Exception:
+                pass
+        try:
+            self._client.chat_postMessage(channel=self._channel,
+                                          thread_ts=self._thread_ts, text=text)
+        except Exception:
+            pass
+
+
 def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
     """A human spoke in a lead thread: award the point, understand the message,
     act on the intent, answer in the thread (uploading any files Grant produced).
@@ -196,16 +246,19 @@ def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
     db.record_engagement(conn, int(post["id"]), user, "reply")
     row = db.get_lead(conn, int(post["lead_id"])) if post["lead_id"] else None
     context = _thread_history(client, event["channel"], post["ts"])
+    status = _Status(client, event["channel"], post["ts"])
+    status.start()
     try:
-        out = conversation.respond(text, row, thread_context=context)
+        out = conversation.respond(text, row, thread_context=context,
+                                   on_progress=status.update)
     except Exception as exc:  # API down ≠ silence; reply honestly
-        say(text=f"I'm having trouble thinking right now ({type(exc).__name__}) — "
-                 f"give me a minute and try again.", thread_ts=post["ts"])
+        status.finalize(f"I'm having trouble thinking right now ({type(exc).__name__}) "
+                        f"— give me a minute and try again.")
         return
     intent, reply, files = out["intent"], out["reply"], out.get("files", [])
 
     if intent == "draft_email" and row is not None:
-        reply = _request_outreach(conn, row, user, say, event["channel"], post["ts"])
+        reply = _request_outreach(conn, row, user, status, event["channel"], post["ts"])
     elif intent == "claim" and row is not None:
         if db.claim_lead(conn, int(row["id"]), user):
             db.record_engagement(conn, int(post["id"]), user, "claim")
@@ -219,7 +272,7 @@ def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
     elif intent == "question":
         db.record_engagement(conn, int(post["id"]), user, "question")
 
-    say(text=reply, thread_ts=post["ts"])
+    status.finalize(reply)
     for path in files:  # spreadsheets etc. — into the same thread, then cleaned up
         try:
             client.files_upload_v2(channel=event["channel"], thread_ts=post["ts"],
@@ -231,10 +284,11 @@ def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
                 _os.remove(path)
 
 
-def _request_outreach(conn, row, user: str, say, channel: str, thread_ts: str) -> str:
+def _request_outreach(conn, row, user: str, status, channel: str, thread_ts: str) -> str:
     """The draft_email action: verified contact (enriching on the spot if needed) ->
     outreach-request.v1 brief -> Persequor. Every branch replies truthfully; the
-    interim copyable draft remains the fallback while Persequor's endpoint is dark."""
+    interim copyable draft remains the fallback while Persequor's endpoint is dark.
+    Progress flows through the spinner (status.update), not separate messages."""
     from .. import persequor_client
     from . import persequor as draft_templates
 
@@ -247,10 +301,9 @@ def _request_outreach(conn, row, user: str, say, channel: str, thread_ts: str) -
                 if c["contact_status"] == "verified"]
     contact = contacts[0] if contacts else None
     if contact is None:
-        say(text=f"On it — digging up the right contact at {row['entity_name']} "
-                 f"first (takes about half a minute)…", thread_ts=thread_ts)
         from . import tools as t
-        t.find_contact(int(row["id"]), row["entity_name"], row["state"] or "")
+        t.find_contact(int(row["id"]), row["entity_name"], row["state"] or "",
+                       status.update)
         contacts = [c for c in db.contacts_for_lead(conn, int(row["id"]))
                     if c["contact_status"] == "verified"]
         contact = contacts[0] if contacts else None
@@ -261,6 +314,7 @@ def _request_outreach(conn, row, user: str, say, channel: str, thread_ts: str) -
         return ("I couldn't verify a contact for them (nothing I can prove from "
                 "their site), and there's no test address configured — so no email "
                 "request from me. If you know the right person, tell me here.")
+    status.update("Sending to Persequor")
     state_, msg = persequor_client.submit_brief(conn, int(row["id"]), brief)
     if state_ == "submitted":
         found = (f" Contact on file: {contact['name']} ({contact['title']})."
@@ -289,16 +343,18 @@ def _thread_history(client, channel: str, thread_ts: str) -> list[str]:
     return lines[-10:]
 
 
-def _converse_general(text: str, say, thread_ts: str | None) -> None:
-    """Friendly LLM reply outside a lead thread (mention or DM), tools included.
-    Falls back to the canned help text if the API is unavailable."""
+def _converse_general(text: str, client, channel: str, thread_ts: str | None) -> None:
+    """Friendly LLM reply outside a lead thread (mention or DM), tools + spinner
+    included. Falls back to the canned help text if the API is unavailable."""
     from . import conversation
 
+    status = _Status(client, channel, thread_ts)
+    status.start()
     try:
-        out = conversation.respond(text, None)
-        say(text=out["reply"], thread_ts=thread_ts)
+        out = conversation.respond(text, None, on_progress=status.update)
+        status.finalize(out["reply"])
     except Exception:
-        say(text=_answer(text.lower()), thread_ts=thread_ts)
+        status.finalize(_answer(text.lower()))
 
 
 def _answer(query: str) -> str:

@@ -9,7 +9,7 @@ import pytest
 
 from grant_watch import db, persequor_client
 from grant_watch.enrich.finder import verify_on_page
-from grant_watch.enrich.salesforce import SFMatch, _sosl_term
+from grant_watch.enrich.salesforce import SFMatch, distinctive_term
 from grant_watch.models import Lead, LeadGrade, RawItem
 
 PAGE = """# Castle Rock School District — Staff Directory
@@ -37,16 +37,26 @@ def test_gate_rejects_malformed_email() -> None:
 
 
 # ------------------------------------------------------------ salesforce (offline bits)
-def test_sosl_term_strips_reserved_punctuation() -> None:
-    # SOSL FIND {...} chokes on these; must be stripped, meaningful words kept.
-    term = _sosl_term("Mt. Morris Consolidated Schools (401) & District")
+def test_distinctive_term_strips_punct_and_generic_words() -> None:
+    # SOSL chokes on punctuation; and dropping generic org words lets name
+    # variations match (ABC Schools <-> ABC School District).
+    term = distinctive_term("Mt. Morris Consolidated Schools (401) & District")
     assert "(" not in term and "&" not in term and "." not in term
-    assert "Morris" in term and "Consolidated" in term
+    assert "Morris" in term
+    # generic words removed so variations still match
+    for generic in ("Consolidated", "Schools", "District"):
+        assert generic not in term
+
+
+def test_distinctive_term_variation_matching() -> None:
+    # "ABC Schools" and "ABC School District" must reduce to the same distinctive term.
+    assert distinctive_term("ABC Schools") == distinctive_term("ABC School District")
 
 
 def test_sf_match_carries_lightning_link() -> None:
-    m = SFMatch(sobject="Account", record_id="001x", name="Monarch", owner="Chase",
-                link="https://x/lightning/r/Account/001x/view", confidence="high")
+    m = SFMatch(sobject="Account", record_id="001x", name="Monarch", company="",
+                owner="Chase", link="https://x/lightning/r/Account/001x/view",
+                confidence="high")
     assert "/lightning/r/Account/001x/view" in m.link
 
 

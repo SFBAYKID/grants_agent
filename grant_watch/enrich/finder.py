@@ -18,10 +18,14 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import requests
 from anthropic import Anthropic
+
+Progress = Callable[[str], None]
+_NOOP: Progress = lambda _msg: None
 
 FIRECRAWL_SEARCH = "https://api.firecrawl.dev/v1/search"
 FIRECRAWL_SCRAPE = "https://api.firecrawl.dev/v1/scrape"
@@ -126,10 +130,14 @@ _SEARCH_ANGLES = (
 )
 
 
-def find_contact(entity: str, state: str, max_pages: int = 6) -> ContactCandidate | None:
+def find_contact(entity: str, state: str, max_pages: int = 6,
+                 on_progress: Progress | None = None) -> ContactCandidate | None:
     """Full pipeline for one entity. Runs several title-targeted searches, scrapes the
     most promising pages, and returns the first VERIFIED contact (prefers higher-value
-    titles). None = not_found (recorded honestly by the caller)."""
+    titles). None = not_found (recorded honestly by the caller). on_progress emits
+    short (<=6 word) status phrases for Grant's live spinner."""
+    say = on_progress or _NOOP
+    say("Searching for the contact")
     seen_urls: set[str] = set()
     candidates: list[ContactCandidate] = []
     for angle in _SEARCH_ANGLES:
@@ -145,6 +153,7 @@ def find_contact(entity: str, state: str, max_pages: int = 6) -> ContactCandidat
             seen_urls.add(url)
             if len(seen_urls) > max_pages:
                 break
+            say("Reading their website")
             text = _scrape(url)
             if len(text) < 200:  # empty/blocked page — no evidence
                 continue
@@ -152,8 +161,39 @@ def find_contact(entity: str, state: str, max_pages: int = 6) -> ContactCandidat
             if cand is None:
                 continue
             if cand.confidence == "high":  # a target-title match — take it immediately
+                say(f"Found {cand.name}")
                 return cand
             candidates.append(cand)  # medium: hold in case nothing better turns up
         if len(seen_urls) > max_pages:
             break
+    if candidates:
+        say(f"Found {candidates[0].name}")
     return candidates[0] if candidates else None
+
+
+def linkedin_person(entity: str, state: str,
+                    on_progress: Progress | None = None) -> dict | None:
+    """Find the likely decision-maker's LinkedIn profile (name, title, url). No email
+    — LinkedIn is login-walled — so this returns a PERSON + profile link to reach out
+    through or verify, never a fabricated address. Parsed from the search result, which
+    for LinkedIn reads like 'Name - Title - Org | LinkedIn'."""
+    say = on_progress or _NOOP
+    say("Checking LinkedIn")
+    query = (f"site:linkedin.com/in {entity} {state} "
+             f"technology director OR superintendent OR principal")
+    try:
+        results = _search(query, limit=5)
+    except (requests.RequestException, RuntimeError):
+        return None
+    for r in results:
+        url = r.get("url") or ""
+        if "linkedin.com/in/" not in url:
+            continue
+        title = (r.get("title") or "").split("|")[0].strip()  # "Name - Title - Org"
+        parts = [p.strip() for p in title.split(" - ")]
+        name = parts[0] if parts else ""
+        role = parts[1] if len(parts) > 1 else ""
+        if name:
+            say(f"Found {name} on LinkedIn")
+            return {"name": name, "title": role, "url": url}
+    return None
