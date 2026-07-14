@@ -105,6 +105,37 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "search_leads",
+        "description": "ON-DEMAND SEARCH of the grant database by filters. Use this when "
+                       "a rep asks to find/show/list grants or awardees by criteria "
+                       "(state, org type, grant program, grade, funding amount, how "
+                       "recently seen, how soon a window closes, name). Set export=true "
+                       "to attach the results as an Excel file. If the request is "
+                       "ambiguous (no state, no timeframe, unclear org type), ask a "
+                       "clarifying question FIRST instead of guessing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "state": {"type": "string", "description": "2-letter, e.g. CA"},
+                "org_type": {"type": "string",
+                             "enum": ["school", "city", "county", "hospital", "any"]},
+                "program": {"type": "string",
+                            "description": "grant type: SVPP, NSGP, CSSGP, STOP, ..."},
+                "grade": {"type": "string", "enum": ["gold", "silver", "watch"]},
+                "amount_min": {"type": "number"},
+                "amount_max": {"type": "number"},
+                "seen_within_days": {"type": "integer",
+                                     "description": "first seen within N days (recency)"},
+                "closing_within_days": {"type": "integer",
+                                        "description": "spend/close window ends within N days"},
+                "name_contains": {"type": "string"},
+                "limit": {"type": "integer", "description": "default 50"},
+                "export": {"type": "boolean", "description": "attach results as .xlsx"},
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "make_spreadsheet",
         "description": "Create a real .xlsx file that will be uploaded into this "
                        "Slack thread. rows[0] is the header row. Use when the rep "
@@ -167,6 +198,86 @@ def query_leads(sql: str) -> str:
     out = [" | ".join(cols)]
     out += [" | ".join(str(r[c]) for c in cols) for r in rows]
     return "\n".join(out)
+
+
+# Org-type -> name patterns (entity_type is sparsely populated, but names are reliable:
+# "... SCHOOL DISTRICT", "CITY OF ...", "... COUNTY", "... HOSPITAL").
+_ORG_TYPE_PATTERNS: dict[str, list[str]] = {
+    "school": ["%SCHOOL%", "%DISTRICT%", "%ACADEMY%", "%CHARTER%", "%ISD%", "%USD%"],
+    "city": ["%CITY%", "%TOWN%", "%BOROUGH%", "%TOWNSHIP%", "%VILLAGE%", "%MUNICIP%"],
+    "county": ["%COUNTY%"],
+    "hospital": ["%HOSPITAL%", "%HEALTH%", "%MEDICAL%", "%CLINIC%"],
+}
+_SEARCH_COLS = ("entity_name", "state", "program", "amount", "lead_grade",
+                "funds_start", "funds_end", "status", "detail_url")
+
+
+def search_leads(state: str = "", org_type: str = "", program: str = "",
+                 grade: str = "", amount_min: float | None = None,
+                 amount_max: float | None = None,
+                 seen_within_days: int | None = None,
+                 closing_within_days: int | None = None, name_contains: str = "",
+                 limit: int = 50, export: bool = False,
+                 on_progress: Progress | None = None,
+                 db_path: Any = None) -> tuple[str, str | None]:
+    """Filtered, read-only search over the leads DB. Returns (summary_text, xlsx_path
+    or None). Every filter is parameterized — no SQL injection surface. Dead leads are
+    excluded. db_path is injectable for tests; defaults to the live DB."""
+    (on_progress or _NOOP)("Searching the grants")
+    where: list[str] = ["status != 'dead'"]
+    params: list[Any] = []
+    if state:
+        where.append("UPPER(state) = ?"); params.append(state.strip().upper())
+    if program:
+        where.append("UPPER(program) LIKE ?"); params.append(f"%{program.strip().upper()}%")
+    if grade:
+        where.append("lead_grade = ?"); params.append(grade.strip().lower())
+    if amount_min is not None:
+        where.append("amount >= ?"); params.append(amount_min)
+    if amount_max is not None:
+        where.append("amount <= ?"); params.append(amount_max)
+    if name_contains:
+        where.append("UPPER(entity_name) LIKE ?"); params.append(f"%{name_contains.strip().upper()}%")
+    if seen_within_days:
+        where.append("first_seen >= datetime('now', ?)"); params.append(f"-{int(seen_within_days)} days")
+    if closing_within_days:
+        where.append("funds_end IS NOT NULL AND date(funds_end) "
+                     "BETWEEN date('now') AND date('now', ?)")
+        params.append(f"+{int(closing_within_days)} days")
+    patterns = _ORG_TYPE_PATTERNS.get((org_type or "").lower())
+    if patterns:
+        where.append("(" + " OR ".join(["UPPER(entity_name) LIKE ?"] * len(patterns)) + ")")
+        params.extend(patterns)
+
+    sql = (f"SELECT {', '.join(_SEARCH_COLS)} FROM leads WHERE {' AND '.join(where)} "
+           f"ORDER BY (amount IS NULL), amount DESC, funds_end ASC LIMIT ?")
+    params.append(max(1, min(int(limit or 50), 1000)))
+    try:
+        conn = sqlite3.connect(f"file:{db_path or db.DEFAULT_DB_PATH}?mode=ro",
+                               uri=True, timeout=5.0)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(sql, params).fetchall()
+    except sqlite3.Error as exc:
+        return f"ERROR: search failed ({exc}).", None
+    if not rows:
+        return "No grants matched those filters.", None
+
+    if export:
+        header = [list(_SEARCH_COLS)]
+        data = header + [[r[c] for c in _SEARCH_COLS] for r in rows]
+        text, path = make_spreadsheet("grant_search.xlsx", data)
+        return f"Found {len(rows)} matching grants — {text}", path
+
+    # inline summary: compact lines, capped so Slack stays readable
+    lines = []
+    for r in rows[:15]:
+        amt = f"${r['amount']:,.0f}" if r["amount"] else "$ n/a"
+        lines.append(f"- {r['entity_name'].title()} ({r['state'] or '?'}) — "
+                     f"{r['program'] or r['lead_grade']} · {amt}"
+                     f"{' · closes ' + r['funds_end'] if r['funds_end'] else ''}")
+    more = f"\n(+{len(rows) - 15} more — say 'export' for the full list as Excel)" \
+        if len(rows) > 15 else ""
+    return f"Found {len(rows)} matching grants:\n" + "\n".join(lines) + more, None
 
 
 def make_spreadsheet(filename: str, rows: list[list[Any]]) -> tuple[str, str]:
@@ -263,6 +374,23 @@ def run_tool(name: str, args: dict[str, Any],
     if name == "query_leads":
         p("Checking the lead database")
         return query_leads(str(args.get("sql", ""))), None
+    if name == "search_leads":
+        try:
+            return search_leads(
+                state=str(args.get("state", "")),
+                org_type=str(args.get("org_type", "")),
+                program=str(args.get("program", "")),
+                grade=str(args.get("grade", "")),
+                amount_min=args.get("amount_min"),
+                amount_max=args.get("amount_max"),
+                seen_within_days=args.get("seen_within_days"),
+                closing_within_days=args.get("closing_within_days"),
+                name_contains=str(args.get("name_contains", "")),
+                limit=int(args.get("limit", 50) or 50),
+                export=bool(args.get("export", False)),
+                on_progress=p)
+        except Exception as exc:
+            return f"ERROR: search failed ({type(exc).__name__}).", None
     if name == "find_contact":
         try:
             return find_contact(int(args.get("lead_id", 0)),

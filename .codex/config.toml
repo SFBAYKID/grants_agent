@@ -1,0 +1,19 @@
+# Project-local Codex configuration.
+# Codex loads this file only after the repository is marked as trusted.
+
+# Keep command execution scoped to this repository and ask before actions that
+# require access outside the sandbox.
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+# Use OpenAI's cached web-search index unless a run explicitly requests live
+# search.
+web_search = "cached"
+
+# Give coding and architectural work a thorough reasoning budget without
+# pinning this repository to a particular model.
+model_reasoning_effort = "high"
+
+# Reuse the repository's existing Claude instructions until/unless an
+# AGENTS.md file is added. AGENTS.md always takes precedence when present.
+project_doc_fallback_filenames = ["CLAUDE.md"]
