@@ -120,3 +120,36 @@ def submit_brief(conn: sqlite3.Connection, lead_id: int,
                                "request is queued locally until it ships.")
     return "rejected", (f"Persequor declined the request "
                         f"(HTTP {resp.status_code}: {resp.text[:120]}).")
+
+
+def create_google_sheet(title: str, columns: list[str], rows: list[list[Any]],
+                        requested_by_slack: str, send_as: str) -> tuple[str, str]:
+    """Ask Persequor to create a Google Sheet in the rep's own Google account (it holds
+    the rep's OAuth token; Grant does not). Returns (state, message). state:
+    'created' (message is the sheet URL) | 'unwired' (endpoint not built yet) |
+    'unreachable' | 'error'. Grant falls back to Excel on anything but 'created'.
+
+    Contract create-sheet-request.v1 (docs to Persequor's agent) — POST to
+    /api/v1/create-sheet with the shared X-Persequor-Key header."""
+    url = os.environ.get("PERSEQUOR_API_URL", DEFAULT_API).rstrip("/")
+    key = os.environ.get("PERSEQUOR_API_KEY", "")
+    payload = {
+        "schema": "create-sheet-request.v1",
+        "request_id": f"grant-sheet-{uuid.uuid4().hex[:12]}",
+        "title": title[:120],
+        "requested_by_slack": requested_by_slack,
+        "send_as": send_as,
+        "columns": columns,
+        "rows": rows[:2000],  # cap payload; large exports stay Excel
+    }
+    try:
+        resp = requests.post(f"{url}/api/v1/create-sheet", json=payload,
+                             headers={"X-Persequor-Key": key}, timeout=30)
+    except requests.RequestException as exc:
+        return "unreachable", f"Persequor unreachable ({type(exc).__name__})"
+    if resp.status_code == 404:
+        return "unwired", "Google Sheet export isn't live on Persequor yet"
+    if resp.status_code in (200, 201):
+        body = resp.json()
+        return "created", body.get("url") or "(created, no URL returned)"
+    return "error", f"Persequor create-sheet failed (HTTP {resp.status_code})"

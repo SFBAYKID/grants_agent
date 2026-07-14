@@ -130,7 +130,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                                         "description": "spend/close window ends within N days"},
                 "name_contains": {"type": "string"},
                 "limit": {"type": "integer", "description": "default 50"},
-                "export": {"type": "boolean", "description": "attach results as .xlsx"},
+                "export": {"type": "string", "enum": ["excel", "google_sheet"],
+                           "description": "attach results as Excel, or create a Google "
+                                          "Sheet in the rep's Google account"},
             },
             "required": [],
         },
@@ -217,8 +219,9 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                  amount_max: float | None = None,
                  seen_within_days: int | None = None,
                  closing_within_days: int | None = None, name_contains: str = "",
-                 limit: int = 50, export: bool = False,
+                 limit: int = 50, export: Any = "",
                  on_progress: Progress | None = None,
+                 requester_slack: str = "",
                  db_path: Any = None) -> tuple[str, str | None]:
     """Filtered, read-only search over the leads DB. Returns (summary_text, xlsx_path
     or None). Every filter is parameterized — no SQL injection surface. Dead leads are
@@ -262,10 +265,24 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
     if not rows:
         return "No grants matched those filters.", None
 
-    if export:
-        header = [list(_SEARCH_COLS)]
-        data = header + [[r[c] for c in _SEARCH_COLS] for r in rows]
-        text, path = make_spreadsheet("grant_search.xlsx", data)
+    kind = ("google_sheet" if export in ("google_sheet", "sheet", "google")
+            else ("excel" if export in (True, "excel", "xlsx", "true") else ""))
+    if kind:
+        cols = list(_SEARCH_COLS)
+        data_rows = [[r[c] for c in _SEARCH_COLS] for r in rows]
+        if kind == "google_sheet":
+            (on_progress or _NOOP)("Creating a Google Sheet")
+            from .. import persequor_client
+            send_as = persequor_client.rep_email_for(requester_slack) or ""
+            state, msg = persequor_client.create_google_sheet(
+                "Grant search results", cols, data_rows, requester_slack, send_as)
+            if state == "created":
+                return f"Found {len(rows)} grants — Google Sheet ready: {msg}", None
+            # not created (endpoint unwired / unreachable) -> honest Excel fallback
+            text, path = make_spreadsheet("grant_search.xlsx", [cols] + data_rows)
+            return (f"Found {len(rows)} grants. ({msg}, so here's Excel instead.) "
+                    f"{text}", path)
+        text, path = make_spreadsheet("grant_search.xlsx", [cols] + data_rows)
         return f"Found {len(rows)} matching grants — {text}", path
 
     # inline summary: compact lines, capped so Slack stays readable
@@ -358,9 +375,11 @@ def find_person_linkedin(entity: str, state: str,
 
 
 def run_tool(name: str, args: dict[str, Any],
-             on_progress: Progress | None = None) -> tuple[str, str | None]:
+             on_progress: Progress | None = None,
+             requester_slack: str = "") -> tuple[str, str | None]:
     """Dispatch one tool call. Returns (result_text_for_model, file_path_or_None).
-    on_progress emits short status phrases for Grant's live spinner."""
+    on_progress emits short status phrases for Grant's live spinner; requester_slack
+    is the rep asking (needed for a Google Sheet in their own Google account)."""
     p = on_progress or _NOOP
     if name == "web_search":
         return web_search(str(args.get("query", "")), p), None
@@ -387,8 +406,8 @@ def run_tool(name: str, args: dict[str, Any],
                 closing_within_days=args.get("closing_within_days"),
                 name_contains=str(args.get("name_contains", "")),
                 limit=int(args.get("limit", 50) or 50),
-                export=bool(args.get("export", False)),
-                on_progress=p)
+                export=args.get("export", ""),
+                on_progress=p, requester_slack=requester_slack)
         except Exception as exc:
             return f"ERROR: search failed ({type(exc).__name__}).", None
     if name == "find_contact":

@@ -67,7 +67,9 @@ clarifying question before searching — never guess:
   • no state given -> "Which state should I search?"
   • no timeframe on a "recent"/"upcoming" ask -> "What date range?"
   • unclear org type -> "Schools, cities, counties, or any?"
-After results, offer to refine or export ("want this as an Excel file?").
+After results, offer to refine or export. Export is either Excel (export="excel") or a
+Google Sheet in the rep's own Google account (export="google_sheet") — offer both
+("want this as an Excel file or a Google Sheet?").
 
 TOOLS: web_search; query_leads (read-only SQL, for questions search_leads can't express);
 search_leads (filtered grant search + optional Excel export); find_contact
@@ -154,7 +156,7 @@ def _parse_final(raw: str) -> dict[str, Any]:
 
 def respond(user_text: str, row: sqlite3.Row | None,
             thread_context: list[str] | None = None,
-            on_progress: Any = None) -> dict[str, Any]:
+            on_progress: Any = None, requester_slack: str = "") -> dict[str, Any]:
     """One conversational turn, with tool use.
 
     Returns {'intent': str, 'reply': str, 'files': [paths]} — grant.py uploads the
@@ -189,7 +191,8 @@ def respond(user_text: str, row: sqlite3.Row | None,
         for block in msg.content:
             if block.type != "tool_use":
                 continue
-            text, path = tools.run_tool(block.name, dict(block.input), say)
+            text, path = tools.run_tool(block.name, dict(block.input), say,
+                                        requester_slack=requester_slack)
             if path:
                 files.append(path)
             results.append({"type": "tool_result", "tool_use_id": block.id,

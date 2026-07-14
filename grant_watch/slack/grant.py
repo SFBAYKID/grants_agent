@@ -132,7 +132,8 @@ def create_app() -> App:
         else:
             # A general question outside a lead thread: answer in a thread on it.
             _converse_general(text, client, event["channel"],
-                              event.get("thread_ts") or event["ts"])
+                              event.get("thread_ts") or event["ts"],
+                              user=event.get("user", ""))
 
     @app.event("message")
     def on_message(event: dict[str, Any], say, client) -> None:
@@ -145,7 +146,8 @@ def create_app() -> App:
         if persequor_id and f"<@{persequor_id}>" in text:
             return  # they're talking to Persequor — Grant stays out of it (Chase's rule)
         if event.get("channel_type") == "im":
-            _converse_general(text.strip(), client, event["channel"], None)
+            _converse_general(text.strip(), client, event["channel"], None,
+                              user=event.get("user", ""))
             return
         thread_ts = event.get("thread_ts")
         if not thread_ts:
@@ -250,7 +252,7 @@ def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
     status.start()
     try:
         out = conversation.respond(text, row, thread_context=context,
-                                   on_progress=status.update)
+                                   on_progress=status.update, requester_slack=user)
     except Exception as exc:  # API down ≠ silence; reply honestly
         status.finalize(f"I'm having trouble thinking right now ({type(exc).__name__}) "
                         f"— give me a minute and try again.")
@@ -343,7 +345,8 @@ def _thread_history(client, channel: str, thread_ts: str) -> list[str]:
     return lines[-10:]
 
 
-def _converse_general(text: str, client, channel: str, thread_ts: str | None) -> None:
+def _converse_general(text: str, client, channel: str, thread_ts: str | None,
+                      user: str = "") -> None:
     """Friendly LLM reply outside a lead thread (mention or DM), tools + spinner
     included. Falls back to the canned help text if the API is unavailable."""
     from . import conversation
@@ -351,7 +354,8 @@ def _converse_general(text: str, client, channel: str, thread_ts: str | None) ->
     status = _Status(client, channel, thread_ts)
     status.start()
     try:
-        out = conversation.respond(text, None, on_progress=status.update)
+        out = conversation.respond(text, None, on_progress=status.update,
+                                   requester_slack=user)
         status.finalize(out["reply"])
     except Exception:
         status.finalize(_answer(text.lower()))
