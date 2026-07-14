@@ -43,7 +43,9 @@ def rep_email_for(slack_id: str) -> str | None:
 
 def build_brief(row: sqlite3.Row, contact: sqlite3.Row | None,
                 requested_by_slack: str, send_as: str,
-                rep_notes: str | None = None) -> dict[str, Any] | None:
+                rep_notes: str | None = None,
+                slack_channel: str | None = None,
+                slack_thread_ts: str | None = None) -> dict[str, Any] | None:
     """outreach-request.v1 payload. Returns None when there is no verified contact
     AND no test override (Persequor would just bounce needs_contact — we gate here,
     per the design)."""
@@ -80,6 +82,10 @@ def build_brief(row: sqlite3.Row, contact: sqlite3.Row | None,
         "angle": "fresh award, camera/access-control eligible, open spend window",
         "rep_notes": notes or None,
         "expires_at": row["funds_end"] or None,  # critic M4: no stale-facts sends
+        # WHERE the conversation lives — so Persequor renders its approval card as a
+        # reply IN Grant's lead thread, not loose in the channel (Chase, 2026-07-14).
+        "slack_channel": slack_channel,
+        "slack_thread_ts": slack_thread_ts,
     }
 
 

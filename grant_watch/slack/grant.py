@@ -195,8 +195,9 @@ def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
     text = re.sub(r"<@[^>]+>", "", event.get("text") or "").strip()
     db.record_engagement(conn, int(post["id"]), user, "reply")
     row = db.get_lead(conn, int(post["lead_id"])) if post["lead_id"] else None
+    context = _thread_history(client, event["channel"], post["ts"])
     try:
-        out = conversation.respond(text, row)
+        out = conversation.respond(text, row, thread_context=context)
     except Exception as exc:  # API down ≠ silence; reply honestly
         say(text=f"I'm having trouble thinking right now ({type(exc).__name__}) — "
                  f"give me a minute and try again.", thread_ts=post["ts"])
@@ -204,7 +205,7 @@ def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
     intent, reply, files = out["intent"], out["reply"], out.get("files", [])
 
     if intent == "draft_email" and row is not None:
-        reply = _request_outreach(conn, row, user, say, post["ts"])
+        reply = _request_outreach(conn, row, user, say, event["channel"], post["ts"])
     elif intent == "claim" and row is not None:
         if db.claim_lead(conn, int(row["id"]), user):
             db.record_engagement(conn, int(post["id"]), user, "claim")
@@ -230,7 +231,7 @@ def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
                 _os.remove(path)
 
 
-def _request_outreach(conn, row, user: str, say, thread_ts: str) -> str:
+def _request_outreach(conn, row, user: str, say, channel: str, thread_ts: str) -> str:
     """The draft_email action: verified contact (enriching on the spot if needed) ->
     outreach-request.v1 brief -> Persequor. Every branch replies truthfully; the
     interim copyable draft remains the fallback while Persequor's endpoint is dark."""
@@ -254,7 +255,8 @@ def _request_outreach(conn, row, user: str, say, thread_ts: str) -> str:
                     if c["contact_status"] == "verified"]
         contact = contacts[0] if contacts else None
 
-    brief = persequor_client.build_brief(row, contact, user, send_as)
+    brief = persequor_client.build_brief(row, contact, user, send_as,
+                                         slack_channel=channel, slack_thread_ts=thread_ts)
     if brief is None:
         return ("I couldn't verify a contact for them (nothing I can prove from "
                 "their site), and there's no test address configured — so no email "
@@ -268,6 +270,23 @@ def _request_outreach(conn, row, user: str, say, thread_ts: str) -> str:
     draft = draft_templates.compose_draft(row)
     return (f"{msg}\nMeanwhile, here's a copyable draft so you're not blocked:\n"
             f"```{draft}```")
+
+
+def _thread_history(client, channel: str, thread_ts: str) -> list[str]:
+    """Recent thread turns as 'Grant: ...' / 'rep: ...' lines, so the offer→confirm
+    flow works (Grant remembers it just offered Persequor). Failure -> no context,
+    never a crash."""
+    try:
+        resp = client.conversations_replies(channel=channel, ts=thread_ts, limit=12)
+    except Exception:
+        return []
+    lines: list[str] = []
+    for m in resp.get("messages", []):
+        who = "Grant" if m.get("bot_id") or m.get("app_id") else "rep"
+        txt = re.sub(r"<@[^>]+>", "", m.get("text") or "").strip()
+        if txt:
+            lines.append(f"{who}: {txt}")
+    return lines[-10:]
 
 
 def _converse_general(text: str, say, thread_ts: str | None) -> None:

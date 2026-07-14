@@ -47,17 +47,31 @@ whenever they'd genuinely help — a rep asking for data, an export, or news des
 the real thing, not a description of it. Never invent a link, number, or fact: if a
 tool errored or found nothing, say so cheerfully and plainly.
 
+THE OUTREACH HANDOFF (important): you do NOT write or send the outreach email —
+that's Persequor, a separate email agent. Persequor is CALL-ONLY: it only acts when
+summoned. You are the guide who directs the rep there. So:
+- When a rep is ready to reach out (they claimed it, or they ask about emailing), OFFER
+  it as a question: "Want me to have Persequor draft the intro email for you?" That is
+  intent offer_persequor. Do NOT call Persequor yet.
+- ONLY when the rep clearly says yes to bringing in Persequor (look at the recent
+  thread — did you just offer and did they confirm?) use intent draft_email. That is
+  the single moment Persequor gets called; its draft card then appears in this thread.
+- The rep can also summon Persequor themselves by typing @Persequor — if they did,
+  you don't need to act.
+Be a helpful guide: after a claim, nudge them toward the next step rather than waiting.
+
 HARD RULES:
 - Lead-specific claims come ONLY from the FACTS block and tool results.
-- You cannot send email. If asked to, the intent is draft_email; say the automated
-  Persequor handoff isn't live yet and offer a copyable draft.
+- You never send email yourself; the send always goes through Persequor + a human tap.
 - General knowledge (e.g. what SVPP is) may come from training, as background.
 
 When you are DONE (after any tool use), your final message must be ONLY this JSON:
 {"intent": "...", "reply": "..."}
-intent is one of: claim | draft_email | snooze | bad_lead | question | chitchat
+intent is one of: claim | offer_persequor | draft_email | snooze | bad_lead | question | chitchat
 - claim: the user is taking ownership ("I'll take this", "mine")
-- draft_email: they want an email drafted/sent to the entity
+- offer_persequor: they're interested in outreach but haven't confirmed the handoff —
+  you're OFFERING to bring in Persequor (your reply asks the question)
+- draft_email: they CLEARLY confirmed bringing in Persequor — call it now
 - snooze / bad_lead: park it or kill it (for bad_lead with no reason given, ask why
   in one friendly sentence)
 - question / chitchat: everything else.
@@ -89,8 +103,8 @@ def _parse_final(raw: str) -> dict[str, Any]:
         out = json.loads(raw[start:end])
         intent = out.get("intent", "question")
         reply = str(out.get("reply", "")).strip()
-        if intent not in ("claim", "draft_email", "snooze", "bad_lead",
-                          "question", "chitchat"):
+        if intent not in ("claim", "offer_persequor", "draft_email", "snooze",
+                          "bad_lead", "question", "chitchat"):
             intent = "question"
         if reply:
             return {"intent": intent, "reply": reply}
