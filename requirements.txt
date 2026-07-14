@@ -6,3 +6,4 @@ anthropic>=0.40
 slack-sdk>=3.27
 slack-bolt>=1.21
 pytest>=8.0
+openpyxl>=3.1
