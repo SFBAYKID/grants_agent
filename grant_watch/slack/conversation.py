@@ -16,10 +16,12 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from datetime import date
 from typing import Any
 
 from anthropic import Anthropic
 
+from ..spreadsheets import GeneratedArtifact
 from . import tools
 
 DEFAULT_MODEL = "claude-sonnet-5"
@@ -59,14 +61,26 @@ YOU HAVE TWO JOBS:
 2. On-demand search — a rep can ask you to find grants by any criteria and you search
    your data and return results, exportable to Excel without leaving Slack.
 
-ON-DEMAND SEARCH: when a rep asks to find/show/list grants or awardees (e.g. "grants
-for school districts in California", "who got funding in the last two weeks", "cities
-in Texas", "grants closing next month"), use the search_leads tool. If they want a
-spreadsheet, call it with export=true. IF THE REQUEST IS AMBIGUOUS, ask ONE smart
-clarifying question before searching — never guess:
-  • no state given -> "Which state should I search?"
-  • no timeframe on a "recent"/"upcoming" ask -> "What date range?"
-  • unclear org type -> "Schools, cities, counties, or any?"
+ON-DEMAND SEARCH: use search_leads for indexed grants and awardees. Ask ONE smart
+clarifying question only when information needed to define the user's requested filter
+is missing; do not require a state, timeframe, or org type when the user intentionally
+asked across all values.
+
+DATE TRUTH RULES (non-negotiable):
+- discovered = when Grant first imported the record; never call it awarded/received.
+- opportunity_open/opportunity_close = Grants.gov application-window dates.
+- solicitation_posted/response_due = SILVER RFP dates.
+- spend_start/spend_end = GOLD award spending-window dates.
+- The database does NOT store a verified award announcement/received date. If asked who
+  "got/received/was awarded" funding in a date range, do not substitute discovered or
+  spend_start. Explain the limitation and ask whether they mean newly discovered leads
+  or spend windows that started then. search_leads also rejects award_received.
+- For "next month," use the next CALENDAR month relative to CURRENT_DATE and pass exact
+  inclusive date_from/date_to values. Never turn it into "the next 30 days."
+
+ORG TRUTH RULE: org_type means the entity itself (school/city/county/hospital), not a
+geographic city field; the database does not currently store a reliable city location.
+
 After results, offer to refine or export. Export is either Excel (export="excel") or a
 Google Sheet in the rep's own Google account (export="google_sheet") — offer both
 ("want this as an Excel file or a Google Sheet?").
@@ -156,12 +170,14 @@ def _parse_final(raw: str) -> dict[str, Any]:
 
 def respond(user_text: str, row: sqlite3.Row | None,
             thread_context: list[str] | None = None,
-            on_progress: Any = None, requester_slack: str = "") -> dict[str, Any]:
+            on_progress: tools.Progress | None = None,
+            requester_slack: str = "") -> dict[str, Any]:
     """One conversational turn, with tool use.
 
-    Returns {'intent': str, 'reply': str, 'files': [paths]} — grant.py uploads the
-    files into the thread and deletes them afterward. on_progress(phrase) is called
-    with short status phrases as tools run, for Grant's live spinner.
+    Returns {'intent': str, 'reply': str, 'files': [GeneratedArtifact]}; grant.py owns
+    delivery and cleanup. If the model fails after creating an artifact, this function
+    cleans it before re-raising. The dict remains dynamic because Anthropic message
+    blocks are third-party runtime objects rather than a stable local model.
     """
     client = Anthropic()  # ANTHROPIC_API_KEY from env
     say = on_progress or (lambda _msg: None)
@@ -169,35 +185,42 @@ def respond(user_text: str, row: sqlite3.Row | None,
                if thread_context else "")
     messages: list[dict[str, Any]] = [{
         "role": "user",
-        "content": f"{lead_facts(row)}{context}\n\nUser says: {user_text}",
+        "content": (f"CURRENT_DATE: {date.today().isoformat()}\n{lead_facts(row)}"
+                    f"{context}\n\nUser says: {user_text}"),
     }]
-    files: list[str] = []
+    files: list[GeneratedArtifact] = []
     model = os.environ.get("GRANT_MODEL", DEFAULT_MODEL)
 
-    for _ in range(MAX_TOOL_TURNS):
-        say("Thinking")
-        msg = client.messages.create(
-            model=model, max_tokens=1500, system=_SYSTEM,
-            tools=tools.TOOL_SCHEMAS, messages=messages,
-        )
-        if msg.stop_reason != "tool_use":
-            raw = "".join(b.text for b in msg.content if b.type == "text")
-            out = _parse_final(raw)
-            out["files"] = files
-            return out
-        # Execute every tool call in this turn and feed results back.
-        messages.append({"role": "assistant", "content": msg.content})
-        results = []
-        for block in msg.content:
-            if block.type != "tool_use":
-                continue
-            text, path = tools.run_tool(block.name, dict(block.input), say,
-                                        requester_slack=requester_slack)
-            if path:
-                files.append(path)
-            results.append({"type": "tool_result", "tool_use_id": block.id,
-                            "content": text})
-        messages.append({"role": "user", "content": results})
+    try:
+        for _ in range(MAX_TOOL_TURNS):
+            say("Thinking")
+            msg = client.messages.create(
+                model=model, max_tokens=1500, system=_SYSTEM,
+                tools=tools.TOOL_SCHEMAS, messages=messages,
+            )
+            if msg.stop_reason != "tool_use":
+                raw = "".join(b.text for b in msg.content if b.type == "text")
+                out = _parse_final(raw)
+                out["files"] = files
+                return out
+            # Execute every tool call in this turn and feed results back.
+            messages.append({"role": "assistant", "content": msg.content})
+            results = []
+            for block in msg.content:
+                if block.type != "tool_use":
+                    continue
+                text, artifact = tools.run_tool(
+                    block.name, dict(block.input), say,
+                    requester_slack=requester_slack)
+                if artifact:
+                    files.append(artifact)
+                results.append({"type": "tool_result", "tool_use_id": block.id,
+                                "content": text})
+            messages.append({"role": "user", "content": results})
+    except Exception:
+        for artifact in files:
+            artifact.cleanup()
+        raise
 
     return {"intent": "question", "files": files,
             "reply": "That took more digging than I expected and I hit my limit — "
