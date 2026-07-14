@@ -46,6 +46,9 @@ FORMATTING (hard rules for Slack — reps SCAN, they don't read paragraphs):
       • *Status:* gold, unclaimed
       Want to jump on it?
 - Use Slack bold (*word*) for key numbers and labels. Bullets start with "• ".
+- Use a NUMBERED list (1. 2. 3.) when the items are steps or a sequence (e.g. next
+  actions); use bullets for parallel facts.
+- Write clean, proofread English — correct grammar and spelling, no typos.
 - Casual one-off replies stay to a sentence or two — don't bulletize everything.
 - Triple-backtick blocks are allowed ONLY for a full email draft, nothing else.
 - Conversations live in THREADS. If a rep should follow up, tell them to reply right
