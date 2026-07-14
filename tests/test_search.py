@@ -1,75 +1,232 @@
-"""On-demand search tool: filters, org-type name matching, export, safety."""
+"""On-demand search correctness: filters, dates, classification, and completeness."""
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
+import pytest
 from openpyxl import load_workbook
 
-from grant_watch import db
+from grant_watch import db, persequor_client
 from grant_watch.models import Lead, LeadGrade, RawItem
-from grant_watch.slack.tools import search_leads
+from grant_watch.slack.search import MAX_EXPORT_ROWS, search_leads
 
 
-def _db(tmp_path: Path):
-    conn = db.connect(tmp_path / "s.db")
+def _insert(conn: sqlite3.Connection, source: str, item_id: str, entity: str,
+            state: str, program: str, amount: float | None, start: str, end: str,
+            grade: LeadGrade) -> None:
+    """Insert one typed fixture lead with source semantics preserved."""
+    db.upsert_lead(conn, Lead(
+        item=RawItem(source=source, item_id=item_id, title=f"Title {item_id}",
+                     entity=entity, state=state, program=program, amount=amount,
+                     start=start, end=end, url="https://example.gov/item", raw={}),
+        grade=grade))
+
+
+def _db(tmp_path: Path) -> Path:
+    """Build a mixed award/opportunity/solicitation database for search tests."""
+    path = tmp_path / "search.db"
+    conn = db.connect(path)
     rows = [
         ("usaspending:16.071", "A1", "Tustin Unified School District", "CA", "SVPP",
-         500_000.0, "2025-10-01", "2026-09-30", LeadGrade.GOLD),
+         500_000.0, "2025-10-01", "2028-09-30", LeadGrade.GOLD),
         ("usaspending:16.071", "A2", "City of Austin", "TX", "NSGP",
          120_000.0, "2025-11-01", "2028-09-30", LeadGrade.GOLD),
         ("usaspending:16.071", "A3", "Fresno County", "CA", "STOP",
-         80_000.0, "2024-01-01", "2025-01-01", LeadGrade.WATCH),
-        ("sam.gov", "A4", "Small Charter Academy", "CA", "RFP:sam.gov",
-         None, "2026-07-01", "2026-08-01", LeadGrade.SILVER),
+         80_000.0, "2024-01-01", "2027-01-01", LeadGrade.GOLD),
+        ("sam.gov", "S1", "Federal Procurement Office", "WA", "RFP:sam.gov",
+         None, "2026-07-10", "2026-08-15", LeadGrade.SILVER),
+        ("grants.gov", "O1", "COPS Office", "", "SVPP",
+         None, "2026-08-01", "2026-08-31", LeadGrade.WATCH),
+        ("usaspending:16.071", "A4", "Modesto City Schools", "CA", "SVPP",
+         300_000.0, "2026-08-01", "2028-09-30", LeadGrade.GOLD),
+        ("usaspending:16.071", "A5", "Township High School District 211", "IL", "SVPP",
+         250_000.0, "2025-10-01", "2028-09-30", LeadGrade.GOLD),
+        ("usaspending:16.071", "A6", "Mesa Water District", "CA", "STOP",
+         90_000.0, "2025-10-01", "2028-09-30", LeadGrade.GOLD),
     ]
-    for src, iid, name, st, prog, amt, s, e, g in rows:
-        db.upsert_lead(conn, Lead(item=RawItem(source=src, item_id=iid, title="t",
-                                               entity=name, state=st, program=prog,
-                                               amount=amt, start=s, end=e,
-                                               url="https://x.gov/a", raw={}), grade=g))
-    return tmp_path / "s.db"
+    for row in rows:
+        _insert(conn, *row)
+    conn.close()
+    return path
 
 
-def test_filter_by_state_and_grade(tmp_path: Path) -> None:
-    text, _ = search_leads(state="CA", grade="gold", db_path=_db(tmp_path))
-    assert "Tustin" in text and "Austin" not in text  # TX excluded
+def _bulk_db(tmp_path: Path, count: int) -> Path:
+    """Build many active leads efficiently for export-boundary tests."""
+    path = tmp_path / f"bulk-{count}.db"
+    conn = db.connect(path)
+    now = "2026-07-14T12:00:00+00:00"
+    conn.executemany(
+        """INSERT INTO leads
+           (source, source_item_id, lead_grade, entity_name, state, program,
+            funds_start, funds_end, first_seen, last_seen, status)
+           VALUES ('usaspending:16.071', ?, 'gold', ?, 'CA', 'SVPP',
+                   '2025-10-01', '2028-09-30', ?, ?, 'new')""",
+        [(f"B{i}", f"School District {i}", now, now) for i in range(count)],
+    )
+    conn.commit()
+    conn.close()
+    return path
 
 
-def test_org_type_school_matches_by_name(tmp_path: Path) -> None:
-    text, _ = search_leads(state="CA", org_type="school", db_path=_db(tmp_path))
-    assert "Tustin Unified School District" in text
-    assert "Charter Academy" in text          # 'academy' pattern
-    assert "Fresno County" not in text        # county, not school
+def test_filter_by_state_grade_and_amount(tmp_path: Path) -> None:
+    """Combine common scalar filters without leaking another state's result."""
+    text, _ = search_leads(state="CA", grade="gold", amount_min=400_000,
+                           db_path=_db(tmp_path))
+    assert "Tustin" in text
+    assert "Austin" not in text
 
 
-def test_org_type_city(tmp_path: Path) -> None:
-    text, _ = search_leads(org_type="city", db_path=_db(tmp_path))
-    assert "Austin" in text and "Tustin" not in text
+def test_school_precedence_excludes_school_names_from_city(tmp_path: Path) -> None:
+    """Municipal words inside school names must never make those entities cities."""
+    path = _db(tmp_path)
+    school_text, _ = search_leads(org_type="school", db_path=path)
+    city_text, _ = search_leads(org_type="city", db_path=path)
+    assert "Modesto City Schools" in school_text
+    assert "Township High School District 211" in school_text
+    assert "City of Austin" in city_text
+    assert "Modesto City Schools" not in city_text
+    assert "Township High School District 211" not in city_text
+    assert "Mesa Water District" not in school_text
 
 
-def test_amount_filter(tmp_path: Path) -> None:
-    text, _ = search_leads(amount_min=200_000, db_path=_db(tmp_path))
-    assert "Tustin" in text and "Austin" not in text  # 120k excluded
+def test_county_filter_excludes_school_districts(tmp_path: Path) -> None:
+    """County entities match while unrelated district names remain excluded."""
+    text, _ = search_leads(org_type="county", db_path=_db(tmp_path))
+    assert "Fresno County" in text
+    assert "School District" not in text
 
 
-def test_export_produces_xlsx(tmp_path: Path) -> None:
-    text, path = search_leads(state="CA", export=True, db_path=_db(tmp_path))
-    assert path is not None and "Found" in text
-    wb = load_workbook(path)
-    assert wb.active["A1"].value == "entity_name"   # header row
-    Path(path).unlink()
+def test_opportunity_open_range_is_source_specific(tmp_path: Path) -> None:
+    """An opportunity-open search must not include an award spend start on the same date."""
+    text, _ = search_leads(date_field="opportunity_open", date_from="2026-08-01",
+                           date_to="2026-08-31", db_path=_db(tmp_path))
+    assert "COPS Office" in text
+    assert "Modesto City Schools" not in text
+    assert "applications open" in text
 
 
-def test_no_match_is_honest(tmp_path: Path) -> None:
-    text, path = search_leads(state="ZZ", db_path=_db(tmp_path))
-    assert "No grants matched" in text and path is None
+def test_response_due_range_is_solicitation_specific(tmp_path: Path) -> None:
+    """RFP response deadlines remain distinct from award spend-window ends."""
+    text, _ = search_leads(date_field="response_due", date_from="2026-08-01",
+                           date_to="2026-08-31", db_path=_db(tmp_path))
+    assert "Federal Procurement Office" in text
+    assert "response due 2026-08-15" in text
+    assert "Tustin" not in text
 
 
-def test_dead_leads_excluded(tmp_path: Path) -> None:
-    dbp = _db(tmp_path)
-    conn = db.connect(dbp)
+def test_award_received_date_is_rejected_honestly(tmp_path: Path) -> None:
+    """Never substitute discovery or spend-window dates for an absent award date."""
+    text, artifact = search_leads(date_field="award_received", date_from="2026-07-01",
+                                  date_to="2026-07-14", db_path=_db(tmp_path))
+    assert text.startswith("ERROR")
+    assert "not stored" in text
+    assert artifact is None
+
+
+def test_gold_window_is_never_labeled_closing(tmp_path: Path) -> None:
+    """Award results describe spend windows rather than application close dates."""
+    text, _ = search_leads(name_contains="Tustin", db_path=_db(tmp_path))
+    assert "spend window 2025-10-01 through 2028-09-30" in text
+    assert "closes" not in text
+
+
+def test_invalid_reversed_date_and_amount_ranges_fail(tmp_path: Path) -> None:
+    """Invalid ranges fail explicitly rather than silently returning misleading data."""
+    path = _db(tmp_path)
+    date_text, _ = search_leads(date_field="spend_end", date_from="2027-01-02",
+                                date_to="2027-01-01", db_path=path)
+    amount_text, _ = search_leads(amount_min=10, amount_max=1, db_path=path)
+    assert date_text.startswith("ERROR") and "after" in date_text
+    assert amount_text.startswith("ERROR") and "exceed" in amount_text
+
+
+def test_incompatible_record_kind_and_date_fail(tmp_path: Path) -> None:
+    """A funding-opportunity date cannot be applied to award records."""
+    text, artifact = search_leads(
+        record_kind="award", date_field="opportunity_close",
+        date_from="2026-08-01", date_to="2026-08-31", db_path=_db(tmp_path))
+    assert text.startswith("ERROR") and "incompatible" in text
+    assert artifact is None
+
+
+def test_like_metacharacters_are_literal(tmp_path: Path) -> None:
+    """Percent and underscore in user text must not broaden a LIKE search."""
+    path = _db(tmp_path)
+    conn = db.connect(path)
+    _insert(conn, "usaspending:16.071", "PCT", "100% Secure School", "CA", "SVPP",
+            1.0, "2025-10-01", "2028-09-30", LeadGrade.GOLD)
+    conn.close()
+    text, _ = search_leads(name_contains="100%", db_path=path)
+    assert "100% Secure School" in text
+    assert "Found 1 matching" in text
+
+
+def test_dead_leads_are_excluded(tmp_path: Path) -> None:
+    """Human-rejected leads never resurface through on-demand search."""
+    path = _db(tmp_path)
+    conn = db.connect(path)
     conn.execute("UPDATE leads SET status='dead' WHERE source_item_id='A1'")
     conn.commit()
-    text, _ = search_leads(state="CA", grade="gold", db_path=dbp)
-    assert "Tustin" not in text  # dead lead never surfaces in search
+    conn.close()
+    text, _ = search_leads(name_contains="Tustin", db_path=path)
+    assert "No grants matched" in text
+
+
+def test_excel_export_ignores_inline_limit_and_is_complete(tmp_path: Path) -> None:
+    """A 51-row export contains every match instead of silently stopping at 50."""
+    text, artifact = search_leads(limit=1, export="excel", db_path=_bulk_db(tmp_path, 51))
+    assert artifact is not None
+    workbook = load_workbook(artifact.path)
+    assert workbook.active.max_row == 52  # header + all 51 matches
+    assert "all 51" in text
+    artifact.cleanup()
+
+
+def test_export_over_declared_cap_creates_no_partial_file(tmp_path: Path) -> None:
+    """Oversized exports fail with the true count and never masquerade as complete."""
+    count = MAX_EXPORT_ROWS + 1
+    text, artifact = search_leads(export="excel", db_path=_bulk_db(tmp_path, count))
+    assert artifact is None
+    assert str(count) in text and str(MAX_EXPORT_ROWS) in text
+    assert "no incomplete file" in text
+
+
+def test_google_sheet_success_exports_every_match(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successful Google handoff receives all 2,001 rows and creates no local file."""
+    captured_count = 0
+
+    def fake_create(_title: str, _columns: list[str], rows: list[list[object]],
+                    _requested_by: str, _send_as: str) -> tuple[str, str]:
+        """Capture the complete handoff and return a verified-looking test URL."""
+        nonlocal captured_count
+        captured_count = len(rows)
+        return "created", "https://docs.google.com/spreadsheets/d/test"
+
+    monkeypatch.setattr(persequor_client, "create_google_sheet", fake_create)
+    text, artifact = search_leads(
+        export="google_sheet", requester_slack="U01DPJVURHU",
+        db_path=_bulk_db(tmp_path, 2_001))
+    assert captured_count == 2_001
+    assert "all 2001" in text
+    assert artifact is None
+
+
+def test_google_sheet_failure_falls_back_to_complete_excel(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unwired Google endpoint returns a complete Excel artifact without truncation."""
+    def fake_create(_title: str, _columns: list[str], _rows: list[list[object]],
+                    _requested_by: str, _send_as: str) -> tuple[str, str]:
+        """Simulate the explicitly unwired Persequor endpoint."""
+        return "unwired", "Google Sheet export is not live"
+
+    monkeypatch.setattr(persequor_client, "create_google_sheet", fake_create)
+    text, artifact = search_leads(
+        limit=1, export="google_sheet", requester_slack="U01DPJVURHU",
+        db_path=_bulk_db(tmp_path, 51))
+    assert artifact is not None
+    assert load_workbook(artifact.path).active.max_row == 52
+    assert "complete Excel instead" in text
+    artifact.cleanup()

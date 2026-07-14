@@ -18,20 +18,29 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
    ever set *after* approval.
 4. **Conversation.** Humans can @mention Grant or DM it to ask about a lead, re-post a digest, or check a
    district's status. Grant answers from the database and clearly says when it doesn't know.
+5. **On-demand search.** Reps can filter Grant's indexed database by state, conservative organization
+   type, program, grade, amount, record kind, and explicit date meaning. Inline results report the true
+   match count; complete Excel/Google exports are all-or-nothing under a declared 5,000-row safety cap.
 
 ## Honesty rules Grant follows
 
 - Never invents a contact, email, phone, award amount, or a Salesforce "last contacted" date.
 - If a contact is `not_found`, Grant says so and offers to let a human research — it does not guess.
 - Salesforce matches that are uncertain are shown as "possible match," never asserted.
+- Grant distinguishes discovery dates, application windows, solicitation deadlines, and award spend
+  windows. The database does not yet contain a verified award-announcement date, so "received funding
+  during this range" is reported as unsupported instead of being mapped to an import or spend date.
+- Organization type falls back to conservative name classification while source-provided entity types
+  remain sparse; Grant discloses that limitation in filtered results.
 - Every send passes through a human. Outreach identifies Monarch Connected, no impersonation, opt-out.
 
 ## How Grant is wired (technical)
 
 - **Runtime:** Slack Bolt (Python) in **Socket Mode** — no public URL. Needs `SLACK_BOT_TOKEN` (xoxb),
   `SLACK_APP_TOKEN` (xapp, `connections:write`), `SLACK_SIGNING_SECRET`, `SLACK_CHANNEL_ID` (all in `.env`).
-- **Code home (when built):** `grant_watch/slack/` — `grant.py` (bot), `digest.py` (message formatting),
-  `persequor.py` (handoff). Everything that posts or drafts honors `--dry-run`.
+- **Code home:** `grant_watch/slack/` — `grant.py` (bot), `digest.py` (message formatting),
+  `search.py` (typed source-aware search), and `persequor.py` (handoff). Spreadsheet safety and owned
+  temporary artifacts live in `grant_watch/spreadsheets.py`.
 - **Talking to @Persequor:** Grant posts an approved-send message that mentions @Persequor with the draft
   and recipient; Persequor already handles the actual email. The approval gate lives on Grant's side.
 
@@ -50,5 +59,8 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 
 ## Status
 
-Slack app: `verified` (provisioned, installed, tokens live). Grant's bot code: **not built yet** —
-that is Phase 3 of the build plan.
+- Slack app and core bot: `verified` live (provisioned, installed, Socket Mode connected).
+- On-demand search and complete Excel fallback: `verified` offline with pytest on 2026-07-14;
+  production DM/@mention upload after this fix is `needs-testing` through grants-ops-guardian.
+- Google Sheet handoff contract: `needs-testing`; Persequor's `/api/v1/create-sheet` endpoint may remain
+  unwired, in which case Grant says so and returns the complete Excel artifact instead.

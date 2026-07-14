@@ -1,12 +1,13 @@
 """Grant's server-side tools — the hands behind the conversation (Chase's ask:
 "if I ask for an Excel, Grant calls a tool and puts the data back in the thread").
 
-Three tools, each honest by construction:
+Core tools are honest by construction:
   web_search        real results from Firecrawl's search API; links are returned
                     verbatim, never invented. No key or an API error -> says so.
   query_leads       read-only SELECT against Grant's own SQLite (opened mode=ro,
                     SELECT-only enforced) — Grant can answer data questions with
                     real numbers instead of vibes.
+  search_leads      typed source-aware filters with complete, formula-safe exports.
   make_spreadsheet  builds a real .xlsx (openpyxl); grant.py uploads it to the
                     thread and deletes the temp file.
 """
@@ -16,13 +17,14 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
-import tempfile
 from collections.abc import Callable
 from typing import Any
 
 import requests
 
 from .. import db
+from ..spreadsheets import GeneratedArtifact, make_spreadsheet
+from .search import search_leads
 
 Progress = Callable[[str], None]
 _NOOP: Progress = lambda _msg: None
@@ -106,13 +108,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "search_leads",
-        "description": "ON-DEMAND SEARCH of the grant database by filters. Use this when "
-                       "a rep asks to find/show/list grants or awardees by criteria "
-                       "(state, org type, grant program, grade, funding amount, how "
-                       "recently seen, how soon a window closes, name). Set export=true "
-                       "to attach the results as an Excel file. If the request is "
-                       "ambiguous (no state, no timeframe, unclear org type), ask a "
-                       "clarifying question FIRST instead of guessing.",
+        "description": "Read-only search of Grant's indexed database. Date meanings are "
+                       "strict: discovered is Grant's import date; opportunity_open/close "
+                       "is Grants.gov; solicitation_posted/response_due is an RFP; "
+                       "spend_start/end is a GOLD award's spend window. Award received "
+                       "dates are not stored and must never be inferred.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -122,17 +122,24 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "program": {"type": "string",
                             "description": "grant type: SVPP, NSGP, CSSGP, STOP, ..."},
                 "grade": {"type": "string", "enum": ["gold", "silver", "watch"]},
+                "record_kind": {"type": "string",
+                                "enum": ["award", "funding_opportunity", "solicitation"]},
                 "amount_min": {"type": "number"},
                 "amount_max": {"type": "number"},
-                "seen_within_days": {"type": "integer",
-                                     "description": "first seen within N days (recency)"},
-                "closing_within_days": {"type": "integer",
-                                        "description": "spend/close window ends within N days"},
                 "name_contains": {"type": "string"},
-                "limit": {"type": "integer", "description": "default 50"},
+                "date_field": {"type": "string",
+                               "enum": ["discovered", "opportunity_open",
+                                        "opportunity_close", "solicitation_posted",
+                                        "response_due", "spend_start", "spend_end",
+                                        "award_received"],
+                               "description": "Meaning of date_from/date_to. "
+                                              "award_received returns an honest unsupported error."},
+                "date_from": {"type": "string", "description": "inclusive YYYY-MM-DD"},
+                "date_to": {"type": "string", "description": "inclusive YYYY-MM-DD"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100,
+                          "description": "inline result limit; exports ignore it"},
                 "export": {"type": "string", "enum": ["excel", "google_sheet"],
-                           "description": "attach results as Excel, or create a Google "
-                                          "Sheet in the rep's Google account"},
+                           "description": "export every match or refuse above the declared cap"},
             },
             "required": [],
         },
@@ -202,117 +209,6 @@ def query_leads(sql: str) -> str:
     return "\n".join(out)
 
 
-# Org-type -> name patterns (entity_type is sparsely populated, but names are reliable:
-# "... SCHOOL DISTRICT", "CITY OF ...", "... COUNTY", "... HOSPITAL").
-_ORG_TYPE_PATTERNS: dict[str, list[str]] = {
-    "school": ["%SCHOOL%", "%DISTRICT%", "%ACADEMY%", "%CHARTER%", "%ISD%", "%USD%"],
-    "city": ["%CITY%", "%TOWN%", "%BOROUGH%", "%TOWNSHIP%", "%VILLAGE%", "%MUNICIP%"],
-    "county": ["%COUNTY%"],
-    "hospital": ["%HOSPITAL%", "%HEALTH%", "%MEDICAL%", "%CLINIC%"],
-}
-_SEARCH_COLS = ("entity_name", "state", "program", "amount", "lead_grade",
-                "funds_start", "funds_end", "status", "detail_url")
-
-
-def search_leads(state: str = "", org_type: str = "", program: str = "",
-                 grade: str = "", amount_min: float | None = None,
-                 amount_max: float | None = None,
-                 seen_within_days: int | None = None,
-                 closing_within_days: int | None = None, name_contains: str = "",
-                 limit: int = 50, export: Any = "",
-                 on_progress: Progress | None = None,
-                 requester_slack: str = "",
-                 db_path: Any = None) -> tuple[str, str | None]:
-    """Filtered, read-only search over the leads DB. Returns (summary_text, xlsx_path
-    or None). Every filter is parameterized — no SQL injection surface. Dead leads are
-    excluded. db_path is injectable for tests; defaults to the live DB."""
-    (on_progress or _NOOP)("Searching the grants")
-    where: list[str] = ["status != 'dead'"]
-    params: list[Any] = []
-    if state:
-        where.append("UPPER(state) = ?"); params.append(state.strip().upper())
-    if program:
-        where.append("UPPER(program) LIKE ?"); params.append(f"%{program.strip().upper()}%")
-    if grade:
-        where.append("lead_grade = ?"); params.append(grade.strip().lower())
-    if amount_min is not None:
-        where.append("amount >= ?"); params.append(amount_min)
-    if amount_max is not None:
-        where.append("amount <= ?"); params.append(amount_max)
-    if name_contains:
-        where.append("UPPER(entity_name) LIKE ?"); params.append(f"%{name_contains.strip().upper()}%")
-    if seen_within_days:
-        where.append("first_seen >= datetime('now', ?)"); params.append(f"-{int(seen_within_days)} days")
-    if closing_within_days:
-        where.append("funds_end IS NOT NULL AND date(funds_end) "
-                     "BETWEEN date('now') AND date('now', ?)")
-        params.append(f"+{int(closing_within_days)} days")
-    patterns = _ORG_TYPE_PATTERNS.get((org_type or "").lower())
-    if patterns:
-        where.append("(" + " OR ".join(["UPPER(entity_name) LIKE ?"] * len(patterns)) + ")")
-        params.extend(patterns)
-
-    sql = (f"SELECT {', '.join(_SEARCH_COLS)} FROM leads WHERE {' AND '.join(where)} "
-           f"ORDER BY (amount IS NULL), amount DESC, funds_end ASC LIMIT ?")
-    params.append(max(1, min(int(limit or 50), 1000)))
-    try:
-        conn = sqlite3.connect(f"file:{db_path or db.DEFAULT_DB_PATH}?mode=ro",
-                               uri=True, timeout=5.0)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(sql, params).fetchall()
-    except sqlite3.Error as exc:
-        return f"ERROR: search failed ({exc}).", None
-    if not rows:
-        return "No grants matched those filters.", None
-
-    kind = ("google_sheet" if export in ("google_sheet", "sheet", "google")
-            else ("excel" if export in (True, "excel", "xlsx", "true") else ""))
-    if kind:
-        cols = list(_SEARCH_COLS)
-        data_rows = [[r[c] for c in _SEARCH_COLS] for r in rows]
-        if kind == "google_sheet":
-            (on_progress or _NOOP)("Creating a Google Sheet")
-            from .. import persequor_client
-            send_as = persequor_client.rep_email_for(requester_slack) or ""
-            state, msg = persequor_client.create_google_sheet(
-                "Grant search results", cols, data_rows, requester_slack, send_as)
-            if state == "created":
-                return f"Found {len(rows)} grants — Google Sheet ready: {msg}", None
-            # not created (endpoint unwired / unreachable) -> honest Excel fallback
-            text, path = make_spreadsheet("grant_search.xlsx", [cols] + data_rows)
-            return (f"Found {len(rows)} grants. ({msg}, so here's Excel instead.) "
-                    f"{text}", path)
-        text, path = make_spreadsheet("grant_search.xlsx", [cols] + data_rows)
-        return f"Found {len(rows)} matching grants — {text}", path
-
-    # inline summary: compact lines, capped so Slack stays readable
-    lines = []
-    for r in rows[:15]:
-        amt = f"${r['amount']:,.0f}" if r["amount"] else "$ n/a"
-        lines.append(f"- {r['entity_name'].title()} ({r['state'] or '?'}) — "
-                     f"{r['program'] or r['lead_grade']} · {amt}"
-                     f"{' · closes ' + r['funds_end'] if r['funds_end'] else ''}")
-    more = f"\n(+{len(rows) - 15} more — say 'export' for the full list as Excel)" \
-        if len(rows) > 15 else ""
-    return f"Found {len(rows)} matching grants:\n" + "\n".join(lines) + more, None
-
-
-def make_spreadsheet(filename: str, rows: list[list[Any]]) -> tuple[str, str]:
-    """Build the .xlsx in a temp dir. Returns (tool_result_text, file_path)."""
-    from openpyxl import Workbook
-
-    safe = re.sub(r"[^A-Za-z0-9._-]", "_", filename or "grant_export.xlsx")
-    if not safe.endswith(".xlsx"):
-        safe += ".xlsx"
-    wb = Workbook()
-    ws = wb.active
-    for row in rows[:5000]:
-        ws.append(list(row))
-    path = os.path.join(tempfile.mkdtemp(prefix="grant_xlsx_"), safe)
-    wb.save(path)
-    return f"Spreadsheet created ({len(rows)} rows). It will be attached to your reply.", path
-
-
 def find_contact(lead_id: int, entity: str, state: str,
                  on_progress: Progress | None = None) -> str:
     """Run enrichment for a lead and persist the outcome (verified or not_found)."""
@@ -376,8 +272,9 @@ def find_person_linkedin(entity: str, state: str,
 
 def run_tool(name: str, args: dict[str, Any],
              on_progress: Progress | None = None,
-             requester_slack: str = "") -> tuple[str, str | None]:
-    """Dispatch one tool call. Returns (result_text_for_model, file_path_or_None).
+             requester_slack: str = "") -> tuple[str, GeneratedArtifact | None]:
+    """Dispatch one tool call and return text plus an optional owned artifact.
+
     on_progress emits short status phrases for Grant's live spinner; requester_slack
     is the rep asking (needed for a Google Sheet in their own Google account)."""
     p = on_progress or _NOOP
@@ -400,11 +297,15 @@ def run_tool(name: str, args: dict[str, Any],
                 org_type=str(args.get("org_type", "")),
                 program=str(args.get("program", "")),
                 grade=str(args.get("grade", "")),
-                amount_min=args.get("amount_min"),
-                amount_max=args.get("amount_max"),
-                seen_within_days=args.get("seen_within_days"),
-                closing_within_days=args.get("closing_within_days"),
+                record_kind=str(args.get("record_kind", "")),
+                amount_min=(float(args["amount_min"]) if args.get("amount_min") is not None
+                            else None),
+                amount_max=(float(args["amount_max"]) if args.get("amount_max") is not None
+                            else None),
                 name_contains=str(args.get("name_contains", "")),
+                date_field=str(args.get("date_field", "")),
+                date_from=str(args.get("date_from", "")),
+                date_to=str(args.get("date_to", "")),
                 limit=int(args.get("limit", 50) or 50),
                 export=args.get("export", ""),
                 on_progress=p, requester_slack=requester_slack)

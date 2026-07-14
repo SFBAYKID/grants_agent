@@ -26,6 +26,7 @@ from typing import Any
 import requests
 
 from . import db
+from .spreadsheets import neutralize_spreadsheet_rows
 
 REPS_PATH = Path(__file__).resolve().parent.parent / "config" / "reps.json"
 DEFAULT_API = "http://127.0.0.1:8002"
@@ -122,7 +123,7 @@ def submit_brief(conn: sqlite3.Connection, lead_id: int,
                         f"(HTTP {resp.status_code}: {resp.text[:120]}).")
 
 
-def create_google_sheet(title: str, columns: list[str], rows: list[list[Any]],
+def create_google_sheet(title: str, columns: list[str], rows: list[list[object]],
                         requested_by_slack: str, send_as: str) -> tuple[str, str]:
     """Ask Persequor to create a Google Sheet in the rep's own Google account (it holds
     the rep's OAuth token; Grant does not). Returns (state, message). state:
@@ -131,6 +132,9 @@ def create_google_sheet(title: str, columns: list[str], rows: list[list[Any]],
 
     Contract create-sheet-request.v1 (docs to Persequor's agent) — POST to
     /api/v1/create-sheet with the shared X-Persequor-Key header."""
+    if not requested_by_slack or not send_as:
+        return "error", "Google Sheet export needs a rep mapped in config/reps.json"
+
     url = os.environ.get("PERSEQUOR_API_URL", DEFAULT_API).rstrip("/")
     key = os.environ.get("PERSEQUOR_API_KEY", "")
     payload = {
@@ -140,7 +144,9 @@ def create_google_sheet(title: str, columns: list[str], rows: list[list[Any]],
         "requested_by_slack": requested_by_slack,
         "send_as": send_as,
         "columns": columns,
-        "rows": rows[:2000],  # cap payload; large exports stay Excel
+        # Formula-like external strings are neutralized before crossing the wire.
+        # Search enforces its declared all-or-nothing row cap before this call.
+        "rows": neutralize_spreadsheet_rows(rows),
     }
     try:
         resp = requests.post(f"{url}/api/v1/create-sheet", json=payload,
@@ -151,5 +157,8 @@ def create_google_sheet(title: str, columns: list[str], rows: list[list[Any]],
         return "unwired", "Google Sheet export isn't live on Persequor yet"
     if resp.status_code in (200, 201):
         body = resp.json()
-        return "created", body.get("url") or "(created, no URL returned)"
+        sheet_url = body.get("url")
+        if not sheet_url:
+            return "error", "Persequor reported success without a Google Sheet URL"
+        return "created", str(sheet_url)
     return "error", f"Persequor create-sheet failed (HTTP {resp.status_code})"

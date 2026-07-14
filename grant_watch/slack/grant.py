@@ -18,14 +18,26 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any
+import sqlite3
+from collections.abc import Callable
+from typing import Any, Protocol
 
 from dotenv import load_dotenv
 from slack_bolt import Ack, App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_sdk import WebClient
 
 from .. import db
+from ..spreadsheets import GeneratedArtifact
 from . import digest, persequor
+
+
+class SlackFileClient(Protocol):
+    """Narrow Slack client surface needed to upload generated artifacts."""
+
+    def files_upload_v2(self, **kwargs: object) -> object:
+        """Upload one file to a channel or thread."""
+        ...
 
 # NOTE: no inline backticks anywhere Grant speaks — Slack renders them as red text,
 # and red text is banned (Chase's rule, 2026-07-13).
@@ -46,21 +58,21 @@ def create_app() -> App:
 
     # ---------------------------------------------------------------- triage buttons
     @app.action("grant_mark_contacted")
-    def mark_contacted(ack: Ack, body: dict[str, Any], client) -> None:
+    def mark_contacted(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
         ack()
         lead_id = int(body["actions"][0]["value"])
         db.set_lead_status(db.connect(), lead_id, "contacted")
         _thread_reply(client, body, f"✅ Marked lead #{lead_id} contacted.")
 
     @app.action("grant_snooze")
-    def snooze(ack: Ack, body: dict[str, Any], client) -> None:
+    def snooze(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
         ack()
         lead_id = int(body["actions"][0]["value"])
         db.set_lead_status(db.connect(), lead_id, "snoozed")
         _thread_reply(client, body, f"💤 Snoozed lead #{lead_id} — it can resurface later.")
 
     @app.action("grant_bad_lead")
-    def bad_lead(ack: Ack, body: dict[str, Any], client) -> None:
+    def bad_lead(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
         """Open a modal asking WHY — the reason is the feedback loop for scoring."""
         ack()
         lead_id = body["actions"][0]["value"]
@@ -90,7 +102,7 @@ def create_app() -> App:
 
     # ---------------------------------------------------------------- draft (interim)
     @app.action("grant_draft_email")
-    def draft_email(ack: Ack, body: dict[str, Any], client) -> None:
+    def draft_email(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
         """Post the template draft in-thread for the rep to use MANUALLY.
 
         HONESTY NOTE (architectural-critic C1, 2026-07-13): the automated
@@ -120,7 +132,8 @@ def create_app() -> App:
     persequor_id: str = os.environ.get("PERSEQUOR_USER_ID", "")
 
     @app.event("app_mention")
-    def on_mention(event: dict[str, Any], say, client) -> None:
+    def on_mention(event: dict[str, Any], say: Callable[..., object],
+                   client: WebClient) -> None:
         """Mentions route to the SAME conversational brain as plain thread replies —
         reps shouldn't need the @, but using it must not degrade the experience."""
         text = re.sub(r"<@[^>]+>", "", event.get("text") or "").strip()
@@ -136,7 +149,8 @@ def create_app() -> App:
                               user=event.get("user", ""))
 
     @app.event("message")
-    def on_message(event: dict[str, Any], say, client) -> None:
+    def on_message(event: dict[str, Any], say: Callable[..., object],
+                   client: WebClient) -> None:
         """DMs, and plain (no-@) thread replies under a drip post."""
         if event.get("bot_id"):  # never talk to bots — loop guard
             return
@@ -170,7 +184,8 @@ def create_app() -> App:
             db.record_engagement(conn, int(post["id"]), event["user"], "reaction")
 
     @app.command("/grant")
-    def slash_grant(ack: Ack, command: dict[str, Any], respond, client) -> None:
+    def slash_grant(ack: Ack, command: dict[str, Any],
+                    respond: Callable[..., object], client: WebClient) -> None:
         ack()
         arg = (command.get("text") or "").strip().lower()
         if arg == "digest":
@@ -196,7 +211,8 @@ class _Status:
 
     _FRAMES = ("/", "—", "\\", "|")
 
-    def __init__(self, client, channel: str, thread_ts: str | None):
+    def __init__(self, client: WebClient, channel: str,
+                 thread_ts: str | None) -> None:
         self._client = client
         self._channel = channel
         self._thread_ts = thread_ts
@@ -237,7 +253,9 @@ class _Status:
             pass
 
 
-def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
+def _handle_drip_thread(conn: sqlite3.Connection, post: sqlite3.Row,
+                        event: dict[str, Any], say: Callable[..., object],
+                        client: WebClient) -> None:
     """A human spoke in a lead thread: award the point, understand the message,
     act on the intent, answer in the thread (uploading any files Grant produced).
     Any LLM failure degrades to an honest reply — never to a wrong action."""
@@ -274,19 +292,12 @@ def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
     elif intent == "question":
         db.record_engagement(conn, int(post["id"]), user, "question")
 
-    status.finalize(reply)
-    for path in files:  # spreadsheets etc. — into the same thread, then cleaned up
-        try:
-            client.files_upload_v2(channel=event["channel"], thread_ts=post["ts"],
-                                   file=path)
-        finally:
-            import contextlib
-            import os as _os
-            with contextlib.suppress(OSError):
-                _os.remove(path)
+    failures = _deliver_artifacts(client, event["channel"], post["ts"], files)
+    status.finalize(_with_upload_warning(reply, failures))
 
 
-def _request_outreach(conn, row, user: str, status, channel: str, thread_ts: str) -> str:
+def _request_outreach(conn: sqlite3.Connection, row: sqlite3.Row, user: str,
+                      status: _Status, channel: str, thread_ts: str) -> str:
     """The draft_email action: verified contact (enriching on the spot if needed) ->
     outreach-request.v1 brief -> Persequor. Every branch replies truthfully; the
     interim copyable draft remains the fallback while Persequor's endpoint is dark.
@@ -328,7 +339,7 @@ def _request_outreach(conn, row, user: str, status, channel: str, thread_ts: str
             f"```{draft}```")
 
 
-def _thread_history(client, channel: str, thread_ts: str) -> list[str]:
+def _thread_history(client: WebClient, channel: str, thread_ts: str) -> list[str]:
     """Recent thread turns as 'Grant: ...' / 'rep: ...' lines, so the offer→confirm
     flow works (Grant remembers it just offered Persequor). Failure -> no context,
     never a crash."""
@@ -345,7 +356,8 @@ def _thread_history(client, channel: str, thread_ts: str) -> list[str]:
     return lines[-10:]
 
 
-def _converse_general(text: str, client, channel: str, thread_ts: str | None,
+def _converse_general(text: str, client: WebClient, channel: str,
+                      thread_ts: str | None,
                       user: str = "") -> None:
     """Friendly LLM reply outside a lead thread (mention or DM), tools + spinner
     included. Falls back to the canned help text if the API is unavailable."""
@@ -356,9 +368,39 @@ def _converse_general(text: str, client, channel: str, thread_ts: str | None,
     try:
         out = conversation.respond(text, None, on_progress=status.update,
                                    requester_slack=user)
-        status.finalize(out["reply"])
+        artifacts = out.get("files", [])
+        failures = _deliver_artifacts(client, channel, thread_ts, artifacts)
+        status.finalize(_with_upload_warning(out["reply"], failures))
     except Exception:
         status.finalize(_answer(text.lower()))
+
+
+def _deliver_artifacts(client: SlackFileClient, channel: str, thread_ts: str | None,
+                       artifacts: list[GeneratedArtifact]) -> int:
+    """Upload every artifact through one path and always release its temp storage."""
+    failures = 0
+    for artifact in artifacts:
+        try:
+            kwargs: dict[str, object] = {"channel": channel, "file": str(artifact.path)}
+            if thread_ts:
+                kwargs["thread_ts"] = thread_ts
+            client.files_upload_v2(**kwargs)
+        except Exception:
+            # Slack retries could duplicate the whole event; contain the upload error and
+            # report it in the existing response instead of escaping the handler.
+            failures += 1
+        finally:
+            artifact.cleanup()
+    return failures
+
+
+def _with_upload_warning(reply: str, failures: int) -> str:
+    """Append one honest delivery warning when Slack rejected an attachment."""
+    if failures == 0:
+        return reply
+    noun = "file" if failures == 1 else "files"
+    return (f"{reply}\nI created the {noun}, but Slack could not attach "
+            f"{failures} of them. Please try the export again.")
 
 
 def _answer(query: str) -> str:
@@ -374,7 +416,7 @@ def _answer(query: str) -> str:
             "Try me again in a minute for the good stuff.")
 
 
-def _thread_reply(client, body: dict[str, Any], text: str,
+def _thread_reply(client: WebClient, body: dict[str, Any], text: str,
                   extra_blocks: list[dict[str, Any]] | None = None) -> None:
     """Reply in the thread under the digest message the button lives on."""
     msg = body["message"]

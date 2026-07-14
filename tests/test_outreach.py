@@ -3,6 +3,7 @@ and the test-mode brief. All offline."""
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -67,7 +68,8 @@ def test_rep_roster_derives_send_as() -> None:
 
 
 # ------------------------------------------------------------ brief
-def _lead_row(tmp_path: Path):
+def _lead_row(tmp_path: Path) -> tuple[sqlite3.Connection, sqlite3.Row]:
+    """Create one award row for outreach and contact-gate tests."""
     conn = db.connect(tmp_path / "t.db")
     db.upsert_lead(conn, Lead(
         item=RawItem(source="usaspending:16.071", item_id="A1", title="SVPP",
@@ -79,7 +81,8 @@ def _lead_row(tmp_path: Path):
     return conn, row
 
 
-def test_brief_test_mode_overrides_recipient(tmp_path: Path, monkeypatch) -> None:
+def test_brief_test_mode_overrides_recipient(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OUTREACH_TEST_EMAIL", "chase@monarchconnected.com")
     conn, row = _lead_row(tmp_path)
     cid = db.save_contact(conn, row["id"], "Jane Doe", "Superintendent",
@@ -96,7 +99,8 @@ def test_brief_test_mode_overrides_recipient(tmp_path: Path, monkeypatch) -> Non
     assert brief["request_id"].startswith(f"grant-{row['id']}-")
 
 
-def test_brief_live_mode_requires_verified_contact(tmp_path: Path, monkeypatch) -> None:
+def test_brief_live_mode_requires_verified_contact(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OUTREACH_TEST_EMAIL", raising=False)
     conn, row = _lead_row(tmp_path)
     assert persequor_client.build_brief(row, None, "U01DPJVURHU",
@@ -104,7 +108,7 @@ def test_brief_live_mode_requires_verified_contact(tmp_path: Path, monkeypatch) 
 
 
 def test_submit_persists_before_post_and_reports_unreachable(
-        tmp_path: Path, monkeypatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PERSEQUOR_API_URL", "http://127.0.0.1:1")  # nothing listens
     monkeypatch.setenv("OUTREACH_TEST_EMAIL", "chase@monarchconnected.com")
     conn, row = _lead_row(tmp_path)
@@ -115,6 +119,59 @@ def test_submit_persists_before_post_and_reports_unreachable(
     # the request was persisted BEFORE the failed POST (idempotency anchor)
     saved = conn.execute("SELECT draft FROM outreach WHERE channel='persequor'").fetchone()
     assert saved is not None and brief["request_id"] in saved["draft"]
+
+
+# ------------------------------------------------------------ Google Sheet handoff
+def test_google_sheet_handoff_is_complete_and_formula_safe(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Persequor receives every row and formula-like external strings as literal text."""
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        """Successful Persequor create-sheet response with a real URL field."""
+
+        status_code = 201
+
+        def json(self) -> dict[str, str]:
+            """Return the created sheet URL."""
+            return {"url": "https://docs.google.com/spreadsheets/d/sheet-id"}
+
+    def fake_post(url: str, **kwargs: object) -> FakeResponse:
+        """Capture the outgoing JSON without making a network request."""
+        captured["url"] = url
+        captured["json"] = kwargs["json"]
+        return FakeResponse()
+
+    monkeypatch.setattr(persequor_client.requests, "post", fake_post)
+    rows: list[list[object]] = [[f"District {i}", i] for i in range(2_001)]
+    rows[0][0] = " \t=IMPORTXML('https://example.test')"
+    state, message = persequor_client.create_google_sheet(
+        "Complete export", ["entity", "amount"], rows,
+        "U01DPJVURHU", "chase@monarchconnected.com")
+
+    assert state == "created" and message.startswith("https://docs.google.com/")
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert len(payload["rows"]) == 2_001
+    assert payload["rows"][0][0].startswith("'")
+    assert payload["rows"][1][1] == 1
+
+
+def test_google_sheet_requires_mapped_rep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing roster identity fails before any request can reach Persequor."""
+    called = False
+
+    def fake_post(_url: str, **_kwargs: object) -> object:
+        """Record an unexpected network call."""
+        nonlocal called
+        called = True
+        return object()
+
+    monkeypatch.setattr(persequor_client.requests, "post", fake_post)
+    state, message = persequor_client.create_google_sheet(
+        "Export", ["entity"], [["District"]], "U_UNKNOWN", "")
+    assert state == "error" and "mapped" in message
+    assert called is False
 
 
 # ------------------------------------------------------------ contact storage
