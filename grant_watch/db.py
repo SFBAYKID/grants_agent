@@ -279,6 +279,34 @@ def approve_outreach(conn: sqlite3.Connection, outreach_id: int, approver: str) 
     conn.commit()
 
 
+# ---------------------------------------------------------------- contacts (Phase 2)
+
+def save_contact(conn: sqlite3.Connection, lead_id: int, name: str, title: str,
+                 email: str, phone: str, source_url: str, confidence: str) -> int:
+    """Store a VERIFIED contact (finder.py's gate already ran). Returns contact id."""
+    cur = conn.execute(
+        "INSERT INTO contacts (lead_id, name, title, email, phone, source_url, "
+        "confidence, contact_status) VALUES (?,?,?,?,?,?,?, 'verified')",
+        (lead_id, name, title, email, phone, source_url, confidence))
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def mark_contact_not_found(conn: sqlite3.Connection, lead_id: int) -> None:
+    """The honest outcome when enrichment finds nothing verifiable."""
+    conn.execute("INSERT INTO contacts (lead_id, contact_status) VALUES (?, 'not_found')",
+                 (lead_id,))
+    conn.commit()
+
+
+def contacts_for_lead(conn: sqlite3.Connection, lead_id: int) -> list[sqlite3.Row]:
+    """All contact rows for a lead, verified first."""
+    return list(conn.execute(
+        "SELECT * FROM contacts WHERE lead_id = ? "
+        "ORDER BY CASE contact_status WHEN 'verified' THEN 0 ELSE 1 END, id",
+        (lead_id,)))
+
+
 # ---------------------------------------------------------------- drip engine + claims
 
 def claim_lead(conn: sqlite3.Connection, lead_id: int, slack_user: str) -> bool:

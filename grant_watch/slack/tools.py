@@ -53,6 +53,24 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "find_contact",
+        "description": "Discover WHO to contact at an awardee (Tech Director, "
+                       "Superintendent, etc.): searches the entity's real website, "
+                       "extracts a contact, and stores it ONLY if the email appears "
+                       "verbatim on the fetched page. Slow (~30s) — tell the user "
+                       "you're digging before calling it. Returns the verified "
+                       "contact or an honest not-found.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "lead_id": {"type": "integer"},
+                "entity": {"type": "string"},
+                "state": {"type": "string"},
+            },
+            "required": ["lead_id", "entity", "state"],
+        },
+    },
+    {
         "name": "make_spreadsheet",
         "description": "Create a real .xlsx file that will be uploaded into this "
                        "Slack thread. rows[0] is the header row. Use when the rep "
@@ -132,12 +150,42 @@ def make_spreadsheet(filename: str, rows: list[list[Any]]) -> tuple[str, str]:
     return f"Spreadsheet created ({len(rows)} rows). It will be attached to your reply.", path
 
 
+def find_contact(lead_id: int, entity: str, state: str) -> str:
+    """Run enrichment for a lead and persist the outcome (verified or not_found)."""
+    from ..enrich import finder  # local import: keeps poll/digest paths light
+
+    conn = db.connect()
+    existing = [c for c in db.contacts_for_lead(conn, lead_id)
+                if c["contact_status"] == "verified"]
+    if existing:
+        c = existing[0]
+        return (f"Already on file: {c['name']} ({c['title']}) — {c['email']} "
+                f"(source: {c['source_url']})")
+    candidate = finder.find_contact(entity, state)
+    if candidate is None:
+        db.mark_contact_not_found(conn, lead_id)
+        return ("No verifiable contact found (email must appear on a page we "
+                "actually fetched). Recorded as not_found — a human can supply one.")
+    db.save_contact(conn, lead_id, candidate.name, candidate.title, candidate.email,
+                    candidate.phone, candidate.source_url, candidate.confidence)
+    return (f"VERIFIED contact: {candidate.name} ({candidate.title}) — "
+            f"{candidate.email}{' / ' + candidate.phone if candidate.phone else ''} "
+            f"(found on {candidate.source_url}, confidence {candidate.confidence})")
+
+
 def run_tool(name: str, args: dict[str, Any]) -> tuple[str, str | None]:
     """Dispatch one tool call. Returns (result_text_for_model, file_path_or_None)."""
     if name == "web_search":
         return web_search(str(args.get("query", ""))), None
     if name == "query_leads":
         return query_leads(str(args.get("sql", ""))), None
+    if name == "find_contact":
+        try:
+            return find_contact(int(args.get("lead_id", 0)),
+                                str(args.get("entity", "")),
+                                str(args.get("state", ""))), None
+        except Exception as exc:  # enrichment API hiccup -> honest tool error
+            return f"ERROR: enrichment failed ({type(exc).__name__}) — say so.", None
     if name == "make_spreadsheet":
         return make_spreadsheet(str(args.get("filename", "")),
                                 list(args.get("rows", [])))

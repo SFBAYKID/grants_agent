@@ -203,7 +203,9 @@ def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
         return
     intent, reply, files = out["intent"], out["reply"], out.get("files", [])
 
-    if intent == "claim" and row is not None:
+    if intent == "draft_email" and row is not None:
+        reply = _request_outreach(conn, row, user, say, post["ts"])
+    elif intent == "claim" and row is not None:
         if db.claim_lead(conn, int(row["id"]), user):
             db.record_engagement(conn, int(post["id"]), user, "claim")
             reply = f"It's yours, <@{user}>. {reply}" if reply else f"It's yours, <@{user}>."
@@ -226,6 +228,46 @@ def _handle_drip_thread(conn, post, event: dict[str, Any], say, client) -> None:
             import os as _os
             with contextlib.suppress(OSError):
                 _os.remove(path)
+
+
+def _request_outreach(conn, row, user: str, say, thread_ts: str) -> str:
+    """The draft_email action: verified contact (enriching on the spot if needed) ->
+    outreach-request.v1 brief -> Persequor. Every branch replies truthfully; the
+    interim copyable draft remains the fallback while Persequor's endpoint is dark."""
+    from .. import persequor_client
+    from . import persequor as draft_templates
+
+    send_as = persequor_client.rep_email_for(user)
+    if send_as is None:
+        return ("You're not on the rep roster yet, so I can't request outreach under "
+                "your name — Chase can add you to config/reps.json.")
+
+    contacts = [c for c in db.contacts_for_lead(conn, int(row["id"]))
+                if c["contact_status"] == "verified"]
+    contact = contacts[0] if contacts else None
+    if contact is None:
+        say(text=f"On it — digging up the right contact at {row['entity_name']} "
+                 f"first (takes about half a minute)…", thread_ts=thread_ts)
+        from . import tools as t
+        t.find_contact(int(row["id"]), row["entity_name"], row["state"] or "")
+        contacts = [c for c in db.contacts_for_lead(conn, int(row["id"]))
+                    if c["contact_status"] == "verified"]
+        contact = contacts[0] if contacts else None
+
+    brief = persequor_client.build_brief(row, contact, user, send_as)
+    if brief is None:
+        return ("I couldn't verify a contact for them (nothing I can prove from "
+                "their site), and there's no test address configured — so no email "
+                "request from me. If you know the right person, tell me here.")
+    state_, msg = persequor_client.submit_brief(conn, int(row["id"]), brief)
+    if state_ == "submitted":
+        found = (f" Contact on file: {contact['name']} ({contact['title']})."
+                 if contact is not None else "")
+        return msg + found
+    # Endpoint dark or refused: fall back to the honest copyable draft.
+    draft = draft_templates.compose_draft(row)
+    return (f"{msg}\nMeanwhile, here's a copyable draft so you're not blocked:\n"
+            f"```{draft}```")
 
 
 def _converse_general(text: str, say, thread_ts: str | None) -> None:

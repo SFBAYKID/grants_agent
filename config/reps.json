@@ -1,0 +1,9 @@
+{
+  "_comment": "Slack id <-> rep mailbox map. Mirrors Persequor's verified roster (its integration response, 2026-07-13). A send_as is ALWAYS derived from this map — never typed free-form.",
+  "reps": [
+    {"slack_id": "U01DPJVURHU", "email": "chase@monarchconnected.com", "name": "Chase"},
+    {"slack_id": "U08C1NBH875", "email": "brett@monarchconnected.com", "name": "Brett"},
+    {"slack_id": "U01E908206M", "email": "kerry@monarchconnected.com", "name": "Kerry"},
+    {"slack_id": "U01DFJWQQJ3", "email": "anthony@monarchconnected.com", "name": "Anthony"}
+  ]
+}
