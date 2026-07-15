@@ -143,6 +143,16 @@ def test_forget_removes_values_without_auditing_content(tmp_path: Path) -> None:
     assert "value_json" not in columns
 
 
+def test_preferences_reject_free_form_secrets_and_out_of_range_values(
+        tmp_path: Path) -> None:
+    """The persistence boundary accepts only bounded non-sensitive typed values."""
+    conn = db.connect(tmp_path / "prefs.db")
+    with pytest.raises(ValueError, match="unsupported preference value"):
+        db.set_user_preference(conn, "T", "U", "export_format", "token=secret", "C", "1")
+    with pytest.raises(ValueError, match="unsupported preference value"):
+        db.set_user_preference(conn, "T", "U", "result_count", 999, "C", "1")
+
+
 def test_failed_migration_rolls_back_schema_and_version(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A mid-migration exception leaves neither partial DDL nor a version marker."""

@@ -657,13 +657,27 @@ def engagement_stats(conn: sqlite3.Connection) -> dict[str, int]:
 _PREFERENCE_KEYS = {"export_format", "result_count", "preferred_states"}
 
 
+def _validate_preference(key: str, value: object) -> object:
+    """Return a bounded safe preference value or reject unsupported/free-form data."""
+    if key == "export_format" and value in {"slack", "excel", "google_sheet"}:
+        return value
+    if key == "result_count" and isinstance(value, int) and not isinstance(value, bool):
+        if 1 <= value <= 200:
+            return value
+    if key == "preferred_states" and isinstance(value, list) and len(value) <= 10:
+        states = [str(item).upper() for item in value]
+        if all(len(item) == 2 and item.isalpha() for item in states):
+            return states
+    raise ValueError("unsupported preference value")
+
+
 def set_user_preference(conn: sqlite3.Connection, workspace: str, slack_user: str,
                         key: str, value: object, channel: str,
                         message_ts: str) -> None:
     """Upsert one explicit allowlisted preference without logging its value."""
     if not workspace or not slack_user or key not in _PREFERENCE_KEYS:
         raise ValueError("unsupported or unscoped preference")
-    encoded = json.dumps(value, sort_keys=True)
+    encoded = json.dumps(_validate_preference(key, value), sort_keys=True)
     now = _now()
     with conn:
         conn.execute(
