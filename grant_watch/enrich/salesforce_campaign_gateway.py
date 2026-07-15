@@ -21,6 +21,10 @@ MEMBER_STATUS = "Identified by Grant"
 _ALLOWED_CREATE_OBJECTS = {
     "Campaign", "CampaignMemberStatus", "Lead", "CampaignMember", "Opportunity"}
 _ALLOWED_BULK_CREATE_OBJECTS = {"Lead", "CampaignMember"}
+_LEAD_ENRICHMENT_FIELDS = {
+    "Website", "Phone", "Street", "City", "State", "PostalCode", "Country",
+    "Industry", "Description", "LinkedIn__c", "Number_of_Students__c",
+}
 _ID_PREFIXES = {
     "Campaign": "701",
     "Lead": "00Q",
@@ -65,6 +69,18 @@ class OpportunityRecord:
     owner_id: str
     amount: float | None
     is_closed: bool
+    link: str
+
+
+@dataclass(frozen=True)
+class LeadEnrichmentSnapshot:
+    """Exact Lead identity, concurrency marker, and enrichment field values."""
+
+    record_id: str
+    company: str
+    email: str
+    system_modstamp: str
+    values: dict[str, str | float | None]
     link: str
 
 
@@ -291,6 +307,38 @@ class SalesforceCampaignGateway:
     def create_opportunity(self, payload: dict[str, object]) -> CreateResult:
         """Create exactly one explicitly approved Opportunity."""
         return self._create_one("Opportunity", payload)
+
+    def lead_enrichment_snapshot(self, lead_id: str) -> LeadEnrichmentSnapshot:
+        """Read one exact Lead before a blank-only enrichment preview or update."""
+        validate_record_id(lead_id, "Lead")
+        fields = ["Id", "Company", "Email", "SystemModstamp", *_LEAD_ENRICHMENT_FIELDS]
+        body = self._get(f"sobjects/Lead/{lead_id}", {"fields": ",".join(fields)})
+        values: dict[str, str | float | None] = {}
+        for key in _LEAD_ENRICHMENT_FIELDS:
+            value = body.get(key)
+            values[key] = (float(value) if key == "Number_of_Students__c"
+                           and value is not None else str(value) if value is not None else None)
+        return LeadEnrichmentSnapshot(
+            lead_id, str(body.get("Company") or ""), str(body.get("Email") or ""),
+            str(body.get("SystemModstamp") or ""), values,
+            self.lightning_link("Lead", lead_id))
+
+    def update_lead_enrichment(self, lead_id: str, delta: dict[str, object],
+                               expected_system_modstamp: str) -> None:
+        """PATCH only allowlisted Lead enrichment fields after a concurrency recheck."""
+        validate_record_id(lead_id, "Lead")
+        if not delta or not set(delta) <= _LEAD_ENRICHMENT_FIELDS:
+            raise ValueError("Lead enrichment contains forbidden or empty fields")
+        current = self.lead_enrichment_snapshot(lead_id)
+        if current.system_modstamp != expected_system_modstamp:
+            raise ValueError("Salesforce Lead changed after the preview")
+        token, instance = self._auth()
+        response = requests.patch(
+            f"{instance}/services/data/{API_VERSION}/sobjects/Lead/{lead_id}",
+            json=delta, headers={"Authorization": f"Bearer {token}"}, timeout=20)
+        if response.status_code not in (200, 204):
+            raise requests.HTTPError(
+                f"Lead enrichment HTTP {response.status_code}: {response.text[:200]}")
 
     def find_people(self, entity_name: str, state: str) -> list[SalesforceRecordRef]:
         """Find exact-company Leads and Account Contacts; never auto-select fuzzy rows."""

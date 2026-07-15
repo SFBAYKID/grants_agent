@@ -11,6 +11,8 @@ import pytest
 from grant_watch import db
 from grant_watch.enrich import salesforce_campaigns as campaigns
 from grant_watch.enrich import salesforce_campaign_gateway as gateway_mod
+from grant_watch.enrich import salesforce_record_actions as record_actions
+from grant_watch.enrich.organization_profile import OrganizationProfile
 from grant_watch.models import Lead, LeadGrade, RawItem
 
 LEAD_ID = "00Q000000000001"
@@ -114,3 +116,24 @@ def test_confirmation_duplicate_prevents_create(monkeypatch: pytest.MonkeyPatch,
         conn, gateway, action.action_id, action.nonce,
         "TWORK", "CGRANTS", "1.1", "UCHASE")
     assert result.already_present == 1 and gateway.calls == []
+
+
+def test_create_preview_includes_verified_organization_fields(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Official profile and NCES facts populate only their exact Salesforce fields."""
+    conn, contact_id = _contact(tmp_path)
+    conn.execute(
+        "UPDATE leads SET entity_type='school_district',enrollment=6600")
+    conn.commit()
+    monkeypatch.setattr(campaigns, "_duplicate_person", lambda *_args: [])
+    monkeypatch.setattr(record_actions, "fetch_profile", lambda *_args: OrganizationProfile(
+        "https://district.test/", "1327 E El Monte Way", "Dinuba", "CA", "93618",
+        "", "559-595-7200", "https://district.test/contact", ""))
+    campaigns.prepare_person_lead_creation(
+        conn, "TWORK", "CGRANTS", "1.1", "UCHASE", contact_id)
+    payload = json.loads(conn.execute(
+        "SELECT payload_json FROM crm_actions").fetchone()[0])["lead"]
+    assert payload["Website"] == "https://district.test/"
+    assert payload["Street"] == "1327 E El Monte Way"
+    assert payload["Industry"] == "K-12 Schools"
+    assert payload["Number_of_Students__c"] == 6600

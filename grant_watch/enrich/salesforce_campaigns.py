@@ -170,6 +170,11 @@ def opportunity_writer_enabled() -> bool:
     return os.environ.get("SALESFORCE_OPPORTUNITY_WRITES_ENABLED", "0") == "1"
 
 
+def lead_enrichment_writer_enabled() -> bool:
+    """Require a separate gate for blank-only existing Lead enrichment."""
+    return os.environ.get("SALESFORCE_LEAD_ENRICHMENT_UPDATES_ENABLED", "0") == "1"
+
+
 def prepare_opportunity_creation(
         conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
         workspace: str, channel: str, thread_ts: str, requester: str,
@@ -198,6 +203,17 @@ def prepare_person_lead_creation(conn: sqlite3.Connection, workspace: str,
 
     return records.prepare_person_lead_creation(
         conn, workspace, channel, thread_ts, requester, contact_id)
+
+
+def prepare_lead_enrichment(
+        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
+        workspace: str, channel: str, thread_ts: str, requester: str,
+        contact_id: int, lead_link: str) -> PreparedAction:
+    """Delegate blank-only existing Lead enrichment to the record action module."""
+    from . import salesforce_record_actions as records
+
+    return records.prepare_lead_enrichment(
+        conn, gateway, workspace, channel, thread_ts, requester, contact_id, lead_link)
 
 
 def _validate_context(workspace: str, channel: str, thread_ts: str,
@@ -591,6 +607,12 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
                        error="Opportunity writes feature flag disabled")
         return ActionExecution(CampaignActionState.FAILED,
                                "Salesforce Opportunity creation is disabled; nothing was created.")
+    if (row["action_type"] == "enrich_existing_lead"
+            and not lead_enrichment_writer_enabled()):
+        _finish_action(conn, action_id, CampaignActionState.FAILED,
+                       error="Lead enrichment updates feature flag disabled")
+        return ActionExecution(CampaignActionState.FAILED,
+                               "Salesforce Lead enrichment is disabled; nothing changed.")
     try:
         if row["action_type"] == "create_campaign":
             return _confirm_campaign_create(conn, gateway, row)
@@ -602,6 +624,9 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
         if row["action_type"] == "create_opportunity":
             from . import salesforce_record_actions as records
             return records.confirm_opportunity(conn, gateway, row)
+        if row["action_type"] == "enrich_existing_lead":
+            from . import salesforce_record_actions as records
+            return records.confirm_lead_enrichment(conn, gateway, row)
         raise ValueError("unknown Salesforce action type")
     except requests.Timeout as exc:
         _finish_action(conn, action_id, CampaignActionState.UNKNOWN,

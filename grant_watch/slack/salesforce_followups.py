@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any  # Salesforce REST records are runtime-shaped JSON.

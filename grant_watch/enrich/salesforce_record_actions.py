@@ -15,6 +15,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
+import requests
+
 from . import salesforce
 from . import salesforce_campaigns as workflow
 from .salesforce_campaign_gateway import (
@@ -22,6 +24,7 @@ from .salesforce_campaign_gateway import (
     parse_record_link,
     validate_record_id,
 )
+from .organization_profile import OrganizationProfile, fetch_profile
 
 
 @dataclass(frozen=True)
@@ -37,16 +40,29 @@ class PersonLeadDraft:
     title: str
     phone: str
     source_url: str
+    organization: OrganizationProfile
+    enrollment: int | None
+    industry: str
 
     def payload(self, action_id: str, requester: str) -> dict[str, object]:
         """Return exact Salesforce fields without guessing first/last-name splits."""
+        research = [
+            f"Grant research source: {self.organization.source_url or self.source_url}",
+            f"Verified contact source: {self.source_url}",
+        ]
+        if self.organization.main_phone:
+            research.append(
+                f"Official organization main phone: {self.organization.main_phone}")
+        if self.enrollment is not None:
+            research.append(f"NCES district enrollment: {self.enrollment}")
         result: dict[str, object] = {
             "Company": self.company, "LastName": self.person_name,
             "Email": self.email, "Status": "New", "LeadSource": "Other",
             "Description": (
                 f"Created by Grant from verified public contact {self.contact_id} for "
                 f"Grant lead {self.grant_lead_id}. Evidence: {self.source_url}. "
-                f"Action {action_id}. Requested by Slack user {requester}."),
+                f"Action {action_id}. Requested by Slack user {requester}.\n"
+                + "\n".join(research)),
         }
         if self.state:
             result["State"] = self.state
@@ -54,6 +70,22 @@ class PersonLeadDraft:
             result["Title"] = self.title
         if self.phone:
             result["Phone"] = self.phone
+        elif self.organization.main_phone:
+            result["Phone"] = self.organization.main_phone
+        for key, value in (
+            ("Website", self.organization.website),
+            ("Street", self.organization.street),
+            ("City", self.organization.city),
+            ("State", self.organization.state or self.state),
+            ("PostalCode", self.organization.postal_code),
+            ("Country", self.organization.country),
+            ("LinkedIn__c", self.organization.linkedin_url),
+            ("Industry", self.industry),
+        ):
+            if value:
+                result[key] = value
+        if self.enrollment is not None:
+            result["Number_of_Students__c"] = self.enrollment
         return result
 
 
@@ -101,7 +133,8 @@ def prepare_person_lead_creation(
     """Freeze a verified contact and duplicate-safe one-Lead confirmation preview."""
     workflow._validate_context(workspace, channel, thread_ts, requester)
     row = conn.execute(
-        """SELECT c.*,l.entity_name,l.state AS lead_state,l.canonical_entity_key
+        """SELECT c.*,l.entity_name,l.state AS lead_state,l.canonical_entity_key,
+                  l.entity_type,l.enrollment
              FROM contacts c JOIN leads l ON l.id=c.lead_id WHERE c.id=?""",
         (contact_id,)).fetchone()
     if row is None or str(row["contact_status"] or "") != "verified":
@@ -120,10 +153,22 @@ def prepare_person_lead_creation(
         links = ", ".join(item.link for item in duplicates[:3])
         raise ValueError(f"Salesforce already has a possible matching record: {links}")
     action_id = str(uuid.uuid4())
+    try:
+        organization = fetch_profile(
+            company, str(row["official_domain"] or ""), source)
+    except (KeyError, ValueError, RuntimeError, requests.RequestException):
+        organization = OrganizationProfile(
+            website=(f"https://{str(row['official_domain']).strip()}/"
+                     if row["official_domain"] else ""), source_url=source)
+    entity_text = f"{row['entity_type'] or ''} {company}".lower()
+    industry = "K-12 Schools" if any(
+        word in entity_text for word in ("school", "district", "k-12")) else ""
+    enrollment = int(row["enrollment"]) if row["enrollment"] is not None else None
     draft = PersonLeadDraft(
         contact_id, int(row["lead_id"]), name, company, email, state,
         str(row["title"] or "").strip() if evidence.get("title") else "",
-        str(row["phone"] or "").strip() if evidence.get("phone") else "", source)
+        str(row["phone"] or "").strip() if evidence.get("phone") else "", source,
+        organization, enrollment, industry)
     payload = draft.payload(action_id, requester)
     plan = workflow.MemberPlan(
         draft.grant_lead_id, str(row["canonical_entity_key"] or company.lower()),
@@ -138,6 +183,16 @@ def prepare_person_lead_creation(
     preview = (f"Create this Salesforce Lead?\n• Name: {name}\n• Organization: {company}"
                f"\n• Email: {email}{optional}\n• Source: {source}"
                "\nNo Campaign membership will be created.")
+    enriched = [
+        ("Website", organization.website), ("Phone", organization.main_phone),
+        ("Address", " ".join(filter(None, (organization.street, organization.city,
+                                            organization.state,
+                                            organization.postal_code)))),
+        ("Industry", industry),
+        ("Students", f"{enrollment:,}" if enrollment is not None else ""),
+        ("LinkedIn", organization.linkedin_url),
+    ]
+    preview += "".join(f"\n• {label}: {value}" for label, value in enriched if value)
     return workflow.PreparedAction(stored_id, nonce, preview, expires)
 
 
@@ -182,6 +237,76 @@ def prepare_opportunity_creation(
     preview = (f"Create this Salesforce Opportunity?\n• Account: {account.name}"
                f"\n• Name: {clean_name}\n• Stage: {stage_name}"
                f"\n• Close date: {close_date}{amount_line}\n• Owner: {owner_name}")
+    return workflow.PreparedAction(stored_id, nonce, preview, expires)
+
+
+def prepare_lead_enrichment(
+        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
+        workspace: str, channel: str, thread_ts: str, requester: str,
+        contact_id: int, lead_link: str) -> workflow.PreparedAction:
+    """Prepare a fill-blank-only update for one exact matching Salesforce Lead."""
+    workflow._validate_context(workspace, channel, thread_ts, requester)
+    _sobject, salesforce_id = parse_record_link(lead_link, {"Lead"})
+    row = conn.execute(
+        """SELECT c.*,l.entity_name,l.state AS lead_state,l.entity_type,l.enrollment,
+                  l.canonical_entity_key
+             FROM contacts c JOIN leads l ON l.id=c.lead_id WHERE c.id=?""",
+        (contact_id,)).fetchone()
+    if row is None or str(row["contact_status"] or "") != "verified":
+        raise ValueError("contact is not verified")
+    evidence = json.loads(str(row["field_evidence_json"] or "{}"))
+    if not evidence.get("email") or not row["source_url"] or not row["official_domain"]:
+        raise ValueError("contact email and official domain require current evidence")
+    snapshot = gateway.lead_enrichment_snapshot(salesforce_id)
+    company, email = str(row["entity_name"] or ""), str(row["email"] or "")
+    if snapshot.company.casefold() != company.casefold() or snapshot.email.casefold() != email.casefold():
+        raise ValueError("Salesforce Lead does not match the verified contact and organization")
+    try:
+        organization = fetch_profile(
+            company, str(row["official_domain"]), str(row["source_url"]))
+    except (KeyError, ValueError, RuntimeError, requests.RequestException):
+        organization = OrganizationProfile(
+            website=f"https://{str(row['official_domain']).strip()}/",
+            source_url=str(row["source_url"]))
+    entity_text = f"{row['entity_type'] or ''} {company}".lower()
+    industry = "K-12 Schools" if any(
+        word in entity_text for word in ("school", "district", "k-12")) else ""
+    desired: dict[str, object] = {
+        "Website": organization.website, "Phone": organization.main_phone,
+        "Street": organization.street, "City": organization.city,
+        "State": organization.state or str(row["lead_state"] or ""),
+        "PostalCode": organization.postal_code, "Country": organization.country,
+        "Industry": industry, "LinkedIn__c": organization.linkedin_url,
+    }
+    if row["enrollment"] is not None:
+        desired["Number_of_Students__c"] = int(row["enrollment"])
+    delta = {key: value for key, value in desired.items()
+             if value not in (None, "") and snapshot.values.get(key) in (None, "")}
+    action_id = str(uuid.uuid4())
+    research = (
+        f"Grant research — action {action_id}\n"
+        f"Official organization source: {organization.source_url}\n"
+        f"Verified contact source: {row['source_url']}")
+    existing_description = str(snapshot.values.get("Description") or "").strip()
+    delta["Description"] = f"{existing_description}\n\n{research}".strip()
+    if set(delta) == {"Description"} and research in existing_description:
+        raise ValueError("Salesforce Lead already contains every verified enrichment field")
+    plan = workflow.MemberPlan(
+        int(row["lead_id"]), str(row["canonical_entity_key"] or company.lower()),
+        company, str(row["lead_state"] or ""), "enrich_existing_lead",
+        proposed_lead=delta,
+        note=json.dumps({"salesforce_id": salesforce_id,
+                         "system_modstamp": snapshot.system_modstamp}))
+    stored_id, nonce, expires = workflow._store_action(
+        conn, "enrich_existing_lead", workspace, channel, thread_ts, requester,
+        {"lead_id": salesforce_id, "delta": delta,
+         "system_modstamp": snapshot.system_modstamp,
+         "company": company, "email": email}, plans=[plan], action_id=action_id)
+    labels = {"Number_of_Students__c": "Students", "LinkedIn__c": "LinkedIn"}
+    lines = [f"• {labels.get(key, key)}: {value}" for key, value in delta.items()
+             if key != "Description"]
+    preview = "Fill these blank Salesforce Lead fields?\n" + "\n".join(lines)
+    preview += "\n• Append the verified Grant research sources to Description"
     return workflow.PreparedAction(stored_id, nonce, preview, expires)
 
 
@@ -255,3 +380,38 @@ def confirm_opportunity(conn: sqlite3.Connection, gateway: SalesforceCampaignGat
     return workflow.ActionExecution(
         workflow.CampaignActionState.COMPLETE,
         f"Created {name} in Salesforce: {created.link}", added=1)
+
+
+def confirm_lead_enrichment(
+        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
+        row: sqlite3.Row) -> workflow.ActionExecution:
+    """Recheck identity/concurrency, PATCH allowlisted fields once, and read back."""
+    payload = json.loads(str(row["payload_json"]))
+    lead_id = validate_record_id(str(payload["lead_id"]), "Lead")
+    delta = dict(payload["delta"])
+    before = gateway.lead_enrichment_snapshot(lead_id)
+    if (before.company.casefold() != str(payload["company"]).casefold()
+            or before.email.casefold() != str(payload["email"]).casefold()):
+        raise ValueError("Salesforce Lead identity changed after preview")
+    if before.system_modstamp != str(payload["system_modstamp"]):
+        raise ValueError("Salesforce Lead changed after preview")
+    workflow._mark_external_write_started(conn, str(row["id"]))
+    gateway.update_lead_enrichment(
+        lead_id, delta, str(payload["system_modstamp"]))
+    after = gateway.lead_enrichment_snapshot(lead_id)
+    for key, value in delta.items():
+        actual = after.values.get(key)
+        if key == "Number_of_Students__c":
+            if actual is None or float(actual) != float(value):
+                raise ValueError("updated Lead enrollment did not match the preview")
+        elif str(actual or "") != str(value):
+            raise ValueError(f"updated Lead field {key} did not match the preview")
+    with conn:
+        conn.execute(
+            """UPDATE crm_action_items SET state='lead_enriched',salesforce_id=?
+               WHERE action_id=?""", (lead_id, row["id"]))
+    workflow._finish_action(
+        conn, str(row["id"]), workflow.CampaignActionState.COMPLETE)
+    return workflow.ActionExecution(
+        workflow.CampaignActionState.COMPLETE,
+        f"Updated the verified details in Salesforce: {after.link}", added=1)

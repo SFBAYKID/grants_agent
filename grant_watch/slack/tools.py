@@ -265,6 +265,19 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "salesforce_lead_enrichment_preview",
+        "description": "Prepare, but do not execute, a fill-blank-only enrichment "
+                       "preview for one exact Salesforce Lead using its verified contact.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "contact_id": {"type": "integer"},
+                "lead_link": {"type": "string"},
+            },
+            "required": ["contact_id", "lead_link"],
+        },
+    },
+    {
         "name": "salesforce_campaign_create_preview",
         "description": "Prepare, but DO NOT execute, an immutable preview for creating "
                        "a new Salesforce Campaign. Use only after the user explicitly "
@@ -611,6 +624,23 @@ def salesforce_lead_create_preview(contact_id: int, requester_slack: str,
                               action.preview, action.expires_at)
 
 
+def salesforce_lead_enrichment_preview(
+        contact_id: int, lead_link: str, requester_slack: str,
+        workspace: str, channel: str, thread_ts: str) -> str:
+    """Prepare one exact Lead's blank-only evidence-backed enrichment preview."""
+    from ..enrich import salesforce_campaigns as crm
+
+    try:
+        action = crm.prepare_lead_enrichment(
+            db.connect(), crm.SalesforceCampaignGateway(), workspace, channel,
+            thread_ts, requester_slack, contact_id, lead_link)
+    except (ValueError, PermissionError, KeyError, ConnectionError,
+            requests.RequestException) as exc:
+        return f"ERROR: Lead enrichment preview failed ({type(exc).__name__}): {str(exc)[:180]}"
+    return _crm_action_result(action.action_id, action.nonce,
+                              action.preview, action.expires_at)
+
+
 def salesforce_opportunity_create_preview(
         args: dict[str, Any], requester_slack: str, workspace: str,
         channel: str, thread_ts: str) -> str:
@@ -717,6 +747,11 @@ def run_tool(name: str, args: dict[str, Any],
         return salesforce_lead_create_preview(
             int(args.get("contact_id", 0)), requester_slack, workspace,
             channel, thread_ts), None
+    if name == "salesforce_lead_enrichment_preview":
+        p("Checking verified Salesforce details")
+        return salesforce_lead_enrichment_preview(
+            int(args.get("contact_id", 0)), str(args.get("lead_link", "")),
+            requester_slack, workspace, channel, thread_ts), None
     if name == "salesforce_opportunity_create_preview":
         p("Preparing Salesforce Opportunity")
         return salesforce_opportunity_create_preview(
