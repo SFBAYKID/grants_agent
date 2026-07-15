@@ -19,7 +19,7 @@ from slack_sdk import WebClient
 
 from .. import db
 from ..enrich.salesforce import readonly_soql
-from ..presentation import display_entity_name, plain_fragment
+from ..presentation import display_entity_name
 from .drip import ABSOLUTE_CAP, in_window
 
 POLICY_VERSION = "v1"
@@ -37,7 +37,6 @@ class FollowupCandidate:
     target_sobject: str
     target_record_id: str
     entity_name: str
-    campaign_name: str
     joined_at: datetime
     due_at: datetime
 
@@ -111,15 +110,12 @@ def candidates(conn: sqlite3.Connection, grace_days: int = DEFAULT_GRACE_BUSINES
             sobject, record_id = _record_id(
                 str(row["proposed_json"]), str(row["salesforce_id"] or ""))
             joined = _parse_utc(str(row["committed_at"]))
-            payload: dict[str, Any] = json.loads(str(row["payload_json"] or "{}"))
-            campaign_data = payload.get("campaign") or {}
-            campaign_name = str(campaign_data.get("name") or "Salesforce campaign")
         except (ValueError, TypeError, json.JSONDecodeError):
             continue
         result.append(FollowupCandidate(
             int(row["id"]), str(row["campaign_member_id"]), str(row["campaign_id"]),
             sobject, record_id, str(row["entity_name"] or "this organization"),
-            campaign_name, joined, add_business_days(joined, grace_days)))
+            joined, add_business_days(joined, grace_days)))
     return result
 
 
@@ -175,13 +171,10 @@ def inspect_activity(candidate: FollowupCandidate, now: datetime) -> ActivityRes
     return ActivityResult("none")
 
 
-def build_message(candidate: FollowupCandidate, smoke: bool = False) -> str:
-    """Build one concise factual Slack sentence without emojis or a sales claim."""
+def build_message(candidate: FollowupCandidate) -> str:
+    """Build one short, user-focused Slack sentence without technical details."""
     entity = display_entity_name(candidate.entity_name) or "This organization"
-    campaign = plain_fragment(candidate.campaign_name) or "the Salesforce campaign"
-    prefix = "Grant follow-up test: " if smoke else ""
-    return (f"{prefix}Salesforce shows no completed follow-up activity for {entity} "
-            f"since it was added to {campaign}.")
+    return f"{entity} still needs follow-up in Salesforce."
 
 
 def _used_slots(conn: sqlite3.Connection, channel: str, now: datetime) -> int:
@@ -224,7 +217,7 @@ def run(client: WebClient | None, channel: str, conn: sqlite3.Connection,
                          activity.evidence_kind or None,activity.evidence_id or None,
                          activity.evidence_at or None,current.isoformat(),activity.error or None))
             continue
-        text = build_message(candidate, smoke=smoke)
+        text = build_message(candidate)
         if dry_run:
             return f"[dry-run] would post: {text}"
         if not smoke and not in_window(current):

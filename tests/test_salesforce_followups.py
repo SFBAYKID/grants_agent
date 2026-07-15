@@ -144,8 +144,9 @@ def test_dry_run_has_zero_writes_and_clean_copy(monkeypatch: Any, tmp_path: Path
     assert outcome.startswith("[dry-run] would post:")
     assert conn.total_changes == before
     assert conn.execute("SELECT COUNT(*) FROM salesforce_followup_state").fetchone()[0] == 0
-    text = followups.build_message(candidate, smoke=True)
-    assert "MT ADAMS" not in text and ":" in text and not any(c in text for c in "🚀🥇🔔")
+    text = followups.build_message(candidate)
+    assert "MT ADAMS" not in text and not any(c in text for c in "🚀🥇🔔")
+    assert text == "Mt Adams School District still needs follow-up in Salesforce."
 
 
 def test_delivery_is_one_shot_and_timeout_never_retries(monkeypatch: Any,
