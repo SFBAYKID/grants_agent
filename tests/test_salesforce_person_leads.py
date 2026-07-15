@@ -36,6 +36,10 @@ def config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GRANT_SALESFORCE_WRITE_CHANNEL_IDS", "CGRANTS")
     monkeypatch.setenv("SALESFORCE_PERSON_LEAD_WRITES_ENABLED", "1")
     monkeypatch.setenv("SALESFORCE_CAMPAIGN_WRITES_ENABLED", "0")
+    monkeypatch.setattr(
+        record_actions, "fetch_profile",
+        lambda *_args: OrganizationProfile(website="https://district.test/",
+                                           source_url="https://district.test/staff"))
 
 
 def _contact(tmp_path: Path, evidence: dict[str, bool] | None = None
