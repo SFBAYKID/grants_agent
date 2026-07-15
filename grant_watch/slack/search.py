@@ -16,6 +16,7 @@ from enum import Enum
 from pathlib import Path
 
 from .. import db
+from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact, make_spreadsheet
 
 Progress = Callable[[str], None]
@@ -680,7 +681,7 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
         location = f", {row['location_city']}" if row["location_city"] else ""
         enrollment = (f" · {int(row['enrollment']):,} students"
                       if row["enrollment"] is not None else "")
-        lines.append(f"- Lead #{row['id']} — {row['entity_name']} "
+        lines.append(f"- Lead #{row['id']} — {display_entity_name(row['entity_name'])} "
                      f"({row['state'] or '?'}{location}, {role}) — "
                      f"{row['program'] or row['lead_grade']} · {amount} · "
                      f"{_window_label(row)}{enrollment}{contact}")

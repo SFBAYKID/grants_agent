@@ -78,7 +78,8 @@ def _lead_row(tmp_path: Path) -> tuple[sqlite3.Connection, sqlite3.Row]:
                      program="SVPP", amount=500_000.0, start="2025-10-01",
                      end="2028-09-30", url="https://x.gov/a", raw={}),
         grade=LeadGrade.GOLD))
-    row = conn.execute("SELECT * FROM leads").fetchone()
+    row = db.get_lead(conn, 1)
+    assert row is not None
     return conn, row
 
 
@@ -98,6 +99,24 @@ def test_brief_test_mode_overrides_recipient(
     assert brief["amount_usd"] == 500000
     assert brief["expires_at"] == "2028-09-30"
     assert brief["request_id"].startswith(f"grant-{row['id']}-")
+
+
+def test_brief_uses_current_event_source_not_stale_projection(tmp_path: Path) -> None:
+    """Persequor receives the exact event record URL used by Grant's detail reply."""
+    conn, row = _lead_row(tmp_path)
+    conn.execute("UPDATE leads SET detail_url='https://generic.example/dataset'")
+    conn.commit()
+    row = db.get_lead(conn, int(row["id"]))
+    assert row is not None
+    contact_id = db.save_contact(
+        conn, int(row["id"]), "Jane Doe", "Superintendent",
+        "jdoe@crschools.org", "", "https://crschools.org/staff", "high")
+    contact = conn.execute(
+        "SELECT * FROM contacts WHERE id=?", (contact_id,)).fetchone()
+    brief = persequor_client.build_brief(
+        row, contact, "U01DPJVURHU", "chase@monarchconnected.com")
+    assert brief is not None
+    assert brief["source_url"] == "https://x.gov/a"
 
 
 def test_brief_live_mode_requires_verified_contact(
@@ -164,14 +183,14 @@ def test_retry_reuses_request_id_and_does_not_duplicate_row(
     assert len(saved) == 1 and saved[0]["status"] == "submitted"
 
 
-def test_request_id_is_stable_per_event_user_and_thread(tmp_path: Path) -> None:
-    """Repeated Slack clicks for the same event cannot mint another outreach key."""
+def test_request_id_is_stable_per_slack_request(tmp_path: Path) -> None:
+    """Redelivery is stable while a later explicit request gets a fresh draft key."""
     conn, row = _lead_row(tmp_path)
-    first = persequor_client.request_id_for(row, "U1", "C1", "100.1")
-    second = persequor_client.request_id_for(row, "U1", "C1", "100.1")
-    other_thread = persequor_client.request_id_for(row, "U1", "C1", "100.2")
+    first = persequor_client.request_id_for(row, "U1", "C1", "100.1", "101.1")
+    second = persequor_client.request_id_for(row, "U1", "C1", "100.1", "101.1")
+    redraft = persequor_client.request_id_for(row, "U1", "C1", "100.1", "102.1")
     assert first == second
-    assert first != other_thread
+    assert first != redraft
 
 
 def test_repeated_submit_does_not_make_second_http_request(
@@ -179,7 +198,8 @@ def test_repeated_submit_does_not_make_second_http_request(
     """A queued/sending persisted key is the local idempotency boundary."""
     monkeypatch.setenv("OUTREACH_TEST_EMAIL", "chase@monarchconnected.com")
     conn, row = _lead_row(tmp_path)
-    request_id = persequor_client.request_id_for(row, "U1", "C1", "100.1")
+    request_id = persequor_client.request_id_for(
+        row, "U1", "C1", "100.1", "101.1")
     brief = persequor_client.build_brief(
         row, None, "U1", "chase@monarchconnected.com", request_id=request_id)
     assert brief is not None
@@ -196,6 +216,35 @@ def test_repeated_submit_does_not_make_second_http_request(
     assert first == "unreachable" and second == "unreachable"
     assert "did not create another copy" in message
     assert calls == 1
+
+
+def test_later_explicit_redraft_creates_fresh_request(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two distinct Slack messages may request two human-reviewed Gmail drafts."""
+    monkeypatch.setenv("OUTREACH_TEST_EMAIL", "chase@monarchconnected.com")
+    conn, row = _lead_row(tmp_path)
+    calls: list[str] = []
+
+    def accept_post(_url: str, json: object, **_kwargs: object) -> _AcceptedResponse:
+        assert isinstance(json, dict)
+        calls.append(str(json["request_id"]))
+        return _AcceptedResponse()
+
+    monkeypatch.setattr(persequor_client.requests, "post", accept_post)
+    for request_token in ("101.1", "102.1"):
+        request_id = persequor_client.request_id_for(
+            row, "U1", "C1", "100.1", request_token)
+        brief = persequor_client.build_brief(
+            row, None, "U1", "chase@monarchconnected.com", request_id=request_id)
+        assert brief is not None
+        state, message = persequor_client.submit_brief(conn, int(row["id"]), brief)
+        assert state == "submitted" and "Nothing was sent" in message
+
+    saved = conn.execute(
+        "SELECT submitted_at,sent_at,approved_by FROM outreach ORDER BY id").fetchall()
+    assert len(saved) == 2 and len(set(calls)) == 2
+    assert all(item["submitted_at"] for item in saved)
+    assert all(item["sent_at"] is None and item["approved_by"] is None for item in saved)
 
 
 def test_retry_compare_and_set_skips_already_sending_row(

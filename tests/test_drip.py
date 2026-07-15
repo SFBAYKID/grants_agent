@@ -1,4 +1,4 @@
-"""Drip-engine tests: window math, pacing gates, message builders, claims,
+"""Drip-engine tests: window math, pacing gates, message builders,
 engagement dedupe. All offline; the LLM layer is not exercised here (its failure
 mode is tested by contract: bad output degrades to an honest 'didn't parse')."""
 
@@ -367,23 +367,7 @@ def test_ambiguous_slack_timeout_is_not_blindly_retried(tmp_path: Path) -> None:
         "SELECT state FROM notification_outbox").fetchone()["state"] == "unknown"
 
 
-# ------------------------------------------------------------------ claims + points
-def test_claim_first_click_wins(tmp_path: Path) -> None:
-    conn = db.connect(tmp_path / "t.db")
-    lead_id = _mk_lead(conn)
-    assert db.claim_lead(conn, lead_id, "U_ANTHONY") is True
-    assert db.claim_lead(conn, lead_id, "U_BRETT") is False       # loser
-    assert db.claim_lead(conn, lead_id, "U_ANTHONY") is False     # no double-claim
-    assert db.get_lead(conn, lead_id)["assigned_to"] == "U_ANTHONY"
-
-
-def test_dead_lead_cannot_be_claimed(tmp_path: Path) -> None:
-    conn = db.connect(tmp_path / "t.db")
-    lead_id = _mk_lead(conn)
-    db.set_lead_status(conn, lead_id, "dead", note="x")
-    assert db.claim_lead(conn, lead_id, "U1") is False
-
-
+# ------------------------------------------------------------------ engagement points
 def test_engagement_dedupes_per_user_and_kind(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     pid = db.record_post(conn, "nugget", None, "C1", "111.1", "ask-me")

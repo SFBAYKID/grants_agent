@@ -378,7 +378,9 @@ def salesforce_lookup(entity: str, domain: str = "", phone: str = "", state: str
     if res.error:
         return f"ERROR: {res.error} — tell the user you couldn't reach Salesforce."
     if res.status.value == "no_match":
-        return f"No Salesforce Account, Lead, or Contact found for '{entity}'."
+        terms = ", ".join(res.attempted_terms) or entity
+        return ("No visible Salesforce Account, Lead, or Contact match in the "
+                f"connected org after a complete search for: {terms}.")
     if not res.matched:
         return "Salesforce lookup was incomplete — no net-new conclusion is safe."
     lines = []
@@ -386,7 +388,8 @@ def salesforce_lookup(entity: str, domain: str = "", phone: str = "", state: str
         tag = "match" if m.confidence == "high" else "possible match"
         who = m.company or m.name
         owner = f", owned by {m.owner}" if m.owner else ""
-        lines.append(f"- {m.sobject} ({tag}): {who}{owner} -> {m.link}")
+        state = f", state {m.state}" if m.state else ""
+        lines.append(f"- {m.sobject} ({tag}): {who}{state}{owner} -> {m.link}")
     extra = (f"\n(+{len(res.matches) - 6} more — worth reviewing)"
              if len(res.matches) > 6 else "")
     header = ("One Salesforce result:" if len(res.matches) == 1

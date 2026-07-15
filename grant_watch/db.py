@@ -424,18 +424,7 @@ def contacts_for_lead(conn: sqlite3.Connection, lead_id: int) -> list[sqlite3.Ro
         (lead_id,)))
 
 
-# ---------------------------------------------------------------- drip engine + claims
-
-def claim_lead(conn: sqlite3.Connection, lead_id: int, slack_user: str) -> bool:
-    """First-click ownership. Race-safe conditional UPDATE: exactly one claimer wins
-    (architectural-critic-approved primitive). Dead/snoozed leads can't be claimed."""
-    cur = conn.execute(
-        "UPDATE leads SET assigned_to = ?, assigned_at = ? "
-        "WHERE id = ? AND assigned_to IS NULL AND status NOT IN ('dead','snoozed')",
-        (slack_user, _now(), lead_id))
-    conn.commit()
-    return cur.rowcount == 1
-
+# ---------------------------------------------------------------- drip engine + conversation state
 
 def record_post(conn: sqlite3.Connection, kind: str, lead_id: int | None,
                 channel: str, ts: str, style: str,
@@ -491,6 +480,44 @@ def find_post_by_ts(conn: sqlite3.Connection, channel: str, ts: str) -> sqlite3.
     """Look up a Grant post from a thread anchor ts (to attribute engagement)."""
     return conn.execute("SELECT * FROM posts WHERE channel = ? AND ts = ?",
                         (channel, ts)).fetchone()
+
+
+def register_conversation_thread(conn: sqlite3.Connection, workspace: str,
+                                 channel: str, thread_ts: str,
+                                 initiated_by: str) -> None:
+    """Persist a configured-channel thread that began with an explicit @Grant mention."""
+    now = _now()
+    with conn:
+        conn.execute(
+            """INSERT INTO slack_conversation_threads
+                 (workspace,channel,thread_ts,initiated_by,created_at,last_active_at)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(workspace,channel,thread_ts) DO UPDATE SET
+                 last_active_at=excluded.last_active_at""",
+            (workspace, channel, thread_ts, initiated_by, now, now),
+        )
+
+
+def is_conversation_thread(conn: sqlite3.Connection, workspace: str,
+                           channel: str, thread_ts: str) -> bool:
+    """Return whether plain replies may continue a prior @Grant conversation."""
+    row = conn.execute(
+        """SELECT 1 FROM slack_conversation_threads
+           WHERE workspace=? AND channel=? AND thread_ts=?""",
+        (workspace, channel, thread_ts),
+    ).fetchone()
+    return row is not None
+
+
+def touch_conversation_thread(conn: sqlite3.Connection, workspace: str,
+                              channel: str, thread_ts: str) -> None:
+    """Record activity after a routed plain reply without widening thread access."""
+    with conn:
+        conn.execute(
+            """UPDATE slack_conversation_threads SET last_active_at=?
+               WHERE workspace=? AND channel=? AND thread_ts=?""",
+            (_now(), workspace, channel, thread_ts),
+        )
 
 
 def claim_slack_event(conn: sqlite3.Connection, event_id: str, workspace: str,
@@ -570,7 +597,6 @@ _OUTCOME_POINTS = {
     "reaction": 1,
     "reply": 2,
     "question": 2,
-    "claim": 4,
     "snoozed": -2,
     "bad_lead": -8,
     "contacted": 6,

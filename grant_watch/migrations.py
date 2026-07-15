@@ -431,6 +431,28 @@ def _migration_6_release_safety_state(conn: sqlite3.Connection) -> None:
         _add_column(conn, "slack_event_receipts", definition)
 
 
+def _migration_7_conversation_and_outreach_truth(conn: sqlite3.Connection) -> None:
+    """Track mention-led threads and distinguish draft intake from email sending."""
+    _add_column(conn, "outreach", "submitted_at TIMESTAMP")
+    conn.execute(
+        """UPDATE outreach SET submitted_at=sent_at, sent_at=NULL, approved_by=NULL
+           WHERE status='submitted' AND submitted_at IS NULL"""
+    )
+    _execute_script(conn,
+        """
+        CREATE TABLE IF NOT EXISTS slack_conversation_threads (
+          workspace TEXT NOT NULL,
+          channel TEXT NOT NULL,
+          thread_ts TEXT NOT NULL,
+          initiated_by TEXT NOT NULL,
+          created_at TIMESTAMP NOT NULL,
+          last_active_at TIMESTAMP NOT NULL,
+          PRIMARY KEY (workspace, channel, thread_ts)
+        );
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "legacy-compatible base", _migration_1_base),
     Migration(2, "truth observations and events", _migration_2_truth_events),
@@ -438,6 +460,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(4, "read-only Salesforce snapshots", _migration_4_salesforce_read_snapshots),
     Migration(5, "remove unused conversation sessions", _migration_5_remove_unused_sessions),
     Migration(6, "release safety state", _migration_6_release_safety_state),
+    Migration(7, "conversation threads and outreach truth",
+              _migration_7_conversation_and_outreach_truth),
 )
 
 

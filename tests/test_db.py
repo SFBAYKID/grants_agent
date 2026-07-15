@@ -106,7 +106,7 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
     conn = db.connect(path)
     versions = [row[0] for row in conn.execute(
         "SELECT version FROM schema_migrations ORDER BY version")]
-    assert versions == [1, 2, 3, 4, 5, 6]
+    assert versions == [1, 2, 3, 4, 5, 6, 7]
     crm_tables = {
         row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
@@ -118,6 +118,10 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
         "SELECT 1 FROM sqlite_master WHERE type='table' "
         "AND name='conversation_sessions'"
     ).fetchone() is None
+    assert conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='slack_conversation_threads'"
+    ).fetchone() is not None
     event = conn.execute(
         "SELECT event_type, backfill, suppressed FROM funding_events"
     ).fetchone()

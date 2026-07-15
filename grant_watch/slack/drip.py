@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 from slack_sdk import WebClient
 
 from .. import db, scoring
+from ..presentation import display_entity_name, plain_fragment
 
 # Bulletin relevance: grants.gov phrase-search still lets through noise (live check
 # 2026-07-13 surfaced 2011-era NSF programs). A bulletin must LOOK like our business.
@@ -45,11 +46,6 @@ PT = ZoneInfo("America/Los_Angeles")
 _STATE_NAMES = {"WA": "Washington", "CA": "California", "MI": "Michigan",
                 "PA": "Pennsylvania", "OR": "Oregon"}
 
-_ENTITY_ACRONYMS = {
-    "ABC", "CSD", "DC", "ISD", "K-12", "RSD", "SD", "STEM", "STEAM", "USD",
-}
-_ENTITY_CONNECTORS = {"and", "at", "by", "for", "in", "of", "on", "the", "to"}
-
 def in_window(now_utc: datetime) -> bool:
     """Mon-Fri, from 8:00 Eastern until 17:00 Pacific (per Chase)."""
     et, pt = now_utc.astimezone(ET), now_utc.astimezone(PT)
@@ -63,38 +59,6 @@ def _fmt_amount(amount: float | None) -> str:
     return f"${amount:,.2f}".removesuffix(".00")
 
 
-def _plain_fragment(value: object, max_length: int = 120) -> str:
-    """Collapse source text into inert Slack prose for a one-sentence alert."""
-    text = re.sub(r"(?i)https?://\S+|www\.\S+", "", str(value or ""))
-    text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"[.!?]+", "", text)
-    inert = text.translate(str.maketrans("", "", "<>@`*_~|")).strip(" ,;:-")
-    return inert[:max_length].rstrip(" ,;:-")
-
-
-def _display_entity(value: object) -> str:
-    """Render all-caps source names naturally without rewriting mixed-case names.
-
-    Government award systems commonly return organization names in uppercase. We
-    normalize only strings with no lowercase letters, preserving known education
-    acronyms and leaving already human-formatted official names untouched.
-    """
-    entity = _plain_fragment(value)
-    if not entity or any(character.islower() for character in entity):
-        return entity
-    words: list[str] = []
-    for index, word in enumerate(entity.split()):
-        bare = word.strip("(),")
-        if bare in _ENTITY_ACRONYMS or re.fullmatch(r"[IVX]+", bare):
-            formatted = word
-        elif index > 0 and bare.lower() in _ENTITY_CONNECTORS:
-            formatted = word.lower()
-        else:
-            formatted = word.title()
-        words.append(formatted)
-    return " ".join(words)
-
-
 def build_nugget(row: sqlite3.Row) -> tuple[str, str]:
     """Build one minimal award sentence using only persisted source facts."""
     if str(row["current_event_verification_status"] or "") != "verified":
@@ -102,17 +66,17 @@ def build_nugget(row: sqlite3.Row) -> tuple[str, str]:
     if str(row["current_event_type"] or "") not in {
             "award_announced", "award_obligated"}:
         raise ValueError("proactive award has unsupported event type")
-    entity = _display_entity(row["entity_name"])
+    entity = display_entity_name(row["entity_name"])
     if not entity:
         raise ValueError("proactive award requires an entity")
-    state_code = _plain_fragment(row["state"]).upper()
-    state = _plain_fragment(_STATE_NAMES.get(state_code, state_code))
+    state_code = plain_fragment(row["state"]).upper()
+    state = plain_fragment(_STATE_NAMES.get(state_code, state_code))
     amt = _fmt_amount(row["amount"])
     if not amt:
         raise ValueError("proactive award requires a finite positive amount")
     location = f" in {state}" if state else ""
     amount = f" {amt}" if amt else ""
-    program = _plain_fragment(row["program"])
+    program = plain_fragment(row["program"])
     program_text = f" {program}" if program else ""
     return (f"{entity}{location} has a verified{amount}{program_text} funding award.",
             "award-brief")
@@ -123,7 +87,7 @@ def build_bulletin(row: sqlite3.Row) -> tuple[str, str]:
 
     The opportunity title is the news, with the posting agency as fallback.
     """
-    what = _plain_fragment(row["title"] or row["entity_name"])
+    what = plain_fragment(row["title"] or row["entity_name"])
     if not what:
         raise ValueError("proactive bulletin requires a title or entity")
     close = f" through {row['funds_end'][:10]}" if row["funds_end"] else ""

@@ -17,12 +17,30 @@ def test_one_word_overlap_is_never_high_confidence() -> None:
     assert confidence == "possible"
 
 
-def test_state_mismatch_rejects_candidate() -> None:
-    """A conflicting known state is stronger evidence than name similarity."""
+def test_exact_name_state_mismatch_is_visible_but_never_confirmed() -> None:
+    """A conflicting state is shown for human review, never marked high confidence."""
     assert salesforce._confidence(
         "Castle Rock School District", "Castle Rock School District",
         "WA", "CO", "", "", "", "",
-    ) is None
+    ) == "possible"
+
+
+def test_trailing_district_number_can_match_numberless_crm_name() -> None:
+    """Source district identifiers may be absent from a Salesforce company name."""
+    assert salesforce._confidence(
+        "Castle Rock School District 401", "Castle Rock School District",
+        "WA", "WA", "", "", "", "",
+    ) == "high"
+    assert salesforce.search_terms("Castle Rock School District 401") == (
+        "Castle Rock School District 401", "Castle Rock 401", "Castle Rock")
+
+
+def test_shared_place_name_with_extra_identity_words_is_only_possible() -> None:
+    """Castle Rock Charter Foundation must not become a confirmed district match."""
+    assert salesforce._confidence(
+        "Castle Rock School District 401", "Castle Rock Charter Foundation",
+        "WA", "WA", "", "", "", "",
+    ) == "possible"
 
 
 def test_account_outage_is_unavailable_not_no_match(

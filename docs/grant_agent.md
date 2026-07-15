@@ -13,10 +13,11 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 2. **Natural engagement.** A human replies in the alert thread for details, or types `@Grant` followed
    by a question in the configured channel. Replies and reactions feed the reward system; Grant does
    not use slash commands, DMs, or help/status menus.
-3. **Approve-to-email.** A natural-language request → Grant composes a personalized draft referencing the specific
-   award (amount, program, freshness) → posts the draft **in-thread for a human to review** → on explicit
-   human approval, hands the send to **@Persequor**. Grant never sends email itself, and `sent_at` is only
-   ever set *after* approval.
+3. **Draft outreach through Persequor.** A natural-language request sends a typed,
+   source-linked brief to Persequor, which creates a Gmail draft for human review.
+   Grant records `submitted_at` at intake; `approved_by` and `sent_at` remain empty
+   until a later verified approval/send status exists. A later explicit “draft again”
+   request creates a new draft while redelivery of the same Slack event stays deduped.
 4. **Conversation.** Humans can @mention Grant in the configured channel or reply in a proactive alert
    thread. Grant answers from the database and clearly says when it doesn't know.
 5. **On-demand search.** A rep @mentions Grant (or talks in a thread) and asks for grants by any
@@ -26,6 +27,8 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
    total (an id tiebreak) so a repeated search returns the same rows. Inline results report the true
    match count; complete Excel/Google exports are all-or-nothing under a declared 5,000-row safety cap.
    A bare "@Grant" with no ask gets a friendly greeting.
+   Mention-led threads are persisted so a plain follow-up such as “85 is fine—Excel”
+   continues the original search instead of being dropped.
 6. **Contact enrichment (second step).** After the list, Grant *offers* to find the best contact for
    each org — never automatically, because each lookup scrapes the org's site (~30s). On a yes, it
    enriches the top N (capped at 10 to stay responsive), adding verified-or-honest contact columns to
@@ -38,6 +41,10 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 - Never invents a contact, email, phone, award amount, or a Salesforce "last contacted" date.
 - If a contact is `not_found`, Grant says so and offers to let a human research — it does not guess.
 - Salesforce matches that are uncertain are shown as "possible match," never asserted.
+- Grant has no claim/dibs workflow. Interest leads directly to an exact Salesforce
+  lookup or an outreach-draft request.
+- Detail replies identify the exact event record and link; a generic source domain is
+  never presented as record-level evidence.
 - Grant distinguishes discovery dates, application windows, solicitation deadlines, and award spend
   windows. The database does not yet contain a verified award-announcement date, so "received funding
   during this range" is reported as unsupported instead of being mapped to an import or spend date.
@@ -53,8 +60,8 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
   `search.py` (typed source-aware search), and `persequor.py` (handoff). Spreadsheet safety and owned
   temporary artifacts live in `grant_watch/spreadsheets.py`; Google Sheets export is Grant's own
   capability in `grant_watch/google_sheets.py`.
-- **Talking to @Persequor:** Grant posts an approved-send message that mentions @Persequor with the draft
-  and recipient; Persequor already handles the actual email. The approval gate lives on Grant's side.
+- **Talking to Persequor:** Grant submits a draft-only request to Persequor. Persequor
+  creates the Gmail draft; nothing is sent by Grant or by intake acceptance.
 - **Google Sheets export (Grant-owned):** email is Persequor's domain; data export is Grant's. Grant
   creates each export as a Sheet in the "Grant Exports" shared drive using its own service account
   (`GOOGLE_SA_KEY_PATH`, `GRANT_EXPORTS_DRIVE_ID`), writes rows with `valueInputOption=RAW` so no cell

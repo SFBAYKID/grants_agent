@@ -80,18 +80,30 @@ def test_thread_facts_include_evidence_and_read_only_crm_context(tmp_path: Path)
     conn = db.connect(tmp_path / "facts.db")
     db.upsert_lead(conn, Lead(item=RawItem(
         source="usaspending:16.071", item_id="A1", title="Award",
-        entity="ABC Schools", state="CA", program="SVPP", amount=500_000.0,
+        entity="ABC SCHOOLS", state="CA", program="SVPP", amount=500_000.0,
         start="2026-07-01", end="2028-09-30", url="https://official.test/A1",
         raw={}, event_type=FundingEventType.AWARD_OBLIGATED,
         event_date="2026-07-01", date_precision=DatePrecision.DAY,
+        source_locator="A1",
         verification_status=VerificationStatus.VERIFIED,
         evidence_excerpt="Official obligation record"), grade=LeadGrade.GOLD))
     row = db.get_lead(conn, 1)
     facts = conversation.lead_facts(row)
+    assert "entity: ABC Schools" in facts
     assert "event_type: award_obligated" in facts
     assert "event_evidence: Official obligation record" in facts
-    assert "source_link: https://official.test/A1" in facts
+    assert "source_record: USASpending award A1 (direct record)" in facts
+    assert "source_url: https://official.test/A1" in facts
     assert "salesforce_status: (not checked)" in facts
+
+
+def test_claim_intent_is_rejected_as_a_non_action() -> None:
+    """Legacy model output cannot assign or claim a Grant lead."""
+    from grant_watch.slack import conversation
+
+    parsed = conversation._parse_final('{"intent":"claim","reply":"It is yours."}')
+    assert parsed["intent"] == "question"
+    assert not hasattr(__import__("grant_watch.db", fromlist=["claim_lead"]), "claim_lead")
 
 
 def test_digest_poster_module_remains_absent() -> None:

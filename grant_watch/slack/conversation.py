@@ -22,6 +22,7 @@ from typing import Any  # Anthropic tool-use response payloads are runtime-shape
 
 from anthropic import Anthropic
 
+from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact
 from . import tools
 
@@ -46,8 +47,8 @@ FORMATTING (hard rules for Slack — reps SCAN, they don't read paragraphs):
       • *Award:* $500K — SVPP (School Violence Prevention Program)
       • *Window:* Oct 2025 – Sep 2028 (open now)
       • *Fit:* federal security money — cameras, access control, door hardening
-      • *Status:* gold, unclaimed
-      Want to jump on it?
+      • *Source:* <https://www.usaspending.gov/award/EXACT_ID|USASpending award EXACT_ID>
+      Want me to check Salesforce for the matching record?
 - Use Slack bold (*word*) for key numbers and labels. Bullets start with "• ".
 - Use a NUMBERED list (1. 2. 3.) when the items are steps or a sequence (e.g. next
   actions); use bullets for parallel facts.
@@ -104,6 +105,8 @@ DATE TRUTH RULES (non-negotiable):
 - opportunity_open/opportunity_close = Grants.gov application-window dates.
 - solicitation_posted/response_due = SILVER RFP dates.
 - spend_start/spend_end = GOLD award spending-window dates.
+- An unknown award-event date can never support "just," "recently," "landed," or
+  "just received." Describe only the verified award record and its spend window.
 - The database does NOT store a verified award announcement/received date. If asked who
   "got/received/was awarded" funding in a date range, do not substitute discovered or
   spend_start. Explain the limitation and ask whether they mean newly discovered leads
@@ -130,6 +133,18 @@ who owns it before they reach out. Never invent a link, number, contact, or fact
 tool errored or found nothing, say so cheerfully and plainly. Present 'possible' CRM
 matches as possible, never asserted.
 
+SOURCE ATTRIBUTION: when the rep asks for details, show the exact current-event source
+record as a clickable Slack link using both source_record and source_url from FACTS.
+Never reduce it to a generic website or bare domain. If the URL is a parent-award link
+or published dataset rather than a direct record, say that explicitly.
+
+LEAD OWNERSHIP: Grant has no claim/dibs workflow. Never say claimed, unclaimed, mine,
+locked, assigned, or "claim the lead," and never ask who owns a Grant lead. If a rep
+shows interest, check Salesforce. If a complete lookup finds a record, provide its
+clickable link. If Salesforce is unavailable or partial, report that limitation and do
+not imply the record is absent. During read-only testing, do not offer or claim to
+create a standalone Salesforce Lead.
+
 SALESFORCE CAMPAIGNS — EXPLICIT APPROVALS, NEVER SILENT WRITES:
 - After returning a fixed lead set, you may OFFER: "Would you like me to add these leads
   to a Salesforce Campaign?" Do not prepare anything until the user says yes.
@@ -151,7 +166,7 @@ SALESFORCE CAMPAIGNS — EXPLICIT APPROVALS, NEVER SILENT WRITES:
 THE OUTREACH HANDOFF (important): you do NOT write or send the outreach email —
 that's Persequor, a separate email agent. Persequor is CALL-ONLY: it only acts when
 summoned. You are the guide who directs the rep there. So:
-- When a rep is ready to reach out (they claimed it, or they ask about emailing), OFFER
+- When a rep asks about emailing, OFFER
   it as a question: "Want me to have Persequor draft the intro email for you?" That is
   intent offer_persequor. Do NOT call Persequor yet.
 - ONLY when the rep clearly says yes to bringing in Persequor (look at the recent
@@ -159,7 +174,9 @@ summoned. You are the guide who directs the rep there. So:
   the single moment Persequor gets called; its draft card then appears in this thread.
 - The rep can also summon Persequor themselves by typing @Persequor — if they did,
   you don't need to act.
-Be a helpful guide: after a claim, nudge them toward the next step rather than waiting.
+- If the rep explicitly asks to draft again, recreate, revise, or start another draft,
+  use draft_email again. A new human request is a new draft request; do not say the old
+  request prevents it. The server still deduplicates redelivery of that same Slack event.
 
 HARD RULES:
 - Lead-specific claims come ONLY from the FACTS block and tool results.
@@ -168,8 +185,7 @@ HARD RULES:
 
 When you are DONE (after any tool use), your final message must be ONLY this JSON:
 {"intent": "...", "reply": "..."}
-intent is one of: claim | offer_persequor | draft_email | snooze | bad_lead | question | chitchat
-- claim: the user is taking ownership ("I'll take this", "mine")
+intent is one of: offer_persequor | draft_email | snooze | bad_lead | question | chitchat
 - offer_persequor: they're interested in outreach but haven't confirmed the handoff —
   you're OFFERING to bring in Persequor (your reply asks the question)
 - draft_email: they CLEARLY confirmed bringing in Persequor — call it now
@@ -179,18 +195,32 @@ intent is one of: claim | offer_persequor | draft_email | snooze | bad_lead | qu
 The reply text goes verbatim to Slack — keep it friendly and backtick-free."""
 
 
+def _source_record_label(row: sqlite3.Row) -> str:
+    """Describe the exact current event locator without overstating URL precision."""
+    source = str(row["source"] or "public source")
+    locator = str(row["current_event_source_locator"] or "").strip()
+    suffix = f" {locator}" if locator else ""
+    if source.startswith("usaspending-subaward:"):
+        return f"USASpending subaward{suffix} (URL points to its parent award)"
+    if source.startswith("usaspending:"):
+        return f"USASpending award{suffix} (direct record)"
+    if source == "ca-grants-portal":
+        return f"California Grants Portal record{suffix} (published dataset)"
+    return f"{source} record{suffix}"
+
+
 def lead_facts(row: sqlite3.Row | None) -> str:
     """The FACTS block — every lead-specific field Grant may assert."""
     if row is None:
         return "FACTS: (no lead attached to this thread)"
     fields = {
         "lead_id": row["id"],
-        "entity": row["entity_name"], "state": row["state"],
+        "entity": display_entity_name(row["entity_name"]), "state": row["state"],
         "program": row["program"], "amount_usd": row["amount"],
         "window": f"{row['funds_start']} to {row['funds_end']}",
-        "source_link": row["detail_url"] or "(none)",
+        "source_record": _source_record_label(row),
+        "source_url": row["current_event_source_url"] or "(none)",
         "status": row["status"],
-        "claimed_by": row["assigned_to"] or "(unclaimed)",
         "grade": row["lead_grade"],
         "event_type": row["current_event_type"],
         "event_date": row["current_event_occurred_on"] or "(unknown)",
@@ -212,7 +242,7 @@ def _parse_final(raw: str) -> dict[str, Any]:
         out = json.loads(raw[start:end])
         intent = out.get("intent", "question")
         reply = str(out.get("reply", "")).strip()
-        if intent not in ("claim", "offer_persequor", "draft_email", "snooze",
+        if intent not in ("offer_persequor", "draft_email", "snooze",
                           "bad_lead", "question", "chitchat"):
             intent = "question"
         if reply:

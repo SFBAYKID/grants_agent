@@ -1,4 +1,4 @@
-# Workflow implementation — multi-rep leads, Persequor outreach, Salesforce (rev 3)
+# Workflow implementation — conversational leads, Persequor outreach, Salesforce (rev 4)
 
 Status (2026-07-14): the local Grant-side workflow is implemented and covered by
 offline tests. Live Salesforce reader/Campaign and Persequor endpoint round trips are
@@ -18,7 +18,7 @@ neutered to an honest manual-copy draft, DB audited (zero false rows existed).
 |---|---|---|
 | **Grant** (this project) | finds/scores/surfaces leads; tracks triage state; briefs Persequor | Slack bot `U0BH0ESRJ4W` |
 | **Persequor** (`~/monarch_followup_agent`) | drafts + sends email AS a rep, human-approved in the rep's DM | Slack bot; tenant `persequor` on the droplet |
-| **Sales reps** (4, verified from Persequor's prod DB) | review statewide leads, claim, approve outreach | chase `U01DPJVURHU` · brett `U08C1NBH875` · kerry `U01E908206M` · anthony `U01DFJWQQJ3` — canonical key is `rep_email` |
+| **Sales reps** (4, verified from Persequor's prod DB) | review leads and request human-reviewed outreach drafts | chase `U01DPJVURHU` · brett `U08C1NBH875` · kerry `U01E908206M` · anthony `U01DFJWQQJ3` — canonical key is `rep_email` |
 | **Salesforce** | CRM of record: accounts, activity, opportunities | sandbox `monarchdev` for dev; prod later |
 
 ## 2. Lead lifecycle (end to end)
@@ -27,8 +27,8 @@ neutered to an honest manual-copy draft, DB audited (zero false rows existed).
 poll (weekly cron) ─► score ─► QUALITY GATE (lead_score rank, top-N only; SHIPPED)
    ─► [SF cross-check: account? owner? last activity? → link + context line]   (§6)
    ─► one paced, prioritized lead alert to the configured Grant channel
-   ─► rep [🙋 Claim]  → leads.assigned_to = rep  (first click wins, block updates)
-   ─► rep [✉️ Draft email]
+   ─► rep asks for Salesforce context or a draft (no claim/dibs state)
+   ─► rep requests an email draft
          │  contact_email verified?  ──no──► lead marked contact:not_found;
          │                                   enrichment queue (Phase 2) — NO brief sent
          yes
@@ -42,26 +42,20 @@ poll (weekly cron) ─► score ─► QUALITY GATE (lead_score rank, top-N only
    ─► real deal → Opportunity in Salesforce (rep-owned; Grant links, never manages)
 ```
 
-Latency reality (Persequor constraint #1): approval is human-scale — a brief can sit at
-`sent_to_rep` for days or die `dismissed`/`expired`. Lead status model must tolerate
-that: new → surfaced → claimed → outreach_pending → contacted | back to claimed.
+Latency reality (Persequor constraint #1): approval is human-scale — a draft can sit
+for days. Grant records draft submission separately from any later verified send.
 
-## 3. Multi-rep model
+## 3. Rep identity model
 
-- **Claim**: a rep replies naturally in the proactive thread. The recognized claim sets
-  `leads.assigned_to` (Slack id) + `assigned_at`; later claims get an "already claimed by @X"
-  response. Race-safe via a conditional UPDATE
-  (`WHERE assigned_to IS NULL`).
-- **Only the claiming rep can trigger [Draft email]** for a claimed lead (mirrors
-  Persequor's requested_by↔send_as validation; a mismatch is `rejected` on their side —
-  we enforce it first on ours for better UX).
-- **Unclaimed GOLD remains eligible for a later ranked alert;** claimed-but-idle leads
-  nudge the owner in-thread after 7 days.
+- Grant does not assign, claim, lock, or reserve leads. Interest triggers a Salesforce
+  lookup, contact research, or a Persequor draft request.
+- Any configured rep can request a draft. The Slack requester still determines
+  `send_as`; Persequor validates that identity before creating the Gmail draft.
 - **Rep map** lives in `config/reps.json` (slack_id ↔ rep_email ↔ states[]), the
   slack↔email pairs mirroring Persequor's verified roster. Bad `send_as` is impossible
-  by construction: Grant derives it from the claiming rep's entry.
+  by construction: Grant derives it from the requesting rep's entry.
 - ⚠️ OPEN (Chase): territory auto-mention (Joe gets @'d for WA leads) — layer on later
-  or now? Claim-first works without it.
+  or after the read-only workflow is proven?
 
 ## 4. Grant ↔ Persequor contract
 
@@ -76,11 +70,10 @@ that: new → surfaced → claimed → outreach_pending → contacted | back to 
   contact_name/email/title (null = unverified, never guessed), angle, rep_notes, and
   `expires_at` (critic M4: = funds_end, so a card that lingers past the spend window
   can never send a stale-facts email — Persequor's expiry watcher honors it).
-- **request_id lifecycle (critic C2 — REQUIRED):** a UUID minted exactly ONCE per
-  outreach attempt, persisted on the `outreach` row *before* the first POST, and reused
-  verbatim for every retry — network retry, backoff, and post-restart re-queue. A new
-  id is minted only for a deliberate resubmission (post-enrichment, or rep-initiated
-  after `dismissed`/`expired`). Replay with the SAME id + same payload → status; same
+- **request_id lifecycle:** a deterministic ID is minted once per triggering Slack
+  event, persisted before the first POST, and reused for network retry/redelivery. A
+  later explicit “draft again” Slack event gets a new ID and a fresh Gmail draft.
+  Replay with the SAME id + same payload → status; same
   id + different payload → 409 (critic M3).
 - **Grant-side rule:** we do NOT send briefs with `contact_email: null` (Persequor
   would just bounce `needs_contact`) — Grant tells the rep "no verified contact
@@ -93,10 +86,10 @@ that: new → surfaced → claimed → outreach_pending → contacted | back to 
   approval and send are the same tap) and `leads.status`. Grant-side status reflection
   remains **needs-testing/not yet implemented**.
 - **Status handling beyond terminals (critic H1):** define reflections for EVERY
-  terminal (`sent`→contacted+gmail ids; `dismissed`/`expired`/`rejected`→back to
-  claimed with truthful note; `needs_contact`→enrichment queue). A `failed` terminal
+  terminal (`sent`→contacted+gmail ids; `dismissed`/`expired`/`rejected`→surfaced
+  with truthful note; `needs_contact`→enrichment queue). A `failed` terminal
   (or Grant-side max-age alarm: brief stuck non-terminal > 5 days → surface to rep +
-  Chase, revert to claimed with note) and defined 404-on-known-id behavior are
+  Chase, retain as surfaced with a note) and defined 404-on-known-id behavior are
   round-2 questions to Persequor (§9).
 - **Implemented locally:** Draft Email builds an event-safe typed brief, persists one
   request id before network I/O, submits it, and retains bounded backoff state for the
@@ -150,16 +143,16 @@ that: new → surfaced → claimed → outreach_pending → contacted | back to 
 - Persequor down / endpoint 5xx → brief stays queued locally (`outreach.status
   ='queued_local'`), retried with backoff; rep sees "brief queued, Persequor
   unreachable" honestly, never a silent drop.
-- Two reps race Claim → conditional UPDATE; loser gets ephemeral notice.
-- Rep dismisses the card → Grant records `dismissed` and reverts lead to `claimed`
-  (rep can retry with notes) — not `contacted`.
+- Two reps request drafts → each explicit Slack request receives its own draft ID;
+  redelivery of either Slack event remains idempotent.
+- Rep dismisses a draft → Grant records `dismissed`; the lead remains surfaced and
+  can be drafted again later — it is not marked `contacted`.
 - Enrichment finds nothing → `contact_status='not_found'`, surfaced as such; a human
   can provide a contact naturally in the thread (validated and logged when supported).
 - Duplicate briefs (double-click) → the persisted-UUID rule (§4) makes any retry carry
   the same id; Persequor's unique index returns existing status, never a second card.
 - Rep departs / OAuth disconnects → any roster-reason `rejected` from Persequor raises
-  a reps.json-drift alarm to Chase (not silently recorded); their claimed leads are
-  reassignable through a natural-language owner request when supported.
+  a reps.json-drift alarm to Chase rather than silently recording success.
 - Manual contact entry → roster-only, provenance recorded
   (`source_url='manual:<slack_id>'`, confidence medium), domain-vs-entity mismatch
   warning (critic M7) — a typo'd valid address must not become a cold email.

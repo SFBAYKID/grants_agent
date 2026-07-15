@@ -79,6 +79,45 @@ def test_mention_search_uploads_in_requested_thread(monkeypatch: pytest.MonkeyPa
     assert not artifact.path.exists()
 
 
+def test_general_thread_reply_keeps_recent_search_context(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A count/format reply receives the original mention and Grant question."""
+    captured: list[str] = []
+
+    def fake_respond(*_args: object, **kwargs: object) -> dict[str, object]:
+        """Capture routed Slack history instead of invoking the model."""
+        captured.extend(kwargs.get("thread_context") or [])
+        return {"intent": "question", "reply": "Attached.", "files": []}
+
+    class ThreadClient(FakeSlackClient):
+        """Return the original search request and Grant's format question."""
+
+        def conversations_replies(self, **_kwargs: object) -> dict[str, object]:
+            return {"messages": [
+                {"text": "<@UGRANT> schools in California next 90 days", "user": "U1"},
+                {"text": "How many, and Excel or Slack?", "bot_id": "B1"},
+                {"text": "85 is fine, Excel", "user": "U1"},
+            ]}
+
+    monkeypatch.setattr(conversation, "respond", fake_respond)
+    grant._converse_general(
+        "85 is fine, Excel", ThreadClient(), "C123", "thread.1", user="U1")
+    assert captured == [
+        "rep: schools in California next 90 days",
+        "Grant: How many, and Excel or Slack?",
+        "rep: 85 is fine, Excel",
+    ]
+
+
+def test_mention_led_conversation_thread_is_persisted(tmp_path: Path) -> None:
+    """Plain replies route only after an explicit configured-channel @Grant mention."""
+    conn = db.connect(tmp_path / "threads.db")
+    assert not db.is_conversation_thread(conn, "T1", "C1", "100.1")
+    db.register_conversation_thread(conn, "T1", "C1", "100.1", "U1")
+    assert db.is_conversation_thread(conn, "T1", "C1", "100.1")
+    assert not db.is_conversation_thread(conn, "T1", "C2", "100.1")
+
+
 def test_upload_failure_is_reported_and_contained(monkeypatch: pytest.MonkeyPatch) -> None:
     """Slack upload failure yields an honest reply, cleanup, and no escaping exception."""
     artifact = _artifact()

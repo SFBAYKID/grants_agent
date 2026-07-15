@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from ..presentation import display_entity_name
+
 SENDER_NAME = "Monarch Connected"
 
 
@@ -25,7 +27,7 @@ def _amount_phrase(amount: float | None) -> str:
 def compose_draft(row: sqlite3.Row) -> str:
     """Deterministic outreach draft from a lead row. Facts only — no invented names,
     dates, or figures; unknown fields degrade gracefully rather than being guessed."""
-    entity = row["entity_name"]
+    entity = display_entity_name(row["entity_name"])
     program = row["program"] or "security"
     grade = row["lead_grade"] or "watch"
     source = row["source"] or "the public source"

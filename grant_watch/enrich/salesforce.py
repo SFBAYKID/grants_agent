@@ -79,6 +79,8 @@ class SFResult:
     matches: list[SFMatch] = field(default_factory=list)
     error: str = ""
     checked_at: float = field(default_factory=time.time)
+    attempted_terms: tuple[str, ...] = ()
+    connected_host: str = ""
 
     @property
     def matched(self) -> bool:
@@ -144,9 +146,22 @@ def distinctive_term(entity: str) -> str:
     return " ".join(words) or cleaned.strip()
 
 
+def search_terms(entity: str) -> tuple[str, ...]:
+    """Return bounded SOSL variants from precise to tolerant for source/CRM drift."""
+    cleaned = " ".join(_SOSL_RESERVED_RE.sub(" ", entity).split())
+    distinctive = distinctive_term(entity)
+    without_number = " ".join(
+        word for word in distinctive.split() if not word.isdigit())
+    return tuple(dict.fromkeys(
+        term for term in (cleaned, distinctive, without_number) if term))
+
+
 def _tokens(value: str) -> set[str]:
     """Return normalized distinctive identity tokens."""
-    return {word.lower() for word in distinctive_term(value).split() if word}
+    return {
+        word.lower() for word in distinctive_term(value).split()
+        if word and not word.isdigit()
+    }
 
 
 def _domain(value: str) -> str:
@@ -167,8 +182,17 @@ def _confidence(entity: str, candidate: str, requested_state: str,
                 candidate_domain: str, requested_phone: str,
                 candidate_phone: str) -> str | None:
     """Classify a candidate without allowing one-word overlaps to be high confidence."""
-    if requested_state and candidate_state and requested_state.upper() != candidate_state.upper():
+    state_conflict = bool(
+        requested_state and candidate_state
+        and requested_state.upper() != candidate_state.upper())
+    wanted = _tokens(entity)
+    found = _tokens(candidate)
+    if not wanted or not found:
         return None
+    if state_conflict:
+        # An exact name with conflicting geography is useful for a human to resolve,
+        # but it can never be promoted to a confirmed organization match.
+        return "possible" if wanted == found and len(wanted) >= 2 else None
     req_domain = _domain(requested_domain)
     cand_domain = _domain(candidate_domain)
     if req_domain and cand_domain and req_domain == cand_domain:
@@ -177,15 +201,9 @@ def _confidence(entity: str, candidate: str, requested_state: str,
     cand_phone = _digits(candidate_phone)
     if len(req_phone) >= 7 and len(cand_phone) >= 7 and req_phone[-7:] == cand_phone[-7:]:
         return "high"
-    wanted = _tokens(entity)
-    found = _tokens(candidate)
-    if not wanted or not found:
-        return None
     if wanted == found and len(wanted) >= 2:
         return "high"
     overlap = wanted & found
-    if len(wanted) >= 2 and overlap == wanted:
-        return "high"
     if overlap:
         return "possible"
     return None
@@ -197,31 +215,33 @@ def _link(instance_url: str, sobject: str, record_id: str) -> str:
 
 
 def _query_accounts(entity: str, token: str, instance_url: str) -> list[dict[str, Any]]:
-    """Search Account only; organization identity must be decided before deals."""
-    term = distinctive_term(entity)
-    if not term:
-        return []
-    sosl = (
-        f"FIND {{{term}}} IN ALL FIELDS RETURNING "
-        "Account(Id,Name,BillingState,BillingCity,Website,Phone,Owner.Name LIMIT 20)"
-    )
-    body = _readonly_get("search", {"q": sosl}, token, instance_url)
-    return list(body.get("searchRecords") or [])
+    """Search Account using bounded name variants and deduplicate record IDs."""
+    records: dict[str, dict[str, Any]] = {}
+    for term in search_terms(entity):
+        sosl = (
+            f"FIND {{{term}}} IN ALL FIELDS RETURNING "
+            "Account(Id,Name,BillingState,BillingCity,Website,Phone,Owner.Name LIMIT 20)"
+        )
+        body = _readonly_get("search", {"q": sosl}, token, instance_url)
+        for record in body.get("searchRecords") or []:
+            records[str(record.get("Id") or "")] = record
+    return [record for record_id, record in records.items() if record_id]
 
 
 def _query_people(entity: str, token: str,
                   instance_url: str) -> list[dict[str, Any]]:
-    """Search Lead and Contact after Account identity has been evaluated."""
-    term = distinctive_term(entity)
-    if not term:
-        return []
-    sosl = (
-        f"FIND {{{term}}} IN ALL FIELDS RETURNING "
-        "Lead(Id,Name,Company,State,Website,Phone,Owner.Name LIMIT 20), "
-        "Contact(Id,Name,MailingState,Phone,Owner.Name,Account.Id,Account.Name LIMIT 20)"
-    )
-    body = _readonly_get("search", {"q": sosl}, token, instance_url)
-    return list(body.get("searchRecords") or [])
+    """Search Lead/Contact with the same bounded variants used for Accounts."""
+    records: dict[str, dict[str, Any]] = {}
+    for term in search_terms(entity):
+        sosl = (
+            f"FIND {{{term}}} IN ALL FIELDS RETURNING "
+            "Lead(Id,Name,Company,State,Website,Phone,Owner.Name LIMIT 20), "
+            "Contact(Id,Name,MailingState,Phone,Owner.Name,Account.Id,Account.Name LIMIT 20)"
+        )
+        body = _readonly_get("search", {"q": sosl}, token, instance_url)
+        for record in body.get("searchRecords") or []:
+            records[str(record.get("Id") or "")] = record
+    return [record for record_id, record in records.items() if record_id]
 
 
 def _query_opportunities(account_id: str, token: str,
@@ -246,6 +266,9 @@ def lookup(entity: str, domain: str = "", phone: str = "", state: str = "",
     """
     say = on_progress or _NOOP
     say("Checking Salesforce")
+    attempted_terms = search_terms(entity)
+    connected_host = urlparse(
+        os.environ.get("SALESFORCE_MY_DOMAIN_URL", "")).hostname or ""
     try:
         token, instance_url = _auth()
         account_records = _query_accounts(entity, token, instance_url)
@@ -253,6 +276,7 @@ def lookup(entity: str, domain: str = "", phone: str = "", state: str = "",
         return SFResult(
             status=SFResultStatus.UNAVAILABLE,
             error=f"Salesforce account lookup failed ({type(exc).__name__})",
+            attempted_terms=attempted_terms, connected_host=connected_host,
         )
 
     matches: list[SFMatch] = []
@@ -349,4 +373,6 @@ def lookup(entity: str, domain: str = "", phone: str = "", state: str = "",
         status = SFResultStatus.NO_MATCH
     if matches:
         say(f"Found {len(matches)} in Salesforce")
-    return SFResult(status=status, matches=matches)
+    return SFResult(
+        status=status, matches=matches, attempted_terms=attempted_terms,
+        connected_host=connected_host)

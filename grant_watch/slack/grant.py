@@ -257,6 +257,9 @@ def create_app() -> App:
                     delivered = _handle_drip_thread(
                         conn, post, event, say, client, workspace=workspace)
                 else:
+                    db.register_conversation_thread(
+                        conn, workspace, str(event["channel"]),
+                        str(thread_ts or event["ts"]), str(event["user"]))
                     delivered = _converse_general(
                         text, client, event["channel"],
                         event.get("thread_ts") or event["ts"],
@@ -295,7 +298,9 @@ def create_app() -> App:
         workspace = _workspace_id(body, event)
         conn = db.connect()
         post = db.find_post_by_ts(conn, event["channel"], thread_ts)
-        if post is None:
+        general_thread = db.is_conversation_thread(
+            conn, workspace, str(event["channel"]), str(thread_ts))
+        if post is None and not general_thread:
             return
         if not db.claim_slack_event(
                 conn, event_id, workspace, str(event["channel"]),
@@ -304,8 +309,15 @@ def create_app() -> App:
         try:
             delivered = True
             with _thread_lock(thread_key):
-                delivered = _handle_drip_thread(
-                    conn, post, event, say, client, workspace=workspace)
+                if post is not None:
+                    delivered = _handle_drip_thread(
+                        conn, post, event, say, client, workspace=workspace)
+                else:
+                    db.touch_conversation_thread(
+                        conn, workspace, str(event["channel"]), str(thread_ts))
+                    delivered = _converse_general(
+                        text.strip(), client, str(event["channel"]), str(thread_ts),
+                        user=str(event["user"]), workspace=workspace)
         except Exception as exc:
             db.finish_slack_event(conn, event_id,
                                   error=f"{type(exc).__name__}: {str(exc)[:300]}",
@@ -420,13 +432,9 @@ def _handle_drip_thread(conn: sqlite3.Connection, post: sqlite3.Row,
     pending_actions = out.get("pending_crm_actions", [])
 
     if intent == "draft_email" and row is not None:
-        reply = _request_outreach(conn, row, user, status, event["channel"], post["ts"])
-    elif intent == "claim" and row is not None:
-        if db.claim_lead(conn, int(row["id"]), user):
-            db.record_engagement(conn, int(post["id"]), user, "claim")
-            reply = f"It's yours, <@{user}>. {reply}" if reply else f"It's yours, <@{user}>."
-        elif row["assigned_to"] and row["assigned_to"] != user:
-            reply = f"Already claimed by <@{row['assigned_to']}> — worth a quick word with them first."
+        reply = _request_outreach(
+            conn, row, user, status, event["channel"], post["ts"],
+            str(event.get("ts") or event.get("event_ts") or ""))
     elif intent == "snooze" and row is not None:
         db.set_lead_status(conn, int(row["id"]), "snoozed")
         db.record_outcome(
@@ -446,7 +454,8 @@ def _handle_drip_thread(conn: sqlite3.Connection, post: sqlite3.Row,
 
 
 def _request_outreach(conn: sqlite3.Connection, row: sqlite3.Row, user: str,
-                      status: _Status, channel: str, thread_ts: str) -> str:
+                      status: _Status, channel: str, thread_ts: str,
+                      request_token: str) -> str:
     """The draft_email action: verified contact (enriching on the spot if needed) ->
     outreach-request.v1 brief -> Persequor. Every branch replies truthfully; the
     interim copyable draft remains the fallback while Persequor's endpoint is dark.
@@ -470,7 +479,7 @@ def _request_outreach(conn: sqlite3.Connection, row: sqlite3.Row, user: str,
         contact = contacts[0] if contacts else None
 
     request_id = persequor_client.request_id_for(
-        row, user, channel, thread_ts)
+        row, user, channel, thread_ts, request_token)
     brief = persequor_client.build_brief(
         row, contact, user, send_as, slack_channel=channel,
         slack_thread_ts=thread_ts, request_id=request_id)
@@ -527,6 +536,8 @@ def _converse_general(text: str, client: WebClient, channel: str,
     status.start()
     try:
         out = conversation.respond(text, None, on_progress=status.update,
+                                   thread_context=_thread_history(
+                                       client, channel, thread_ts) if thread_ts else None,
                                    requester_slack=user, workspace=workspace,
                                    channel=channel, thread_ts=thread_ts or "")
         artifacts = out.get("files", [])

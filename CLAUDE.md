@@ -135,9 +135,9 @@ affect Chase's other projects.
 - **Post-launch fixes (same day, `verified`):** seed-vs-live duplicate reconciliation (75 superseded
   CSV rows retired; expiring bucket 34→17) and the proactive quality gate (`scoring.lead_score` —
   freshness × dollars × program camera-fit; the highest-ranked lead wins, watch never surfaces).
-- **In design (do not build yet):** multi-rep workflow (claim/ownership, territory routing), the
-  Grant↔Persequor outreach handoff (awaiting `persequor_integration_response.md` from the
-  `~/monarch_followup_agent` project), and Salesforce cross-referencing. Chase wants the complete
-  workflow agreed before implementation.
+- **Removed from product:** claim/ownership/dibs workflow. Rep interest now leads to Salesforce
+  lookup, contact research, or a Persequor draft. Territory routing remains future design.
+- **Implemented but still gated:** Grant↔Persequor draft intake and Salesforce cross-referencing;
+  Salesforce Campaign writes stay disabled until the sandbox workflow is explicitly approved.
 - Next: Phase 2 (contact enrichment — Firecrawl + Claude extraction, not_found never fabricated),
   then cron on the droplet (Phase 4 tenant).
