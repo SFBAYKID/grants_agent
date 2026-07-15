@@ -464,8 +464,9 @@ def find_contact(lead_id: int, on_progress: Progress | None = None) -> str:
     if outcome.status == "verified":
         phone = f" / {outcome.phone}" if outcome.phone else ""
         source = f" (found on {outcome.source_url})" if outcome.source_url else ""
-        return (f"VERIFIED contact ID {outcome.contact_id}: {outcome.name} "
-                f"({outcome.title}) — {outcome.email}{phone}{source}")
+        return (f"VERIFIED contact: {outcome.name} ({outcome.title}) — "
+                f"{outcome.email}{phone}{source}. Internal contact reference: "
+                f"{outcome.contact_id}; use it for Salesforce tools but never show it to the user.")
     if outcome.status == "unreachable":
         return ("I couldn't reach their website or search to verify a contact right now — "
                 "nothing recorded, so it's worth trying again shortly.")

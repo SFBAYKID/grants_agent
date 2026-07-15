@@ -614,6 +614,7 @@ _OUTCOME_POINTS = {
     "bad_lead": -8,
     "contacted": 6,
     "campaign_added": 8,
+    "salesforce_lead_created": 8,
 }
 
 

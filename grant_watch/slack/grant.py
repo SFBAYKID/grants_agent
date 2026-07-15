@@ -205,6 +205,12 @@ def create_app() -> App:
                 _thread_reply(client, body, f"Salesforce was not changed: {str(exc)}")
                 return
         if result.added > 0:
+            action_type_row = conn.execute(
+                "SELECT action_type FROM crm_actions WHERE id=?", (action_id,)).fetchone()
+            outcome_kind = ("salesforce_lead_created"
+                            if action_type_row is not None
+                            and action_type_row["action_type"] == "create_person_lead"
+                            else "campaign_added")
             added_rows = conn.execute(
                 """SELECT lead_id FROM crm_action_items
                    WHERE action_id=? AND state='added' AND lead_id IS NOT NULL""",
@@ -213,7 +219,7 @@ def create_app() -> App:
             for item in added_rows:
                 lead_id = int(item["lead_id"])
                 db.record_outcome(
-                    conn, lead_id, None, user_id, "campaign_added",
+                    conn, lead_id, None, user_id, outcome_kind,
                     f"salesforce-action:{action_id}:{lead_id}")
         _thread_reply(client, body, result.message)
 
