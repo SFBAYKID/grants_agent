@@ -175,6 +175,11 @@ def lead_enrichment_writer_enabled() -> bool:
     return os.environ.get("SALESFORCE_LEAD_ENRICHMENT_UPDATES_ENABLED", "0") == "1"
 
 
+def lead_audit_writer_enabled() -> bool:
+    """Require a separate gate for visible Grant Notes and administrative Tasks."""
+    return os.environ.get("SALESFORCE_GRANT_AUDIT_RECORDS_ENABLED", "0") == "1"
+
+
 def prepare_opportunity_creation(
         conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
         workspace: str, channel: str, thread_ts: str, requester: str,
@@ -214,6 +219,17 @@ def prepare_lead_enrichment(
 
     return records.prepare_lead_enrichment(
         conn, gateway, workspace, channel, thread_ts, requester, contact_id, lead_link)
+
+
+def prepare_lead_audit_repair(
+        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
+        workspace: str, channel: str, thread_ts: str, requester: str,
+        lead_link: str) -> PreparedAction:
+    """Delegate one exact Lead's missing audit-trail repair preview."""
+    from . import salesforce_record_actions as records
+
+    return records.prepare_lead_audit_repair(
+        conn, gateway, workspace, channel, thread_ts, requester, lead_link)
 
 
 def _validate_context(workspace: str, channel: str, thread_ts: str,
@@ -613,6 +629,14 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
                        error="Lead enrichment updates feature flag disabled")
         return ActionExecution(CampaignActionState.FAILED,
                                "Salesforce Lead enrichment is disabled; nothing changed.")
+    if (row["action_type"] in {
+            "create_person_lead", "enrich_existing_lead", "repair_lead_audit"}
+            and not lead_audit_writer_enabled()):
+        _finish_action(conn, action_id, CampaignActionState.FAILED,
+                       error="Grant Salesforce audit records feature flag disabled")
+        return ActionExecution(
+            CampaignActionState.FAILED,
+            "Salesforce Notes and Activities are disabled; nothing was submitted.")
     try:
         if row["action_type"] == "create_campaign":
             return _confirm_campaign_create(conn, gateway, row)
@@ -627,6 +651,9 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
         if row["action_type"] == "enrich_existing_lead":
             from . import salesforce_record_actions as records
             return records.confirm_lead_enrichment(conn, gateway, row)
+        if row["action_type"] == "repair_lead_audit":
+            from . import salesforce_record_actions as records
+            return records.confirm_lead_audit_repair(conn, gateway, row)
         raise ValueError("unknown Salesforce action type")
     except requests.Timeout as exc:
         _finish_action(conn, action_id, CampaignActionState.UNKNOWN,

@@ -133,6 +133,22 @@ def duplicate_person(email: str, company: str, state: str) -> list[salesforce.SF
     return result.matches
 
 
+def _audit_task_description(action: str, verb: str, fields: list[str],
+                            original_time: str = "") -> str:
+    """Describe one CRM API action honestly without implying customer outreach."""
+    field_text = ", ".join(sorted(fields)) or "audit records only"
+    timing = f" Original Lead update completed at {original_time}." if original_time else ""
+    return (
+        f"Grant {verb} these Salesforce Lead fields: {field_text}.{timing} "
+        f"No customer outreach was performed. Action {action}."
+    )
+
+
+def _activity_date() -> str:
+    """Return today's local calendar date for the Salesforce administrative Task."""
+    return datetime.now().astimezone().date().isoformat()
+
+
 def prepare_person_lead_creation(
         conn: sqlite3.Connection, workspace: str, channel: str, thread_ts: str,
         requester: str, contact_id: int) -> workflow.PreparedAction:
@@ -199,7 +215,9 @@ def prepare_person_lead_creation(
         ("LinkedIn", organization.linkedin_url),
     ]
     preview += "".join(f"\n• {label}: {value}" for label, value in enriched if value)
-    preview += "\n• Add a Salesforce Note with Grant’s verified research sources"
+    preview += "\n• Add a visible Salesforce Note with Grant’s verified research sources"
+    preview += "\n• Add a system Activity describing exactly what Grant created"
+    preview += "\n• The Activity will say that no customer outreach occurred"
     return workflow.PreparedAction(stored_id, nonce, preview, expires)
 
 
@@ -314,7 +332,9 @@ def prepare_lead_enrichment(
              if key != "Description"]
     preview = "Fill these blank Salesforce Lead fields?\n" + "\n".join(lines)
     preview += "\n• Append the verified Grant research sources to Description"
-    preview += "\n• Add the same verified research summary as a Salesforce Note"
+    preview += "\n• Add the same verified research summary as a visible Salesforce Note"
+    preview += "\n• Add a system Activity describing exactly which fields Grant updated"
+    preview += "\n• The Activity will say that no customer outreach occurred"
     return workflow.PreparedAction(stored_id, nonce, preview, expires)
 
 
@@ -346,14 +366,17 @@ def confirm_person_lead(conn: sqlite3.Connection, gateway: SalesforceCampaignGat
                if item.record_id == result.record_id]
     if len(created) != 1 or created[0].company != company:
         raise ValueError("created Lead could not be verified by exact readback")
-    note_title = f"Grant research — {str(row['id'])[:8]}"
-    if not gateway.note_exists(result.record_id, note_title):
-        note = gateway.create_note(
-            result.record_id, note_title, str(payload.get("Description") or ""))
-        if not note.success or not note.record_id:
-            raise ValueError(note.error or "Salesforce returned no Note ID")
-        if not gateway.note_exists(result.record_id, note_title):
-            raise ValueError("created Salesforce Note could not be verified")
+    action_id = str(row["id"])
+    note_body = str(payload.get("Description") or "")
+    task_body = _audit_task_description(
+        action_id, "created and populated", list(payload))
+    audit = gateway.create_lead_audit_bundle(
+        result.record_id, action_id, note_body, task_body, _activity_date())
+    if not audit.success:
+        raise ValueError(audit.error or "Salesforce returned no audit record IDs")
+    if not gateway.verify_lead_audit_bundle(
+            result.record_id, action_id, note_body, task_body, audit):
+        raise ValueError("created Salesforce Lead audit trail could not be verified")
     with conn:
         conn.execute(
             """UPDATE crm_action_items SET state='lead_created',salesforce_id=?
@@ -423,14 +446,16 @@ def confirm_lead_enrichment(
                 raise ValueError("updated Lead enrollment did not match the preview")
         elif str(actual or "") != str(value):
             raise ValueError(f"updated Lead field {key} did not match the preview")
-    note_title = f"Grant research — {str(row['id'])[:8]}"
-    if not gateway.note_exists(lead_id, note_title):
-        note = gateway.create_note(
-            lead_id, note_title, str(delta.get("Description") or ""))
-        if not note.success or not note.record_id:
-            raise ValueError(note.error or "Salesforce returned no Note ID")
-        if not gateway.note_exists(lead_id, note_title):
-            raise ValueError("created Salesforce Note could not be verified")
+    action_id = str(row["id"])
+    note_body = str(delta.get("Description") or "")
+    task_body = _audit_task_description(action_id, "updated", list(delta))
+    audit = gateway.create_lead_audit_bundle(
+        lead_id, action_id, note_body, task_body, _activity_date())
+    if not audit.success:
+        raise ValueError(audit.error or "Salesforce returned no audit record IDs")
+    if not gateway.verify_lead_audit_bundle(
+            lead_id, action_id, note_body, task_body, audit):
+        raise ValueError("created Salesforce Lead audit trail could not be verified")
     with conn:
         conn.execute(
             """UPDATE crm_action_items SET state='lead_enriched',salesforce_id=?
@@ -440,3 +465,99 @@ def confirm_lead_enrichment(
     return workflow.ActionExecution(
         workflow.CampaignActionState.COMPLETE,
         f"Updated the verified details in Salesforce: {after.link}", added=1)
+
+
+def prepare_lead_audit_repair(
+        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
+        workspace: str, channel: str, thread_ts: str, requester: str,
+        lead_link: str) -> workflow.PreparedAction:
+    """Prepare missing visible Note/Activity records for one completed Grant update."""
+    workflow._validate_context(workspace, channel, thread_ts, requester)
+    _sobject, lead_id = parse_record_link(lead_link, {"Lead"})
+    prior = conn.execute(
+        """SELECT a.*,i.salesforce_id
+             FROM crm_actions a JOIN crm_action_items i ON i.action_id=a.id
+            WHERE a.action_type='enrich_existing_lead' AND a.state='complete'
+              AND i.state='lead_enriched' AND i.salesforce_id=?
+              AND a.workspace=? AND a.channel=? AND a.thread_ts=? AND a.requested_by=?
+            ORDER BY a.committed_at DESC LIMIT 1""",
+        (lead_id, workspace, channel, thread_ts, requester)).fetchone()
+    if prior is None:
+        raise ValueError("no completed Grant Lead update was found in this thread")
+    source_action = str(prior["id"])
+    existing = gateway.lead_audit_snapshot(lead_id, source_action)
+    if existing.complete:
+        raise ValueError("the visible Salesforce Note and Activity already exist")
+    if existing.partial:
+        raise ValueError("the Salesforce audit trail is partial and requires reconciliation")
+    payload = json.loads(str(prior["payload_json"]))
+    snapshot = gateway.lead_enrichment_snapshot(lead_id)
+    if (snapshot.company.casefold() != str(payload["company"]).casefold()
+            or snapshot.email.casefold() != str(payload["email"]).casefold()):
+        raise ValueError("Salesforce Lead no longer matches the completed Grant update")
+    delta = dict(payload["delta"])
+    note_body = str(delta.get("Description") or "")
+    fields = [key for key in delta if key != "Description"]
+    task_body = _audit_task_description(
+        source_action, "updated", fields, str(prior["committed_at"] or ""))
+    action_id = str(uuid.uuid4())
+    plan = workflow.MemberPlan(
+        None, f"lead:{lead_id}", snapshot.company, str(snapshot.values.get("State") or ""),
+        "repair_lead_audit", note=json.dumps({"source_action_id": source_action}))
+    stored_id, nonce, expires = workflow._store_action(
+        conn, "repair_lead_audit", workspace, channel, thread_ts, requester,
+        {"lead_id": lead_id, "source_action_id": source_action,
+         "company": snapshot.company, "email": snapshot.email,
+         "note_body": note_body, "task_description": task_body,
+         "activity_date": _activity_date()}, plans=[plan], action_id=action_id)
+    field_text = ", ".join(sorted(fields)) or "the verified research details"
+    preview = (
+        f"Add the missing Salesforce audit trail for {snapshot.company}?\n"
+        "• Add one visible Salesforce Note with Grant’s verified sources\n"
+        f"• Add one completed system Activity documenting: {field_text}\n"
+        "• The Activity will explicitly say no customer outreach occurred\n"
+        "No Lead fields, Campaigns, Campaign Members, or Opportunities will change."
+    )
+    return workflow.PreparedAction(stored_id, nonce, preview, expires)
+
+
+def confirm_lead_audit_repair(
+        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
+        row: sqlite3.Row) -> workflow.ActionExecution:
+    """Create and verify only the missing Enhanced Note/link and system Task."""
+    payload = json.loads(str(row["payload_json"]))
+    lead_id = validate_record_id(str(payload["lead_id"]), "Lead")
+    source_action = str(payload["source_action_id"])
+    snapshot = gateway.lead_enrichment_snapshot(lead_id)
+    if (snapshot.company.casefold() != str(payload["company"]).casefold()
+            or snapshot.email.casefold() != str(payload["email"]).casefold()):
+        raise ValueError("Salesforce Lead identity changed after the preview")
+    existing = gateway.lead_audit_snapshot(lead_id, source_action)
+    if existing.complete:
+        workflow._finish_action(
+            conn, str(row["id"]), workflow.CampaignActionState.COMPLETE)
+        return workflow.ActionExecution(
+            workflow.CampaignActionState.COMPLETE,
+            f"The Salesforce Note and Activity are already present: {snapshot.link}",
+            already_present=1)
+    if existing.partial:
+        raise ValueError("the Salesforce audit trail is partial and requires reconciliation")
+    workflow._mark_external_write_started(conn, str(row["id"]))
+    note_body = str(payload["note_body"])
+    task_body = str(payload["task_description"])
+    audit = gateway.create_lead_audit_bundle(
+        lead_id, source_action, note_body, task_body, str(payload["activity_date"]))
+    if not audit.success:
+        raise ValueError(audit.error or "Salesforce returned no audit record IDs")
+    if not gateway.verify_lead_audit_bundle(
+            lead_id, source_action, note_body, task_body, audit):
+        raise ValueError("Salesforce Lead audit trail could not be verified")
+    with conn:
+        conn.execute(
+            """UPDATE crm_action_items SET state='audit_repaired',salesforce_id=?
+               WHERE action_id=?""", (lead_id, row["id"]))
+    workflow._finish_action(
+        conn, str(row["id"]), workflow.CampaignActionState.COMPLETE)
+    return workflow.ActionExecution(
+        workflow.CampaignActionState.COMPLETE,
+        f"Added the Salesforce Note and Activity: {snapshot.link}", added=1)

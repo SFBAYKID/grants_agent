@@ -278,6 +278,18 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "salesforce_lead_audit_preview",
+        "description": "Prepare, but do not execute, a repair preview that adds the "
+                       "missing visible Salesforce Note and administrative Activity "
+                       "for one exact Lead previously updated by Grant in this thread. "
+                       "It does not update Lead fields or create Campaigns/Opportunities.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"lead_link": {"type": "string"}},
+            "required": ["lead_link"],
+        },
+    },
+    {
         "name": "salesforce_campaign_create_preview",
         "description": "Prepare, but DO NOT execute, an immutable preview for creating "
                        "a new Salesforce Campaign. Use only after the user explicitly "
@@ -641,6 +653,23 @@ def salesforce_lead_enrichment_preview(
                               action.preview, action.expires_at)
 
 
+def salesforce_lead_audit_preview(
+        lead_link: str, requester_slack: str, workspace: str,
+        channel: str, thread_ts: str) -> str:
+    """Prepare one exact Lead's missing visible Note and Activity audit records."""
+    from ..enrich import salesforce_campaigns as crm
+
+    try:
+        action = crm.prepare_lead_audit_repair(
+            db.connect(), crm.SalesforceCampaignGateway(), workspace, channel,
+            thread_ts, requester_slack, lead_link)
+    except (ValueError, PermissionError, KeyError, ConnectionError,
+            requests.RequestException) as exc:
+        return f"ERROR: Lead audit preview failed ({type(exc).__name__}): {str(exc)[:180]}"
+    return _crm_action_result(action.action_id, action.nonce,
+                              action.preview, action.expires_at)
+
+
 def salesforce_opportunity_create_preview(
         args: dict[str, Any], requester_slack: str, workspace: str,
         channel: str, thread_ts: str) -> str:
@@ -752,6 +781,11 @@ def run_tool(name: str, args: dict[str, Any],
         return salesforce_lead_enrichment_preview(
             int(args.get("contact_id", 0)), str(args.get("lead_link", "")),
             requester_slack, workspace, channel, thread_ts), None
+    if name == "salesforce_lead_audit_preview":
+        p("Preparing Salesforce audit trail")
+        return salesforce_lead_audit_preview(
+            str(args.get("lead_link", "")), requester_slack, workspace,
+            channel, thread_ts), None
     if name == "salesforce_opportunity_create_preview":
         p("Preparing Salesforce Opportunity")
         return salesforce_opportunity_create_preview(

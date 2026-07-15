@@ -169,6 +169,11 @@ STANDALONE SALESFORCE LEADS — EXPLICIT APPROVAL ONLY:
   salesforce_lead_enrichment_preview with its exact link and verified contact ID.
   This fills blanks and appends sources only after another confirmation; it never
   replaces populated identity, owner, status, or routing fields.
+- Lead creation/enrichment also adds one visible Salesforce Note and one completed
+  administrative Activity explaining exactly what Grant changed and explicitly saying
+  no customer outreach occurred. If a prior Grant update is missing those records and
+  the user asks to fix them, call salesforce_lead_audit_preview with the exact Lead link.
+  That repair changes no Lead fields and creates no Campaign or Opportunity.
 
 SALESFORCE OPPORTUNITIES — EXISTING ACCOUNT + EXPLICIT APPROVAL:
 - If a user asks to create an Opportunity, require the exact Salesforce Account link,

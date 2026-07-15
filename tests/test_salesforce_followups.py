@@ -105,6 +105,19 @@ def test_activity_signals_suppress(monkeypatch: Any, tmp_path: Path) -> None:
     assert (result.status, result.evidence_kind) == ("activity", "task")
 
 
+def test_grant_admin_task_never_counts_as_sales_followup(
+        monkeypatch: Any, tmp_path: Path) -> None:
+    """Grant's own CRM audit Task cannot suppress a real follow-up reminder."""
+    _, candidate = _eligible(tmp_path)
+    _reader(
+        monkeypatch, last_activity="2026-07-11",
+        tasks=[{"Id": "00TGRANT", "Subject": "Grant system: CRM research updated",
+                "IsClosed": True, "CompletedDateTime": "2026-07-11T17:00:00Z"}])
+    result = followups.inspect_activity(
+        candidate, datetime(2026, 7, 16, tzinfo=timezone.utc))
+    assert result.status == "none"
+
+
 def test_open_task_future_event_and_old_task_do_not_suppress(monkeypatch: Any,
                                                               tmp_path: Path) -> None:
     """Only completed/past activity after membership counts."""

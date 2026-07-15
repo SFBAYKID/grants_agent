@@ -1,11 +1,13 @@
-"""Least-privilege Salesforce HTTP gateway for Campaign create operations.
+"""Least-privilege Salesforce HTTP gateway for approved CRM actions.
 
-This module owns the separate writer credentials and exposes GET plus an explicit
-create allowlist. It intentionally contains no update or delete request primitive.
+This module owns the separate writer credentials and exposes reads, exact allowlisted
+creates, and one exact-ID Lead enrichment PATCH. It intentionally exposes no delete,
+merge, conversion, arbitrary-object update, or collection update primitive.
 """
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import time
@@ -19,7 +21,7 @@ API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
 MAX_ACTION_ORGANIZATIONS = 200
 MEMBER_STATUS = "Identified by Grant"
 _ALLOWED_CREATE_OBJECTS = {
-    "Campaign", "CampaignMemberStatus", "Lead", "CampaignMember", "Opportunity", "Note"}
+    "Campaign", "CampaignMemberStatus", "Lead", "CampaignMember", "Opportunity"}
 _ALLOWED_BULK_CREATE_OBJECTS = {"Lead", "CampaignMember"}
 _LEAD_ENRICHMENT_FIELDS = {
     "Website", "Phone", "Street", "City", "State", "PostalCode", "Country",
@@ -32,6 +34,9 @@ _ID_PREFIXES = {
     "Account": "001",
     "Opportunity": "006",
     "User": "005",
+    "ContentNote": "069",
+    "ContentDocumentLink": "06A",
+    "Task": "00T",
 }
 
 
@@ -82,6 +87,36 @@ class LeadEnrichmentSnapshot:
     system_modstamp: str
     values: dict[str, str | float | None]
     link: str
+
+
+@dataclass(frozen=True)
+class LeadAuditSnapshot:
+    """Exact Enhanced Note/link and administrative Task state for one Grant action."""
+
+    note_id: str = ""
+    link_id: str = ""
+    task_id: str = ""
+
+    @property
+    def complete(self) -> bool:
+        """Return whether all three exact audit artifacts exist."""
+        return bool(self.note_id and self.link_id and self.task_id)
+
+    @property
+    def partial(self) -> bool:
+        """Return whether an incomplete subset exists and needs reconciliation."""
+        return bool(self.note_id or self.link_id or self.task_id) and not self.complete
+
+
+@dataclass(frozen=True)
+class LeadAuditResult:
+    """IDs returned by one fixed all-or-none audit bundle."""
+
+    success: bool
+    note_id: str = ""
+    link_id: str = ""
+    task_id: str = ""
+    error: str = ""
 
 
 
@@ -340,21 +375,148 @@ class SalesforceCampaignGateway:
             raise requests.HTTPError(
                 f"Lead enrichment HTTP {response.status_code}: {response.text[:200]}")
 
-    def note_exists(self, lead_id: str, title: str) -> bool:
-        """Return whether the exact Grant research Note already exists on one Lead."""
+    def lead_audit_snapshot(self, lead_id: str, action_id: str) -> LeadAuditSnapshot:
+        """Read the exact Enhanced Note/link and system Task for one Grant action."""
         validate_record_id(lead_id, "Lead")
-        literal = _soql_literal(title)
-        body = self._get("query", {"q": (
-            f"SELECT Id FROM Note WHERE ParentId='{lead_id}' AND Title='{literal}' LIMIT 2")})
-        return bool(body.get("records") or [])
+        marker = action_id.strip()
+        if not re.fullmatch(r"[0-9a-f-]{36}", marker):
+            raise ValueError("Grant audit action ID is invalid")
+        title = _soql_literal(f"Grant research — {marker}")
+        links = self._get("query", {"q": (
+            "SELECT Id,ContentDocumentId,LinkedEntityId,ContentDocument.Title "
+            "FROM ContentDocumentLink "
+            f"WHERE LinkedEntityId='{lead_id}' AND ContentDocument.Title='{title}' LIMIT 2"
+        )}).get("records") or []
+        if len(links) > 1:
+            raise ValueError("multiple Salesforce research Notes share one action marker")
+        link_id = str(links[0].get("Id") or "") if links else ""
+        note_id = str(links[0].get("ContentDocumentId") or "") if links else ""
+        task_subject = _soql_literal("Grant system: CRM research updated")
+        task_marker = _soql_literal(f"%Action {marker}%")
+        tasks = self._get("query", {"q": (
+            "SELECT Id FROM Task "
+            f"WHERE WhoId='{lead_id}' AND Subject='{task_subject}' "
+            f"AND Description LIKE '{task_marker}' LIMIT 2"
+        )}).get("records") or []
+        if len(tasks) > 1:
+            raise ValueError("multiple Salesforce Tasks share one Grant action marker")
+        task_id = str(tasks[0].get("Id") or "") if tasks else ""
+        return LeadAuditSnapshot(note_id, link_id, task_id)
 
-    def create_note(self, lead_id: str, title: str, body: str) -> CreateResult:
-        """Create one bounded legacy Note attached only to an exact Lead."""
+    def create_lead_audit_bundle(
+            self, lead_id: str, action_id: str, note_body: str,
+            task_description: str, activity_date: str) -> LeadAuditResult:
+        """Atomically create one Enhanced Note/link and one honest administrative Task."""
         validate_record_id(lead_id, "Lead")
-        if not title.strip() or len(title) > 80 or not body.strip() or len(body) > 32_000:
+        marker = action_id.strip()
+        title = f"Grant research — {marker}"
+        clean_note = note_body.strip()
+        clean_task = task_description.strip()
+        if not re.fullmatch(r"[0-9a-f-]{36}", marker):
+            raise ValueError("Grant audit action ID is invalid")
+        if len(title) > 255 or not clean_note or len(clean_note) > 32_000:
             raise ValueError("Salesforce research Note is empty or too long")
-        return self._create_one("Note", {
-            "ParentId": lead_id, "Title": title.strip(), "Body": body.strip()})
+        if not clean_task or len(clean_task) > 32_000:
+            raise ValueError("Salesforce audit Task description is empty or too long")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", activity_date):
+            raise ValueError("Salesforce audit Task date is invalid")
+        existing = self.lead_audit_snapshot(lead_id, marker)
+        if existing.complete:
+            return LeadAuditResult(
+                True, existing.note_id, existing.link_id, existing.task_id)
+        if existing.partial:
+            raise ValueError("Salesforce audit trail is partial and requires reconciliation")
+        token, instance = self._auth()
+        encoded = base64.b64encode(clean_note.encode("utf-8")).decode("ascii")
+        request_body = {
+            "allOrNone": True,
+            "compositeRequest": [
+                {
+                    "method": "POST",
+                    "url": f"/services/data/{API_VERSION}/sobjects/ContentNote",
+                    "referenceId": "grantResearchNote",
+                    "body": {"Title": title, "Content": encoded},
+                },
+                {
+                    "method": "POST",
+                    "url": f"/services/data/{API_VERSION}/sobjects/ContentDocumentLink",
+                    "referenceId": "grantResearchLink",
+                    "body": {
+                        "ContentDocumentId": "@{grantResearchNote.id}",
+                        "LinkedEntityId": lead_id,
+                        "ShareType": "V",
+                        "Visibility": "InternalUsers",
+                    },
+                },
+                {
+                    "method": "POST",
+                    "url": f"/services/data/{API_VERSION}/sobjects/Task",
+                    "referenceId": "grantAuditTask",
+                    "body": {
+                        "WhoId": lead_id,
+                        "Subject": "Grant system: CRM research updated",
+                        "ActivityDate": activity_date,
+                        "Status": "Completed",
+                        "Priority": "Normal",
+                        "Description": clean_task,
+                    },
+                },
+            ],
+        }
+        response = requests.post(
+            f"{instance}/services/data/{API_VERSION}/composite",
+            json=request_body, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        if response.status_code not in (200, 201):
+            return LeadAuditResult(
+                False, error=f"HTTP {response.status_code}: {response.text[:200]}")
+        payload: dict[str, Any] = response.json()  # Salesforce composite JSON is dynamic
+        by_ref = {str(item.get("referenceId") or ""): item
+                  for item in payload.get("compositeResponse") or []}
+        expected = ("grantResearchNote", "grantResearchLink", "grantAuditTask")
+        if any(int(by_ref.get(ref, {}).get("httpStatusCode") or 0) not in (200, 201)
+               for ref in expected):
+            return LeadAuditResult(False, error="Salesforce audit transaction rolled back")
+        note_id = str((by_ref["grantResearchNote"].get("body") or {}).get("id") or "")
+        link_id = str((by_ref["grantResearchLink"].get("body") or {}).get("id") or "")
+        task_id = str((by_ref["grantAuditTask"].get("body") or {}).get("id") or "")
+        validate_record_id(note_id, "ContentNote")
+        validate_record_id(link_id, "ContentDocumentLink")
+        validate_record_id(task_id, "Task")
+        return LeadAuditResult(True, note_id, link_id, task_id)
+
+    def verify_lead_audit_bundle(
+            self, lead_id: str, action_id: str, note_body: str,
+            task_description: str, result: LeadAuditResult) -> bool:
+        """Read back every exact audit artifact and compare its immutable contents."""
+        validate_record_id(lead_id, "Lead")
+        note_id = validate_record_id(result.note_id, "ContentNote")
+        link_id = validate_record_id(result.link_id, "ContentDocumentLink")
+        task_id = validate_record_id(result.task_id, "Task")
+        note = self._get(
+            f"sobjects/ContentNote/{note_id}", {"fields": "Id,Title,Content"})
+        link = self._get(
+            f"sobjects/ContentDocumentLink/{link_id}",
+            {"fields": "Id,ContentDocumentId,LinkedEntityId,ShareType,Visibility"})
+        task = self._get(
+            f"sobjects/Task/{task_id}",
+            {"fields": "Id,WhoId,Subject,Status,Description"})
+        encoded = str(note.get("Content") or "")
+        try:
+            decoded = base64.b64decode(encoded).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return False
+        return (
+            str(note.get("Title") or "") == f"Grant research — {action_id}"
+            and decoded == note_body.strip()
+            and str(link.get("ContentDocumentId") or "") == note_id
+            and str(link.get("LinkedEntityId") or "") == lead_id
+            and str(link.get("ShareType") or "") == "V"
+            and str(link.get("Visibility") or "") == "InternalUsers"
+            and str(task.get("WhoId") or "") == lead_id
+            and str(task.get("Subject") or "") == "Grant system: CRM research updated"
+            and str(task.get("Status") or "") == "Completed"
+            and str(task.get("Description") or "") == task_description.strip()
+        )
 
     def find_people(self, entity_name: str, state: str) -> list[SalesforceRecordRef]:
         """Find exact-company Leads and Account Contacts; never auto-select fuzzy rows."""

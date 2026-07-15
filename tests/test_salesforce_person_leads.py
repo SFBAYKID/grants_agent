@@ -23,23 +23,35 @@ class FakeGateway:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
-        self.notes: set[str] = set()
+        self.audit_actions: set[str] = set()
 
     def create_lead(self, _payload: dict[str, object]) -> gateway_mod.CreateResult:
         """Return one deterministic Lead ID."""
         self.calls.append("create_lead")
         return gateway_mod.CreateResult(True, LEAD_ID)
 
-    def note_exists(self, _lead_id: str, title: str) -> bool:
-        """Return whether the fake research Note was created."""
-        return title in self.notes
+    def lead_audit_snapshot(self, _lead_id: str,
+                            action_id: str) -> gateway_mod.LeadAuditSnapshot:
+        """Return a complete fake audit trail only after creation."""
+        if action_id in self.audit_actions:
+            return gateway_mod.LeadAuditSnapshot(
+                "069000000000001", "06A000000000001", "00T000000000001")
+        return gateway_mod.LeadAuditSnapshot()
 
-    def create_note(self, _lead_id: str, title: str,
-                    _body: str) -> gateway_mod.CreateResult:
-        """Create one deterministic research Note."""
-        self.calls.append("create_note")
-        self.notes.add(title)
-        return gateway_mod.CreateResult(True, "002000000000001")
+    def create_lead_audit_bundle(
+            self, _lead_id: str, action_id: str, _note_body: str,
+            _task_description: str, _activity_date: str) -> gateway_mod.LeadAuditResult:
+        """Create one deterministic fake Enhanced Note/link/Task transaction."""
+        self.calls.append("create_audit_bundle")
+        self.audit_actions.add(action_id)
+        return gateway_mod.LeadAuditResult(
+            True, "069000000000001", "06A000000000001", "00T000000000001")
+
+    def verify_lead_audit_bundle(
+            self, _lead_id: str, _action_id: str, _note_body: str,
+            _task_description: str, _result: gateway_mod.LeadAuditResult) -> bool:
+        """Accept the deterministic fake audit readback."""
+        return True
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +59,7 @@ def config(monkeypatch: pytest.MonkeyPatch) -> None:
     """Enable only the explicitly scoped standalone Lead test path."""
     monkeypatch.setenv("GRANT_SALESFORCE_WRITE_CHANNEL_IDS", "CGRANTS")
     monkeypatch.setenv("SALESFORCE_PERSON_LEAD_WRITES_ENABLED", "1")
+    monkeypatch.setenv("SALESFORCE_GRANT_AUDIT_RECORDS_ENABLED", "1")
     monkeypatch.setenv("SALESFORCE_CAMPAIGN_WRITES_ENABLED", "0")
     monkeypatch.setattr(
         record_actions, "fetch_profile",
@@ -111,7 +124,7 @@ def test_confirmation_creates_one_and_reads_back(monkeypatch: pytest.MonkeyPatch
     result = campaigns.confirm_action(
         conn, gateway, action.action_id, action.nonce,
         "TWORK", "CGRANTS", "1.1", "UCHASE")
-    assert result.added == 1 and gateway.calls == ["create_lead", "create_note"]
+    assert result.added == 1 and gateway.calls == ["create_lead", "create_audit_bundle"]
     item = conn.execute("SELECT state,salesforce_id FROM crm_action_items").fetchone()
     assert tuple(item) == ("lead_created", LEAD_ID)
 

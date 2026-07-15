@@ -24,6 +24,7 @@ from .drip import ABSOLUTE_CAP, in_window
 POLICY_VERSION = "v1"
 DEFAULT_GRACE_BUSINESS_DAYS = 3
 BUSINESS_TZ = ZoneInfo("America/Los_Angeles")
+GRANT_SYSTEM_TASK_PREFIX = "Grant system:"
 
 
 @dataclass(frozen=True)
@@ -145,7 +146,7 @@ def inspect_activity(candidate: FollowupCandidate, now: datetime) -> ActivityRes
             f"SELECT Id,LastActivityDate FROM {candidate.target_sobject} "
             f"WHERE Id='{record_id}' LIMIT 1")
         tasks, _ = readonly_soql(
-            "SELECT Id,IsClosed,ActivityDate,CompletedDateTime FROM Task "
+            "SELECT Id,Subject,IsClosed,ActivityDate,CompletedDateTime FROM Task "
             f"WHERE WhoId='{record_id}'")
         events, _ = readonly_soql(
             "SELECT Id,EndDateTime FROM Event "
@@ -156,8 +157,13 @@ def inspect_activity(candidate: FollowupCandidate, now: datetime) -> ActivityRes
         return ActivityResult("unknown", error="record_missing_or_ambiguous")
     if bool(members[0].get("HasResponded")):
         return ActivityResult("activity", "campaign_response", str(members[0].get("Id") or ""))
+    grant_system_activity = False
     for task in tasks:
         happened = _sf_datetime(task, "CompletedDateTime", "ActivityDate")
+        if str(task.get("Subject") or "").startswith(GRANT_SYSTEM_TASK_PREFIX):
+            if bool(task.get("IsClosed")) and happened and happened >= candidate.joined_at:
+                grant_system_activity = True
+            continue
         if bool(task.get("IsClosed")) and happened and happened >= candidate.joined_at:
             return ActivityResult("activity", "task", str(task.get("Id") or ""), happened.isoformat())
     for event in events:
@@ -165,7 +171,8 @@ def inspect_activity(candidate: FollowupCandidate, now: datetime) -> ActivityRes
         if happened and candidate.joined_at <= happened <= now:
             return ActivityResult("activity", "event", str(event.get("Id") or ""), happened.isoformat())
     last_activity = _sf_datetime(targets[0], "LastActivityDate")
-    if last_activity and last_activity.date() >= candidate.joined_at.date():
+    if (not grant_system_activity and last_activity
+            and last_activity.date() >= candidate.joined_at.date()):
         return ActivityResult("activity", "activity_date_only", evidence_at=last_activity.date().isoformat())
     return ActivityResult("none")
 
