@@ -18,9 +18,19 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
    ever set *after* approval.
 4. **Conversation.** Humans can @mention Grant or DM it to ask about a lead, re-post a digest, or check a
    district's status. Grant answers from the database and clearly says when it doesn't know.
-5. **On-demand search.** Reps can filter Grant's indexed database by state, conservative organization
-   type, program, grade, amount, record kind, and explicit date meaning. Inline results report the true
+5. **On-demand search.** A rep @mentions Grant (or talks in a thread) and asks for grants by any
+   criteria. Grant **confirms its understanding first** — restating the full filter set and asking how
+   many results and which format (Excel / Google Sheet / just in Slack) — then searches its indexed
+   database (state, org type, program, grade, amount, record kind, explicit date meaning). Ordering is
+   total (an id tiebreak) so a repeated search returns the same rows. Inline results report the true
    match count; complete Excel/Google exports are all-or-nothing under a declared 5,000-row safety cap.
+   A bare "@Grant" with no ask gets a friendly greeting.
+6. **Contact enrichment (second step).** After the list, Grant *offers* to find the best contact for
+   each org — never automatically, because each lookup scrapes the org's site (~30s). On a yes, it
+   enriches the top N (capped at 10 to stay responsive), adding verified-or-honest contact columns to
+   the summary and the export. A contact is stored only if its email appears verbatim on a fetched page;
+   a genuine miss is `not_found`; a source outage records **nothing** (retryable) — never a false
+   `not_found`.
 
 ## Honesty rules Grant follows
 
@@ -40,9 +50,15 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
   `SLACK_APP_TOKEN` (xapp, `connections:write`), `SLACK_SIGNING_SECRET`, `SLACK_CHANNEL_ID` (all in `.env`).
 - **Code home:** `grant_watch/slack/` — `grant.py` (bot), `digest.py` (message formatting),
   `search.py` (typed source-aware search), and `persequor.py` (handoff). Spreadsheet safety and owned
-  temporary artifacts live in `grant_watch/spreadsheets.py`.
+  temporary artifacts live in `grant_watch/spreadsheets.py`; Google Sheets export is Grant's own
+  capability in `grant_watch/google_sheets.py`.
 - **Talking to @Persequor:** Grant posts an approved-send message that mentions @Persequor with the draft
   and recipient; Persequor already handles the actual email. The approval gate lives on Grant's side.
+- **Google Sheets export (Grant-owned):** email is Persequor's domain; data export is Grant's. Grant
+  creates each export as a Sheet in the "Grant Exports" shared drive using its own service account
+  (`GOOGLE_SA_KEY_PATH`, `GRANT_EXPORTS_DRIVE_ID`), writes rows with `valueInputOption=RAW` so no cell
+  is ever parsed as a formula, shares it with the requesting rep's roster email, and returns the link.
+  Persequor is never in this path. Falls back to a complete Excel workbook if unconfigured or on error.
 
 ## Live Slack app config (provisioned 2026-07-13 — this is the record; the setup manifest was removed)
 
@@ -62,5 +78,12 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 - Slack app and core bot: `verified` live (provisioned, installed, Socket Mode connected).
 - On-demand search and complete Excel fallback: `verified` offline with pytest on 2026-07-14;
   production DM/@mention upload after this fix is `needs-testing` through grants-ops-guardian.
-- Google Sheet handoff contract: `needs-testing`; Persequor's `/api/v1/create-sheet` endpoint may remain
-  unwired, in which case Grant says so and returns the complete Excel artifact instead.
+- Google Sheets export (Grant-owned service account + "Grant Exports" shared drive
+  `0AB7O7rkKxU_jUk9PVA`): `verified` live on 2026-07-14 — end-to-end create → RAW write (formula cells
+  stored inert) → numeric amounts → share with rep → URL returned; offline pytest covers the guards,
+  value coercion, and the create/share path. Falls back to a complete Excel workbook when unconfigured.
+- Confirm-first search UX + two-step contact enrichment: `verified` offline with pytest on 2026-07-14
+  (determinism, outage ≠ not_found honesty, cap disclosure, per-org failure isolation, column parity,
+  greeting, event-dedup, tool dispatch). Live conversational behavior is `needs-testing` in Slack. The
+  design was stress-tested by architectural-critic; enrichment runs inline with a wall-clock budget and
+  an idempotency guard — moving it to a background worker is the recommended scaling follow-up.

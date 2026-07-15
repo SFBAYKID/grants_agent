@@ -8,9 +8,10 @@ from pathlib import Path
 import pytest
 from openpyxl import load_workbook
 
-from grant_watch import db, persequor_client
+from grant_watch import db, google_sheets
 from grant_watch.models import Lead, LeadGrade, RawItem
-from grant_watch.slack.search import MAX_EXPORT_ROWS, search_leads
+from grant_watch.slack import tools
+from grant_watch.slack.search import MAX_ENRICH_ROWS, MAX_EXPORT_ROWS, search_leads
 
 
 def _insert(conn: sqlite3.Connection, source: str, item_id: str, entity: str,
@@ -200,12 +201,12 @@ def test_google_sheet_success_exports_every_match(
 
     def fake_create(_title: str, _columns: list[str], rows: list[list[object]],
                     _requested_by: str, _send_as: str) -> tuple[str, str]:
-        """Capture the complete handoff and return a verified-looking test URL."""
+        """Capture the complete export and return a verified-looking test URL."""
         nonlocal captured_count
         captured_count = len(rows)
         return "created", "https://docs.google.com/spreadsheets/d/test"
 
-    monkeypatch.setattr(persequor_client, "create_google_sheet", fake_create)
+    monkeypatch.setattr(google_sheets, "create_sheet", fake_create)
     text, artifact = search_leads(
         export="google_sheet", requester_slack="U01DPJVURHU",
         db_path=_bulk_db(tmp_path, 2_001))
@@ -219,10 +220,10 @@ def test_google_sheet_failure_falls_back_to_complete_excel(
     """An unwired Google endpoint returns a complete Excel artifact without truncation."""
     def fake_create(_title: str, _columns: list[str], _rows: list[list[object]],
                     _requested_by: str, _send_as: str) -> tuple[str, str]:
-        """Simulate the explicitly unwired Persequor endpoint."""
-        return "unwired", "Google Sheet export is not live"
+        """Simulate an unconfigured/failed export so the Excel fallback is exercised."""
+        return "unconfigured", "Google Sheet export is not live"
 
-    monkeypatch.setattr(persequor_client, "create_google_sheet", fake_create)
+    monkeypatch.setattr(google_sheets, "create_sheet", fake_create)
     text, artifact = search_leads(
         limit=1, export="google_sheet", requester_slack="U01DPJVURHU",
         db_path=_bulk_db(tmp_path, 51))
@@ -230,3 +231,82 @@ def test_google_sheet_failure_falls_back_to_complete_excel(
     assert load_workbook(artifact.path).active.max_row == 52
     assert "complete Excel instead" in text
     artifact.cleanup()
+
+
+# ------------------------------------------------------------ with_contacts enrichment
+def _verified(entity: str) -> tools.ContactOutcome:
+    """A deterministic verified outcome keyed to the entity name."""
+    return tools.ContactOutcome("verified", name=f"Dir {entity[:6]}",
+                                title="Technology Director",
+                                email=f"it@{entity[:4].lower()}.org")
+
+
+def test_determinism_repeated_search_returns_same_rows(tmp_path: Path) -> None:
+    """Tie-heavy data must return an identical top-N across calls (the id tiebreak) —
+    otherwise turn-2 enrichment would attach contacts to orgs the rep never saw."""
+    path = _bulk_db(tmp_path, 20)  # all share first_seen + funds_start, amount NULL
+    first, _ = search_leads(limit=10, db_path=path)
+    second, _ = search_leads(limit=10, db_path=path)
+    assert first == second
+
+
+def test_with_contacts_appends_columns_to_summary(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The second step enriches the shown orgs and shows each contact inline."""
+    monkeypatch.setattr(tools, "enrich_lead_contact",
+                        lambda _c, _id, entity, _s, _p=None: _verified(entity))
+    text, _ = search_leads(state="CA", grade="gold", with_contacts=True, limit=3,
+                           db_path=_db(tmp_path))
+    assert "contact:" in text
+    assert "Technology Director" in text
+
+
+def test_with_contacts_export_has_contact_columns(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Excel export carries the same contact columns as the inline summary (parity)."""
+    monkeypatch.setattr(tools, "enrich_lead_contact",
+                        lambda _c, _id, entity, _s, _p=None: _verified(entity))
+    _, artifact = search_leads(state="CA", grade="gold", export="excel",
+                               with_contacts=True, limit=3, db_path=_db(tmp_path))
+    assert artifact is not None
+    sheet = load_workbook(artifact.path).active
+    header = [c.value for c in sheet[1]]
+    assert header[-4:] == list(("contact_name", "contact_title",
+                                "contact_email", "contact_status"))
+    emails = [sheet.cell(row=r, column=len(header) - 1).value
+              for r in range(2, sheet.max_row + 1)]
+    assert any(e and "@" in str(e) for e in emails)
+    artifact.cleanup()
+
+
+def test_with_contacts_one_failure_does_not_sink_batch(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A single org's enrichment blowing up degrades to 'error'; the rest still resolve."""
+    def flaky(_c: object, _id: int, entity: str, _s: str,
+              _p: object = None) -> tools.ContactOutcome:
+        if "Tustin" in entity:
+            raise RuntimeError("boom")
+        return _verified(entity)
+
+    monkeypatch.setattr(tools, "enrich_lead_contact", flaky)
+    text, _ = search_leads(state="CA", grade="gold", with_contacts=True, limit=5,
+                           db_path=_db(tmp_path))
+    assert "lookup error" in text          # the org that raised
+    assert "Technology Director" in text   # the others still enriched
+
+
+def test_with_contacts_caps_and_discloses(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Asking for more than the ceiling enriches only the cap and says so."""
+    calls = 0
+
+    def counting(_c: object, _id: int, entity: str, _s: str,
+                 _p: object = None) -> tools.ContactOutcome:
+        nonlocal calls
+        calls += 1
+        return _verified(entity)
+
+    monkeypatch.setattr(tools, "enrich_lead_contact", counting)
+    text, _ = search_leads(with_contacts=True, limit=15, db_path=_bulk_db(tmp_path, 30))
+    assert calls == MAX_ENRICH_ROWS
+    assert f"top {MAX_ENRICH_ROWS}" in text

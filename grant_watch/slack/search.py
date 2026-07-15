@@ -22,6 +22,10 @@ _NOOP: Progress = lambda _message: None
 
 MAX_INLINE_LIMIT = 100
 MAX_EXPORT_ROWS = 5_000
+MAX_ENRICH_ROWS = 10          # hard ceiling on per-search contact lookups (cost + latency)
+ENRICH_TIME_BUDGET_S = 240.0  # stop enriching past this wall-clock; disclose the partial
+
+_CONTACT_COLUMNS = ("contact_name", "contact_title", "contact_email", "contact_status")
 
 _SEARCH_COLUMNS = (
     "source", "source_item_id", "entity_name", "title", "entity_type", "state",
@@ -239,6 +243,24 @@ def _entity_role_for_row(row: sqlite3.Row) -> str:
     return "award recipient"
 
 
+def _contact_suffix(cell: list[object]) -> str:
+    """Render one enriched contact cell [name, title, email, status] as a short inline
+    suffix for the summary — honest about not_found / unreachable, never fabricated."""
+    name, title, email, status = (list(cell) + ["", "", "", ""])[:4]
+    if status == "verified":
+        who = f"{name} ({title})".strip()
+        return f" · contact: {who} {email}".rstrip()
+    if status == "not_found":
+        return " · contact: none found"
+    if status == "unreachable":
+        return " · contact: source unreachable — retry"
+    if status == "error":
+        return " · contact: lookup error"
+    if status:
+        return f" · contact: {status}"
+    return ""
+
+
 def _export_kind(raw: str | bool) -> str:
     """Normalize supported export values while retaining legacy True as Excel."""
     if raw is True:
@@ -248,15 +270,57 @@ def _export_kind(raw: str | bool) -> str:
     return _enum_value(ExportFormat, str(raw), "export format")
 
 
+def _enrich_contacts(rows: list[sqlite3.Row], db_target: Path | str,
+                     requested_limit: int,
+                     on_progress: Progress | None) -> tuple[list[list[object]], str]:
+    """Find each shown org's best contact on ONE writable connection, honestly and
+    within a wall-clock budget. Returns per-row [name, title, email, status] cells (one
+    per input row, always) plus a disclosure note. Runs AFTER the read-only snapshot is
+    closed. Per-org failures degrade to an explicit cell, never sink the batch or
+    fabricate a contact; an unreachable source records nothing (retryable)."""
+    import time
+
+    from . import tools  # local import: avoids the tools<->search cycle at module load
+
+    say = on_progress or _NOOP
+    cells: list[list[object]] = []
+    conn = db.connect(db_target)
+    deadline = time.monotonic() + ENRICH_TIME_BUDGET_S
+    try:
+        for index, row in enumerate(rows, start=1):
+            if time.monotonic() > deadline:
+                cells.append(["", "", "", "not checked (time budget)"])
+                continue
+            say(f"Looking for contacts ({index}/{len(rows)})")
+            try:
+                outcome = tools.enrich_lead_contact(
+                    conn, int(row["id"]), row["entity_name"] or "",
+                    row["state"] or "", say)
+                cells.append([outcome.name, outcome.title, outcome.email, outcome.status])
+            except Exception:  # noqa: BLE001 — one org's failure must not sink the batch
+                cells.append(["", "", "", "error"])
+    finally:
+        conn.close()
+    note = (f" (Contacts limited to the top {MAX_ENRICH_ROWS} to stay responsive.)"
+            if requested_limit > MAX_ENRICH_ROWS else "")
+    return cells, note
+
+
 def search_leads(state: str = "", org_type: str = "", program: str = "",
                  grade: str = "", record_kind: str = "",
                  amount_min: float | None = None, amount_max: float | None = None,
                  name_contains: str = "", date_field: str = "", date_from: str = "",
                  date_to: str = "", limit: int = 50, export: str | bool = "",
+                 with_contacts: bool = False,
                  on_progress: Progress | None = None, requester_slack: str = "",
                  db_path: Path | str | None = None) -> tuple[str, GeneratedArtifact | None]:
-    """Search one read-only SQLite snapshot and optionally export every matching row."""
-    (on_progress or _NOOP)("Searching the grants")
+    """Search one read-only SQLite snapshot and optionally export every matching row.
+
+    with_contacts is the deliberate SECOND step (never automatic): it bounds the result
+    to the top min(limit, MAX_ENRICH_ROWS) orgs, finds each one's verified-or-honest
+    contact, and appends contact columns to the summary AND the export — so every shown
+    row carries a real outcome instead of a misleading blank."""
+    (on_progress or _NOOP)("Searching grant databases")
     try:
         org_value = _enum_value(OrgType, org_type, "organization type")
         record_value = _enum_value(RecordKind, record_kind, "record kind")
@@ -329,10 +393,19 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                         "export safety limit. Refine the search; no incomplete file was "
                         "created.", None)
 
-            row_limit = (total if export_value
-                         else max(1, min(int(limit or 50), MAX_INLINE_LIMIT)))
-            select_sql = (f"SELECT {', '.join(_SEARCH_COLUMNS)} FROM leads "
-                          f"WHERE {where_sql} ORDER BY {order_sql} LIMIT ?")
+            if with_contacts:
+                # Contacts are a bounded top-N feature: enrich (and show/export) only as
+                # many as we'll actually look up, so no row gets a misleading blank.
+                row_limit = min(total, int(limit or 50), MAX_ENRICH_ROWS)
+            elif export_value:
+                row_limit = total
+            else:
+                row_limit = max(1, min(int(limit or 50), MAX_INLINE_LIMIT))
+            # `, id` makes the order TOTAL so a repeated search returns the SAME rows —
+            # otherwise ties (e.g. many awards sharing funds_start) could enrich orgs the
+            # rep never saw. id is selected for enrichment persistence, not displayed.
+            select_sql = (f"SELECT id, {', '.join(_SEARCH_COLUMNS)} FROM leads "
+                          f"WHERE {where_sql} ORDER BY {order_sql}, id LIMIT ?")
             rows = connection.execute(select_sql, params + [row_limit]).fetchall()
         finally:
             connection.close()
@@ -345,32 +418,47 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
          *[row[column] for column in _SEARCH_COLUMNS], _window_label(row)]
         for row in rows
     ]
+
+    # SECOND step: enrich contacts for the (bounded) shown orgs and append the columns to
+    # BOTH the export and the inline summary, so the three output paths never disagree.
+    contact_cells: list[list[object]] = []
+    enrich_note = ""
+    if with_contacts and rows:
+        contact_cells, enrich_note = _enrich_contacts(
+            rows, db_target, int(limit or 50), on_progress)
+        columns = [*columns, *_CONTACT_COLUMNS]
+        data_rows = [row + cells for row, cells in zip(data_rows, contact_cells)]
+
     if export_value == ExportFormat.GOOGLE_SHEET.value:
-        (on_progress or _NOOP)("Creating a Google Sheet")
-        from .. import persequor_client
+        (on_progress or _NOOP)("Preparing your Google Sheet")
+        # Export is Grant's own capability (its service account + shared drive), not a
+        # Persequor call; the roster read still comes from the shared reps.json helper.
+        from .. import google_sheets, persequor_client
 
         send_as = persequor_client.rep_email_for(requester_slack) or ""
-        state_value, message = persequor_client.create_google_sheet(
+        state_value, message = google_sheets.create_sheet(
             "Grant search results", columns, data_rows, requester_slack, send_as)
         if state_value == "created":
-            return f"Found and exported all {total} matches: {message}", None
+            return f"Found and exported all {len(rows)} matches: {message}{enrich_note}", None
         text, artifact = make_spreadsheet("grant_search.xlsx", [columns] + data_rows)
-        return (f"Found all {total} matches. {message}; I created complete Excel instead. "
-                f"{text}", artifact)
+        return (f"Found {len(rows)} matches. {message}; I created complete Excel instead. "
+                f"{text}{enrich_note}", artifact)
     if export_value == ExportFormat.EXCEL.value:
         text, artifact = make_spreadsheet("grant_search.xlsx", [columns] + data_rows)
-        return f"Found and exported all {total} matching grants. {text}", artifact
+        return (f"Found and exported all {len(rows)} matching grants. "
+                f"{text}{enrich_note}", artifact)
 
     lines: list[str] = []
-    for row in rows[:15]:
+    for index, row in enumerate(rows[:15]):
         amount = f"${row['amount']:,.0f}" if row["amount"] is not None else "$ n/a"
         role = _entity_role_for_row(row)
+        contact = _contact_suffix(contact_cells[index]) if index < len(contact_cells) else ""
         lines.append(f"- {row['entity_name']} ({row['state'] or '?'}, {role}) — "
                      f"{row['program'] or row['lead_grade']} · {amount} · "
-                     f"{_window_label(row)}")
+                     f"{_window_label(row)}{contact}")
     shown = min(len(rows), 15)
-    more = (f"\nShowing {shown} of {total} matches — refine the search or export all results."
-            if total > shown else "")
+    more = ((f"\nShowing {shown} of {total} matches — refine the search or export all results."
+             if total > shown else "") + enrich_note)
     inference_note = ("\nOrganization type is conservatively inferred from the entity name "
                       "when the source does not provide a structured type."
                       if org_value and org_value != "any" else "")

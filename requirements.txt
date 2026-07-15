@@ -7,3 +7,5 @@ slack-sdk>=3.27
 slack-bolt>=1.21
 pytest>=8.0
 openpyxl>=3.1
+google-api-python-client>=2.100
+google-auth>=2.30

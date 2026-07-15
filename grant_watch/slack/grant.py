@@ -19,6 +19,8 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import threading
+from collections import deque
 from collections.abc import Callable
 from typing import Any, Protocol
 
@@ -49,6 +51,37 @@ HELP_TEXT = (
     "spreadsheet, or ask me to search for news.\n"
     "I never invent contacts or figures — if I don't know, I'll say so."
 )
+
+
+# Idempotency guard (architectural-critic C3): a conversational turn can run an
+# expensive contact-enrichment batch (real scrapes + Anthropic calls). Slack redelivers
+# un-acked events, and a rep can double-tap "yes" — either would double-spend and post
+# duplicate answers. We drop a repeated event_id and refuse a second concurrent run for a
+# thread already being handled. In-memory is sufficient: one long-lived bot process.
+_dedup_lock = threading.Lock()
+_seen_events: deque[str] = deque(maxlen=512)
+_inflight_threads: set[str] = set()
+
+
+def _claim_turn(event_id: str, thread_key: str) -> bool:
+    """True if this event should be processed now. False for a redelivered event_id or a
+    thread already in flight (caller must NOT process). Thread-safe; pairs with
+    _release_turn in a finally."""
+    with _dedup_lock:
+        if event_id and event_id in _seen_events:
+            return False
+        if thread_key in _inflight_threads:
+            return False
+        if event_id:
+            _seen_events.append(event_id)
+        _inflight_threads.add(thread_key)
+        return True
+
+
+def _release_turn(thread_key: str) -> None:
+    """Release a thread claimed by _claim_turn so later turns can proceed."""
+    with _dedup_lock:
+        _inflight_threads.discard(thread_key)
 
 
 def create_app() -> App:
@@ -132,25 +165,31 @@ def create_app() -> App:
     persequor_id: str = os.environ.get("PERSEQUOR_USER_ID", "")
 
     @app.event("app_mention")
-    def on_mention(event: dict[str, Any], say: Callable[..., object],
-                   client: WebClient) -> None:
+    def on_mention(event: dict[str, Any], body: dict[str, Any],
+                   say: Callable[..., object], client: WebClient) -> None:
         """Mentions route to the SAME conversational brain as plain thread replies —
         reps shouldn't need the @, but using it must not degrade the experience."""
         text = re.sub(r"<@[^>]+>", "", event.get("text") or "").strip()
         thread_ts = event.get("thread_ts")
-        conn = db.connect()
-        post = db.find_post_by_ts(conn, event["channel"], thread_ts or "")
-        if post is not None:
-            _handle_drip_thread(conn, post, event, say, client)
-        else:
-            # A general question outside a lead thread: answer in a thread on it.
-            _converse_general(text, client, event["channel"],
-                              event.get("thread_ts") or event["ts"],
-                              user=event.get("user", ""))
+        thread_key = f"{event['channel']}:{thread_ts or event['ts']}"
+        if not _claim_turn(str(body.get("event_id", "")), thread_key):
+            return  # redelivered event, or this thread is already being handled
+        try:
+            conn = db.connect()
+            post = db.find_post_by_ts(conn, event["channel"], thread_ts or "")
+            if post is not None:
+                _handle_drip_thread(conn, post, event, say, client)
+            else:
+                # A general question outside a lead thread: answer in a thread on it.
+                _converse_general(text, client, event["channel"],
+                                  event.get("thread_ts") or event["ts"],
+                                  user=event.get("user", ""))
+        finally:
+            _release_turn(thread_key)
 
     @app.event("message")
-    def on_message(event: dict[str, Any], say: Callable[..., object],
-                   client: WebClient) -> None:
+    def on_message(event: dict[str, Any], body: dict[str, Any],
+                   say: Callable[..., object], client: WebClient) -> None:
         """DMs, and plain (no-@) thread replies under a drip post."""
         if event.get("bot_id"):  # never talk to bots — loop guard
             return
@@ -159,18 +198,25 @@ def create_app() -> App:
             return  # the app_mention handler owns this one — no double replies
         if persequor_id and f"<@{persequor_id}>" in text:
             return  # they're talking to Persequor — Grant stays out of it (Chase's rule)
-        if event.get("channel_type") == "im":
-            _converse_general(text.strip(), client, event["channel"], None,
-                              user=event.get("user", ""))
-            return
+        is_dm = event.get("channel_type") == "im"
         thread_ts = event.get("thread_ts")
-        if not thread_ts:
+        if not is_dm and not thread_ts:
             return  # top-level channel chatter isn't Grant's business
-        conn = db.connect()
-        post = db.find_post_by_ts(conn, event["channel"], thread_ts)
-        if post is None:
-            return  # a thread on someone else's message
-        _handle_drip_thread(conn, post, event, say, client)
+        thread_key = f"{event['channel']}:{thread_ts or event['ts']}"
+        if not _claim_turn(str(body.get("event_id", "")), thread_key):
+            return  # redelivered event, or this thread is already being handled
+        try:
+            if is_dm:
+                _converse_general(text.strip(), client, event["channel"], None,
+                                  user=event.get("user", ""))
+                return
+            conn = db.connect()
+            post = db.find_post_by_ts(conn, event["channel"], thread_ts)
+            if post is None:
+                return  # a thread on someone else's message
+            _handle_drip_thread(conn, post, event, say, client)
+        finally:
+            _release_turn(thread_key)
 
     @app.event("reaction_added")
     def on_reaction(event: dict[str, Any]) -> None:
@@ -362,6 +408,16 @@ def _converse_general(text: str, client: WebClient, channel: str,
     """Friendly LLM reply outside a lead thread (mention or DM), tools + spinner
     included. Falls back to the canned help text if the API is unavailable."""
     from . import conversation
+
+    if not text.strip():
+        # A bare "@Grant" with no ask: greet deterministically (no LLM, no spinner) so
+        # the rep always gets the same warm invitation to say what they need.
+        try:
+            client.chat_postMessage(channel=channel, thread_ts=thread_ts,
+                                    text="Hey! What can I help you with?")
+        except Exception:
+            pass
+        return
 
     status = _Status(client, channel, thread_ts)
     status.start()

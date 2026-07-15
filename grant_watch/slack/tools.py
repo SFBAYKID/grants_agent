@@ -18,6 +18,7 @@ import os
 import re
 import sqlite3
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -28,6 +29,50 @@ from .search import search_leads
 
 Progress = Callable[[str], None]
 _NOOP: Progress = lambda _msg: None
+
+
+@dataclass(frozen=True)
+class ContactOutcome:
+    """One lead's enrichment result — the honest, structured outcome the batch search
+    and the single-lead tool both consume. status is exactly one of:
+      verified    — a verbatim-verified contact (name/title/email populated),
+      not_found   — we read real pages and none had a verifiable contact,
+      unreachable — the source was down; NOTHING was recorded, so a retry re-attempts.
+    """
+
+    status: str
+    name: str = ""
+    title: str = ""
+    email: str = ""
+    phone: str = ""
+    source_url: str = ""
+
+
+def enrich_lead_contact(conn: sqlite3.Connection, lead_id: int, entity: str,
+                        state: str, on_progress: Progress | None = None) -> ContactOutcome:
+    """Find + persist ONE lead's best contact through finder's verbatim gate, reusing a
+    caller-supplied connection so a batch enriches on a single handle. Idempotent: an
+    existing verified contact is returned without re-scraping. A SourceUnreachable
+    outage records nothing (retryable) and is NEVER written as not_found."""
+    from ..enrich import finder  # local import: keeps poll/digest paths light
+
+    existing = [c for c in db.contacts_for_lead(conn, lead_id)
+                if c["contact_status"] == "verified"]
+    if existing:
+        c = existing[0]
+        return ContactOutcome("verified", c["name"] or "", c["title"] or "",
+                              c["email"] or "", c["phone"] or "", c["source_url"] or "")
+    try:
+        candidate = finder.find_contact(entity, state, on_progress=on_progress)
+    except finder.SourceUnreachable:
+        return ContactOutcome("unreachable")  # could not look -> record nothing
+    if candidate is None:
+        db.mark_contact_not_found(conn, lead_id)
+        return ContactOutcome("not_found")
+    db.save_contact(conn, lead_id, candidate.name, candidate.title, candidate.email,
+                    candidate.phone, candidate.source_url, candidate.confidence)
+    return ContactOutcome("verified", candidate.name, candidate.title,
+                          candidate.email, candidate.phone, candidate.source_url)
 
 # Tool schemas passed to the Anthropic API (the model picks; we execute).
 TOOL_SCHEMAS: list[dict[str, Any]] = [
@@ -137,9 +182,16 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "date_from": {"type": "string", "description": "inclusive YYYY-MM-DD"},
                 "date_to": {"type": "string", "description": "inclusive YYYY-MM-DD"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100,
-                          "description": "inline result limit; exports ignore it"},
+                          "description": "how many results the rep asked for (top N); "
+                                         "with_contacts enriches this many"},
                 "export": {"type": "string", "enum": ["excel", "google_sheet"],
                            "description": "export every match or refuse above the declared cap"},
+                "with_contacts": {"type": "boolean",
+                                  "description": "SECOND step only: after the rep says yes "
+                                                 "to finding contacts, set true to enrich "
+                                                 "the top `limit` orgs (~30s each) and add "
+                                                 "verified-or-not-found contact columns. "
+                                                 "Never set true on the first search."},
             },
             "required": [],
         },
@@ -211,27 +263,20 @@ def query_leads(sql: str) -> str:
 
 def find_contact(lead_id: int, entity: str, state: str,
                  on_progress: Progress | None = None) -> str:
-    """Run enrichment for a lead and persist the outcome (verified or not_found)."""
-    from ..enrich import finder  # local import: keeps poll/digest paths light
-
+    """Enrich one lead and report the outcome honestly (verified / not_found /
+    unreachable). Thin string wrapper over enrich_lead_contact for the single-lead tool."""
     conn = db.connect()
-    existing = [c for c in db.contacts_for_lead(conn, lead_id)
-                if c["contact_status"] == "verified"]
-    if existing:
-        c = existing[0]
-        return (f"Already on file: {c['name']} ({c['title']}) — {c['email']} "
-                f"(source: {c['source_url']})")
-    candidate = finder.find_contact(entity, state, on_progress=on_progress)
-    if candidate is None:
-        db.mark_contact_not_found(conn, lead_id)
-        return ("No verifiable contact found on their website (email must appear on a "
-                "page we actually fetched). Recorded as not_found — try "
-                "find_person_linkedin for a name, or a human can supply one.")
-    db.save_contact(conn, lead_id, candidate.name, candidate.title, candidate.email,
-                    candidate.phone, candidate.source_url, candidate.confidence)
-    return (f"VERIFIED contact: {candidate.name} ({candidate.title}) — "
-            f"{candidate.email}{' / ' + candidate.phone if candidate.phone else ''} "
-            f"(found on {candidate.source_url}, confidence {candidate.confidence})")
+    outcome = enrich_lead_contact(conn, lead_id, entity, state, on_progress)
+    if outcome.status == "verified":
+        phone = f" / {outcome.phone}" if outcome.phone else ""
+        source = f" (found on {outcome.source_url})" if outcome.source_url else ""
+        return f"VERIFIED contact: {outcome.name} ({outcome.title}) — {outcome.email}{phone}{source}"
+    if outcome.status == "unreachable":
+        return ("I couldn't reach their website or search to verify a contact right now — "
+                "nothing recorded, so it's worth trying again shortly.")
+    return ("No verifiable contact found on their website (email must appear on a page we "
+            "actually fetched). Recorded as not_found — try find_person_linkedin for a "
+            "name, or a human can supply one.")
 
 
 def salesforce_lookup(entity: str, domain: str = "", phone: str = "",
@@ -308,6 +353,7 @@ def run_tool(name: str, args: dict[str, Any],
                 date_to=str(args.get("date_to", "")),
                 limit=int(args.get("limit", 50) or 50),
                 export=args.get("export", ""),
+                with_contacts=bool(args.get("with_contacts", False)),
                 on_progress=p, requester_slack=requester_slack)
         except Exception as exc:
             return f"ERROR: search failed ({type(exc).__name__}).", None
@@ -325,7 +371,7 @@ def run_tool(name: str, args: dict[str, Any],
         except Exception as exc:
             return f"ERROR: LinkedIn search failed ({type(exc).__name__}).", None
     if name == "make_spreadsheet":
-        p("Building the spreadsheet")
+        p("Preparing your spreadsheet")
         return make_spreadsheet(str(args.get("filename", "")),
                                 list(args.get("rows", [])))
     return f"ERROR: unknown tool {name}", None

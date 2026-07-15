@@ -121,59 +121,6 @@ def test_submit_persists_before_post_and_reports_unreachable(
     assert saved is not None and brief["request_id"] in saved["draft"]
 
 
-# ------------------------------------------------------------ Google Sheet handoff
-def test_google_sheet_handoff_is_complete_and_formula_safe(
-        monkeypatch: pytest.MonkeyPatch) -> None:
-    """Persequor receives every row and formula-like external strings as literal text."""
-    captured: dict[str, object] = {}
-
-    class FakeResponse:
-        """Successful Persequor create-sheet response with a real URL field."""
-
-        status_code = 201
-
-        def json(self) -> dict[str, str]:
-            """Return the created sheet URL."""
-            return {"url": "https://docs.google.com/spreadsheets/d/sheet-id"}
-
-    def fake_post(url: str, **kwargs: object) -> FakeResponse:
-        """Capture the outgoing JSON without making a network request."""
-        captured["url"] = url
-        captured["json"] = kwargs["json"]
-        return FakeResponse()
-
-    monkeypatch.setattr(persequor_client.requests, "post", fake_post)
-    rows: list[list[object]] = [[f"District {i}", i] for i in range(2_001)]
-    rows[0][0] = " \t=IMPORTXML('https://example.test')"
-    state, message = persequor_client.create_google_sheet(
-        "Complete export", ["entity", "amount"], rows,
-        "U01DPJVURHU", "chase@monarchconnected.com")
-
-    assert state == "created" and message.startswith("https://docs.google.com/")
-    payload = captured["json"]
-    assert isinstance(payload, dict)
-    assert len(payload["rows"]) == 2_001
-    assert payload["rows"][0][0].startswith("'")
-    assert payload["rows"][1][1] == 1
-
-
-def test_google_sheet_requires_mapped_rep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Missing roster identity fails before any request can reach Persequor."""
-    called = False
-
-    def fake_post(_url: str, **_kwargs: object) -> object:
-        """Record an unexpected network call."""
-        nonlocal called
-        called = True
-        return object()
-
-    monkeypatch.setattr(persequor_client.requests, "post", fake_post)
-    state, message = persequor_client.create_google_sheet(
-        "Export", ["entity"], [["District"]], "U_UNKNOWN", "")
-    assert state == "error" and "mapped" in message
-    assert called is False
-
-
 # ------------------------------------------------------------ contact storage
 def test_not_found_is_recorded_honestly(tmp_path: Path) -> None:
     conn, row = _lead_row(tmp_path)

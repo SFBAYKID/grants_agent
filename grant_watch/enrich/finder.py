@@ -31,6 +31,13 @@ FIRECRAWL_SEARCH = "https://api.firecrawl.dev/v1/search"
 FIRECRAWL_SCRAPE = "https://api.firecrawl.dev/v1/scrape"
 MODEL = "claude-sonnet-5"
 
+
+class SourceUnreachable(RuntimeError):
+    """Contact discovery never actually READ a page — search/scrape/extract all failed
+    for infrastructure reasons. The honest outcome is 'we could not look,' which must
+    NEVER be recorded as not_found (Constitution rule 1). Callers treat this as a
+    retryable non-result and persist nothing."""
+
 # Titles that own security-funding decisions, in rough priority order (CLAUDE.md).
 TARGET_TITLES = ("technology director", "director of technology", "it director",
                  "superintendent", "director of facilities", "facilities director",
@@ -134,18 +141,29 @@ def find_contact(entity: str, state: str, max_pages: int = 6,
                  on_progress: Progress | None = None) -> ContactCandidate | None:
     """Full pipeline for one entity. Runs several title-targeted searches, scrapes the
     most promising pages, and returns the first VERIFIED contact (prefers higher-value
-    titles). None = not_found (recorded honestly by the caller). on_progress emits
-    short (<=6 word) status phrases for Grant's live spinner."""
+    titles). on_progress emits short (<=6 word) status phrases for Grant's live spinner.
+
+    Return/raise contract is the honesty boundary (Constitution rule 1):
+      - a ContactCandidate  -> a verbatim-verified contact,
+      - None                -> we genuinely READ real pages and none had a verifiable
+                               contact (a truthful not_found),
+      - SourceUnreachable   -> we never actually read a page (search/scrape/extract all
+                               failed); the caller must record NOTHING, not not_found.
+    """
     say = on_progress or _NOOP
     say("Searching for the contact")
     seen_urls: set[str] = set()
     candidates: list[ContactCandidate] = []
+    reached_search = False     # at least one Firecrawl search returned without error
+    pages_read = 0             # real (>=200 char) pages we actually scraped
+    clean_extractions = 0      # extractions that completed (gave a definite yes/no)
     for angle in _SEARCH_ANGLES:
         query = angle.format(entity=entity, state=state)
         try:
             results = _search(query, limit=4)
         except (requests.RequestException, RuntimeError):
             continue
+        reached_search = True
         for r in results:
             url = r.get("url") or ""
             if not url or url in seen_urls:
@@ -157,7 +175,12 @@ def find_contact(entity: str, state: str, max_pages: int = 6,
             text = _scrape(url)
             if len(text) < 200:  # empty/blocked page — no evidence
                 continue
-            cand = _extract(text, entity, url)
+            pages_read += 1
+            try:
+                cand = _extract(text, entity, url)
+            except Exception:  # noqa: BLE001 — one page's API hiccup is inconclusive, not not_found
+                continue
+            clean_extractions += 1
             if cand is None:
                 continue
             if cand.confidence == "high":  # a target-title match — take it immediately
@@ -168,7 +191,12 @@ def find_contact(entity: str, state: str, max_pages: int = 6,
             break
     if candidates:
         say(f"Found {candidates[0].name}")
-    return candidates[0] if candidates else None
+        return candidates[0]
+    # No candidate. Only claim not_found when we actually looked: reached search, read a
+    # real page, AND extracted cleanly from it. Otherwise we could not look — say so.
+    if not reached_search or pages_read == 0 or clean_extractions == 0:
+        raise SourceUnreachable(f"could not read a source for {entity}")
+    return None
 
 
 def linkedin_person(entity: str, state: str,

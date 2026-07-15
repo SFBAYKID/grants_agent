@@ -142,3 +142,78 @@ def test_model_failure_after_artifact_creation_cleans_file(
     with pytest.raises(RuntimeError, match="model failure"):
         conversation.respond("export", None)
     assert not artifact.path.exists()
+
+
+# ------------------------------------------------------------ greeting + idempotency
+def test_empty_mention_greets_without_calling_the_model(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bare @Grant greets deterministically and never invokes the LLM."""
+    def must_not_run(*_a: object, **_k: object) -> dict[str, object]:
+        raise AssertionError("empty mention must not call the model")
+
+    monkeypatch.setattr(conversation, "respond", must_not_run)
+    posted: list[str] = []
+    client = SimpleNamespace(
+        chat_postMessage=lambda **kw: posted.append(str(kw.get("text", ""))) or {"ts": "1"})
+    grant._converse_general("   ", client, "C1", None, user="U1")
+    assert posted and "help you with" in posted[0]
+
+
+def test_claim_turn_dedups_redelivered_event() -> None:
+    """The same Slack event_id delivered twice is processed once."""
+    assert grant._claim_turn("evt-A", "chanA:1") is True
+    assert grant._claim_turn("evt-A", "chanA:2") is False  # redelivered event_id
+    grant._release_turn("chanA:1")
+
+
+def test_claim_turn_blocks_concurrent_same_thread_then_frees() -> None:
+    """A thread already in flight refuses a second run until released (no double-spend)."""
+    assert grant._claim_turn("evt-B1", "chanB:9") is True
+    assert grant._claim_turn("evt-B2", "chanB:9") is False  # thread already in flight
+    grant._release_turn("chanB:9")
+    assert grant._claim_turn("evt-B3", "chanB:9") is True   # freed -> allowed again
+    grant._release_turn("chanB:9")
+
+
+def test_respond_dispatches_with_contacts_second_step(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 'yes, top 5' reply flows a search_leads(with_contacts=True) call through the loop."""
+    captured: dict[str, object] = {}
+
+    class FakeMessages:
+        """Turn 1 asks for the enrichment tool; turn 2 returns the final JSON."""
+
+        calls = 0
+
+        def create(self, **_kwargs: object) -> object:
+            """Script the two-step tool loop."""
+            self.calls += 1
+            if self.calls == 1:
+                block = SimpleNamespace(
+                    type="tool_use", name="search_leads",
+                    input={"state": "IL", "with_contacts": True, "limit": 5}, id="t1")
+                return SimpleNamespace(stop_reason="tool_use", content=[block])
+            block = SimpleNamespace(
+                type="text",
+                text='{"intent": "question", "reply": "Top 5 with contacts, attached."}')
+            return SimpleNamespace(stop_reason="end_turn", content=[block])
+
+    class FakeAnthropic:
+        """Expose the scripted messages resource."""
+
+        def __init__(self) -> None:
+            self.messages = FakeMessages()
+
+    def fake_run_tool(name: str, args: dict[str, object], *_a: object,
+                      **_k: object) -> tuple[str, object]:
+        """Capture the dispatched tool call instead of touching the database."""
+        captured["name"] = name
+        captured["args"] = args
+        return "Found and exported all 5 matches.", None
+
+    monkeypatch.setattr(conversation, "Anthropic", FakeAnthropic)
+    monkeypatch.setattr(tools, "run_tool", fake_run_tool)
+    out = conversation.respond("yes, top 5 with contacts", None)
+    assert captured["name"] == "search_leads"
+    assert captured["args"].get("with_contacts") is True
+    assert "contacts" in out["reply"]
