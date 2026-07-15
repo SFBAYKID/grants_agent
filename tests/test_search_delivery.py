@@ -7,8 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from grant_watch import db
 from grant_watch.slack import conversation, grant, tools
-from grant_watch.spreadsheets import GeneratedArtifact
+from grant_watch.spreadsheets import GeneratedArtifact, make_spreadsheet
 
 
 class FakeSlackClient:
@@ -39,12 +40,12 @@ class FakeSlackClient:
 
 def _artifact() -> GeneratedArtifact:
     """Create one owned workbook for a delivery test."""
-    _, artifact = tools.make_spreadsheet("delivery.xlsx", [["name"], ["District"]])
+    _, artifact = make_spreadsheet("delivery.xlsx", [["name"], ["District"]])
     return artifact
 
 
-def test_dm_search_uploads_and_cleans_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A DM export uploads to the DM channel without a thread timestamp."""
+def test_general_search_uploads_and_cleans_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shared mention path uploads an artifact and releases temporary storage."""
     artifact = _artifact()
 
     def fake_respond(*_args: object, **_kwargs: object) -> dict[str, object]:
@@ -159,20 +160,62 @@ def test_empty_mention_greets_without_calling_the_model(
     assert posted and "help you with" in posted[0]
 
 
-def test_claim_turn_dedups_redelivered_event() -> None:
-    """The same Slack event_id delivered twice is processed once."""
-    assert grant._claim_turn("evt-A", "chanA:1") is True
-    assert grant._claim_turn("evt-A", "chanA:2") is False  # redelivered event_id
-    grant._release_turn("chanA:1")
+def test_persistent_receipt_dedups_redelivered_event(tmp_path: Path) -> None:
+    """The same Slack event_id remains deduped across database connections."""
+    path = tmp_path / "events.db"
+    first = db.connect(path)
+    assert db.claim_slack_event(first, "evt-A", "T1", "C1", "1.0", "U1") is True
+    first.close()
+    second = db.connect(path)
+    assert db.claim_slack_event(second, "evt-A", "T1", "C1", "1.0", "U1") is False
 
 
-def test_claim_turn_blocks_concurrent_same_thread_then_frees() -> None:
-    """A thread already in flight refuses a second run until released (no double-spend)."""
-    assert grant._claim_turn("evt-B1", "chanB:9") is True
-    assert grant._claim_turn("evt-B2", "chanB:9") is False  # thread already in flight
-    grant._release_turn("chanB:9")
-    assert grant._claim_turn("evt-B3", "chanB:9") is True   # freed -> allowed again
-    grant._release_turn("chanB:9")
+def test_failed_final_delivery_requires_explicit_review(tmp_path: Path) -> None:
+    """Completed actions with an unconfirmed reply are listed and never replayed."""
+    conn = db.connect(tmp_path / "events.db")
+    assert db.claim_slack_event(conn, "evt-failed", "T1", "C1", "1.0", "U1")
+    db.finish_slack_event(
+        conn, "evt-failed", error="final Slack response was not confirmed",
+        action_state="complete", delivery_state="failed")
+    pending = db.unresolved_slack_events(conn)
+    assert len(pending) == 1
+    assert pending[0]["action_state"] == "complete"
+    assert pending[0]["delivery_state"] == "failed"
+    assert db.claim_slack_event(
+        conn, "evt-failed", "T1", "C1", "1.0", "U1") is False
+    assert db.mark_slack_event_reviewed(conn, "evt-failed") is True
+    assert db.mark_slack_event_reviewed(conn, "evt-failed") is False
+    assert db.unresolved_slack_events(conn) == []
+
+
+def test_status_finalizer_reports_both_delivery_failures() -> None:
+    """A failed spinner update plus failed fallback post returns false to the receipt."""
+    class FailedClient:
+        """Reject every final Slack delivery operation."""
+
+        def chat_update(self, **_kwargs: object) -> None:
+            """Simulate a failed spinner replacement."""
+            raise RuntimeError("update failed")
+
+        def chat_postMessage(self, **_kwargs: object) -> dict[str, str]:
+            """Simulate a failed fallback post."""
+            raise RuntimeError("post failed")
+
+    status = grant._Status(FailedClient(), "C1", "1.0")
+    status.ts = "spinner.1"
+    assert status.finalize("final") is False
+
+
+def test_same_thread_uses_one_serial_lock() -> None:
+    """Concurrent turns queue on the same lock instead of dropping a message."""
+    first = grant._thread_lock("chanB:9")
+    second = grant._thread_lock("chanB:9")
+    assert first is second
+    assert first.acquire(blocking=False) is True
+    assert second.acquire(blocking=False) is False
+    first.release()
+    assert second.acquire(blocking=False) is True
+    second.release()
 
 
 def test_respond_dispatches_with_contacts_second_step(

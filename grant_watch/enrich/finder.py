@@ -5,9 +5,10 @@ Pipeline (every step verifiable, per CLAUDE.md rule 1):
      the entity's own site / staff pages.
   2. Firecrawl SCRAPE the most promising 1-3 pages to markdown.
   3. Claude EXTRACTION: pull {name, title, email, phone} from the page text only.
-  4. CODE-LEVEL VERIFICATION (the anti-hallucination gate): the email must appear
-     VERBATIM in the scraped text, and the name tokens must appear too, or the
-     candidate is rejected. The model cannot smuggle an invented address past this.
+  4. CODE-LEVEL VERIFICATION (the anti-hallucination gate): every returned contact
+     field (name, title, email, phone) must appear in the scraped text under the
+     field-specific verifier, or the candidate is rejected. The model cannot smuggle
+     invented contact data past this.
 
 Returns a ContactCandidate or None — None means not_found, which is honest and final
 until a human or a better source supplies more.
@@ -20,12 +21,20 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any  # Firecrawl search response JSON is runtime-shaped.
+from urllib.parse import urlparse
 
 import requests
 from anthropic import Anthropic
 
 Progress = Callable[[str], None]
-_NOOP: Progress = lambda _msg: None
+
+
+def _noop(_message: str) -> None:
+    """Ignore an optional progress update."""
+
+
+_NOOP: Progress = _noop
 
 FIRECRAWL_SEARCH = "https://api.firecrawl.dev/v1/search"
 FIRECRAWL_SCRAPE = "https://api.firecrawl.dev/v1/scrape"
@@ -56,6 +65,8 @@ class ContactCandidate:
     phone: str
     source_url: str
     confidence: str  # high | medium | low
+    official_domain: str = ""
+    field_evidence: dict[str, bool] | None = None
 
 
 def verify_on_page(page_text: str, email: str, name: str) -> bool:
@@ -68,6 +79,73 @@ def verify_on_page(page_text: str, email: str, name: str) -> bool:
     return bool(name) and all(tok.lower() in low for tok in name.split()[:2])
 
 
+def _text_field_on_page(page_text: str, value: str) -> bool:
+    """Verify a non-email field through normalized contiguous page text."""
+    if not value.strip():
+        return False
+    normalized_value = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+    normalized_page = re.sub(r"[^a-z0-9]+", " ", page_text.lower()).strip()
+    return normalized_value in normalized_page
+
+
+def _phone_on_page(page_text: str, phone: str) -> bool:
+    """Verify phone digits without depending on source formatting punctuation."""
+    wanted = re.sub(r"\D", "", phone)
+    page_digits = re.sub(r"\D", "", page_text)
+    return len(wanted) >= 7 and wanted in page_digits
+
+
+_GENERIC_ENTITY_WORDS = {
+    "school", "schools", "district", "unified", "public", "city", "town",
+    "county", "of", "the", "department", "board", "education", "isd", "usd",
+}
+_BLOCKED_HOSTS = {
+    "linkedin.com", "facebook.com", "instagram.com", "x.com", "twitter.com",
+    "greatschools.org", "niche.com", "wikipedia.org",
+}
+
+
+def _host(url: str) -> str:
+    """Return a normalized hostname for official-site binding."""
+    return (urlparse(url).hostname or "").lower().removeprefix("www.")
+
+
+def _same_site(left: str, right: str) -> bool:
+    """Accept exact host or a direct subdomain relationship, not unrelated domains."""
+    return bool(left and right and (
+        left == right or left.endswith(f".{right}") or right.endswith(f".{left}")
+    ))
+
+
+def _looks_official(entity: str, state: str, result: dict[str, Any]) -> bool:
+    """Conservatively bind a search result to the named organization."""
+    url = str(result.get("url") or "")
+    host = _host(url)
+    if not host or any(host == blocked or host.endswith(f".{blocked}")
+                       for blocked in _BLOCKED_HOSTS):
+        return False
+    haystack = " ".join(str(result.get(key) or "")
+                        for key in ("title", "description", "url")).lower()
+    normalized_entity = re.sub(r"[^a-z0-9]+", " ", entity.lower()).strip()
+    normalized_haystack = re.sub(r"[^a-z0-9]+", " ", haystack).strip()
+    if normalized_entity and normalized_entity in normalized_haystack:
+        return True
+    tokens = {
+        token for token in normalized_entity.split()
+        if token not in _GENERIC_ENTITY_WORDS and len(token) > 2
+    }
+    if len(tokens) >= 2 and tokens.issubset(set(normalized_haystack.split())):
+        return True
+    # A one-word distinctive name such as Orange needs both domain and organization
+    # phrase evidence; name overlap alone caused a verified CRM false positive.
+    if len(tokens) == 1:
+        token = next(iter(tokens))
+        org_word = any(word in normalized_haystack for word in ("school", "district", "city"))
+        state_seen = not state or state.lower() in normalized_haystack
+        return token in host and org_word and state_seen
+    return False
+
+
 def _fc_headers() -> dict[str, str]:
     key = os.environ.get("FIRECRAWL_API_KEY", "")
     if not key:
@@ -75,7 +153,7 @@ def _fc_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"}
 
 
-def _search(query: str, limit: int = 5) -> list[dict]:
+def _search(query: str, limit: int = 5) -> list[dict[str, Any]]:
     resp = requests.post(FIRECRAWL_SEARCH, headers=_fc_headers(),
                          json={"query": query, "limit": limit}, timeout=30)
     resp.raise_for_status()
@@ -120,11 +198,20 @@ def _extract(page_text: str, entity: str, source_url: str) -> ContactCandidate |
     name = str(data.get("name") or "").strip()
     if not verify_on_page(page_text, email, name):
         return None  # THE GATE said no — model claim not backed by the page
-    title = str(data.get("title") or "").strip()
-    confidence = "high" if any(t in title.lower() for t in TARGET_TITLES) else "medium"
-    return ContactCandidate(name=name, title=title, email=email,
-                            phone=str(data.get("phone") or "").strip(),
-                            source_url=source_url, confidence=confidence)
+    proposed_title = str(data.get("title") or "").strip()
+    proposed_phone = str(data.get("phone") or "").strip()
+    title = proposed_title if _text_field_on_page(page_text, proposed_title) else ""
+    phone = proposed_phone if _phone_on_page(page_text, proposed_phone) else ""
+    confidence = ("high" if title and any(t in title.lower() for t in TARGET_TITLES)
+                  else "medium")
+    return ContactCandidate(
+        name=name, title=title, email=email, phone=phone,
+        source_url=source_url, confidence=confidence,
+        official_domain=_host(source_url),
+        field_evidence={
+            "name": True, "email": True, "title": bool(title), "phone": bool(phone),
+        },
+    )
 
 
 # Title-targeted searches, most decision-relevant first. Multiple angles because a
@@ -157,6 +244,7 @@ def find_contact(entity: str, state: str, max_pages: int = 6,
     reached_search = False     # at least one Firecrawl search returned without error
     pages_read = 0             # real (>=200 char) pages we actually scraped
     clean_extractions = 0      # extractions that completed (gave a definite yes/no)
+    official_domain = ""
     for angle in _SEARCH_ANGLES:
         query = angle.format(entity=entity, state=state)
         try:
@@ -166,8 +254,12 @@ def find_contact(entity: str, state: str, max_pages: int = 6,
         reached_search = True
         for r in results:
             url = r.get("url") or ""
-            if not url or url in seen_urls:
+            if not url or url in seen_urls or not _looks_official(entity, state, r):
                 continue
+            candidate_domain = _host(url)
+            if official_domain and not _same_site(candidate_domain, official_domain):
+                continue
+            official_domain = official_domain or candidate_domain
             seen_urls.add(url)
             if len(seen_urls) > max_pages:
                 break

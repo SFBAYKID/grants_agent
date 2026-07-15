@@ -45,7 +45,10 @@ def test_finder_raises_unreachable_when_no_page_is_readable(
         monkeypatch: pytest.MonkeyPatch) -> None:
     """Search works but every page is blocked/empty — still 'could not look'."""
     monkeypatch.setattr(finder, "_search",
-                        lambda *_a, **_k: [{"url": "https://x.org/staff"}])
+                        lambda *_a, **_k: [{
+                            "url": "https://crschools.org/staff",
+                            "title": "Castle Rock School District staff",
+                        }])
     monkeypatch.setattr(finder, "_scrape", lambda *_a, **_k: "")  # blocked page
     with pytest.raises(SourceUnreachable):
         finder.find_contact("Castle Rock School District", "WA")
@@ -55,10 +58,36 @@ def test_finder_returns_none_when_pages_read_but_nothing_verifiable(
         monkeypatch: pytest.MonkeyPatch) -> None:
     """A real page that yields no verifiable contact is a TRUTHFUL not_found (None)."""
     monkeypatch.setattr(finder, "_search",
-                        lambda *_a, **_k: [{"url": "https://x.org/staff"}])
+                        lambda *_a, **_k: [{
+                            "url": "https://crschools.org/staff",
+                            "title": "Castle Rock School District staff",
+                        }])
     monkeypatch.setattr(finder, "_scrape", lambda *_a, **_k: "x" * 400)  # real content
     monkeypatch.setattr(finder, "_extract", lambda *_a, **_k: None)      # clean negative
     assert finder.find_contact("Castle Rock School District", "WA") is None
+
+
+def test_contact_fields_require_independent_page_evidence() -> None:
+    """A verified email cannot smuggle an invented title or phone into storage."""
+    page = "Jane Doe — jdoe@crschools.org — Technology Director — (360) 555-0100"
+    assert finder._text_field_on_page(page, "Technology Director") is True
+    assert finder._text_field_on_page(page, "Chief Security Officer") is False
+    assert finder._phone_on_page(page, "360-555-0100") is True
+    assert finder._phone_on_page(page, "360-555-9999") is False
+
+
+def test_search_result_must_bind_to_named_entity() -> None:
+    """A directory/near-name result cannot become the organization's official site."""
+    assert finder._looks_official(
+        "Castle Rock School District", "WA",
+        {"url": "https://crschools.org/staff",
+         "title": "Castle Rock School District staff"},
+    ) is True
+    assert finder._looks_official(
+        "Orange Unified School District", "CA",
+        {"url": "https://orangecountywater.example/staff",
+         "title": "Orange County Water Authority"},
+    ) is False
 
 
 # ------------------------------------------------------------ enrich_lead_contact honesty
@@ -71,7 +100,7 @@ def test_enrich_unreachable_records_nothing(
         raise SourceUnreachable("down")
 
     monkeypatch.setattr(finder, "find_contact", raise_unreachable)
-    outcome = tools.enrich_lead_contact(conn, lead_id, "Castle Rock", "WA")
+    outcome = tools.enrich_lead_contact(conn, lead_id)
     assert outcome.status == "unreachable"
     assert db.contacts_for_lead(conn, lead_id) == []  # nothing fabricated, nothing final
 
@@ -81,7 +110,7 @@ def test_enrich_genuine_miss_records_not_found(
     """A true miss (finder returned None) is recorded as not_found, honestly and finally."""
     conn, lead_id = _lead(tmp_path)
     monkeypatch.setattr(finder, "find_contact", lambda *_a, **_k: None)
-    outcome = tools.enrich_lead_contact(conn, lead_id, "Castle Rock", "WA")
+    outcome = tools.enrich_lead_contact(conn, lead_id)
     assert outcome.status == "not_found"
     rows = db.contacts_for_lead(conn, lead_id)
     assert len(rows) == 1 and rows[0]["contact_status"] == "not_found"
@@ -96,7 +125,7 @@ def test_enrich_verified_saves_contact(
                             email="jdoe@crschools.org", phone="",
                             source_url="https://crschools.org/staff", confidence="high")
     monkeypatch.setattr(finder, "find_contact", lambda *_a, **_k: cand)
-    outcome = tools.enrich_lead_contact(conn, lead_id, "Castle Rock", "WA")
+    outcome = tools.enrich_lead_contact(conn, lead_id)
     assert outcome.status == "verified" and outcome.email == "jdoe@crschools.org"
     rows = db.contacts_for_lead(conn, lead_id)
     assert rows[0]["contact_status"] == "verified"
@@ -114,5 +143,5 @@ def test_enrich_reuses_existing_verified_without_researching(
         raise AssertionError("finder must not run when a verified contact exists")
 
     monkeypatch.setattr(finder, "find_contact", fail)
-    outcome = tools.enrich_lead_contact(conn, lead_id, "Castle Rock", "WA")
+    outcome = tools.enrich_lead_contact(conn, lead_id)
     assert outcome.status == "verified" and outcome.email == "ssmith@crschools.org"

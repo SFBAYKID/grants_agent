@@ -1,0 +1,16 @@
+{
+  "enrollment": {
+    "features": [
+      {"attributes": {"LEAID": "0640150", "LEA_NAME": "Tustin Unified", "LSTATE": "CA ", "ENROLLMENT": 21220}},
+      {"attributes": {"LEAID": "0600010", "LEA_NAME": "Orange Unified", "LSTATE": "CA", "ENROLLMENT": 26000}},
+      {"attributes": {"LEAID": "0600020", "LEA_NAME": "Orange School District", "LSTATE": "CA", "ENROLLMENT": 1000}}
+    ]
+  },
+  "location": {
+    "features": [
+      {"attributes": {"LEAID": "0640150", "NAME": "Tustin Unified", "STATE": "CA", "CITY": "Tustin"}},
+      {"attributes": {"LEAID": "0600010", "NAME": "Orange Unified", "STATE": "CA", "CITY": "Orange"}},
+      {"attributes": {"LEAID": "0600020", "NAME": "Orange School District", "STATE": "CA", "CITY": "Orange"}}
+    ]
+  }
+}
