@@ -1,0 +1,54 @@
+entity_id,source_id,linked_on,link_method,notes
+01097,al.mobile_county.bids,2026-07-15,publisher_exact_name,Mobile County
+02110,ak.juneau_borough.bids,2026-07-15,manual_alias,Juneau City and Borough
+04015,az.mohave_county.bids,2026-07-15,publisher_exact_name,Mohave County
+05119,ar.pulaski_county.bids,2026-07-15,publisher_exact_name,Pulaski County
+06087,ca.santa_cruz_county.solicitations,2026-07-15,publisher_exact_name,Santa Cruz County
+08041,co.el_paso_county.bids,2026-07-15,publisher_exact_name,El Paso County
+10003,de.new_castle_county.bids,2026-07-15,publisher_exact_name,New Castle County
+12097,fl.osceola_county.bids,2026-07-15,publisher_exact_name,Osceola County
+13121,ga.fulton_county.bids,2026-07-15,publisher_exact_name,Fulton County
+15001,hi.hawaii_county.bids,2026-07-15,publisher_exact_name,Hawaii County
+16001,id.ada_county.procurement,2026-07-15,publisher_exact_name,Ada County
+17197,il.will_county.bids,2026-07-15,publisher_exact_name,Will County
+18097,in.marion_county.bids,2026-07-15,manual_alias,Marion County
+19153,ia.polk_county.bids,2026-07-15,publisher_exact_name,Polk County
+20209,ks.wyandotte.bids,2026-07-15,manual_alias,Wyandotte County
+21111,ky.louisville_metro.procurement,2026-07-15,manual_alias,Jefferson County
+22089,la.st_charles_parish.bids,2026-07-15,publisher_exact_name,St. Charles Parish
+23005,me.cumberland_county.bids,2026-07-15,publisher_exact_name,Cumberland County
+24005,md.baltimore_county.bids,2026-07-15,publisher_exact_name,Baltimore County
+25001,ma.barnstable_county.bids,2026-07-15,publisher_exact_name,Barnstable County
+26163,mi.wayne_county.procurement,2026-07-15,publisher_exact_name,Wayne County
+27053,mn.hennepin_county.vendors,2026-07-15,publisher_exact_name,Hennepin County
+28049,ms.hinds_county.purchasing,2026-07-15,publisher_exact_name,Hinds County
+29189,mo.st_louis_county.bids,2026-07-15,publisher_exact_name,St. Louis County
+30049,mt.lewis_clark_county.awards,2026-07-15,publisher_exact_name,Lewis and Clark County
+30063,mt.missoula_county.bids,2026-07-15,publisher_exact_name,Missoula County
+31127,ne.nemaha_county.bids,2026-07-15,publisher_exact_name,Nemaha County
+32003,nv.clark_county.bids,2026-07-15,publisher_exact_name,Clark County
+33011,nh.hillsborough_county.bids,2026-07-15,publisher_exact_name,Hillsborough County
+34027,nj.morris_county.bids,2026-07-15,publisher_exact_name,Morris County
+35017,nm.grant_county.purchasing,2026-07-15,publisher_exact_name,Grant County
+36119,ny.westchester_county.bids,2026-07-15,publisher_exact_name,Westchester County
+37179,nc.union_county.bids,2026-07-15,publisher_exact_name,Union County
+38017,nd.cass_county.bids,2026-07-15,publisher_exact_name,Cass County
+39049,oh.franklin_county.bids,2026-07-15,publisher_exact_name,Franklin County
+40109,ok.oklahoma_county.bids,2026-07-15,publisher_exact_name,Oklahoma County
+41029,or.jackson_county.bids,2026-07-15,publisher_exact_name,Jackson County
+42071,pa.lancaster_county.bids,2026-07-15,publisher_exact_name,Lancaster County
+45051,sc.horry_county.bids,2026-07-15,publisher_exact_name,Horry County
+46099,sd.minnehaha_county.bids,2026-07-15,publisher_exact_name,Minnehaha County
+47003,tn.bedford_county.bids,2026-07-15,publisher_exact_name,Bedford County
+48439,tx.tarrant_county.procurement,2026-07-15,publisher_exact_name,Tarrant County
+49001,ut.beaver_county.bids,2026-07-15,publisher_exact_name,Beaver County
+51041,va.chesterfield_county.procurement,2026-07-15,publisher_exact_name,Chesterfield County
+53053,wa.pierce_county.bids,2026-07-15,publisher_exact_name,Pierce County
+54037,wv.jefferson_county.bids,2026-07-15,publisher_exact_name,Jefferson County
+55079,wi.milwaukee_county.bids,2026-07-15,publisher_exact_name,Milwaukee County
+56021,wy.laramie_county.bids,2026-07-15,publisher_exact_name,Laramie County
+06037,ca.los_angeles_county.procurement,2026-07-15,publisher_exact_name,Los Angeles County
+26125,mi.oakland_county.solicitations,2026-07-15,publisher_exact_name,Oakland County
+42003,pa.allegheny_county.solicitations,2026-07-15,publisher_exact_name,Allegheny County
+53033,wa.king_county.procurement,2026-07-15,publisher_exact_name,King County
+06059,ca.orange_county.procurement,2026-07-15,publisher_exact_name,Orange County

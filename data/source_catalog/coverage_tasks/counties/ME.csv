@@ -1,0 +1,17 @@
+entity_id,state,entity_name,entity_kind,universe_vintage,research_status,source_id,last_checked_on,notes
+23001,ME,Androscoggin County,county_equivalent,2025,not_researched,,,
+23003,ME,Aroostook County,county_equivalent,2025,not_researched,,,
+23005,ME,Cumberland County,county_equivalent,2025,candidate_found,me.cumberland_county.bids,2026-07-15,Cumberland County
+23007,ME,Franklin County,county_equivalent,2025,not_researched,,,
+23009,ME,Hancock County,county_equivalent,2025,not_researched,,,
+23011,ME,Kennebec County,county_equivalent,2025,not_researched,,,
+23013,ME,Knox County,county_equivalent,2025,not_researched,,,
+23015,ME,Lincoln County,county_equivalent,2025,not_researched,,,
+23017,ME,Oxford County,county_equivalent,2025,not_researched,,,
+23019,ME,Penobscot County,county_equivalent,2025,not_researched,,,
+23021,ME,Piscataquis County,county_equivalent,2025,not_researched,,,
+23023,ME,Sagadahoc County,county_equivalent,2025,not_researched,,,
+23025,ME,Somerset County,county_equivalent,2025,not_researched,,,
+23027,ME,Waldo County,county_equivalent,2025,not_researched,,,
+23029,ME,Washington County,county_equivalent,2025,not_researched,,,
+23031,ME,York County,county_equivalent,2025,not_researched,,,

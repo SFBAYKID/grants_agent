@@ -1,0 +1,11 @@
+entity_id,state,entity_name,entity_kind,universe_vintage,research_status,source_id,last_checked_on,notes
+33001,NH,Belknap County,county_equivalent,2025,not_researched,,,
+33003,NH,Carroll County,county_equivalent,2025,not_researched,,,
+33005,NH,Cheshire County,county_equivalent,2025,not_researched,,,
+33007,NH,Coos County,county_equivalent,2025,not_researched,,,
+33009,NH,Grafton County,county_equivalent,2025,not_researched,,,
+33011,NH,Hillsborough County,county_equivalent,2025,candidate_found,nh.hillsborough_county.bids,2026-07-15,Hillsborough County
+33013,NH,Merrimack County,county_equivalent,2025,not_researched,,,
+33015,NH,Rockingham County,county_equivalent,2025,not_researched,,,
+33017,NH,Strafford County,county_equivalent,2025,not_researched,,,
+33019,NH,Sullivan County,county_equivalent,2025,not_researched,,,

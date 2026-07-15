@@ -1,0 +1,18 @@
+entity_id,state,entity_name,entity_kind,universe_vintage,research_status,source_id,last_checked_on,notes
+32001,NV,Churchill County,county_equivalent,2025,not_researched,,,
+32003,NV,Clark County,county_equivalent,2025,candidate_found,nv.clark_county.bids,2026-07-15,Clark County
+32005,NV,Douglas County,county_equivalent,2025,not_researched,,,
+32007,NV,Elko County,county_equivalent,2025,not_researched,,,
+32009,NV,Esmeralda County,county_equivalent,2025,not_researched,,,
+32011,NV,Eureka County,county_equivalent,2025,not_researched,,,
+32013,NV,Humboldt County,county_equivalent,2025,not_researched,,,
+32015,NV,Lander County,county_equivalent,2025,not_researched,,,
+32017,NV,Lincoln County,county_equivalent,2025,not_researched,,,
+32019,NV,Lyon County,county_equivalent,2025,not_researched,,,
+32021,NV,Mineral County,county_equivalent,2025,not_researched,,,
+32023,NV,Nye County,county_equivalent,2025,not_researched,,,
+32027,NV,Pershing County,county_equivalent,2025,not_researched,,,
+32029,NV,Storey County,county_equivalent,2025,not_researched,,,
+32031,NV,Washoe County,county_equivalent,2025,not_researched,,,
+32033,NV,White Pine County,county_equivalent,2025,not_researched,,,
+32510,NV,Carson City,county_equivalent,2025,not_researched,,,

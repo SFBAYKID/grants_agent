@@ -1,0 +1,16 @@
+entity_id,state,entity_name,entity_kind,universe_vintage,research_status,source_id,last_checked_on,notes
+04001,AZ,Apache County,county_equivalent,2025,not_researched,,,
+04003,AZ,Cochise County,county_equivalent,2025,not_researched,,,
+04005,AZ,Coconino County,county_equivalent,2025,not_researched,,,
+04007,AZ,Gila County,county_equivalent,2025,not_researched,,,
+04009,AZ,Graham County,county_equivalent,2025,not_researched,,,
+04011,AZ,Greenlee County,county_equivalent,2025,not_researched,,,
+04012,AZ,La Paz County,county_equivalent,2025,not_researched,,,
+04013,AZ,Maricopa County,county_equivalent,2025,not_researched,,,
+04015,AZ,Mohave County,county_equivalent,2025,candidate_found,az.mohave_county.bids,2026-07-15,Mohave County
+04017,AZ,Navajo County,county_equivalent,2025,not_researched,,,
+04019,AZ,Pima County,county_equivalent,2025,not_researched,,,
+04021,AZ,Pinal County,county_equivalent,2025,not_researched,,,
+04023,AZ,Santa Cruz County,county_equivalent,2025,not_researched,,,
+04025,AZ,Yavapai County,county_equivalent,2025,not_researched,,,
+04027,AZ,Yuma County,county_equivalent,2025,not_researched,,,

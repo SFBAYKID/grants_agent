@@ -1,0 +1,10 @@
+entity_id,state,entity_name,entity_kind,universe_vintage,research_status,source_id,last_checked_on,notes
+09110,CT,Capitol Planning Region,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
+09120,CT,Greater Bridgeport Planning Region,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
+09130,CT,Lower Connecticut River Valley Planning Region,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
+09140,CT,Naugatuck Valley Planning Region,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
+09150,CT,Northeastern Connecticut Planning Region,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
+09160,CT,Northwest Hills Planning Region,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
+09170,CT,South Central Connecticut Planning Region,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
+09180,CT,Southeastern Connecticut Planning Region,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
+09190,CT,Western Connecticut Planning Region,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent

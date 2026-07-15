@@ -1,10 +1,13 @@
-# Grant-Lead Data Source Inventory — Monarch Connected
-Compiled 2026-07-13. Every source labeled with verification status from live testing this session.
+# Integrated and High-Value Grant-Lead Sources — Monarch Connected
+
+Compiled through 2026-07-15. This narrative covers integrated sources and high-value follow-ups.
+The canonical nationwide candidate catalog and separate access lists live in
+`docs/source_inventory/`; discovery rows there are not automatically live integrations.
 Lead definitions: **GOLD** = entity just received security funding. **SILVER** = entity is applying / has an open RFP.
 
 ---
 
-## TIER 1 — VERIFIED TODAY (live data pulled in this session)
+## TIER 1 — VERIFIED LIVE (live data pulled in recorded sessions)
 
 ### 1. USASpending API — prime awards
 - Endpoint: POST https://api.usaspending.gov/api/v2/search/spending_by_award/ — no key
@@ -44,59 +47,97 @@ Lead definitions: **GOLD** = entity just received security funding. **SILVER** =
   visible text found 0 security hits today (collapsed rows not checked — parse raw HTML).
   Better long-term: register as vendor w/ commodity codes → parse notification emails via Gmail.
 
+### 6. California Grants Portal / data.ca.gov
+- Official CKAN metadata plus daily opportunity and fiscal-year award CSVs; no key
+- Lead type: GOLD only when a named recipient award has physical-security evidence;
+  application-window records remain lower-priority pipeline signals
+- Verified 2026-07-14: live dry run parsed 831 records and wrote zero rows; current physical-security
+  opportunity count was zero
+- Caveat: portal publication/update dates are provenance, not award-action dates; undated awards are
+  backfill-suppressed and cannot be described as "just awarded"
+
+### 7. OregonBuys recent-bids PDF
+- Official Oregon DAS seven-day selected-bids publication; no key
+- Lead type: SILVER physical-security solicitations
+- Verified 2026-07-14: PDF fetch, text/table extraction, and a truthful zero-match live dry run
+- Needs-testing: entity parsing on a live physical-security row. The broader search requires a
+  supplier session and is intentionally not automated around that boundary.
+
+### 8. NCES EDGE 2024–25 (enrichment, not a lead source)
+- Official school membership aggregation and district office city; no key
+- Verified 2026-07-14: Tustin Unified uniquely matched NCES id `0640150`, enrollment 21,220
+- Conservative behavior: exact normalized district match within one state; ambiguous names remain
+  unmatched. Statewide production coverage remains needs-testing.
+
 ---
 
-## TIER 2 — CONFIRMED TO EXIST, ACCESS NOT YET WIRED
+## TIER 2 — CONFIRMED HIGH-VALUE FOLLOW-UPS AND SEASONAL FEEDS
 
-### 6. Michigan MSP Competitive School Safety Grant Program (CSSGP)
+### 9. Michigan MSP Competitive School Safety Grant Program (CSSGP)
 - michigan.gov/msp → Grants & Community Services → school safety; award lists published per FY (PDFs)
 - Lead type: GOLD. Eligible costs are literally Verkada's catalog: access control systems,
   intercom w/ access, barrier systems, duress/panic alarms, doorway hardening
 - Eligible: public AND nonpublic schools, districts, ISDs. ~$10M FY22; proposed much larger since
-- TODO: verify latest-cycle award list URL + parse
+- Future work — owner: Grant data-source maintainer. Verify the latest-cycle award-list URL and parser.
 
-### 7. FEMA NSGP state-published subrecipient lists
+### 10. FEMA NSGP state-published subrecipient lists
 - State Administrative Agencies (WA Military Dept, Cal OES, MI State Police, PEMA) publish
   awardee lists, often earlier than USASpending subaward data
-- Lead type: GOLD. TODO: locate each state's posting page
+- Lead type: GOLD. Future work — owner: Grant data-source maintainer. Locate each state's posting page.
 
-### 8. NEW: School Safety Enhancement (SSE) program — 84.184A
+### 11. NEW: School Safety Enhancement (SSE) program — 84.184A
 - Brand-new FY26 federal program, $93M, apps close 7/28/2026; grants go to ~30 state education
   agencies ($500K–$5M) which then SUBGRANT to districts; physical security focus (locks, secure
   entry, perimeter, visitor screening) per the Uvalde report
 - Lead type: future GOLD wave — state awards ~fall 2026, then state subgrant rounds = fresh
   district lead lists in early 2027. Watch ed.gov 84.184A page + each state's subgrant process
 
-### 9. SAM.gov Opportunities API
+### 12. SAM.gov Opportunities API
 - Lead type: SILVER (federal-side RFPs; some school/city solicitations w/ federal nexus)
-- Verified: keyless request rejected (key required). BLOCKED on Chase signing in to grab key
-- Unverified: rate limits, keyword-vs-title-only search
+- Verified: keyless requests are rejected and Chase's configured key completed a live poll.
+- Verified offline: parser and pagination behavior are covered by recorded fixtures and tests.
+- Needs-testing: Assistance Listings is cataloged but has no runtime poller; operational rate-limit
+  behavior should be monitored rather than assumed from documentation.
 
-### 10. COPS/DOJ press releases + annual SVPP awardee PDFs
+### 13. COPS/DOJ press releases + annual SVPP awardee PDFs
 - cops.usdoj.gov publishes state-by-state award lists at announcement time (~Sept/Oct) —
-  faster than USASpending. Lead type: GOLD, seasonal. TODO: wire an autumn watcher
+  faster than USASpending. Lead type: GOLD, seasonal. Future work — owner: Grant data-source
+  maintainer. Wire an autumn watcher before the next award season.
 
 ---
 
 ## TIER 3 — KNOWN CHANNELS, UNVERIFIED (next pass)
 
-### 11. School board meeting agendas/minutes (BoardDocs, Simbli, etc.)
+### 14. School board meeting agendas/minutes (BoardDocs, Simbli, etc.)
 - THE silver-lead source: boards must approve grant applications and vendor contracts.
   "Resolution to apply for SVPP/CSSGP" in minutes = applying now
 - Fragmented per district; needs a crawler + Claude extraction. Not verified this session.
 
-### 12. Regional bid platforms (silver leads)
-- CA: PlanetBids (widely used by districts/cities) — unverified
-- MI: BidNet Direct / MITN network — unverified
+### 15. Regional bid platforms (silver leads)
+- CA: PlanetBids is cataloged but still needs access testing. Orange County's official OpenGov page
+  and anonymous embedded solicitation list were verified live through Firecrawl on 2026-07-15.
+- MI: Oakland County's official page was verified live and requires MITN/BidNet vendor registration;
+  exact account cost and automation behavior remain needs-testing.
 - PA: PennBid — unverified
-- National: OpenGov Procurement, Public Purchase, DemandStar, Bonfire — unverified
-- These are account-based portals; per-portal access rules TBD
+- PA Bonfire: Allegheny County's official page was verified live and requires supplier registration.
+- National: OpenGov Procurement, Public Purchase, DemandStar, and Bonfire still require per-agency
+  access characterization; one verified agency page does not prove nationwide portal access.
 
-### 13. Bond measures (Ballotpedia school bond elections, CA especially)
+### 16. County procurement coverage queue (discovery, not runtime pollers)
+- Verified 2026-07-15: the pinned Census Gazetteer tracks all 3,144 county-equivalents in the 50 states
+  plus DC. Current state is 53 exact source candidates, 15 structural exceptions, and 3,076
+  `not_researched` tasks.
+- Verified 2026-07-15: official procurement pages for Los Angeles, Orange, Oakland, Allegheny, and
+  King counties were selected from Firecrawl search and scraped successfully; immutable search and
+  content hashes are stored in `data/source_catalog/discovery_checks.csv`.
+- Needs-testing: these five additions are catalog candidates, not executable pollers. Pagination,
+  robots/terms, stable record schemas, failure behavior, and positive security matches remain open.
+
+### 17. Bond measures (Ballotpedia school bond elections, CA especially)
 - Passed facilities bond = large multi-year budget that typically includes security scope
 - Lead type: GOLD-adjacent, big dollars, slow cycle. Unverified.
 
-### 14. State single-audit / grant transparency portals
+### 18. State single-audit / grant transparency portals
 - e.g., PA has Egrants records; states publish grant transparency data. Unverified.
 
 ## Dead ends / honest notes

@@ -1,0 +1,5 @@
+state,jurisdiction_level,status,checked_on,evidence_method,evidence_url,notes
+CT,county,not_applicable,2026-07-15,firecrawl_search,https://portal.ct.gov/-/media/OPM/IGPP/ORG/County-Equivalency/FAQ-for-CT-County-Equivalency-12-14-2020.pdf,Official FAQ states Connecticut dissolved county government in 1960 and uses planning-region equivalents
+DC,county,not_applicable,2026-07-15,official_web,https://statehood.dc.gov/page/faq,DC performs state city and county functions through one government
+RI,county,not_applicable,2026-07-15,official_document,https://treasury.ri.gov/sites/g/files/xkgbur646/files/assets/55b05c66c0d671401701f5c6/State_of_RI_LPC_2014_A_B_C.pdf,Rhode Island has no county governmental structure
+VT,county,researched_not_found,2026-07-15,firecrawl_search,https://legislature.vermont.gov/Documents/2024/WorkGroups/Senate%20Appropriations/FY2024%20Budget/1.%20Governor%27s%20Recommended%20Budget%20Documents/W~Governor%27s%20Recommended%20FY%202024%20State%20Budget~Executive%20Budget%20Book%20-%201500%20Pages%20-%20Do%20NOT%20Print~1-23-2023.pdf,County government is limited and no county procurement endpoint was found in this pass

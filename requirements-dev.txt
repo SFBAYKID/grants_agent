@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Reproducible repository health gate; runtime deployments do not need these tools.
+ruff>=0.15,<1
+vulture>=2.16,<3

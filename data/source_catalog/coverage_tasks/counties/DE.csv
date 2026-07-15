@@ -1,0 +1,4 @@
+entity_id,state,entity_name,entity_kind,universe_vintage,research_status,source_id,last_checked_on,notes
+10001,DE,Kent County,county_equivalent,2025,not_researched,,,
+10003,DE,New Castle County,county_equivalent,2025,candidate_found,de.new_castle_county.bids,2026-07-15,New Castle County
+10005,DE,Sussex County,county_equivalent,2025,not_researched,,,

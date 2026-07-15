@@ -1,27 +1,52 @@
-# FINDINGS — Grant Lead Research Session (2026-07-13)
-Everything discovered, verified, and still open. Companion to `grant_lead_source_inventory.md`.
+# FINDINGS — Integrated Grant Lead Research (through 2026-07-15)
 
-## What was built this session
-1. **`grant_watch.py`** — v1 poller scaffold: Grants.gov + USASpending (prime awards) + WEBS
-   scraper + SAM.gov stub, SQLite dedupe, console alerts. Grants.gov/USASpending payloads are
-   exact copies of live-verified calls. Script itself NOT yet executed end-to-end. WEBS parse
-   selectors unverified. No Slack, no contact enrichment, no subawards poller yet.
-2. **`data/svpp_active_awards_CA_MI_PA_WA.csv`** — 75 active SVPP awards (real, pulled live).
-3. **`docs/grant_lead_source_inventory.md`** — full source map w/ verification status per source.
-4. This findings doc + `CLAUDE.md` build briefing.
+This records live integrations, verified lead findings, and open implementation work. It is not the
+complete nationwide candidate list. See `docs/source_inventory/README.md` and its generated CSVs for
+the canonical discovery catalog.
 
-## What still needs to be built
-(Phases 1–5 detailed in CLAUDE.md)
-- Run/fix/verify v1 script; proper DB schema; seed from CSV
-- New pollers: USASpending subawards (NSGP), PA PCCD PDFs, MI CSSGP PDFs, COPS fall
-  announcement watcher, SSE (84.184A) state-subgrant watcher
-- Contact enrichment (website/staff-directory extraction via Claude API; ZoomInfo flagging)
-- Slack weekly digest + approve-to-email flow via existing @Persequor agent
-- Cron; then DigitalOcean Postgres migration; then state expansion by config
-- SAM.gov poller once Chase retrieves his API key (sam.gov → Workspace → Account Details;
-  email OTP step is his)
+## What is built locally
 
-## Verified API facts (tested live in browser, 2026-07-13)
+- **verified (offline tests):** typed package, versioned truth/event schema, official-source
+  pollers, scoring/dedup, Slack proactive/search tools, Excel/Google Sheets export jobs,
+  contact integrity gates, Persequor outbox/retry, NCES enrichment, Salesforce reader snapshots,
+  and the disabled create-only Salesforce Campaign approval workflow.
+- **verified (live read-only, 2026-07-13/14):** USAspending, Grants.gov, SAM.gov, WEBS fetch/parser,
+  California Grants Portal, OregonBuys recent-bids fetch/table parse, and NCES district data.
+- **needs-testing:** Salesforce and Persequor live round trips, a positive OregonBuys security bid,
+  Salesforce Campaign sandbox creation, production cron, and production deployment.
+
+## Nationwide discovery snapshot
+
+- **verified (catalog validation):** 252 candidate and integrated source records validate across
+  federal, state, county, city, school-district, specialized-jurisdiction, multi-jurisdiction, and
+  portal-family levels.
+- **verified (access evidence):** 17 no-auth sources have verified access, 11 additional no-auth
+  classifications remain candidates, 2 public APIs require keys, 14 sources require free accounts,
+  4 require supplier accounts, and 204 candidates still have unknown access.
+- **verified (gap pass):** exact official endpoints were added for Ada County, Troy School District,
+  Houston ISD, and Seattle Public Schools. Connecticut is an evidenced `not_applicable` county layer
+  because its official FAQ states that county government was dissolved in 1960.
+- **verified (new evidence):** twelve Firecrawl selected-result checks now persist queries, result
+  metadata, deterministic evidence hashes, and scraped-content hashes.
+- **verified (county universe):** the pinned 2025 Census Gazetteer produces 3,144 county-equivalent
+  tasks across 50 states plus DC: 53 linked source candidates, 15 structural exceptions, and 3,076
+  entities explicitly marked `not_researched`.
+- **verified (county batch):** Firecrawl search and scrape checks added official procurement pages for
+  Los Angeles, Orange, Oakland, Allegheny, and King counties. Their portal/account boundaries are
+  recorded separately from runtime integration status.
+- **needs-testing:** county, city, and school-district coverage remains incomplete. The earlier
+  185 Firecrawl-discovered rows predate immutable check storage and are not independently replayable.
+
+## What remains
+
+- **needs-testing:** verify live contact enrichment and positive RFP extraction against real rows.
+- **needs-testing:** complete Persequor status reflection and one test-mode end-to-end brief.
+- **needs-testing:** run Salesforce match-quality shadow testing, then a sandbox-only Campaign action.
+- **needs-testing:** deploy only a committed revision through grants-ops-guardian and install scoped cron.
+- **assumed roadmap:** PA PCCD parser, MI CSSGP, COPS announcement, SSE state-subgrant, board-agenda,
+  and additional compliant RFP watchers remain valuable next sources.
+
+## Verified API facts (tested live through 2026-07-14)
 - **Grants.gov**: `POST https://api.grants.gov/v1/api/search2`, no auth. Body e.g.
   `{"keyword":"school violence prevention","oppStatuses":"posted","rows":25}`.
   Returns `data.hitCount`, `data.oppHits[]` (id, number, title, agency, openDate, closeDate, cfdaList).
@@ -37,8 +62,18 @@ Everything discovered, verified, and still open. Companion to `grant_lead_source
 - **WEBS**: `https://pr-webs-vendor.des.wa.gov/BidCalendar.aspx` public, no login, ~189 rows
   on test day. Frameset app; parse raw HTML. Filter-by-org uses ASP.NET VIEWSTATE postbacks —
   default <All> view is fine. State agencies must post; districts/cities/higher-ed optional.
-- **SAM.gov**: keyless request rejected (key mandatory). Rate limits + search fields UNVERIFIED.
+- **SAM.gov**: a key is mandatory; the configured keyed opportunities integration was exercised live.
+  Pagination and parsing are fixture-tested. Assistance Listings is cataloged separately and still
+  needs an executable poller.
 - **PA PCCD**: award PDFs fetchable from pa.gov without auth (verified via direct PDF pull).
+- **California Grants Portal**: official CKAN metadata and CSV feeds need no API key. A 2026-07-14
+  dry run parsed 831 records and wrote nothing. The parser keeps portal publication dates as
+  provenance rather than treating them as award dates.
+- **NCES EDGE**: the official 2024–25 directory/enrollment service needs no key. Tustin Unified
+  matched uniquely in the live check with NCES district id `0640150` and 21,220 students.
+- **OregonBuys**: the public recent-bids PDF fetched and its table parsed in a 2026-07-14 dry run;
+  it contained zero matching physical-security bids at that moment. The authenticated full-search
+  workflow is intentionally not bypassed.
 
 ## The lead lists (as of 2026-07-13)
 

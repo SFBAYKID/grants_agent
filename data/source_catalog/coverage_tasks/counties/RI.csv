@@ -1,0 +1,6 @@
+entity_id,state,entity_name,entity_kind,universe_vintage,research_status,source_id,last_checked_on,notes
+44001,RI,Bristol County,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
+44003,RI,Kent County,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
+44005,RI,Newport County,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
+44007,RI,Providence County,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
+44009,RI,Washington County,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent

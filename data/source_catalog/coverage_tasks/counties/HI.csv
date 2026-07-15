@@ -1,0 +1,6 @@
+entity_id,state,entity_name,entity_kind,universe_vintage,research_status,source_id,last_checked_on,notes
+15001,HI,Hawaii County,county_equivalent,2025,candidate_found,hi.hawaii_county.bids,2026-07-15,Hawaii County
+15003,HI,Honolulu County,county_equivalent,2025,not_researched,,,
+15005,HI,Kalawao County,county_equivalent,2025,not_researched,,,
+15007,HI,Kauai County,county_equivalent,2025,not_researched,,,
+15009,HI,Maui County,county_equivalent,2025,not_researched,,,

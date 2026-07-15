@@ -1,0 +1,15 @@
+entity_id,state,entity_name,entity_kind,universe_vintage,research_status,source_id,last_checked_on,notes
+25001,MA,Barnstable County,county_equivalent,2025,candidate_found,ma.barnstable_county.bids,2026-07-15,Barnstable County
+25003,MA,Berkshire County,county_equivalent,2025,not_researched,,,
+25005,MA,Bristol County,county_equivalent,2025,not_researched,,,
+25007,MA,Dukes County,county_equivalent,2025,not_researched,,,
+25009,MA,Essex County,county_equivalent,2025,not_researched,,,
+25011,MA,Franklin County,county_equivalent,2025,not_researched,,,
+25013,MA,Hampden County,county_equivalent,2025,not_researched,,,
+25015,MA,Hampshire County,county_equivalent,2025,not_researched,,,
+25017,MA,Middlesex County,county_equivalent,2025,not_researched,,,
+25019,MA,Nantucket County,county_equivalent,2025,not_researched,,,
+25021,MA,Norfolk County,county_equivalent,2025,not_researched,,,
+25023,MA,Plymouth County,county_equivalent,2025,not_researched,,,
+25025,MA,Suffolk County,county_equivalent,2025,not_researched,,,
+25027,MA,Worcester County,county_equivalent,2025,not_researched,,,

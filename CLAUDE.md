@@ -88,7 +88,7 @@ Build a **weekly grants checker** that:
 ## The agents in this repo
 
 - **Grant** — the Slack chatbot persona (the product). Talks to humans and to other Slack agents
-  (@Persequor). Posts the weekly digest, runs the approve-to-email flow. Honest, human-in-the-loop,
+  (@Persequor). Posts paced individual lead alerts, runs the approve-to-email flow. Honest, human-in-the-loop,
   never fabricates. Spec + live app config: `docs/grant_agent.md` (Slack app provisioned 2026-07-13;
   tokens in `.env`).
 - **grants-ops-guardian** (`.claude/agents/`) — the ONLY thing allowed to operate the DigitalOcean
@@ -107,36 +107,40 @@ affect Chase's other projects.
 - Prefer **official APIs > published PDFs/pages > scraping portals.** Respect `robots.txt`; sleep
   between requests — these are government servers, do not hammer them.
 - Small commits per working increment; a `--dry-run` flag on anything that posts to Slack or drafts email.
-- Read `docs/FINDINGS.md` and `docs/grant_lead_source_inventory.md` before touching data sources —
-  they record what is already verified and the gotchas (e.g. SVPP is split across CFDA `16.071` **and**
-  `16.710`; query one and you silently lose most leads).
+- Read `docs/source_inventory/README.md`, `data/source_catalog/sources.csv`, `docs/FINDINGS.md`, and
+  `docs/grant_lead_source_inventory.md` before touching data sources. The generated inventory records
+  nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
+  across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
-## Current status (2026-07-13, end of day)
+## Current status (2026-07-15)
 
-- **Phase 1 built and `verified` live.** The `grant_watch/` package (typed models, 4-table schema,
-  per-source modules, CLI with `--dry-run`) replaced the v1 single-file scaffold, which was deleted.
-  Run it: `python -m grant_watch.cli poll|seed|status`. Tests: `python -m pytest` (18 passing, on
-  recorded fixtures in `tests/fixtures/`).
-- Per-source verification: **usaspending** `verified` (SVPP filter fixed — unfiltered 16.710 was 96%
-  non-school noise; pagination added; 4 states polled); **grants.gov** `verified`; **sam.gov**
-  `verified` with Chase's key; **webs** fetch+parse `verified`, but entity extraction from group-header
-  rows is `needs-testing` until a real security bid appears on the page (capture-day HTML verifiably
-  contained zero security keywords, so 0 matches was correct).
-- DB seeded: 75 CSV GOLD + 75 live GOLD SVPP awards + 96 expired-window watch + 153 grants.gov
-  signals + 4 SILVER RFPs. Dedup `verified` (repeat poll → 0 new).
-- **Phase 3 built and `verified` live.** `grant_watch/slack/` — digest (pure Block Kit builder +
-  poster), Grant bot (Socket Mode; triage buttons; bad-lead-reason modal; draft → human-approve →
-  @Persequor handoff), `/grant status|digest`. First real digest posted 2026-07-13 (16 leads,
-  statuses flipped to surfaced); Socket Mode boot `verified`. Run the bot:
-  `python -m grant_watch.slack.grant`. Digest cron target: `python -m grant_watch.cli digest`.
-  Outstanding: invite @Grant to the digest channel (posting worked via chat:write.public, but
-  thread reads need membership); set PERSEQUOR_USER_ID in .env so handoffs ping.
-- **Post-launch fixes (same day, `verified`):** seed-vs-live duplicate reconciliation (75 superseded
-  CSV rows retired; expiring bucket 34→17) and the digest quality gate (`scoring.lead_score` —
-  freshness × dollars × program camera-fit; GOLD bucket shows the top-ranked N, watch never surfaces).
-- **In design (do not build yet):** multi-rep workflow (claim/ownership, territory routing), the
-  Grant↔Persequor outreach handoff (awaiting `persequor_integration_response.md` from the
-  `~/monarch_followup_agent` project), and Salesforce cross-referencing. Chase wants the complete
-  workflow agreed before implementation.
-- Next: Phase 2 (contact enrichment — Firecrawl + Claude extraction, not_found never fabricated),
-  then cron on the droplet (Phase 4 tenant).
+- `verified` offline: the canonical `python -m pytest tests -q` target passes 251 tests. The package
+  uses seven ordered SQLite migrations, typed evidence/funding models, deduplication, scoring, search,
+  export, Slack receipt/reconciliation state, outreach retry state, and Salesforce snapshots.
+- `verified` live through 2026-07-14: USAspending prime awards and NSGP subawards, Grants.gov,
+  keyed SAM.gov opportunities, WEBS fetch/parser, California Grants Portal, OregonBuys recent-bids,
+  NCES district enrichment, and Grant Socket Mode have been exercised. OregonBuys and WEBS returned
+  truthful zero security matches during their checks; positive-row entity extraction remains
+  `needs-testing`.
+- `verified` catalog validation: `data/source_catalog/sources.csv` contains 252 federal, state,
+  county, city, school-district, multi-jurisdiction, and portal-family research records. Generated
+  public/keyed/account/unknown-access lists and the 50-state-plus-DC coverage matrix live in
+  `docs/source_inventory/`. Twelve Firecrawl checks have immutable selected-result evidence in
+  `data/source_catalog/discovery_checks.csv`. The pinned 2025 Census county universe tracks 3,144
+  county-equivalents in state shards: 53 linked candidates, 15 structural exceptions, and 3,076
+  explicitly `not_researched`; most catalog rows remain candidates, not pollers.
+- `verified` product behavior: Grant accepts configured-channel mentions and replies in registered
+  Grant threads, sends paced individual alerts, and has no digest, DM, slash-command, or ownership
+  workflow. Run the bot with `python -m grant_watch.slack.grant`; the dry-run-aware drip entrypoint is
+  `python -m grant_watch.cli drip --dry-run`.
+- `verified` safeguards in code and tests: seed/live reconciliation, freshness and program-fit
+  ranking, immutable source observations, incomplete-run tracking, Slack delivery reconciliation,
+  contact evidence gates, idempotent Persequor retry state, read-only Salesforce lookup, and
+  create-only Campaign approval state are implemented.
+- `needs-testing`: live contact enrichment, a positive OregonBuys/WEBS security row, Persequor live
+  round trips, Salesforce sandbox Campaign creation, production scheduling, Postgres parity, and
+  tenant-scoped deployment remain unverified. Salesforce Campaign writes stay disabled until explicit
+  sandbox approval.
+- `assumed` next sequence: characterize high-value catalog candidates, implement them one source per
+  module with fixtures and live smoke checks, complete contact-quality testing, then deploy through
+  `grants-ops-guardian` only.

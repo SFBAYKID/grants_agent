@@ -22,28 +22,38 @@ Data flow:
      normalize → score (GOLD/SILVER/watch) → dedup on (source, source_item_id)
             │
             ▼
-        leads DB  ──►  contact enrichment (Firecrawl crawl + Claude extraction)
-            │                 │  never fabricate — not_found is a valid outcome
-            ▼                 ▼
-   weekly cron ──► Grant (Slack digest + buttons) ──► human approves ──► @Persequor sends email
+ immutable observations/events ──► lead projection ──► contact + NCES + CRM snapshots
+            │                                  │  never fabricate — unknown is valid
+            ▼                                  ▼
+ scheduled workers ──► Grant (Slack/search/export) ──► approved Persequor/Campaign actions
 ```
 
-Phasing (see `CLAUDE.md` mission): Phase 1 pollers + local SQLite → Phase 2 contact enrichment →
-Phase 3 Grant/Slack/cron → Phase 4 DigitalOcean Postgres → Phase 5 state expansion.
+Local source, enrichment, Slack, search/export, read-only CRM, and create-only Campaign workflows are
+implemented. Production scheduling and live integration smoke tests remain separate deployment work.
 
 ---
 
 ## 2. Repository layout
 
-**Current (v1 scaffold, consolidated from Desktop):**
+**Current package:**
 
 ```
 grants_agent/
+├── AGENTS.md                 # tool-neutral agent workflow and health gate
 ├── CLAUDE.md                 # constitution + mission
 ├── architectural.md          # this file
 ├── .env / .env.example       # secrets (real .env git-ignored)
 ├── requirements.txt
-├── grant_watch.py            # v1 poller scaffold — NEVER run end-to-end; to be refactored
+├── grant_watch/              # typed application package
+│   ├── migrations.py         # ordered SQLite migrations and durable workflow state
+│   ├── source_catalog.py      # discovery evidence validation + generated access reports
+│   ├── source_discovery.py    # immutable Firecrawl selected-result evidence
+│   ├── coverage_universe.py   # Census county universe + sharded research tasks
+│   ├── sources/              # one official source per module
+│   ├── enrich/               # contacts, NCES, Salesforce reader + Campaign gateway
+│   └── slack/                # individual proactive alerts and conversation tools
+├── data/source_catalog/       # canonical nationwide source candidates + gap evidence
+├── docs/source_inventory/     # generated public/keyed/access/coverage catalog views
 ├── data/svpp_active_awards_CA_MI_PA_WA.csv   # 75 verified GOLD seed leads
 ├── docs/FINDINGS.md
 ├── docs/grant_lead_source_inventory.md
@@ -52,96 +62,124 @@ grants_agent/
 └── .claude/agents/           # project-scoped agents (grants-ops-guardian, architectural-critic)
 ```
 
-**Target package (when we build the program — one responsibility per module, each well under the
-1000-line cap):**
+**Responsibility split (each file remains below the 1000-line cap):**
 
 ```
 grant_watch/
 ├── __init__.py
-├── models.py           # typed Lead, Contact, Outreach, Run (dataclasses/pydantic)
-├── db/                 # schema, migrations, SQLite + Postgres backends
-├── sources/            # ONE module per source: usaspending.py, grants_gov.py, pa_pccd.py,
-│                       #   mi_cssgp.py, nsgp.py, webs.py, sam_gov.py, ...
-├── scoring.py          # GOLD/SILVER/watch + freshness; keyword relevance (Claude pass)
-├── enrich/             # firecrawl.py (crawl), extract.py (Claude staff-directory extraction)
-├── slack/              # grant.py (bot), digest.py (message formatting), persequor.py (handoff)
-├── cli.py              # entrypoints; --dry-run everywhere that posts/sends
-└── tests/              # pytest; recorded API fixtures (no live gov hammering)
+├── models.py           # typed source, funding-event, lead, and run dataclasses
+├── db.py               # SQLite repository operations; schema lives in migrations.py
+├── migrations.py       # seven ordered migrations; never mutate old migrations in place
+├── source_catalog.py   # typed candidate catalog, evidence validation, generated reports
+├── source_discovery.py # immutable Firecrawl search and scrape fingerprints
+├── coverage_universe.py # pinned Census county universe and per-entity research status
+├── health.py           # docs/annotations/line-cap/nested-test-tree enforcement
+├── sources/            # ONE integrated source per module; registry in sources/__init__.py
+├── scoring.py          # GOLD/SILVER/watch + freshness and physical-security program fit
+├── enrich/             # Firecrawl/Claude contacts, NCES, Salesforce reader and Campaign actions
+├── slack/              # channel-only bot, drip, search/export, tools, Persequor handoff
+├── google_sheets.py    # Google Drive/Sheets export integration
+├── spreadsheets.py     # local XLSX export generation
+├── presentation.py     # factual Slack/export presentation helpers
+├── persequor_client.py # durable idempotent draft-intake client and retry worker
+└── cli.py              # poll/seed/status/drip/retry/CRM/reconciliation entrypoints
 ```
 
-`grant_watch.py` (the single-file v1) is kept as reference until the package replaces it, then deleted
-(no dead code).
+Repository-root `tests/` contains pytest coverage and recorded API fixtures; default tests do not
+hammer live government servers.
 
----
+## 3. Data model
 
-## 3. Data model (canonical — supersedes v1's flat `seen` table)
+`grant_watch/migrations.py` is canonical. The important separation is:
 
-```sql
-CREATE TABLE leads (
-  id INTEGER PRIMARY KEY,
-  source TEXT NOT NULL,            -- 'usaspending:16.071', 'pccd_pdf', 'webs', ...
-  source_item_id TEXT NOT NULL,
-  lead_grade TEXT CHECK(lead_grade IN ('gold','silver','watch')),
-  entity_name TEXT NOT NULL,
-  entity_type TEXT,                -- district, city, nonpublic_school, nonprofit
-  state TEXT, county TEXT,
-  program TEXT,                    -- SVPP, NSGP, CSSGP, PCCD, STOP, RFP:<platform>
-  amount REAL,
-  funds_start DATE, funds_end DATE,
-  detail_url TEXT,
-  raw_json TEXT,
-  first_seen TIMESTAMP, last_seen TIMESTAMP,
-  status TEXT DEFAULT 'new',       -- new, surfaced, contacted, snoozed, replied, opportunity, dead
-  status_note TEXT,                -- human feedback, e.g. the [Bad lead] reason (feeds scoring)
-  UNIQUE(source, source_item_id)   -- the dedup key
-);
-CREATE TABLE contacts (
-  id INTEGER PRIMARY KEY,
-  lead_id INTEGER REFERENCES leads(id),
-  name TEXT, title TEXT, email TEXT, phone TEXT,
-  source_url TEXT, confidence TEXT CHECK(confidence IN ('high','medium','low')),
-  contact_status TEXT DEFAULT 'unverified'   -- unverified, verified, not_found (NEVER fabricate)
-);
-CREATE TABLE outreach (
-  id INTEGER PRIMARY KEY,
-  lead_id INTEGER, contact_id INTEGER,
-  channel TEXT, draft TEXT, approved_by TEXT,   -- approved_by is required before sent_at is set
-  sent_at TIMESTAMP, response TEXT
-);
-CREATE TABLE runs (
-  id INTEGER PRIMARY KEY, started TIMESTAMP, finished TIMESTAMP,
-  source TEXT, items_seen INT, items_new INT, errors TEXT
-);
-```
+- `source_observations`: immutable evidence payloads and observation hashes.
+- `funding_events`: typed event, evidenced date/precision, verification and suppression state.
+- `leads`: current projection used by search, ranking, Slack and enrichment.
+- durable workflow tables: Slack receipts, search snapshots, export jobs, outreach outbox,
+  notification outbox, outcomes/rewards, Salesforce snapshots and CRM action approvals.
+
+Unknown amount, date, enrollment, contact, or CRM state stays unknown. Observation time never becomes
+an award date, and an old backfill is suppressed from "new" notifications.
 
 **Dedup rule:** `(source, source_item_id)`. The classic failure here is the SVPP CFDA split — the same
 program lives under `16.071` and `16.710`, so `source` must include the CFDA (`usaspending:16.071`) or
 the same award reappears/duplicates. See `docs/FINDINGS.md`.
 
-**Schema parity across backends:** SQLite (Phase 1) and Postgres (Phase 4) use the same logical schema.
-The Postgres migration must preserve every value; test parity, do not assume it.
+**Future backend parity requirement:** a Postgres migration must preserve every SQLite value and
+workflow state. Postgres support is not implemented; test parity rather than assuming it.
+
+**Compatibility debt:** immutable migration 1 still creates `leads.assigned_to`,
+`leads.assigned_at`, and an `engagement.kind='claim'` option from the removed ownership workflow.
+Runtime code does not use them. The storage maintainer owns their removal through a new forward-only
+migration after backup/legacy-upgrade tests; editing the historical migration would break reproducible
+upgrades. Until then, these fields must not be presented as product capabilities.
 
 ---
 
-## 4. Data sources (summary — full map in `docs/grant_lead_source_inventory.md`)
+## 4. Data sources
 
-Verified live (2026-07-13): USASpending prime awards + **subawards** (NSGP end-recipients), Grants.gov
-`search2`, PA PCCD award PDFs, WEBS bid calendar. Blocked/unwired: SAM.gov (needs Chase's key), MI CSSGP
-PDFs, FEMA NSGP state lists, COPS autumn announcements, SSE 84.184A (new $93M program → district lead
-waves early 2027). Each source is one module in `sources/`, each labeled with its verification status.
+`docs/grant_lead_source_inventory.md` records integrated and high-value live-source findings.
+`docs/source_inventory/README.md` and its generated CSVs are the nationwide candidate map. Neither
+document turns a discovered URL into an integrated poller.
+
+Verified live through 2026-07-14: USAspending prime awards and NSGP subawards, Grants.gov, SAM.gov,
+WEBS fetch/parser, California Grants Portal feeds, and the OregonBuys recent-bids feed. NCES district
+enrollment/location enrichment was also verified live. OregonBuys returned no security matches during
+the live check, so positive-row entity extraction remains needs-testing. See the source inventory for
+the per-source evidence and limitations.
 
 Discipline for every source: official API > published PDF > scraped portal; respect robots.txt;
 rate-limit; record `verified`/`assumed`/`needs-testing` per source in code and in summaries.
+
+### 4.1 Discovery catalog versus runtime pollers
+
+Source discovery and source integration are deliberately separate:
+
+- `data/source_catalog/sources.csv` stores stable candidate IDs, publisher/jurisdiction scope,
+  source kind, access mode, credential environment-variable name, and independent evidence labels.
+- `data/source_catalog/coverage_exceptions.csv` records researched gaps and structurally inapplicable
+  layers without inventing an endpoint.
+- `data/source_catalog/discovery_checks.csv` stores selected Firecrawl query/result evidence and
+  content fingerprints linked to a catalog row or coverage exception. Twelve checks from the
+  2026-07-15 gap-closing pass are currently persisted and validator-backed.
+- `grant_watch/coverage_universe.py` pins the official 2025 Census national county Gazetteer by URL,
+  byte hash, vintage, and filtered entity count. Explicit GEOID-to-source links live in
+  `data/source_catalog/county_source_links.csv`; generated state shards retain a status for every one
+  of the 3,144 county-equivalents in the 50 states and DC. The upstream release is documented at
+  `https://www.census.gov/geographies/reference-files/2025/geo/gazetter-file.html`.
+- County task status is evidence-preserving: a reviewed link becomes `candidate_found`, statewide
+  structural evidence may become `not_applicable`, and everything else remains `not_researched`.
+  A state-level source or one county example never implies coverage of the other counties.
+- `grant_watch/source_catalog.py` validates those typed records and regenerates the access partitions
+  and 50-state-plus-DC matrix in `docs/source_inventory/`.
+- `grant_watch/sources/` contains the much smaller set of executable pollers. A candidate reaches this
+  layer only after access/terms review, a focused module, recorded fixtures, happy/failure tests, and a
+  separately reported live smoke check.
+
+The discovery catalog is durable research memory, not an automatic crawler and not a lead table. It
+must never promote `discovered` into `verified` merely because a URL was found.
+
+The current catalog is a manually reviewed snapshot. New checks now persist a query, retrieval date,
+selected rank/title/snippet, deterministic evidence hash, and scraped-content fingerprint. Historical
+Firecrawl rows from before this evidence schema remain `needs-testing`. A future discovery worker must
+record every returned result and status transition, require human promotion, and never auto-enable a
+poller. It also needs an explicit mapping from catalog IDs to runtime source namespaces such as
+`usaspending:16.071`; runtime namespaces remain CFDA/feed-specific because they are part of the dedup
+key. Automated discovery and runtime namespace mapping are not implemented today.
 
 ---
 
 ## 5. Grant (the Slack chatbot)
 
 Full spec and the live app's configuration record in `docs/grant_agent.md`. In short:
-Grant posts the weekly digest (new GOLD/SILVER leads, expiring-window alerts), offers per-lead buttons
-([Draft email] [Mark contacted] [Snooze] [Bad lead]), and on human approval hands the send to @Persequor.
-Grant runs in **Socket Mode** (no public URL). Everything that posts or drafts honors `--dry-run`. Grant
-never fabricates a lead, contact, or award figure.
+Grant never posts multi-lead digests. A paced worker surfaces at most one ranked lead or lower-priority
+funding bulletin per notification, with strict daily caps. Its initial post is one factual sentence
+without links, buttons, menus, CRM detail, or a call to action. Humans engage only by replying in that
+thread or mentioning @Grant in the configured channel; there are no slash commands or DMs. Grant runs
+in **Socket Mode** (no public URL). Scheduled CLI workers for polling, drip delivery, outreach retry,
+and Salesforce sync expose tested dry-run boundaries. The long-lived Socket Mode listener intentionally
+posts replies and has no dry-run flag, so exercise it through offline tests unless a real channel
+interaction is explicitly intended. Grant never fabricates a lead, contact, or award figure.
 
 ---
 
@@ -151,23 +189,26 @@ Grant cross-references each lead against Monarch's Salesforce so it can tell the
 already know: *"This district is already an Account — you logged a call 3 days ago"* with a deep link,
 or *"No record found — this is net-new."* This turns a raw lead into an actionable, context-aware nudge.
 
-- **Read-mostly, query-first.** The integration primarily runs SOQL queries (match Account/Lead/Contact
-  by entity name, domain, address; read recent Activities/Tasks) and returns record links. Any write-back
-  (e.g. creating a Lead) is a later, explicitly-scoped decision — not assumed.
+- **Read-only discovery by default.** A bounded worker queries Account, Lead and account-bound open
+  Opportunity records and stores status/links locally. Unavailable, partial and ambiguous are distinct
+  from no-match; an outage can never label a lead net-new.
+- **One narrow write exception: Campaign intake.** A separate credential may create Campaign,
+  CampaignMemberStatus, organization-only Lead, and CampaignMember records. It cannot update/delete
+  existing CRM records. Every execution requires an immutable Slack preview, one-time nonce, same
+  requester/channel, short expiry, and a final button confirmation. The feature flag defaults off.
 - **Sandbox for all development.** `test.salesforce.com`, sandbox `monarchdev`
   (`...--monarchdev.sandbox.my.salesforce.com`). Production Salesforce is never touched during dev.
 - **Production uses SEPARATE credentials from sandbox** — different org, different Connected App.
   Separate creds give least privilege, independent revocation, and blast-radius isolation (a sandbox
   leak or a dev mistake cannot reach live CRM). Do not reuse the sandbox key in production.
-- **Auth:** OAuth 2.0 **JWT Bearer flow** (server-to-server, no interactive login) with a **dedicated
-  least-privilege integration user** — query-focused permission set, not a human admin login. This suits
-  the weekly cron. Username-password + security-token is a fallback for quick local testing only.
-- **Matching is fuzzy and must not fabricate.** Entity-name matching across gov data and CRM is
-  imperfect; when uncertain, Grant says "possible match" with the link and lets the human confirm —
-  it never asserts a match it cannot support, and never invents a record or a "last contacted" date.
+- **Auth:** OAuth 2.0 **client credentials flow** with a dedicated least-privilege integration user
+  configured as the Connected App's run-as user — query-focused permission set, not a human admin
+  login. Grant implements this flow for both the separate reader and create-only writer clients.
+- **Matching must not fabricate.** Exact supporting signals (state/domain/phone and account binding)
+  determine confidence. Ambiguous matches remain possible matches and are not used as priority proof.
 - Env keys: `SALESFORCE_LOGIN_URL`, `SALESFORCE_SANDBOX_NAME`, `SALESFORCE_MY_DOMAIN_URL`,
-  `SALESFORCE_CLIENT_ID`, `SALESFORCE_CLIENT_SECRET`, `SALESFORCE_USERNAME`, `SALESFORCE_JWT_KEY_PATH`
-  (see `.env.example`).
+  `SALESFORCE_CLIENT_ID`, `SALESFORCE_CLIENT_SECRET` plus separate `SALESFORCE_WRITE_*` values for
+  the disabled Campaign gateway (see `.env.example`).
 
 ---
 
@@ -185,8 +226,9 @@ provisions):
 
 - A dedicated **Unix user** for grants (e.g. `grantwatch`), **no sudo**, confined to its own home.
 - A dedicated **SSH keypair** (e.g. `~/.ssh/grants_droplet`) used ONLY for that user.
-- A dedicated **`~/.ssh/config` Host alias** (e.g. `grants`) → the droplet IP, `User grantwatch`,
-  `IdentityFile ~/.ssh/grants_droplet`. The guardian uses ONLY `ssh grants`.
+- The guardian uses the explicit scoped command only: `ssh -i ~/.ssh/grants_droplet -o
+  IdentitiesOnly=yes "$GRANTS_DROPLET_USER@$GRANTS_DROPLET_HOST"`. It never relies on a shared SSH
+  alias, agent-selected identity, admin login, another tenant, `sudo`, or root.
 - A dedicated **Postgres role + database** scoped to grants — the role can reach only its own DB, is
   not a superuser, and cannot see other tenants' data.
 
@@ -198,10 +240,15 @@ box they define.
 
 ## 7. Secrets policy
 
-All secrets in `.env` (git-ignored); template in `.env.example`. On the droplet, secrets live in the
-grants tenant's own environment, never in the repo, never in another tenant's space. Never print, echo,
-or commit a secret. The database URL, Slack tokens, Firecrawl key, Anthropic key, and SAM key are the
-only secrets today.
+All secrets live in `.env` (git-ignored); `.env.example` is the canonical key-name template and must
+contain placeholders only. On the droplet, secrets live in the grants tenant's own environment, never
+in the repo or another tenant's space. Never print, echo, or commit a secret. Current integration
+families include Slack, Firecrawl, Anthropic, SAM.gov, separate Salesforce reader/writer credentials,
+tenant/database settings, Persequor, and Google export credentials. The poll CLI has tested redaction
+for SAM, Firecrawl, the Salesforce reader secret, and URL `api_key` parameters. Centralized redaction
+for every exception/log path is `needs-testing`; code must therefore avoid logging request headers,
+payload credentials, or raw secret-bearing exceptions. Source metadata stores environment-variable
+names only.
 
 ---
 
@@ -213,6 +260,12 @@ only secrets today.
 - **Live smoke tests** gated behind an explicit flag/env — run manually, never in the default suite.
 - **`--dry-run`** exercised in tests for anything that posts to Slack or drafts/sends email.
 - Tests never fabricate results; a skipped/blocked test is reported as skipped, not passed.
+
+The repository health gate is documented in `AGENTS.md`. Ruff and Vulture cover lint/dead code;
+`python -m grant_watch.health` enforces module/function documentation, annotations, the file-size cap,
+and duplicate test-tree detection. The gate also runs canonical pytest, Firecrawl evidence validation,
+source-report drift checks, and offline county-task validation.
+A clean offline gate is not a substitute for a live source smoke test.
 
 ---
 

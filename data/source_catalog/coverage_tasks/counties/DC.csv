@@ -1,0 +1,2 @@
+entity_id,state,entity_name,entity_kind,universe_vintage,research_status,source_id,last_checked_on,notes
+11001,DC,District of Columbia,county_equivalent,2025,not_applicable,,2026-07-15,State-layer structural exception applies to this county-equivalent
