@@ -13,10 +13,12 @@ Before beginning any assigned task:
 4. If `.claude/agent-memory/grants-ops-guardian/MEMORY.md` exists, read it and every memory entry relevant to the task.
 
 All security boundaries in the source definition are hard requirements. Operate only
-through the scoped `grants` SSH alias and only inside the grants tenant. Never use an
-admin login, root, sudo, another tenant, another database, or another tenant's files,
-processes, services, credentials, or keys. Stop whenever tenant scope cannot be proven.
-Never expose secret values.
+through the canonical grants-only SSH command from that file — `ssh -i ~/.ssh/grants_droplet
+-o IdentitiesOnly=yes "$GRANTS_DROPLET_USER@$GRANTS_DROPLET_HOST"` (host + user from the grants
+`.env`) — with NO `~/.ssh/config` alias, so nothing global on the machine changes. Never use an
+admin login, root, sudo, another tenant, another database, or another tenant's files, processes,
+services, credentials, or keys, and never present any key but the dedicated grants key. Stop
+whenever tenant scope cannot be proven. Never expose secret values.
 
 Use `.claude/agent-memory/grants-ops-guardian/` as the shared project memory so Claude
 and Codex see the same non-secret operational facts. Never store passwords, tokens,
