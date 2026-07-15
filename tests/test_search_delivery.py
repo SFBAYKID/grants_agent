@@ -44,8 +44,8 @@ def _artifact() -> GeneratedArtifact:
     return artifact
 
 
-def test_dm_search_uploads_and_cleans_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A DM export uploads to the DM channel without a thread timestamp."""
+def test_general_search_uploads_and_cleans_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shared mention path uploads an artifact and releases temporary storage."""
     artifact = _artifact()
 
     def fake_respond(*_args: object, **_kwargs: object) -> dict[str, object]:

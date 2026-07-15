@@ -1,6 +1,6 @@
 """Lead grading: GOLD / SILVER / WATCH, per Chase's definitions in CLAUDE.md.
 
-Rules (v1 — deliberately simple, tuned as feedback arrives via Grant's [Bad lead] button):
+Rules (v1 — deliberately simple, tuned as feedback arrives through Grant's threads):
   GOLD    an actual award (money in hand) whose spend window is still open and whose
           amount is positive. Freshness matters: awards started within the last
           FRESH_MONTHS are the hottest; older-but-open awards stay gold but rank

@@ -32,6 +32,9 @@ _LEAD_EVENT_SELECT = """l.*, e.event_type AS current_event_type,
     e.occurred_on AS current_event_occurred_on,
     e.date_precision AS current_event_date_precision,
     e.verification_status AS current_event_verification_status,
+    e.evidence_excerpt AS current_event_evidence_excerpt,
+    e.source_url AS current_event_source_url,
+    e.source_locator AS current_event_source_locator,
     e.backfill AS current_event_backfill,
     e.suppressed AS current_event_suppressed"""
 _CRM_CONTEXT_SELECT = """
@@ -365,7 +368,7 @@ def reconcile_seed_duplicates(conn: sqlite3.Connection) -> int:
 def get_lead(conn: sqlite3.Connection, lead_id: int) -> sqlite3.Row | None:
     """One lead row by primary key (None when the id is stale/unknown)."""
     return conn.execute(
-        f"""SELECT {_LEAD_EVENT_SELECT} FROM leads l
+        f"""SELECT {_LEAD_EVENT_SELECT}, {_CRM_CONTEXT_SELECT} FROM leads l
             LEFT JOIN funding_events e ON e.id=l.current_event_id WHERE l.id=?""",
         (lead_id,),
     ).fetchone()

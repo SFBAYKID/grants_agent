@@ -48,9 +48,9 @@ that: new → surfaced → claimed → outreach_pending → contacted | back to 
 
 ## 3. Multi-rep model
 
-- **Claim**: button on every individual lead alert. First tap sets `leads.assigned_to`
-  (slack id) + `assigned_at`; the block re-renders showing the owner; later taps get an
-  ephemeral "already claimed by @X". Race-safe via a conditional UPDATE
+- **Claim**: a rep replies naturally in the proactive thread. The recognized claim sets
+  `leads.assigned_to` (Slack id) + `assigned_at`; later claims get an "already claimed by @X"
+  response. Race-safe via a conditional UPDATE
   (`WHERE assigned_to IS NULL`).
 - **Only the claiming rep can trigger [Draft email]** for a claimed lead (mirrors
   Persequor's requested_by↔send_as validation; a mismatch is `rejected` on their side —
@@ -83,7 +83,7 @@ that: new → surfaced → claimed → outreach_pending → contacted | back to 
   after `dismissed`/`expired`). Replay with the SAME id + same payload → status; same
   id + different payload → 409 (critic M3).
 - **Grant-side rule:** we do NOT send briefs with `contact_email: null` (Persequor
-  would just bounce `needs_contact`) — the button tells the rep "no verified contact
+  would just bounce `needs_contact`) — Grant tells the rep "no verified contact
   yet" and queues the lead for enrichment instead. Resubmission after enrichment uses a
   **new request_id** (simpler than PATCH semantics; our preference, flagged to them).
 - **Expected external status lifecycle:** `received → drafted → sent_to_rep →` terminal
@@ -154,13 +154,13 @@ that: new → surfaced → claimed → outreach_pending → contacted | back to 
 - Rep dismisses the card → Grant records `dismissed` and reverts lead to `claimed`
   (rep can retry with notes) — not `contacted`.
 - Enrichment finds nothing → `contact_status='not_found'`, surfaced as such; a human
-  can add a contact manually via `/grant contact <lead_id> <email>` (validated, logged).
+  can provide a contact naturally in the thread (validated and logged when supported).
 - Duplicate briefs (double-click) → the persisted-UUID rule (§4) makes any retry carry
   the same id; Persequor's unique index returns existing status, never a second card.
 - Rep departs / OAuth disconnects → any roster-reason `rejected` from Persequor raises
   a reps.json-drift alarm to Chase (not silently recorded); their claimed leads are
-  reassignable via `/grant reassign` (Chase or owner).
-- `/grant contact` manual entry → roster-only, provenance recorded
+  reassignable through a natural-language owner request when supported.
+- Manual contact entry → roster-only, provenance recorded
   (`source_url='manual:<slack_id>'`, confidence medium), domain-vs-entity mismatch
   warning (critic M7) — a typo'd valid address must not become a cold email.
 

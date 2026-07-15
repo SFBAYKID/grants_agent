@@ -1,5 +1,4 @@
-"""Grant — the Socket Mode bot: proactive-thread conversations, mentions, DMs,
-legacy lead buttons, and the /grant slash command.
+"""Grant — proactive-thread conversations and @mentions in one Slack channel.
 
 Run it (long-lived process; needs SLACK_BOT_TOKEN + SLACK_APP_TOKEN in .env):
     python -m grant_watch.slack.grant
@@ -9,9 +8,8 @@ posts — no @ needed there; @Grant works too and routes to the same brain. Mess
 mentioning @Persequor are ignored (that's their conversation). Friendly always; no
 inline backticks anywhere (Slack renders them red, and red text is banned).
 
-Lead-button flow: [Draft email] requests a Persequor draft (Persequor keeps the final
-human approval gate); [Mark contacted] / [Snooze] set status; [Bad lead] asks WHY and
-stores the reason as a scoring outcome.
+There are no slash commands, menus, DMs, or buttons on initial alerts. Humans use
+natural language after @Grant or in the thread under Grant's proactive message.
 """
 
 from __future__ import annotations
@@ -40,18 +38,6 @@ class SlackFileClient(Protocol):
     def files_upload_v2(self, **kwargs: object) -> object:
         """Upload one file to a channel or thread."""
         ...
-
-# NOTE: no inline backticks anywhere Grant speaks — Slack renders them as red text,
-# and red text is banned (Chase's rule, 2026-07-13).
-HELP_TEXT = (
-    "Hey! I'm *Grant* — I watch government security-funding sources and surface the "
-    "best leads here.\n• /grant status — lead counts by source\n"
-    "• Talk to me in any of my lead threads: claim a lead, ask questions, request a "
-    "spreadsheet, or ask me to search for news.\n"
-    "I never invent contacts or figures — if I don't know, I'll say so."
-)
-DIGEST_DISABLED_TEXT = "Digest posting is disabled in every channel."
-
 
 # Per-thread locks serialize long turns without dropping the second human message.
 # Slack event identity itself is persisted in ``slack_event_receipts`` so restarts and
@@ -152,69 +138,19 @@ def _interaction_thread_ts(body: dict[str, Any]) -> str:
                or message.get("ts") or "")
 
 
+def _in_configured_channel(event: dict[str, Any]) -> bool:
+    """Allow conversations only in Grant's explicitly configured test channel."""
+    configured = os.environ.get("SLACK_CHANNEL_ID", "").strip()
+    item = event.get("item") or {}
+    channel = event.get("channel") or item.get("channel")
+    return bool(configured and channel == configured
+                and event.get("channel_type") != "im")
+
+
 def create_app() -> App:
     """Build the Bolt app and register every handler. Split from main() so tests can
     construct the app without opening a socket."""
     app = App(token=os.environ["SLACK_BOT_TOKEN"])
-
-    # ---------------------------------------------------------------- triage buttons
-    @app.action("grant_mark_contacted")
-    def mark_contacted(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
-        ack()
-        lead_id = int(body["actions"][0]["value"])
-        user_id = str((body.get("user") or {}).get("id") or "")
-        conn = db.connect()
-        db.set_lead_status(conn, lead_id, "contacted")
-        db.record_outcome(
-            conn, lead_id, None, user_id, "contacted",
-            f"slack-action:{body.get('trigger_id', '')}:{lead_id}:contacted")
-        _thread_reply(client, body, f"✅ Marked lead #{lead_id} contacted.")
-
-    @app.action("grant_snooze")
-    def snooze(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
-        ack()
-        lead_id = int(body["actions"][0]["value"])
-        user_id = str((body.get("user") or {}).get("id") or "")
-        conn = db.connect()
-        db.set_lead_status(conn, lead_id, "snoozed")
-        db.record_outcome(
-            conn, lead_id, None, user_id, "snoozed",
-            f"slack-action:{body.get('trigger_id', '')}:{lead_id}:snoozed")
-        _thread_reply(client, body, f"💤 Snoozed lead #{lead_id} — it can resurface later.")
-
-    @app.action("grant_bad_lead")
-    def bad_lead(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
-        """Open a modal asking WHY — the reason is the feedback loop for scoring."""
-        ack()
-        lead_id = body["actions"][0]["value"]
-        client.views_open(
-            trigger_id=body["trigger_id"],
-            view={
-                "type": "modal", "callback_id": "grant_bad_lead_reason",
-                "private_metadata": lead_id,
-                "title": {"type": "plain_text", "text": "Bad lead — why?"},
-                "submit": {"type": "plain_text", "text": "Save"},
-                "blocks": [{
-                    "type": "input", "block_id": "reason_block",
-                    "label": {"type": "plain_text",
-                              "text": "What made this a bad lead?"},
-                    "element": {"type": "plain_text_input", "action_id": "reason",
-                                "placeholder": {"type": "plain_text",
-                                                "text": "e.g. money is for software, not cameras"}},
-                }],
-            })
-
-    @app.view("grant_bad_lead_reason")
-    def bad_lead_reason(ack: Ack, body: dict[str, Any], view: dict[str, Any]) -> None:
-        ack()
-        lead_id = int(view["private_metadata"])
-        reason = view["state"]["values"]["reason_block"]["reason"]["value"] or ""
-        user_id = str((body.get("user") or {}).get("id") or "")
-        conn = db.connect()
-        db.set_lead_status(conn, lead_id, "dead", note=reason)
-        db.record_outcome(
-            conn, lead_id, None, user_id, "bad_lead",
-            f"slack-view:{view.get('id', '')}:{lead_id}:bad-lead")
 
     # ------------------------------------------------------ Salesforce approvals
     @app.action("salesforce_confirm")
@@ -225,6 +161,10 @@ def create_app() -> App:
 
         user_id = str((body.get("user") or {}).get("id") or "")
         channel = str((body.get("channel") or {}).get("id") or "")
+        if not _in_configured_channel({"channel": channel}):
+            _thread_reply(client, body,
+                          "Salesforce was not changed because this is not the Grant channel.")
+            return
         workspace = _workspace_id(body)
         thread_ts = _interaction_thread_ts(body)
         try:
@@ -276,33 +216,17 @@ def create_app() -> App:
 
         action_id = str(body["actions"][0]["value"])
         user_id = str((body.get("user") or {}).get("id") or "")
+        channel = str((body.get("channel") or {}).get("id") or "")
+        if not _in_configured_channel({"channel": channel}):
+            _thread_reply(client, body,
+                          "Nothing was changed because this is not the Grant channel.")
+            return
         if campaigns.cancel_action(db.connect(), action_id, user_id):
             _thread_reply(client, body, "Cancelled — Salesforce was not changed.")
         else:
             _thread_reply(client, body,
                           "That preview was already handled or belongs to another user; "
                           "Salesforce was not changed by this click.")
-
-    # ---------------------------------------------------------------- draft (interim)
-    @app.action("grant_draft_email")
-    def draft_email(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
-        """Request a Persequor draft; Persequor retains the final human-send gate."""
-        ack()
-        conn = db.connect()
-        lead_id = int(body["actions"][0]["value"])
-        row = db.get_lead(conn, lead_id)
-        if row is None:
-            _thread_reply(client, body, f"⚠️ Lead #{lead_id} not found — stale button?")
-            return
-        user_id = str((body.get("user") or {}).get("id") or "")
-        channel = str((body.get("channel") or {}).get("id") or "")
-        thread_ts = str((body.get("message") or {}).get("thread_ts")
-                        or (body.get("message") or {}).get("ts") or "")
-        status = _Status(client, channel, thread_ts or None)
-        status.start()
-        reply = _request_outreach(
-            conn, row, user_id, status, channel, thread_ts)
-        status.finalize(reply)
 
     # ---------------------------------------------------------------- conversation
     bot_user_id: str = app.client.auth_test()["user_id"]
@@ -311,8 +235,10 @@ def create_app() -> App:
     @app.event("app_mention")
     def on_mention(event: dict[str, Any], body: dict[str, Any],
                    say: Callable[..., object], client: WebClient) -> None:
-        """Mentions route to the SAME conversational brain as plain thread replies —
-        reps shouldn't need the @, but using it must not degrade the experience."""
+        """Handle @Grant only in the configured channel; ignore every other venue."""
+        if (not _in_configured_channel(event) or event.get("bot_id")
+                or event.get("subtype") or not str(event.get("user") or "")):
+            return
         text = re.sub(r"<@[^>]+>", "", event.get("text") or "").strip()
         thread_ts = event.get("thread_ts")
         thread_key = f"{event['channel']}:{thread_ts or event['ts']}"
@@ -350,22 +276,27 @@ def create_app() -> App:
     @app.event("message")
     def on_message(event: dict[str, Any], body: dict[str, Any],
                    say: Callable[..., object], client: WebClient) -> None:
-        """DMs, and plain (no-@) thread replies under a drip post."""
-        if event.get("bot_id"):  # never talk to bots — loop guard
+        """Handle plain replies only under Grant's configured-channel alerts."""
+        if (event.get("bot_id") or event.get("app_id") or event.get("subtype")
+                or not str(event.get("user") or "")):
+            return
+        if not _in_configured_channel(event):
             return
         text = event.get("text") or ""
         if f"<@{bot_user_id}>" in text:
             return  # the app_mention handler owns this one — no double replies
         if persequor_id and f"<@{persequor_id}>" in text:
             return  # they're talking to Persequor — Grant stays out of it (Chase's rule)
-        is_dm = event.get("channel_type") == "im"
         thread_ts = event.get("thread_ts")
-        if not is_dm and not thread_ts:
+        if not thread_ts or not text.strip():
             return  # top-level channel chatter isn't Grant's business
         thread_key = f"{event['channel']}:{thread_ts or event['ts']}"
         event_id = str(body.get("event_id", ""))
         workspace = _workspace_id(body, event)
         conn = db.connect()
+        post = db.find_post_by_ts(conn, event["channel"], thread_ts)
+        if post is None:
+            return
         if not db.claim_slack_event(
                 conn, event_id, workspace, str(event["channel"]),
                 str(thread_ts or event["ts"]), str(event.get("user") or "")):
@@ -373,15 +304,8 @@ def create_app() -> App:
         try:
             delivered = True
             with _thread_lock(thread_key):
-                if is_dm:
-                    delivered = _converse_general(
-                        text.strip(), client, event["channel"], None,
-                        user=event.get("user", ""), workspace=workspace)
-                else:
-                    post = db.find_post_by_ts(conn, event["channel"], thread_ts)
-                    if post is not None:
-                        delivered = _handle_drip_thread(
-                            conn, post, event, say, client, workspace=workspace)
+                delivered = _handle_drip_thread(
+                    conn, post, event, say, client, workspace=workspace)
         except Exception as exc:
             db.finish_slack_event(conn, event_id,
                                   error=f"{type(exc).__name__}: {str(exc)[:300]}",
@@ -397,6 +321,8 @@ def create_app() -> App:
     @app.event("reaction_added")
     def on_reaction(event: dict[str, Any]) -> None:
         """A reaction on a drip post is engagement — the cheapest +1 there is."""
+        if not _in_configured_channel(event):
+            return
         item = event.get("item") or {}
         if item.get("type") != "message":
             return
@@ -404,19 +330,6 @@ def create_app() -> App:
         post = db.find_post_by_ts(conn, item.get("channel", ""), item.get("ts", ""))
         if post is not None:
             db.record_engagement(conn, int(post["id"]), event["user"], "reaction")
-
-    @app.command("/grant")
-    def slash_grant(ack: Ack, command: dict[str, Any],
-                    respond: Callable[..., object], client: WebClient) -> None:
-        ack()
-        arg = (command.get("text") or "").strip().lower()
-        if arg == "stats":
-            stats = db.engagement_stats(db.connect())
-            detail = ", ".join(f"{k}: {v}" for k, v in stats.items() if k != "total")
-            respond(f"Grant's engagement score: *{stats['total']}* points"
-                    f"{f' ({detail})' if detail else ''}.")
-        else:
-            respond(_answer(arg))
 
     return app
 
@@ -597,8 +510,7 @@ def _thread_history(client: WebClient, channel: str, thread_ts: str) -> list[str
 def _converse_general(text: str, client: WebClient, channel: str,
                       thread_ts: str | None,
                       user: str = "", workspace: str = "") -> bool:
-    """Friendly LLM reply outside a lead thread (mention or DM), tools + spinner
-    included. Falls back to the canned help text if the API is unavailable."""
+    """Answer a configured-channel @mention with tools and a visible status update."""
     from . import conversation
 
     if not text.strip():
@@ -623,7 +535,7 @@ def _converse_general(text: str, client: WebClient, channel: str,
             _with_upload_warning(out["reply"], failures),
             _crm_action_blocks(out.get("pending_crm_actions", [])))
     except Exception:
-        return status.finalize(_answer(text.lower()))
+        return status.finalize(_fallback_answer(text))
 
 
 def _deliver_artifacts(client: SlackFileClient, channel: str, thread_ts: str | None,
@@ -654,19 +566,11 @@ def _with_upload_warning(reply: str, failures: int) -> str:
             f"{failures} of them. Please try the export again.")
 
 
-def _answer(query: str) -> str:
-    """Deterministic fallback Q&A (used when the LLM is unreachable): status/help,
-    honest and friendly, no inline code styling (red text is banned)."""
-    if query.strip().lower() == "digest":
-        return DIGEST_DISABLED_TEXT
-    if "status" in query:
-        lines = [f"• {source} — {grade_}: {count}"
-                 for source, grade_, count in db.status_summary(db.connect())]
-        return "Here's where we stand:\n" + "\n".join(lines)
-    if query in ("", "help") or "help" in query:
-        return HELP_TEXT
-    return ("My brain's having a slow moment — I can do status or help right now. "
-            "Try me again in a minute for the good stuff.")
+def _fallback_answer(query: str) -> str:
+    """Give a natural, menu-free fallback when the conversational model is down."""
+    if not query.strip():
+        return "What would you like me to find?"
+    return "I'm having trouble thinking right now. Please try that question again in a minute."
 
 
 def _thread_reply(client: WebClient, body: dict[str, Any], text: str,
@@ -683,6 +587,8 @@ def _thread_reply(client: WebClient, body: dict[str, Any], text: str,
 def main() -> None:
     """Start the Socket Mode listener (blocks forever; Ctrl-C to stop)."""
     load_dotenv()
+    if not os.environ.get("SLACK_CHANNEL_ID", "").strip():
+        raise RuntimeError("SLACK_CHANNEL_ID must be the Monarch Bot Playground channel")
     handler = SocketModeHandler(create_app(), os.environ["SLACK_APP_TOKEN"])
     print("Grant is listening (Socket Mode)…")
     handler.start()

@@ -114,10 +114,11 @@ def test_salesforce_sync_dry_run_uses_readonly_database(
     assert cli.cmd_salesforce_sync(limit=3, dry_run=True) == 0
 
 
-def test_digest_cli_command_does_not_exist() -> None:
-    """No local or cron-capable command can post a multi-lead digest."""
+@pytest.mark.parametrize("command", ["digest", "slack-smoke"])
+def test_direct_slack_posting_cli_commands_do_not_exist(command: str) -> None:
+    """No local or cron-capable command can directly post test or digest messages."""
     with pytest.raises(SystemExit) as exc:
-        cli.main(["digest"])
+        cli.main([command])
     assert exc.value.code == 2
 
 

@@ -124,10 +124,11 @@ affect Chase's other projects.
   contained zero security keywords, so 0 matches was correct).
 - DB seeded: 75 CSV GOLD + 75 live GOLD SVPP awards + 96 expired-window watch + 153 grants.gov
   signals + 4 SILVER RFPs. Dedup `verified` (repeat poll → 0 new).
-- **Phase 3 built and `verified` live.** `grant_watch/slack/` — paced individual proactive alerts,
-  Grant bot (Socket Mode; triage buttons; bad-lead-reason modal; draft → human-approve → @Persequor
-  handoff), and `/grant status`. A historical 16-lead digest was posted on 2026-07-13; digest posting
-  has since been removed globally. Socket Mode boot is `verified`. Run the bot:
+- **Phase 3 built and `verified` live.** `grant_watch/slack/` — paced individual proactive alerts and
+  a Grant bot that accepts only configured-channel @mentions and proactive-thread replies. Slash
+  commands, DMs, menus, and buttons on initial alerts are removed. A historical 16-lead digest was
+  posted on 2026-07-13; digest posting has since been removed globally. Socket Mode boot is `verified`.
+  Run the bot:
   `python -m grant_watch.slack.grant`. Proactive cron target: `python -m grant_watch.cli drip`.
   Outstanding: invite @Grant to the alert channel (posting works via chat:write.public, but thread
   reads need membership); set PERSEQUOR_USER_ID in .env so handoffs ping.

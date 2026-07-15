@@ -38,7 +38,7 @@ One to three short sentences unless the rep asked for real detail. No emoji.
 
 FORMATTING (hard rules for Slack — reps SCAN, they don't read paragraphs):
 - NEVER use inline backticks or code formatting — Slack renders it as red text and
-  red text is banned. Write /grant status, not a code-styled version.
+  red text is banned. Never suggest slash commands or menus; users talk naturally.
 - When you present a lead's details or several facts, lay them out as short bulleted
   lines with *bold labels*, NOT a paragraph. Blank line between the intro and the
   bullets. Example shape:
@@ -192,6 +192,14 @@ def lead_facts(row: sqlite3.Row | None) -> str:
         "status": row["status"],
         "claimed_by": row["assigned_to"] or "(unclaimed)",
         "grade": row["lead_grade"],
+        "event_type": row["current_event_type"],
+        "event_date": row["current_event_occurred_on"] or "(unknown)",
+        "event_date_precision": row["current_event_date_precision"],
+        "event_verification": row["current_event_verification_status"],
+        "event_evidence": row["current_event_evidence_excerpt"] or "(none)",
+        "salesforce_status": row["salesforce_status"] or "(not checked)",
+        "salesforce_opportunity": row["salesforce_opportunity_link"] or "(none)",
+        "salesforce_account": row["salesforce_account_link"] or "(none)",
     }
     return "FACTS:\n" + "\n".join(f"- {k}: {v}" for k, v in fields.items())
 

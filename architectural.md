@@ -111,8 +111,9 @@ rate-limit; record `verified`/`assumed`/`needs-testing` per source in code and i
 
 Full spec and the live app's configuration record in `docs/grant_agent.md`. In short:
 Grant never posts multi-lead digests. A paced worker surfaces at most one ranked lead or lower-priority
-funding bulletin per notification, with strict daily caps. Individual lead alerts offer [Draft email],
-[Mark contacted], [Snooze], and [Bad lead]; human-approved outreach is handed to @Persequor. Grant runs
+funding bulletin per notification, with strict daily caps. Its initial post is one factual sentence
+without links, buttons, menus, CRM detail, or a call to action. Humans engage only by replying in that
+thread or mentioning @Grant in the configured channel; there are no slash commands or DMs. Grant runs
 in **Socket Mode** (no public URL). Everything that posts or drafts honors `--dry-run`. Grant never
 fabricates a lead, contact, or award figure.
 

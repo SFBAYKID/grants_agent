@@ -7,17 +7,18 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 ## What Grant does
 
 1. **Individual proactive alerts.** Grant never posts multi-lead digests. A paced cron surfaces at most
-   one ranked lead or lower-priority funding bulletin per notification, with strict daily caps. Each
-   lead includes its real source link and persisted Salesforce context when available.
-2. **Interactive triage.** Each individual lead shows buttons: **[Draft email] [Mark contacted]
-   [Snooze] [Bad lead]**.
-   [Bad lead] reasons feed back into scoring.
-3. **Approve-to-email.** [Draft email] → Grant composes a personalized draft referencing the specific
+   one ranked lead or lower-priority funding bulletin per notification, with strict daily caps. The
+   first message is exactly one short factual sentence: no link, buttons, menu, Salesforce context,
+   call to action, or extra formatting.
+2. **Natural engagement.** A human replies in the alert thread for details, or types `@Grant` followed
+   by a question in the configured channel. Replies and reactions feed the reward system; Grant does
+   not use slash commands, DMs, or help/status menus.
+3. **Approve-to-email.** A natural-language request → Grant composes a personalized draft referencing the specific
    award (amount, program, freshness) → posts the draft **in-thread for a human to review** → on explicit
    human approval, hands the send to **@Persequor**. Grant never sends email itself, and `sent_at` is only
    ever set *after* approval.
-4. **Conversation.** Humans can @mention Grant or DM it to ask about a lead, search funding records, or
-   check a district's status. Grant answers from the database and clearly says when it doesn't know.
+4. **Conversation.** Humans can @mention Grant in the configured channel or reply in a proactive alert
+   thread. Grant answers from the database and clearly says when it doesn't know.
 5. **On-demand search.** A rep @mentions Grant (or talks in a thread) and asks for grants by any
    criteria. Grant **confirms its understanding first** — restating the full filter set and asking how
    many results and which format (Excel / Google Sheet / just in Slack) — then searches its indexed
@@ -60,24 +61,27 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
   is ever parsed as a formula, shares it with the requesting rep's roster email, and returns the link.
   Persequor is never in this path. Falls back to a complete Excel workbook if unconfigured or on error.
 
-## Live Slack app config (provisioned 2026-07-13 — this is the record; the setup manifest was removed)
+## Slack app config
 
 - **App:** "Grant", App ID `A0BH657R5M2`, Monarch workspace (`T01DFJLFKE3`). Installed; bot user `grant`.
 - **Icon:** the owl logo (`assets/grant_logo_512.png`). Background color `#0b3d5c`.
 - **Socket Mode:** ON (app-level token `grant-socket-mode`, scope `connections:write`).
-- **Interactivity:** ON. **Events:** `app_mention`, `message.im`. **Slash command:** `/grant`.
-- **Bot scopes (17):** `app_mentions:read`, `chat:write`, `chat:write.public`, `commands`,
-  `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `im:read`,
-  `im:write`, `mpim:history`, `reactions:read`, `reactions:write`, `users:read`, `users:read.email`,
-  `files:write`.
+- **Desired configuration (`needs-testing` externally):** interactivity remains ON for explicit
+  Salesforce safety confirmations; events are `app_mention`, `message.channels`, and
+  `reaction_added`; no slash command or DM subscription remains.
+- **Required bot scopes after reinstall:** `app_mentions:read`, `chat:write`, `channels:history`,
+  `channels:read`, `groups:history`, `groups:read`, `reactions:read`, `reactions:write`, `users:read`,
+  `users:read.email`, and `files:write`. DM and command scopes are unnecessary.
 - **Verified live** (2026-07-13): `auth.test` ok (team Monarch, user grant); `apps.connections.open`
   returned a `wss://` URL. If scopes change later, edit via the app's App Manifest page and reinstall.
 
 ## Status
 
 - Slack app and core bot: `verified` live (provisioned, installed, Socket Mode connected).
+- Removal of the live `/grant` command, DM subscription/scopes, and `chat:write.public` is
+  `needs-testing`; code already has no handler and fails closed outside the configured channel.
 - On-demand search and complete Excel fallback: `verified` offline with pytest on 2026-07-14;
-  production DM/@mention upload after this fix is `needs-testing` through grants-ops-guardian.
+  production configured-channel @mention upload is `needs-testing` through grants-ops-guardian.
 - Google Sheets export (Grant-owned service account + "Grant Exports" shared drive
   `0AB7O7rkKxU_jUk9PVA`): `verified` live on 2026-07-14 — end-to-end create → RAW write (formula cells
   stored inert) → numeric amounts → share with rep → URL returned; offline pytest covers the guards,

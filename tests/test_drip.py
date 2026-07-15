@@ -9,6 +9,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from grant_watch import db
 from grant_watch.models import (
     DatePrecision,
@@ -109,12 +111,11 @@ def test_nugget_is_short_and_factual(tmp_path: Path) -> None:
     lead_id = _mk_lead(conn)
     row = db.get_lead(conn, lead_id)
     text, style = drip.build_nugget(row)
-    assert "$500K" in text
-    assert "Castle Rock" in text
-    assert text.count(".") <= 3                      # two sentences + maybe a link line
-    assert "https://x.gov/a" in text                 # only the REAL link we hold
-    assert style in ("ask-me", "window", "worth-a-look")
-    assert "just got" not in text and "just landed" not in text
+    assert text == ("Castle Rock School District 401 in Washington has a verified "
+                    "$500,000 SVPP funding award.")
+    assert style == "award-brief"
+    assert text.count(".") == 1 and "\n" not in text
+    assert "http" not in text and "Salesforce" not in text
 
 
 def test_unknown_event_date_is_disclosed_as_a_listing(tmp_path: Path) -> None:
@@ -124,8 +125,63 @@ def test_unknown_event_date_is_disclosed_as_a_listing(tmp_path: Path) -> None:
     row = db.get_lead(conn, lead_id)
     assert row is not None
     text, _style = drip.build_nugget(row)
-    assert "lists" in text or "Award record worth a look" in text
-    assert "just" not in text.lower()
+    assert text == ("Castle Rock School District 401 in Washington has a verified "
+                    "$500,000 SVPP funding award.")
+    assert "received" not in text.lower()
+
+
+def test_source_text_cannot_inject_mentions_links_or_extra_sentences(
+        tmp_path: Path) -> None:
+    """Untrusted source fields remain inert inside the one-sentence Slack alert."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _mk_lead(conn)
+    conn.execute(
+        """UPDATE leads SET entity_name='<@U123> District.\nSecond sentence?',
+                            program='SVPP <https://evil.test|click>'
+           WHERE id=?""", (lead_id,))
+    conn.commit()
+    row = db.get_lead(conn, lead_id)
+    assert row is not None
+    text, _style = drip.build_nugget(row)
+    assert text.count(".") == 1 and "\n" not in text
+    assert "<@" not in text and "http" not in text and "|" not in text
+
+
+def test_official_acronym_capitalization_is_preserved(tmp_path: Path) -> None:
+    """Minimal alerts do not rewrite official organization acronyms."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _mk_lead(conn, entity="ABC Schools")
+    row = db.get_lead(conn, lead_id)
+    assert row is not None
+    text, _style = drip.build_nugget(row)
+    assert text.startswith("ABC Schools in Washington")
+
+
+@pytest.mark.parametrize("amount", [None, 0.0, -1.0, float("inf"), float("nan")])
+def test_invalid_amount_fails_closed(tmp_path: Path, amount: float | None) -> None:
+    """A non-finite or non-positive amount cannot enter a proactive award claim."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _mk_lead(conn)
+    conn.execute("UPDATE leads SET amount=? WHERE id=?", (amount, lead_id))
+    conn.commit()
+    row = db.get_lead(conn, lead_id)
+    assert row is not None
+    with pytest.raises(ValueError, match="finite positive amount"):
+        drip.build_nugget(row)
+
+
+def test_unverified_or_wrong_event_type_fails_closed(tmp_path: Path) -> None:
+    """The builder independently enforces award evidence even outside candidate SQL."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _mk_lead(conn)
+    conn.execute(
+        "UPDATE funding_events SET verification_status='needs-testing' WHERE lead_id=?",
+        (lead_id,))
+    conn.commit()
+    row = db.get_lead(conn, lead_id)
+    assert row is not None
+    with pytest.raises(ValueError, match="verified"):
+        drip.build_nugget(row)
 
 
 def test_bulletin_uses_opportunity_title(tmp_path: Path) -> None:
@@ -136,7 +192,7 @@ def test_bulletin_uses_opportunity_title(tmp_path: Path) -> None:
     row = db.bulletin_candidates(conn)[0]
     text, style = drip.build_bulletin(row)
     assert "FY26 School Violence Prevention Program" in text
-    assert "closes 2026-08-04" in text
+    assert text == "FY26 School Violence Prevention Program is listed as open through 2026-08-04."
     assert style == "bulletin-open"
 
 
@@ -183,7 +239,7 @@ def test_pick_prioritizes_existing_salesforce_opportunity(tmp_path: Path) -> Non
     kind, row = drip.pick(conn, "C1")
     assert kind == "nugget" and row["entity_name"] == "Salesforce District"
     text, _style = drip.build_nugget(row)
-    assert "https://sf.test/006SF" in text and "Anthony" in text
+    assert "https://sf.test/006SF" not in text and "Anthony" not in text
 
 
 def test_unavailable_salesforce_snapshot_cannot_boost_stale_match(
@@ -226,7 +282,7 @@ def test_california_opportunity_can_become_bulletin(tmp_path: Path) -> None:
              title="School Security Grant")
     row = db.bulletin_candidates(conn)[0]
     text, style = drip.build_bulletin(row)
-    assert "California Grants Portal" in text
+    assert text == "School Security Grant is listed as open through 2026-08-04."
     assert style == "bulletin-open"
 
 
@@ -266,13 +322,13 @@ def test_delivery_reservation_prevents_duplicate_post(tmp_path: Path) -> None:
     assert first.startswith("posted nugget")
     assert second == "skip: nothing new worth saying"
     assert client.calls == 1
-    blocks = client.last_kwargs["blocks"]
-    assert isinstance(blocks, list) and len(blocks) == 2
-    action_ids = {element["action_id"] for element in blocks[1]["elements"]}
-    assert action_ids == {
-        "grant_draft_email", "grant_mark_contacted", "grant_snooze", "grant_bad_lead",
-    }
-    assert {element["value"] for element in blocks[1]["elements"]} == {"1"}
+    assert "blocks" not in client.last_kwargs
+    assert client.last_kwargs["mrkdwn"] is False
+    assert client.last_kwargs["unfurl_links"] is False
+    assert client.last_kwargs["unfurl_media"] is False
+    assert client.last_kwargs["text"] == (
+        "Castle Rock School District 401 in Washington has a verified "
+        "$500,000 SVPP funding award.")
     assert conn.execute(
         "SELECT state FROM notification_outbox").fetchone()["state"] == "delivered"
 
