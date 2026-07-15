@@ -157,6 +157,26 @@ def test_official_acronym_capitalization_is_preserved(tmp_path: Path) -> None:
     assert text.startswith("ABC Schools in Washington")
 
 
+def test_all_caps_source_entity_is_human_formatted(tmp_path: Path) -> None:
+    """Government-system uppercase names render as clean conversational prose."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _mk_lead(conn, entity="CASTLE ROCK SCHOOL DISTRICT 401")
+    row = db.get_lead(conn, lead_id)
+    assert row is not None
+    text, _style = drip.build_nugget(row)
+    assert text.startswith("Castle Rock School District 401 in Washington")
+
+
+def test_all_caps_entity_preserves_known_acronyms(tmp_path: Path) -> None:
+    """Casing cleanup does not corrupt education acronyms or roman numerals."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _mk_lead(conn, entity="ABC USD III SCHOOL DISTRICT")
+    row = db.get_lead(conn, lead_id)
+    assert row is not None
+    text, _style = drip.build_nugget(row)
+    assert text.startswith("ABC USD III School District in Washington")
+
+
 @pytest.mark.parametrize("amount", [None, 0.0, -1.0, float("inf"), float("nan")])
 def test_invalid_amount_fails_closed(tmp_path: Path, amount: float | None) -> None:
     """A non-finite or non-positive amount cannot enter a proactive award claim."""

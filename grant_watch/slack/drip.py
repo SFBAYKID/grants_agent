@@ -45,6 +45,11 @@ PT = ZoneInfo("America/Los_Angeles")
 _STATE_NAMES = {"WA": "Washington", "CA": "California", "MI": "Michigan",
                 "PA": "Pennsylvania", "OR": "Oregon"}
 
+_ENTITY_ACRONYMS = {
+    "ABC", "CSD", "DC", "ISD", "K-12", "RSD", "SD", "STEM", "STEAM", "USD",
+}
+_ENTITY_CONNECTORS = {"and", "at", "by", "for", "in", "of", "on", "the", "to"}
+
 def in_window(now_utc: datetime) -> bool:
     """Mon-Fri, from 8:00 Eastern until 17:00 Pacific (per Chase)."""
     et, pt = now_utc.astimezone(ET), now_utc.astimezone(PT)
@@ -67,6 +72,29 @@ def _plain_fragment(value: object, max_length: int = 120) -> str:
     return inert[:max_length].rstrip(" ,;:-")
 
 
+def _display_entity(value: object) -> str:
+    """Render all-caps source names naturally without rewriting mixed-case names.
+
+    Government award systems commonly return organization names in uppercase. We
+    normalize only strings with no lowercase letters, preserving known education
+    acronyms and leaving already human-formatted official names untouched.
+    """
+    entity = _plain_fragment(value)
+    if not entity or any(character.islower() for character in entity):
+        return entity
+    words: list[str] = []
+    for index, word in enumerate(entity.split()):
+        bare = word.strip("(),")
+        if bare in _ENTITY_ACRONYMS or re.fullmatch(r"[IVX]+", bare):
+            formatted = word
+        elif index > 0 and bare.lower() in _ENTITY_CONNECTORS:
+            formatted = word.lower()
+        else:
+            formatted = word.title()
+        words.append(formatted)
+    return " ".join(words)
+
+
 def build_nugget(row: sqlite3.Row) -> tuple[str, str]:
     """Build one minimal award sentence using only persisted source facts."""
     if str(row["current_event_verification_status"] or "") != "verified":
@@ -74,7 +102,7 @@ def build_nugget(row: sqlite3.Row) -> tuple[str, str]:
     if str(row["current_event_type"] or "") not in {
             "award_announced", "award_obligated"}:
         raise ValueError("proactive award has unsupported event type")
-    entity = _plain_fragment(row["entity_name"])
+    entity = _display_entity(row["entity_name"])
     if not entity:
         raise ValueError("proactive award requires an entity")
     state_code = _plain_fragment(row["state"]).upper()
