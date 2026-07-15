@@ -80,6 +80,26 @@ class CampaignMatch:
     link: str
 
 
+def readonly_soql(query: str) -> tuple[list[dict[str, Any]], str]:
+    """Run a paginated SOQL query through the reader-only GET transport.
+
+    This intentionally exposes reads only; callers cannot select an HTTP method.
+    The returned host is useful for constructing evidence links without trusting
+    an environment URL that Salesforce may redirect during OAuth.
+    """
+    token, instance_url = _auth()
+    body = _readonly_get("query", {"q": query}, token, instance_url)
+    records: list[dict[str, Any]] = list(body.get("records") or [])
+    while not bool(body.get("done", True)):
+        next_url = str(body.get("nextRecordsUrl") or "")
+        prefix = f"/services/data/{API_VERSION}/"
+        if not next_url.startswith(prefix):
+            raise RuntimeError("Salesforce returned an invalid pagination URL")
+        body = _readonly_get(next_url.removeprefix(prefix), {}, token, instance_url)
+        records.extend(body.get("records") or [])
+    return records, instance_url
+
+
 @dataclass
 class SFResult:
     """Typed lookup result; ``no_match`` is distinct from any outage."""
