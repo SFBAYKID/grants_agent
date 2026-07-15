@@ -56,7 +56,7 @@ def enrich_lead_contact(conn: sqlite3.Connection, lead_id: int,
     caller-supplied connection so a batch enriches on a single handle. Idempotent: an
     existing verified contact is returned without re-scraping. A SourceUnreachable
     outage records nothing (retryable) and is NEVER written as not_found."""
-    from ..enrich import finder  # local import: keeps poll/digest paths light
+    from ..enrich import finder  # local import: keeps poll and status paths light
 
     lead = db.get_lead(conn, lead_id)
     if lead is None:

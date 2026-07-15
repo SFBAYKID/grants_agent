@@ -18,6 +18,7 @@ import random
 import re
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
+from typing import Any  # Slack Block Kit payloads are runtime-shaped mappings.
 from zoneinfo import ZoneInfo
 
 from slack_sdk import WebClient
@@ -42,6 +43,13 @@ PT = ZoneInfo("America/Los_Angeles")
 
 _STATE_NAMES = {"WA": "Washington", "CA": "California", "MI": "Michigan",
                 "PA": "Pennsylvania", "OR": "Oregon"}
+
+_LEAD_ACTIONS = (
+    ("grant_draft_email", "✉️ Draft email"),
+    ("grant_mark_contacted", "✅ Mark contacted"),
+    ("grant_snooze", "💤 Snooze"),
+    ("grant_bad_lead", "👎 Bad lead"),
+)
 
 
 def in_window(now_utc: datetime) -> bool:
@@ -124,6 +132,23 @@ def build_bulletin(row: sqlite3.Row) -> tuple[str, str]:
     text = (f"Heads up — {source_name} lists \"{what}\" as open{close}. "
             f"Worth mentioning to clients who'd apply.{link}")
     return text, "bulletin-open"
+
+
+def build_lead_blocks(text: str, lead_id: int) -> list[dict[str, Any]]:
+    """Attach per-lead workflow actions to one proactive lead notification.
+
+    The payload intentionally contains one lead only; Grant never combines alerts
+    into a multi-lead digest.
+    """
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": text}},
+        {"type": "actions", "block_id": f"lead-{lead_id}", "elements": [
+            {"type": "button", "action_id": action_id,
+             "text": {"type": "plain_text", "text": label, "emoji": True},
+             "value": str(lead_id)}
+            for action_id, label in _LEAD_ACTIONS
+        ]},
+    ]
 
 
 def pacing_ok(conn: sqlite3.Connection, channel: str, now_utc: datetime,
@@ -221,7 +246,14 @@ def run_drip(client: WebClient | None, channel: str, conn: sqlite3.Connection,
         return "skip: this funding event is already reserved or delivered"
     assert client is not None
     try:
-        resp = client.chat_postMessage(channel=channel, text=text, unfurl_links=False)
+        if kind == "nugget":
+            resp = client.chat_postMessage(
+                channel=channel, text=text,
+                blocks=build_lead_blocks(text, int(row["id"])),
+                unfurl_links=False)
+        else:
+            resp = client.chat_postMessage(
+                channel=channel, text=text, unfurl_links=False)
     except Exception as exc:  # noqa: BLE001 — timeout is ambiguous; never blind-retry
         db.finish_notification(
             conn, delivery_key, "unknown", error=type(exc).__name__)

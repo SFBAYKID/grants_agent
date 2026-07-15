@@ -6,18 +6,18 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 
 ## What Grant does
 
-1. **Weekly digest.** On the Monday-morning cron, Grant posts to its channel: new 🥇 GOLD leads, new 🥈
-   SILVER leads, and ⏳ expiring-window alerts (spend/obligation deadline < ~90 days). One block per lead:
-   entity, state, program, $, window, contact (if found), a one-line "why now," and a Salesforce note
-   ("already an Account — last activity 3 days ago · <link>" or "net-new — no CRM record").
-2. **Interactive triage.** Each lead shows buttons: **[Draft email] [Mark contacted] [Snooze] [Bad lead]**.
+1. **Individual proactive alerts.** Grant never posts multi-lead digests. A paced cron surfaces at most
+   one ranked lead or lower-priority funding bulletin per notification, with strict daily caps. Each
+   lead includes its real source link and persisted Salesforce context when available.
+2. **Interactive triage.** Each individual lead shows buttons: **[Draft email] [Mark contacted]
+   [Snooze] [Bad lead]**.
    [Bad lead] reasons feed back into scoring.
 3. **Approve-to-email.** [Draft email] → Grant composes a personalized draft referencing the specific
    award (amount, program, freshness) → posts the draft **in-thread for a human to review** → on explicit
    human approval, hands the send to **@Persequor**. Grant never sends email itself, and `sent_at` is only
    ever set *after* approval.
-4. **Conversation.** Humans can @mention Grant or DM it to ask about a lead, re-post a digest, or check a
-   district's status. Grant answers from the database and clearly says when it doesn't know.
+4. **Conversation.** Humans can @mention Grant or DM it to ask about a lead, search funding records, or
+   check a district's status. Grant answers from the database and clearly says when it doesn't know.
 5. **On-demand search.** A rep @mentions Grant (or talks in a thread) and asks for grants by any
    criteria. Grant **confirms its understanding first** — restating the full filter set and asking how
    many results and which format (Excel / Google Sheet / just in Slack) — then searches its indexed
@@ -48,7 +48,7 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 
 - **Runtime:** Slack Bolt (Python) in **Socket Mode** — no public URL. Needs `SLACK_BOT_TOKEN` (xoxb),
   `SLACK_APP_TOKEN` (xapp, `connections:write`), `SLACK_SIGNING_SECRET`, `SLACK_CHANNEL_ID` (all in `.env`).
-- **Code home:** `grant_watch/slack/` — `grant.py` (bot), `digest.py` (message formatting),
+- **Code home:** `grant_watch/slack/` — `grant.py` (bot), `drip.py` (single proactive alerts),
   `search.py` (typed source-aware search), and `persequor.py` (handoff). Spreadsheet safety and owned
   temporary artifacts live in `grant_watch/spreadsheets.py`; Google Sheets export is Grant's own
   capability in `grant_watch/google_sheets.py`.

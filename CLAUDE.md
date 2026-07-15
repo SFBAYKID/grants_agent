@@ -88,7 +88,7 @@ Build a **weekly grants checker** that:
 ## The agents in this repo
 
 - **Grant** — the Slack chatbot persona (the product). Talks to humans and to other Slack agents
-  (@Persequor). Posts the weekly digest, runs the approve-to-email flow. Honest, human-in-the-loop,
+  (@Persequor). Posts paced individual lead alerts, runs the approve-to-email flow. Honest, human-in-the-loop,
   never fabricates. Spec + live app config: `docs/grant_agent.md` (Slack app provisioned 2026-07-13;
   tokens in `.env`).
 - **grants-ops-guardian** (`.claude/agents/`) — the ONLY thing allowed to operate the DigitalOcean
@@ -124,16 +124,16 @@ affect Chase's other projects.
   contained zero security keywords, so 0 matches was correct).
 - DB seeded: 75 CSV GOLD + 75 live GOLD SVPP awards + 96 expired-window watch + 153 grants.gov
   signals + 4 SILVER RFPs. Dedup `verified` (repeat poll → 0 new).
-- **Phase 3 built and `verified` live.** `grant_watch/slack/` — digest (pure Block Kit builder +
-  poster), Grant bot (Socket Mode; triage buttons; bad-lead-reason modal; draft → human-approve →
-  @Persequor handoff), `/grant status|digest`. First real digest posted 2026-07-13 (16 leads,
-  statuses flipped to surfaced); Socket Mode boot `verified`. Run the bot:
-  `python -m grant_watch.slack.grant`. Digest cron target: `python -m grant_watch.cli digest`.
-  Outstanding: invite @Grant to the digest channel (posting worked via chat:write.public, but
-  thread reads need membership); set PERSEQUOR_USER_ID in .env so handoffs ping.
+- **Phase 3 built and `verified` live.** `grant_watch/slack/` — paced individual proactive alerts,
+  Grant bot (Socket Mode; triage buttons; bad-lead-reason modal; draft → human-approve → @Persequor
+  handoff), and `/grant status`. A historical 16-lead digest was posted on 2026-07-13; digest posting
+  has since been removed globally. Socket Mode boot is `verified`. Run the bot:
+  `python -m grant_watch.slack.grant`. Proactive cron target: `python -m grant_watch.cli drip`.
+  Outstanding: invite @Grant to the alert channel (posting works via chat:write.public, but thread
+  reads need membership); set PERSEQUOR_USER_ID in .env so handoffs ping.
 - **Post-launch fixes (same day, `verified`):** seed-vs-live duplicate reconciliation (75 superseded
-  CSV rows retired; expiring bucket 34→17) and the digest quality gate (`scoring.lead_score` —
-  freshness × dollars × program camera-fit; GOLD bucket shows the top-ranked N, watch never surfaces).
+  CSV rows retired; expiring bucket 34→17) and the proactive quality gate (`scoring.lead_score` —
+  freshness × dollars × program camera-fit; the highest-ranked lead wins, watch never surfaces).
 - **In design (do not build yet):** multi-rep workflow (claim/ownership, territory routing), the
   Grant↔Persequor outreach handoff (awaiting `persequor_integration_response.md` from the
   `~/monarch_followup_agent` project), and Salesforce cross-referencing. Chase wants the complete

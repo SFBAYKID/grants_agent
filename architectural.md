@@ -47,7 +47,7 @@ grants_agent/
 │   ├── migrations.py         # ordered SQLite migrations and durable workflow state
 │   ├── sources/              # one official source per module
 │   ├── enrich/               # contacts, NCES, Salesforce reader + Campaign gateway
-│   └── slack/                # digest, proactive drip, conversation tools
+│   └── slack/                # individual proactive alerts and conversation tools
 ├── data/svpp_active_awards_CA_MI_PA_WA.csv   # 75 verified GOLD seed leads
 ├── docs/FINDINGS.md
 ├── docs/grant_lead_source_inventory.md
@@ -67,7 +67,7 @@ grant_watch/
 │                       #   mi_cssgp.py, nsgp.py, webs.py, sam_gov.py, ...
 ├── scoring.py          # GOLD/SILVER/watch + freshness; keyword relevance (Claude pass)
 ├── enrich/             # Firecrawl/Claude contacts, NCES, Salesforce reader and Campaign actions
-├── slack/              # grant.py (bot), digest.py (message formatting), persequor.py (handoff)
+├── slack/              # grant.py (bot), drip.py (single alerts), persequor.py (handoff)
 ├── cli.py              # entrypoints; --dry-run everywhere that posts/sends
 └── tests/              # pytest; recorded API fixtures (no live gov hammering)
 ```
@@ -110,10 +110,11 @@ rate-limit; record `verified`/`assumed`/`needs-testing` per source in code and i
 ## 5. Grant (the Slack chatbot)
 
 Full spec and the live app's configuration record in `docs/grant_agent.md`. In short:
-Grant posts the weekly digest (new GOLD/SILVER leads, expiring-window alerts), offers per-lead buttons
-([Draft email] [Mark contacted] [Snooze] [Bad lead]), and on human approval hands the send to @Persequor.
-Grant runs in **Socket Mode** (no public URL). Everything that posts or drafts honors `--dry-run`. Grant
-never fabricates a lead, contact, or award figure.
+Grant never posts multi-lead digests. A paced worker surfaces at most one ranked lead or lower-priority
+funding bulletin per notification, with strict daily caps. Individual lead alerts offer [Draft email],
+[Mark contacted], [Snooze], and [Bad lead]; human-approved outreach is handed to @Persequor. Grant runs
+in **Socket Mode** (no public URL). Everything that posts or drafts honors `--dry-run`. Grant never
+fabricates a lead, contact, or award figure.
 
 ---
 

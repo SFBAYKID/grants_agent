@@ -1,5 +1,5 @@
-"""Grant — the Socket Mode bot: drip-thread conversations (LLM + tools), digest
-triage buttons, mentions, DMs, and the /grant slash command.
+"""Grant — the Socket Mode bot: proactive-thread conversations, mentions, DMs,
+legacy lead buttons, and the /grant slash command.
 
 Run it (long-lived process; needs SLACK_BOT_TOKEN + SLACK_APP_TOKEN in .env):
     python -m grant_watch.slack.grant
@@ -9,7 +9,7 @@ posts — no @ needed there; @Grant works too and routes to the same brain. Mess
 mentioning @Persequor are ignored (that's their conversation). Friendly always; no
 inline backticks anywhere (Slack renders them red, and red text is banned).
 
-Digest-button flow: [Draft email] requests a Persequor draft (Persequor keeps the final
+Lead-button flow: [Draft email] requests a Persequor draft (Persequor keeps the final
 human approval gate); [Mark contacted] / [Snooze] set status; [Bad lead] asks WHY and
 stores the reason as a scoring outcome.
 """
@@ -32,7 +32,6 @@ from slack_sdk import WebClient
 
 from .. import db
 from ..spreadsheets import GeneratedArtifact
-from . import digest
 
 
 class SlackFileClient(Protocol):
@@ -47,11 +46,11 @@ class SlackFileClient(Protocol):
 HELP_TEXT = (
     "Hey! I'm *Grant* — I watch government security-funding sources and surface the "
     "best leads here.\n• /grant status — lead counts by source\n"
-    "• /grant digest — post the full digest now\n"
     "• Talk to me in any of my lead threads: claim a lead, ask questions, request a "
     "spreadsheet, or ask me to search for news.\n"
     "I never invent contacts or figures — if I don't know, I'll say so."
 )
+DIGEST_DISABLED_TEXT = "Digest posting is disabled in every channel."
 
 
 # Per-thread locks serialize long turns without dropping the second human message.
@@ -411,11 +410,7 @@ def create_app() -> App:
                     respond: Callable[..., object], client: WebClient) -> None:
         ack()
         arg = (command.get("text") or "").strip().lower()
-        if arg == "digest":
-            conn = db.connect()
-            n = digest.post_digest(client, os.environ["SLACK_CHANNEL_ID"], conn)
-            respond(f"Posted the digest ({n} leads shown).")
-        elif arg == "stats":
+        if arg == "stats":
             stats = db.engagement_stats(db.connect())
             detail = ", ".join(f"{k}: {v}" for k, v in stats.items() if k != "total")
             respond(f"Grant's engagement score: *{stats['total']}* points"
@@ -490,7 +485,7 @@ def _handle_drip_thread(conn: sqlite3.Connection, post: sqlite3.Row,
     """A human spoke in a lead thread: award the point, understand the message,
     act on the intent, answer in the thread (uploading any files Grant produced).
     Any LLM failure degrades to an honest reply — never to a wrong action."""
-    from . import conversation  # local import: poll/digest paths never need anthropic
+    from . import conversation  # local import: scheduled poll/drip paths need no LLM
 
     user = event["user"]
     text = re.sub(r"<@[^>]+>", "", event.get("text") or "").strip()
@@ -662,6 +657,8 @@ def _with_upload_warning(reply: str, failures: int) -> str:
 def _answer(query: str) -> str:
     """Deterministic fallback Q&A (used when the LLM is unreachable): status/help,
     honest and friendly, no inline code styling (red text is banned)."""
+    if query.strip().lower() == "digest":
+        return DIGEST_DISABLED_TEXT
     if "status" in query:
         lines = [f"• {source} — {grade_}: {count}"
                  for source, grade_, count in db.status_summary(db.connect())]
@@ -674,7 +671,7 @@ def _answer(query: str) -> str:
 
 def _thread_reply(client: WebClient, body: dict[str, Any], text: str,
                   extra_blocks: list[dict[str, Any]] | None = None) -> None:
-    """Reply in the thread under the digest message the button lives on."""
+    """Reply in the thread under the message containing an interactive button."""
     msg = body["message"]
     blocks = ([{"type": "section", "text": {"type": "mrkdwn", "text": text}}]
               + (extra_blocks or []))

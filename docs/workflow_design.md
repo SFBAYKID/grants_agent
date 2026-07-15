@@ -26,7 +26,7 @@ neutered to an honest manual-copy draft, DB audited (zero false rows existed).
 ```
 poll (weekly cron) ─► score ─► QUALITY GATE (lead_score rank, top-N only; SHIPPED)
    ─► [SF cross-check: account? owner? last activity? → link + context line]   (§6)
-   ─► digest to the leads channel, tagged by state
+   ─► one paced, prioritized lead alert to the configured Grant channel
    ─► rep [🙋 Claim]  → leads.assigned_to = rep  (first click wins, block updates)
    ─► rep [✉️ Draft email]
          │  contact_email verified?  ──no──► lead marked contact:not_found;
@@ -48,14 +48,14 @@ that: new → surfaced → claimed → outreach_pending → contacted | back to 
 
 ## 3. Multi-rep model
 
-- **Claim**: new button on every digest lead. First tap sets `leads.assigned_to`
+- **Claim**: button on every individual lead alert. First tap sets `leads.assigned_to`
   (slack id) + `assigned_at`; the block re-renders showing the owner; later taps get an
   ephemeral "already claimed by @X". Race-safe via a conditional UPDATE
   (`WHERE assigned_to IS NULL`).
 - **Only the claiming rep can trigger [Draft email]** for a claimed lead (mirrors
   Persequor's requested_by↔send_as validation; a mismatch is `rejected` on their side —
   we enforce it first on ours for better UX).
-- **Unclaimed GOLD re-surfaces** next digest (still ranked); claimed-but-idle leads
+- **Unclaimed GOLD remains eligible for a later ranked alert;** claimed-but-idle leads
   nudge the owner in-thread after 7 days.
 - **Rep map** lives in `config/reps.json` (slack_id ↔ rep_email ↔ states[]), the
   slack↔email pairs mirroring Persequor's verified roster. Bad `send_as` is impossible
@@ -116,8 +116,8 @@ that: new → surfaced → claimed → outreach_pending → contacted | back to 
   won't dump on anyone.
 - No per-rep send quotas exist on either side yet — if statewide volume gets real,
   Persequor's agent proposes intake-enforced daily caps (Chase would set the number).
-- ⚠️ OPEN (Chase): digest destination. #monarch-bot-playground is a noisy bot commons;
-  recommend a dedicated **#grant-leads** channel reps actually watch.
+- Grant uses one explicitly configured alert channel. Multi-lead digests are disabled globally;
+  changing the channel does not enable them.
 
 ## 6. Salesforce integration
 
@@ -142,7 +142,7 @@ that: new → surfaced → claimed → outreach_pending → contacted | back to 
 3. Verify one Chase-owned Persequor test-mode brief and implement status reflection.
 4. Have grants-ops-guardian validate the scoped Unix user/key/database role and deploy
    only a committed revision into the grants tenant.
-5. Schedule poll → Salesforce sync → digest/drip → outreach retry. Enable Campaign
+5. Schedule poll → Salesforce sync → individual drip → outreach retry. Enable Campaign
    writes only after preview logs are reviewed and a second explicit approval.
 
 ## 8. Failure modes designed for

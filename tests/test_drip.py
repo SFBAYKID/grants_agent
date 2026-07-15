@@ -5,6 +5,7 @@ mode is tested by contract: bad output degrades to an honest 'didn't parse')."""
 from __future__ import annotations
 
 import random
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,7 +21,8 @@ from grant_watch.models import (
 from grant_watch.slack import drip
 
 
-def _mk_lead(conn, iid: str = "A1", entity: str = "Castle Rock School District 401",
+def _mk_lead(conn: sqlite3.Connection, iid: str = "A1",
+             entity: str = "Castle Rock School District 401",
              grade: LeadGrade = LeadGrade.GOLD, source: str = "usaspending:16.071",
              amount: float | None = 500_000.0, start: str = "2025-10-01",
              end: str = "2028-09-30", title: str = "SVPP award") -> int:
@@ -156,9 +158,7 @@ def test_needs_testing_event_cannot_enter_proactive_notifications(tmp_path: Path
            WHERE lead_id=?""", (lead_id,))
     conn.commit()
     assert db.nugget_candidates(conn) == []
-    assert all(
-        lead_id not in {int(row["id"]) for row in rows}
-        for rows in db.digest_leads(conn).values())
+    assert drip.pick(conn, "C1") is None
 
 
 def test_pick_prioritizes_existing_salesforce_opportunity(tmp_path: Path) -> None:
@@ -245,10 +245,12 @@ class _SlackClient:
     def __init__(self, fail: bool = False) -> None:
         self.fail = fail
         self.calls = 0
+        self.last_kwargs: dict[str, object] = {}
 
-    def chat_postMessage(self, **_kwargs: object) -> dict[str, str]:  # noqa: N802
+    def chat_postMessage(self, **kwargs: object) -> dict[str, str]:  # noqa: N802
         """Return a stable timestamp or simulate an ambiguous timeout."""
         self.calls += 1
+        self.last_kwargs = kwargs
         if self.fail:
             raise TimeoutError("ambiguous")
         return {"ts": "200.1"}
@@ -264,6 +266,13 @@ def test_delivery_reservation_prevents_duplicate_post(tmp_path: Path) -> None:
     assert first.startswith("posted nugget")
     assert second == "skip: nothing new worth saying"
     assert client.calls == 1
+    blocks = client.last_kwargs["blocks"]
+    assert isinstance(blocks, list) and len(blocks) == 2
+    action_ids = {element["action_id"] for element in blocks[1]["elements"]}
+    assert action_ids == {
+        "grant_draft_email", "grant_mark_contacted", "grant_snooze", "grant_bad_lead",
+    }
+    assert {element["value"] for element in blocks[1]["elements"]} == {"1"}
     assert conn.execute(
         "SELECT state FROM notification_outbox").fetchone()["state"] == "delivered"
 

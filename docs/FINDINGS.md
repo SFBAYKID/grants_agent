@@ -4,7 +4,7 @@ Everything discovered, verified, and still open. Companion to `grant_lead_source
 ## What is built locally
 
 - **verified (offline tests):** typed package, versioned truth/event schema, official-source
-  pollers, scoring/dedup, Slack digest/proactive/search tools, Excel/Google Sheets export jobs,
+  pollers, scoring/dedup, Slack proactive/search tools, Excel/Google Sheets export jobs,
   contact integrity gates, Persequor outbox/retry, NCES enrichment, Salesforce reader snapshots,
   and the disabled create-only Salesforce Campaign approval workflow.
 - **verified (live read-only, 2026-07-13/14):** USAspending, Grants.gov, SAM.gov, WEBS fetch/parser,

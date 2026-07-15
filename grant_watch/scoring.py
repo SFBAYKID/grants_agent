@@ -3,8 +3,8 @@
 Rules (v1 — deliberately simple, tuned as feedback arrives via Grant's [Bad lead] button):
   GOLD    an actual award (money in hand) whose spend window is still open and whose
           amount is positive. Freshness matters: awards started within the last
-          FRESH_MONTHS are the hottest; older-but-open awards stay gold (they show up
-          in "use-it-or-lose-it" digests) — expired windows drop to watch.
+          FRESH_MONTHS are the hottest; older-but-open awards stay gold but rank
+          below fresh events — expired windows drop to watch.
   SILVER  an open RFP/bid matched to our keywords (WEBS, SAM.gov).
   WATCH   everything ambiguous: grants.gov opportunities (pipeline signal, not money),
           negative/zero amounts (de-obligations — found in the 2026-07-13 live run),
@@ -71,7 +71,7 @@ def is_fresh(item: RawItem, today: date | None = None) -> bool:
 # ---------------------------------------------------------------- quality gate (rank)
 
 # How addressable each program's dollars are with Monarch's catalog (cameras, access
-# control, door hardening). Chase's rule: reps must trust every digest line, so
+# control, door hardening). Chase's rule: reps must trust every proactive alert, so
 # software-heavy programs rank low even at high dollar amounts.
 PROGRAM_FIT: dict[str, float] = {
     "SVPP": 1.0,    # school physical security — the bullseye

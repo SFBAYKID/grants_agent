@@ -340,7 +340,7 @@ def finish_export_job(conn: sqlite3.Connection, job_id: str, state: str,
 def reconcile_seed_duplicates(conn: sqlite3.Connection) -> int:
     """Retire seed-CSV rows that a live poller row has superseded.
 
-    Why: the 2026-07-13 live digest showed the same award twice — once from
+    Why: the 2026-07-13 live output showed the same award twice — once from
     'seed:svpp_csv' (no award id, no URL) and once from live USASpending. Match is
     EXACT on normalized entity + amount + funds_end (verified 75/75 seed rows matched
     this way with zero false lonelies). The live row wins (it carries the award id and
@@ -362,44 +362,6 @@ def reconcile_seed_duplicates(conn: sqlite3.Connection) -> int:
 
 # ---------------------------------------------------------------- Phase 3: Slack workflow
 
-def digest_leads(conn: sqlite3.Connection, expiring_days: int = 90
-                 ) -> dict[str, list[sqlite3.Row]]:
-    """Rows for the weekly digest, in three buckets:
-      gold      new GOLD leads not yet surfaced (freshest start date first, then $)
-      silver    new SILVER leads not yet surfaced
-      expiring  GOLD leads whose spend window ends within `expiring_days`
-                (use-it-or-lose-it — regardless of surfaced status, but not dead/contacted)
-    """
-    expiring_predicate = (
-        "l.funds_end IS NOT NULL AND date(l.funds_end) BETWEEN date('now') "
-        "AND date('now', ?)")
-    gold = list(conn.execute(
-        f"""SELECT {_LEAD_EVENT_SELECT}, {_CRM_CONTEXT_SELECT} FROM leads l
-            JOIN funding_events e ON e.id=l.current_event_id
-            WHERE l.lead_grade='gold' AND l.status='new'
-              AND e.suppressed=0 AND e.verification_status='verified'
-              AND e.event_type IN ('award_announced','award_obligated')
-              AND NOT ({expiring_predicate})
-            ORDER BY e.occurred_on DESC, l.amount DESC, l.id""",
-        (f"+{expiring_days} days",)))
-    silver = list(conn.execute(
-        f"""SELECT {_LEAD_EVENT_SELECT}, {_CRM_CONTEXT_SELECT} FROM leads l
-            JOIN funding_events e ON e.id=l.current_event_id
-            WHERE l.lead_grade='silver' AND l.status='new'
-              AND e.suppressed=0 AND e.verification_status='verified'
-              AND e.event_type='rfp_posted'
-            ORDER BY l.funds_end ASC, l.id"""))
-    expiring = list(conn.execute(
-        f"""SELECT {_LEAD_EVENT_SELECT}, {_CRM_CONTEXT_SELECT} FROM leads l
-            JOIN funding_events e ON e.id=l.current_event_id
-            WHERE l.lead_grade='gold' AND l.status NOT IN ('dead','contacted')
-              AND e.suppressed=0 AND e.verification_status='verified'
-              AND e.event_type IN ('award_announced','award_obligated')
-              AND {expiring_predicate}
-            ORDER BY l.funds_end ASC, l.id""", (f"+{expiring_days} days",)))
-    return {"gold": gold, "silver": silver, "expiring": expiring}
-
-
 def get_lead(conn: sqlite3.Connection, lead_id: int) -> sqlite3.Row | None:
     """One lead row by primary key (None when the id is stale/unknown)."""
     return conn.execute(
@@ -419,7 +381,7 @@ def set_lead_status(conn: sqlite3.Connection, lead_id: int, status: str,
 
 
 def mark_surfaced(conn: sqlite3.Connection, lead_ids: list[int]) -> None:
-    """Flip a batch of just-posted digest leads from 'new' to 'surfaced'."""
+    """Mark leads whose individual proactive alerts were confirmed by Slack."""
     conn.executemany("UPDATE leads SET status='surfaced' WHERE id=? AND status='new'",
                      [(i,) for i in lead_ids])
     conn.commit()
@@ -505,26 +467,6 @@ def reserve_notification(conn: sqlite3.Connection, lead_id: int, event_id: int |
                VALUES (?,?,?,?,?,?,'sending',1,?,?,?)""",
             (delivery_key, event_id, lead_id, channel, delivery_class,
              json.dumps(payload, sort_keys=True), now, now, now),
-        )
-    return delivery_key if cur.rowcount == 1 else None
-
-
-def reserve_digest_notification(conn: sqlite3.Connection, channel: str,
-                                shown_ids: list[int],
-                                local_date: str | None = None) -> str | None:
-    """Reserve at most one full digest per channel/Pacific business date."""
-    date_key = local_date or datetime.now(timezone.utc).astimezone(
-        ZoneInfo("America/Los_Angeles")).date().isoformat()
-    delivery_key = f"{channel}:digest:{date_key}"
-    now = _now()
-    with conn:
-        cur = conn.execute(
-            """INSERT OR IGNORE INTO notification_outbox
-                 (delivery_key,event_id,lead_id,audience,delivery_class,payload_json,
-                  state,attempts,available_at,created_at,updated_at)
-               VALUES (?,NULL,NULL,?,'digest',?,'sending',1,?,?,?)""",
-            (delivery_key, channel,
-             json.dumps({"lead_ids": shown_ids}, sort_keys=True), now, now, now),
         )
     return delivery_key if cur.rowcount == 1 else None
 

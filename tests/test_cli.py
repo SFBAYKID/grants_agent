@@ -65,24 +65,6 @@ def _readonly_only(monkeypatch: pytest.MonkeyPatch) -> object:
     return sentinel
 
 
-def test_digest_dry_run_uses_readonly_database(
-        monkeypatch: pytest.MonkeyPatch) -> None:
-    """Digest preview cannot apply migrations or alter the lead database."""
-    from grant_watch.slack import digest
-
-    sentinel = _readonly_only(monkeypatch)
-    monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANTS")
-
-    def fake_post(client: object, channel: str, conn: object,
-                  dry_run: bool = False) -> int:
-        assert client is None and channel == "CGRANTS"
-        assert conn is sentinel and dry_run is True
-        return 2
-
-    monkeypatch.setattr(digest, "post_digest", fake_post)
-    assert cli.cmd_digest(dry_run=True) == 0
-
-
 def test_drip_dry_run_uses_readonly_database(monkeypatch: pytest.MonkeyPatch) -> None:
     """Proactive preview cannot migrate or write SQLite."""
     from grant_watch.slack import drip
@@ -130,6 +112,13 @@ def test_salesforce_sync_dry_run_uses_readonly_database(
 
     monkeypatch.setattr(salesforce_sync, "sync", fake_sync)
     assert cli.cmd_salesforce_sync(limit=3, dry_run=True) == 0
+
+
+def test_digest_cli_command_does_not_exist() -> None:
+    """No local or cron-capable command can post a multi-lead digest."""
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["digest"])
+    assert exc.value.code == 2
 
 
 def test_unresolved_cron_outcomes_return_nonzero(

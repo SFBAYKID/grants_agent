@@ -1,8 +1,8 @@
-"""Tests for the two live-digest fixes of 2026-07-13: seed-vs-live duplicate
-reconciliation, and the quality-gate ranking (strongest leads first)."""
+"""Tests for seed/live reconciliation and proactive quality-gate ranking."""
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import date
 from pathlib import Path
 
@@ -16,12 +16,13 @@ from grant_watch.models import (
     VerificationStatus,
 )
 from grant_watch.scoring import lead_score
-from grant_watch.slack.digest import _rank
+from grant_watch.slack import drip
 
 TODAY = date(2026, 7, 13)
 
 
-def _mk(conn, source: str, iid: str, entity: str, amount: float | None,
+def _mk(conn: sqlite3.Connection, source: str, iid: str, entity: str,
+        amount: float | None,
         start: str, end: str, grade_: LeadGrade = LeadGrade.GOLD,
         program: str = "SVPP", event_date: str = "2026-06-01") -> None:
     is_seed = source.startswith("seed:")
@@ -67,16 +68,16 @@ def test_reconcile_spares_seed_without_live_twin(tmp_path: Path) -> None:
                         ).fetchone()["status"] == "new"
 
 
-def test_retired_seed_leaves_digest(tmp_path: Path) -> None:
+def test_retired_seed_leaves_proactive_candidates(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     _mk(conn, "seed:svpp_csv", "castle~FY25", "Castle Rock SD 401", 500_000.0,
         "2025-10-01", "2026-09-30")                     # would hit 'expiring' bucket
     _mk(conn, "usaspending:16.071", "AWD1", "Castle Rock SD 401", 500_000.0,
         "2025-10-01", "2026-09-30")
     db.reconcile_seed_duplicates(conn)
-    expiring = db.digest_leads(conn)["expiring"]
-    assert len(expiring) == 1                           # the live row only
-    assert expiring[0]["source"] == "usaspending:16.071"
+    candidates = db.nugget_candidates(conn)
+    assert len(candidates) == 1                         # the live row only
+    assert candidates[0]["source"] == "usaspending:16.071"
 
 
 # ------------------------------------------------------------ quality-gate ranking
@@ -93,14 +94,15 @@ def test_program_fit_downranks_software_heavy() -> None:
     assert svpp > stop  # STOP skews software/threat-assessment (FINDINGS)
 
 
-def test_rank_orders_digest_rows(tmp_path: Path) -> None:
+def test_proactive_pick_orders_rows_by_freshness(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     _mk(conn, "usaspending:16.071", "OLD", "Old Big District", 500_000.0,
         "2022-10-01", "2028-09-30", event_date="2022-10-01")
     _mk(conn, "usaspending:16.071", "FRESH", "Fresh District", 150_000.0,
         "2026-05-01", "2029-09-30", event_date="2026-05-01")
-    ranked = _rank(db.digest_leads(conn)["gold"])
-    assert ranked[0]["entity_name"] == "Fresh District"
+    choice = drip.pick(conn, "C1")
+    assert choice is not None
+    assert choice[1]["entity_name"] == "Fresh District"
 
 
 def test_unknown_start_never_outranks_known_fresh() -> None:
