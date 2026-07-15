@@ -111,6 +111,32 @@ def test_partial_audit_never_blindly_retries(monkeypatch: pytest.MonkeyPatch) ->
     assert called is False
 
 
+def test_audit_snapshot_filters_task_description_in_memory(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Task.Description is selected but never used as an unsupported SOQL filter."""
+    gateway = gateway_mod.SalesforceCampaignGateway()
+    queries: list[str] = []
+
+    def fake_get(_path: str, params: dict[str, str]) -> dict[str, object]:
+        query = params["q"]
+        queries.append(query)
+        if "FROM ContentDocumentLink" in query:
+            return {"records": []}
+        if "FROM Task" in query:
+            return {"records": [
+                {"Id": "00T000000000009", "Description": "Action another-id."},
+                {"Id": "00T000000000001", "Description": f"Action {ACTION_ID}."},
+            ]}
+        raise AssertionError(query)
+
+    monkeypatch.setattr(gateway, "_get", fake_get)
+    snapshot = gateway.lead_audit_snapshot(LEAD_ID, ACTION_ID)
+    assert snapshot.task_id == "00T000000000001"
+    task_query = next(item for item in queries if "FROM Task" in item)
+    assert "Description LIKE" not in task_query
+    assert "SELECT Id,Description" in task_query
+
+
 def test_salesforce_gateway_exposes_no_delete_or_put_http_method() -> None:
     """The Salesforce writer module has no DELETE or PUT request primitive."""
     source = inspect.getsource(gateway_mod)

@@ -392,12 +392,12 @@ class SalesforceCampaignGateway:
         link_id = str(links[0].get("Id") or "") if links else ""
         note_id = str(links[0].get("ContentDocumentId") or "") if links else ""
         task_subject = _soql_literal("Grant system: CRM research updated")
-        task_marker = _soql_literal(f"%Action {marker}%")
-        tasks = self._get("query", {"q": (
-            "SELECT Id FROM Task "
-            f"WHERE WhoId='{lead_id}' AND Subject='{task_subject}' "
-            f"AND Description LIKE '{task_marker}' LIMIT 2"
+        candidates = self._get("query", {"q": (
+            "SELECT Id,Description FROM Task "
+            f"WHERE WhoId='{lead_id}' AND Subject='{task_subject}' LIMIT 200"
         )}).get("records") or []
+        tasks = [item for item in candidates
+                 if f"Action {marker}" in str(item.get("Description") or "")]
         if len(tasks) > 1:
             raise ValueError("multiple Salesforce Tasks share one Grant action marker")
         task_id = str(tasks[0].get("Id") or "") if tasks else ""
