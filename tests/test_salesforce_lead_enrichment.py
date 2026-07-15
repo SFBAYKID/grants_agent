@@ -27,6 +27,7 @@ class FakeGateway:
         self.values["State"] = "CA"
         self.stamp = "2026-07-15T22:00:00.000+0000"
         self.calls: list[dict[str, object]] = []
+        self.notes: set[str] = set()
 
     def lead_enrichment_snapshot(self, lead_id: str) -> gateway_mod.LeadEnrichmentSnapshot:
         """Return the current fake Lead state."""
@@ -42,6 +43,16 @@ class FakeGateway:
         self.calls.append(delta)
         self.values.update(delta)  # type: ignore[arg-type]  # test fake mirrors CRM JSON
         self.stamp = "2026-07-15T22:01:00.000+0000"
+
+    def note_exists(self, _lead_id: str, title: str) -> bool:
+        """Return whether one fake research Note exists."""
+        return title in self.notes
+
+    def create_note(self, _lead_id: str, title: str,
+                    _body: str) -> gateway_mod.CreateResult:
+        """Create one fake research Note without changing Lead update call counts."""
+        self.notes.add(title)
+        return gateway_mod.CreateResult(True, "002000000000001")
 
 
 @pytest.fixture(autouse=True)

@@ -23,11 +23,23 @@ class FakeGateway:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.notes: set[str] = set()
 
     def create_lead(self, _payload: dict[str, object]) -> gateway_mod.CreateResult:
         """Return one deterministic Lead ID."""
         self.calls.append("create_lead")
         return gateway_mod.CreateResult(True, LEAD_ID)
+
+    def note_exists(self, _lead_id: str, title: str) -> bool:
+        """Return whether the fake research Note was created."""
+        return title in self.notes
+
+    def create_note(self, _lead_id: str, title: str,
+                    _body: str) -> gateway_mod.CreateResult:
+        """Create one deterministic research Note."""
+        self.calls.append("create_note")
+        self.notes.add(title)
+        return gateway_mod.CreateResult(True, "002000000000001")
 
 
 @pytest.fixture(autouse=True)
@@ -99,7 +111,7 @@ def test_confirmation_creates_one_and_reads_back(monkeypatch: pytest.MonkeyPatch
     result = campaigns.confirm_action(
         conn, gateway, action.action_id, action.nonce,
         "TWORK", "CGRANTS", "1.1", "UCHASE")
-    assert result.added == 1 and gateway.calls == ["create_lead"]
+    assert result.added == 1 and gateway.calls == ["create_lead", "create_note"]
     item = conn.execute("SELECT state,salesforce_id FROM crm_action_items").fetchone()
     assert tuple(item) == ("lead_created", LEAD_ID)
 

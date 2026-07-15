@@ -19,7 +19,7 @@ API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
 MAX_ACTION_ORGANIZATIONS = 200
 MEMBER_STATUS = "Identified by Grant"
 _ALLOWED_CREATE_OBJECTS = {
-    "Campaign", "CampaignMemberStatus", "Lead", "CampaignMember", "Opportunity"}
+    "Campaign", "CampaignMemberStatus", "Lead", "CampaignMember", "Opportunity", "Note"}
 _ALLOWED_BULK_CREATE_OBJECTS = {"Lead", "CampaignMember"}
 _LEAD_ENRICHMENT_FIELDS = {
     "Website", "Phone", "Street", "City", "State", "PostalCode", "Country",
@@ -339,6 +339,22 @@ class SalesforceCampaignGateway:
         if response.status_code not in (200, 204):
             raise requests.HTTPError(
                 f"Lead enrichment HTTP {response.status_code}: {response.text[:200]}")
+
+    def note_exists(self, lead_id: str, title: str) -> bool:
+        """Return whether the exact Grant research Note already exists on one Lead."""
+        validate_record_id(lead_id, "Lead")
+        literal = _soql_literal(title)
+        body = self._get("query", {"q": (
+            f"SELECT Id FROM Note WHERE ParentId='{lead_id}' AND Title='{literal}' LIMIT 2")})
+        return bool(body.get("records") or [])
+
+    def create_note(self, lead_id: str, title: str, body: str) -> CreateResult:
+        """Create one bounded legacy Note attached only to an exact Lead."""
+        validate_record_id(lead_id, "Lead")
+        if not title.strip() or len(title) > 80 or not body.strip() or len(body) > 32_000:
+            raise ValueError("Salesforce research Note is empty or too long")
+        return self._create_one("Note", {
+            "ParentId": lead_id, "Title": title.strip(), "Body": body.strip()})
 
     def find_people(self, entity_name: str, state: str) -> list[SalesforceRecordRef]:
         """Find exact-company Leads and Account Contacts; never auto-select fuzzy rows."""

@@ -193,6 +193,7 @@ def prepare_person_lead_creation(
         ("LinkedIn", organization.linkedin_url),
     ]
     preview += "".join(f"\n• {label}: {value}" for label, value in enriched if value)
+    preview += "\n• Add a Salesforce Note with Grant’s verified research sources"
     return workflow.PreparedAction(stored_id, nonce, preview, expires)
 
 
@@ -307,6 +308,7 @@ def prepare_lead_enrichment(
              if key != "Description"]
     preview = "Fill these blank Salesforce Lead fields?\n" + "\n".join(lines)
     preview += "\n• Append the verified Grant research sources to Description"
+    preview += "\n• Add the same verified research summary as a Salesforce Note"
     return workflow.PreparedAction(stored_id, nonce, preview, expires)
 
 
@@ -338,6 +340,14 @@ def confirm_person_lead(conn: sqlite3.Connection, gateway: SalesforceCampaignGat
                if item.record_id == result.record_id]
     if len(created) != 1 or created[0].company != company:
         raise ValueError("created Lead could not be verified by exact readback")
+    note_title = f"Grant research — {str(row['id'])[:8]}"
+    if not gateway.note_exists(result.record_id, note_title):
+        note = gateway.create_note(
+            result.record_id, note_title, str(payload.get("Description") or ""))
+        if not note.success or not note.record_id:
+            raise ValueError(note.error or "Salesforce returned no Note ID")
+        if not gateway.note_exists(result.record_id, note_title):
+            raise ValueError("created Salesforce Note could not be verified")
     with conn:
         conn.execute(
             """UPDATE crm_action_items SET state='lead_created',salesforce_id=?
@@ -406,6 +416,14 @@ def confirm_lead_enrichment(
                 raise ValueError("updated Lead enrollment did not match the preview")
         elif str(actual or "") != str(value):
             raise ValueError(f"updated Lead field {key} did not match the preview")
+    note_title = f"Grant research — {str(row['id'])[:8]}"
+    if not gateway.note_exists(lead_id, note_title):
+        note = gateway.create_note(
+            lead_id, note_title, str(delta.get("Description") or ""))
+        if not note.success or not note.record_id:
+            raise ValueError(note.error or "Salesforce returned no Note ID")
+        if not gateway.note_exists(lead_id, note_title):
+            raise ValueError("created Salesforce Note could not be verified")
     with conn:
         conn.execute(
             """UPDATE crm_action_items SET state='lead_enriched',salesforce_id=?
