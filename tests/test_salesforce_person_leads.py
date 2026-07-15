@@ -92,7 +92,7 @@ def test_preview_freezes_exact_contact_without_write(monkeypatch: pytest.MonkeyP
     row = conn.execute("SELECT action_type,state,payload_json FROM crm_actions").fetchone()
     payload = json.loads(str(row["payload_json"]))["lead"]
     assert (row["action_type"], row["state"]) == ("create_person_lead", "ready")
-    assert payload["LastName"] == "Andrew Popp" and "FirstName" not in payload
+    assert payload["FirstName"] == "Andrew" and payload["LastName"] == "Popp"
     assert "No Campaign membership" in action.preview
 
 

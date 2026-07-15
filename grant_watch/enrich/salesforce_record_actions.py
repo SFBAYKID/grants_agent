@@ -45,7 +45,10 @@ class PersonLeadDraft:
     industry: str
 
     def payload(self, action_id: str, requester: str) -> dict[str, object]:
-        """Return exact Salesforce fields without guessing first/last-name splits."""
+        """Return exact Salesforce fields; split only an unambiguous two-token name."""
+        name_parts = self.person_name.split()
+        simple_name = (len(name_parts) == 2 and all(
+            re.fullmatch(r"[A-Za-z][A-Za-z'’-]*", part) for part in name_parts))
         research = [
             f"Grant research source: {self.organization.source_url or self.source_url}",
             f"Verified contact source: {self.source_url}",
@@ -56,7 +59,8 @@ class PersonLeadDraft:
         if self.enrollment is not None:
             research.append(f"NCES district enrollment: {self.enrollment}")
         result: dict[str, object] = {
-            "Company": self.company, "LastName": self.person_name,
+            "Company": self.company,
+            "LastName": name_parts[1] if simple_name else self.person_name,
             "Email": self.email, "Status": "New", "LeadSource": "Other",
             "Description": (
                 f"Created by Grant from verified public contact {self.contact_id} for "
@@ -64,6 +68,8 @@ class PersonLeadDraft:
                 f"Action {action_id}. Requested by Slack user {requester}.\n"
                 + "\n".join(research)),
         }
+        if simple_name:
+            result["FirstName"] = name_parts[0]
         if self.state:
             result["State"] = self.state
         if self.title:
@@ -329,7 +335,7 @@ def confirm_person_lead(conn: sqlite3.Connection, gateway: SalesforceCampaignGat
                    WHERE action_id=?""", (item.record_id, row["id"]))
         return workflow.ActionExecution(
             workflow.CampaignActionState.COMPLETE,
-            f"{payload['LastName']} is already in Salesforce: {item.link}",
+            f"{item.name or payload['LastName']} is already in Salesforce: {item.link}",
             already_present=1)
     workflow._mark_external_write_started(conn, str(row["id"]))
     result = gateway.create_lead(payload)
@@ -356,7 +362,8 @@ def confirm_person_lead(conn: sqlite3.Connection, gateway: SalesforceCampaignGat
         conn, str(row["id"]), workflow.CampaignActionState.COMPLETE)
     return workflow.ActionExecution(
         workflow.CampaignActionState.COMPLETE,
-        f"Created {payload['LastName']} in Salesforce: {created[0].link}", added=1)
+        f"Created {created[0].name or payload['LastName']} in Salesforce: "
+        f"{created[0].link}", added=1)
 
 
 def confirm_opportunity(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
