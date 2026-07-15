@@ -287,6 +287,20 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "salesforce_opportunity_create_preview",
+        "description": "Prepare, but do not execute, one Salesforce Opportunity under "
+                       "an exact Account link after the user explicitly requests it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "account_link": {"type": "string"}, "name": {"type": "string"},
+                "stage_name": {"type": "string"}, "close_date": {"type": "string"},
+                "amount": {"type": "number"},
+            },
+            "required": ["account_link", "name", "stage_name", "close_date"],
+        },
+    },
+    {
         "name": "salesforce_campaign_members_preview",
         "description": "Prepare, but DO NOT execute, an exact preview for adding a "
                        "frozen list of Grant lead IDs to a human-confirmed Campaign. "
@@ -597,6 +611,34 @@ def salesforce_lead_create_preview(contact_id: int, requester_slack: str,
                               action.preview, action.expires_at)
 
 
+def salesforce_opportunity_create_preview(
+        args: dict[str, Any], requester_slack: str, workspace: str,
+        channel: str, thread_ts: str) -> str:
+    """Prepare one Account-bound, owner-resolved Opportunity preview."""
+    from .. import persequor_client
+    from ..enrich import salesforce_campaigns as crm
+
+    gateway = crm.SalesforceCampaignGateway()
+    requester_email = persequor_client.rep_email_for(requester_slack) or ""
+    try:
+        owners = gateway.find_active_user_by_email(requester_email)
+        if len(owners) != 1:
+            raise ValueError("your Slack user does not map to exactly one Salesforce owner")
+        owner = owners[0]
+        raw_amount = args.get("amount")
+        amount = float(raw_amount) if raw_amount is not None else None
+        action = crm.prepare_opportunity_creation(
+            db.connect(), gateway, workspace, channel, thread_ts, requester_slack,
+            str(args.get("account_link", "")), str(args.get("name", "")),
+            str(args.get("stage_name", "")), str(args.get("close_date", "")),
+            owner.record_id, owner.name, amount)
+    except (ValueError, PermissionError, KeyError, ConnectionError,
+            requests.RequestException) as exc:
+        return f"ERROR: Opportunity preview failed ({type(exc).__name__}): {str(exc)[:180]}"
+    return _crm_action_result(action.action_id, action.nonce,
+                              action.preview, action.expires_at)
+
+
 def salesforce_campaign_members_preview(
         args: dict[str, Any], requester_slack: str, workspace: str,
         channel: str, thread_ts: str) -> str:
@@ -675,6 +717,10 @@ def run_tool(name: str, args: dict[str, Any],
         return salesforce_lead_create_preview(
             int(args.get("contact_id", 0)), requester_slack, workspace,
             channel, thread_ts), None
+    if name == "salesforce_opportunity_create_preview":
+        p("Preparing Salesforce Opportunity")
+        return salesforce_opportunity_create_preview(
+            args, requester_slack, workspace, channel, thread_ts), None
     if name == "salesforce_campaign_create_preview":
         p("Preparing Campaign preview")
         return salesforce_campaign_create_preview(

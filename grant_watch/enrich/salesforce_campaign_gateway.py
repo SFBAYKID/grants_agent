@@ -18,7 +18,9 @@ import requests
 API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
 MAX_ACTION_ORGANIZATIONS = 200
 MEMBER_STATUS = "Identified by Grant"
-_ALLOWED_CREATE_OBJECTS = {"Campaign", "CampaignMemberStatus", "Lead", "CampaignMember"}
+_ALLOWED_CREATE_OBJECTS = {
+    "Campaign", "CampaignMemberStatus", "Lead", "CampaignMember", "Opportunity"}
+_ALLOWED_BULK_CREATE_OBJECTS = {"Lead", "CampaignMember"}
 _ID_PREFIXES = {
     "Campaign": "701",
     "Lead": "00Q",
@@ -49,6 +51,21 @@ class CreateResult:
     success: bool
     record_id: str = ""
     error: str = ""
+
+
+@dataclass(frozen=True)
+class OpportunityRecord:
+    """Exact Opportunity fields used for duplicate checks and create readback."""
+
+    record_id: str
+    name: str
+    account_id: str
+    stage_name: str
+    close_date: str
+    owner_id: str
+    amount: float | None
+    is_closed: bool
+    link: str
 
 
 
@@ -160,7 +177,7 @@ class SalesforceCampaignGateway:
     def _create_many(self, sobject: str,
                      payloads: list[dict[str, object]]) -> list[CreateResult]:
         """Create up to 200 records with per-record results and allOrNone disabled."""
-        if sobject not in _ALLOWED_CREATE_OBJECTS:
+        if sobject not in _ALLOWED_BULK_CREATE_OBJECTS:
             raise ValueError(f"Salesforce create forbidden for {sobject}")
         if len(payloads) > MAX_ACTION_ORGANIZATIONS:
             raise ValueError("Salesforce collection exceeds 200 records")
@@ -202,6 +219,15 @@ class SalesforceCampaignGateway:
                 }
         return values["Type"], values["Status"]
 
+    def opportunity_stages(self) -> set[str]:
+        """Return active Opportunity StageName values from writer-org metadata."""
+        body = self._get("sobjects/Opportunity/describe")
+        for field in body.get("fields") or []:
+            if field.get("name") == "StageName":
+                return {str(item.get("value")) for item in field.get("picklistValues") or []
+                        if item.get("active")}
+        return set()
+
     def find_active_user_by_email(self, email: str) -> list[SalesforceRecordRef]:
         """Resolve an owner only by exact active-user email; never guess by name."""
         if not email.strip():
@@ -237,6 +263,7 @@ class SalesforceCampaignGateway:
             "Campaign": "Id,Name",
             "Lead": "Id,Name,Company,State",
             "Contact": "Id,Name,MailingState,Account.Name",
+            "Account": "Id,Name,BillingState",
         }[sobject]
         body = self._get(f"sobjects/{sobject}/{record_id}", {"fields": fields})
         account = body.get("Account") or {}
@@ -244,8 +271,27 @@ class SalesforceCampaignGateway:
             sobject=sobject, record_id=record_id, name=str(body.get("Name") or ""),
             link=self.lightning_link(sobject, record_id),
             company=str(body.get("Company") or account.get("Name") or ""),
-            state=str(body.get("State") or body.get("MailingState") or ""),
+            state=str(body.get("State") or body.get("MailingState")
+                      or body.get("BillingState") or ""),
         )
+
+    def open_opportunities(self, account_id: str) -> list[OpportunityRecord]:
+        """Return every open Opportunity under one exact validated Account."""
+        validate_record_id(account_id, "Account")
+        soql = ("SELECT Id,Name,AccountId,StageName,CloseDate,OwnerId,Amount,IsClosed "
+                f"FROM Opportunity WHERE AccountId='{account_id}' AND IsClosed=false")
+        records = self._get("query", {"q": soql}).get("records") or []
+        return [OpportunityRecord(
+            str(item["Id"]), str(item.get("Name") or ""), str(item.get("AccountId") or ""),
+            str(item.get("StageName") or ""), str(item.get("CloseDate") or ""),
+            str(item.get("OwnerId") or ""),
+            float(item["Amount"]) if item.get("Amount") is not None else None,
+            bool(item.get("IsClosed")),
+            self.lightning_link("Opportunity", str(item["Id"]))) for item in records]
+
+    def create_opportunity(self, payload: dict[str, object]) -> CreateResult:
+        """Create exactly one explicitly approved Opportunity."""
+        return self._create_one("Opportunity", payload)
 
     def find_people(self, entity_name: str, state: str) -> list[SalesforceRecordRef]:
         """Find exact-company Leads and Account Contacts; never auto-select fuzzy rows."""

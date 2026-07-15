@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import math
 import secrets
 import sqlite3
 import uuid
@@ -121,10 +122,36 @@ class PersonLeadDraft:
 
 
 @dataclass(frozen=True)
+class OpportunityDraft:
+    """Allowlisted fields for one Opportunity under an exact existing Account."""
+
+    account_id: str
+    account_name: str
+    name: str
+    stage_name: str
+    close_date: str
+    owner_id: str
+    owner_name: str
+    amount: float | None = None
+
+    def payload(self, action_id: str, requester: str) -> dict[str, object]:
+        """Return only the approved Salesforce Opportunity create fields."""
+        result: dict[str, object] = {
+            "AccountId": self.account_id, "Name": self.name,
+            "StageName": self.stage_name, "CloseDate": self.close_date,
+            "OwnerId": self.owner_id,
+            "Description": f"Created by Grant. Action {action_id}. Requested by {requester}.",
+        }
+        if self.amount is not None:
+            result["Amount"] = self.amount
+        return result
+
+
+@dataclass(frozen=True)
 class MemberPlan:
     """How one canonical organization will become a Campaign Member."""
 
-    lead_id: int
+    lead_id: int | None
     canonical_entity_key: str
     entity_name: str
     state: str
@@ -201,6 +228,54 @@ def writer_enabled() -> bool:
 def person_lead_writer_enabled() -> bool:
     """Require a separate explicit gate for standalone person Lead creation."""
     return os.environ.get("SALESFORCE_PERSON_LEAD_WRITES_ENABLED", "0") == "1"
+
+
+def opportunity_writer_enabled() -> bool:
+    """Require a distinct explicit gate for Opportunity creation."""
+    return os.environ.get("SALESFORCE_OPPORTUNITY_WRITES_ENABLED", "0") == "1"
+
+
+def prepare_opportunity_creation(
+        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
+        workspace: str, channel: str, thread_ts: str, requester: str,
+        account_link: str, name: str, stage_name: str, close_date: str,
+        owner_id: str, owner_name: str, amount: float | None = None) -> PreparedAction:
+    """Freeze one duplicate-checked Opportunity preview under an exact Account."""
+    _validate_context(workspace, channel, thread_ts, requester)
+    _sobject, account_id = parse_record_link(account_link, {"Account"})
+    account = gateway.get_record("Account", account_id)
+    clean_name = " ".join(name.split())
+    if not clean_name or len(clean_name) > 120:
+        raise ValueError("Opportunity name must be between 1 and 120 characters")
+    if stage_name not in gateway.opportunity_stages():
+        raise ValueError("Opportunity stage is not active in Salesforce")
+    try:
+        datetime.strptime(close_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("Opportunity close date must be YYYY-MM-DD") from exc
+    validate_record_id(owner_id, "User")
+    if amount is not None and (not math.isfinite(amount) or amount < 0):
+        raise ValueError("Opportunity amount must be a finite nonnegative number")
+    open_items = gateway.open_opportunities(account_id)
+    duplicate = next((item for item in open_items
+                      if item.name.casefold() == clean_name.casefold()), None)
+    if duplicate:
+        raise ValueError(f"That open Opportunity already exists: {duplicate.link}")
+    action_id = str(uuid.uuid4())
+    draft = OpportunityDraft(account_id, account.name, clean_name, stage_name,
+                             close_date, owner_id, owner_name, amount)
+    payload = draft.payload(action_id, requester)
+    plan = MemberPlan(None, f"account:{account_id}", account.name, account.state,
+                      "create_opportunity", proposed_lead=payload)
+    stored_id, nonce, expires = _store_action(
+        conn, "create_opportunity", workspace, channel, thread_ts, requester,
+        {"opportunity": payload, "account_link": account.link}, plans=[plan],
+        action_id=action_id)
+    amount_line = f"\n• Amount: ${amount:,.2f}" if amount is not None else ""
+    preview = (f"Create this Salesforce Opportunity?\n• Account: {account.name}"
+               f"\n• Name: {clean_name}\n• Stage: {stage_name}"
+               f"\n• Close date: {close_date}{amount_line}\n• Owner: {owner_name}")
+    return PreparedAction(stored_id, nonce, preview, expires)
 
 
 def _duplicate_person(email: str, company: str, state: str) -> list[salesforce.SFMatch]:
@@ -637,7 +712,7 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
         return ActionExecution(CampaignActionState.DRY_RUN,
                                "Dry run verified the approval; Salesforce was not written.")
     if not writer_enabled():
-        if row["action_type"] != "create_person_lead":
+        if row["action_type"] in {"create_campaign", "add_campaign_members"}:
             _finish_action(conn, action_id, CampaignActionState.FAILED,
                            error="campaign writes feature flag disabled")
             return ActionExecution(CampaignActionState.FAILED,
@@ -647,6 +722,11 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
                        error="person Lead writes feature flag disabled")
         return ActionExecution(CampaignActionState.FAILED,
                                "Salesforce Lead creation is disabled; nothing was created.")
+    if row["action_type"] == "create_opportunity" and not opportunity_writer_enabled():
+        _finish_action(conn, action_id, CampaignActionState.FAILED,
+                       error="Opportunity writes feature flag disabled")
+        return ActionExecution(CampaignActionState.FAILED,
+                               "Salesforce Opportunity creation is disabled; nothing was created.")
     try:
         if row["action_type"] == "create_campaign":
             return _confirm_campaign_create(conn, gateway, row)
@@ -654,6 +734,8 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
             return _confirm_membership(conn, gateway, row)
         if row["action_type"] == "create_person_lead":
             return _confirm_person_lead(conn, gateway, row)
+        if row["action_type"] == "create_opportunity":
+            return _confirm_opportunity(conn, gateway, row)
         raise ValueError("unknown Salesforce action type")
     except requests.Timeout as exc:
         _finish_action(conn, action_id, CampaignActionState.UNKNOWN,
@@ -752,6 +834,36 @@ def _confirm_person_lead(conn: sqlite3.Connection,
     return ActionExecution(
         CampaignActionState.COMPLETE,
         f"Created {payload['LastName']} in Salesforce: {created[0].link}", added=1)
+
+
+def _confirm_opportunity(conn: sqlite3.Connection,
+                         gateway: SalesforceCampaignGateway,
+                         row: sqlite3.Row) -> ActionExecution:
+    """Recheck exact duplicates and create one approved Opportunity."""
+    payload = dict(json.loads(str(row["payload_json"]))["opportunity"])
+    account_id, name = str(payload["AccountId"]), str(payload["Name"])
+    duplicate = next((item for item in gateway.open_opportunities(account_id)
+                      if item.name.casefold() == name.casefold()), None)
+    if duplicate:
+        _finish_action(conn, str(row["id"]), CampaignActionState.COMPLETE)
+        return ActionExecution(CampaignActionState.COMPLETE,
+                               f"{name} is already in Salesforce: {duplicate.link}",
+                               already_present=1)
+    _mark_external_write_started(conn, str(row["id"]))
+    result = gateway.create_opportunity(payload)
+    if not result.success or not result.record_id:
+        raise ValueError(result.error or "Salesforce returned no Opportunity ID")
+    validate_record_id(result.record_id, "Opportunity")
+    created = next((item for item in gateway.open_opportunities(account_id)
+                    if item.record_id == result.record_id), None)
+    if created is None or created.name != name or created.account_id != account_id:
+        raise ValueError("created Opportunity could not be verified by exact readback")
+    with conn:
+        conn.execute("""UPDATE crm_action_items SET state='opportunity_created',salesforce_id=?
+                        WHERE action_id=?""", (result.record_id, row["id"]))
+    _finish_action(conn, str(row["id"]), CampaignActionState.COMPLETE)
+    return ActionExecution(CampaignActionState.COMPLETE,
+                           f"Created {name} in Salesforce: {created.link}", added=1)
 
 
 def _confirm_membership(conn: sqlite3.Connection,
