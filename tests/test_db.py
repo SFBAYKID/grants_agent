@@ -131,7 +131,7 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
             "SELECT version FROM schema_migrations ORDER BY version"
         )
     ]
-    assert versions == [1, 2, 3, 4, 5, 6, 7]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
     crm_tables = {
         row[0]
         for row in conn.execute(

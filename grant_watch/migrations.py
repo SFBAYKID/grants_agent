@@ -465,6 +465,34 @@ def _migration_7_conversation_and_outreach_truth(conn: sqlite3.Connection) -> No
     )
 
 
+def _migration_8_salesforce_followup_state(conn: sqlite3.Connection) -> None:
+    """Persist one-shot, fail-closed Salesforce follow-up reminder delivery."""
+    _execute_script(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS salesforce_followup_state (
+          campaign_member_id TEXT PRIMARY KEY,
+          crm_action_item_id INTEGER NOT NULL UNIQUE REFERENCES crm_action_items(id),
+          campaign_id TEXT NOT NULL,
+          target_sobject TEXT NOT NULL CHECK(target_sobject IN ('Lead','Contact')),
+          target_record_id TEXT NOT NULL,
+          joined_at TIMESTAMP NOT NULL,
+          due_at TIMESTAMP NOT NULL,
+          policy_version TEXT NOT NULL,
+          state TEXT NOT NULL,
+          evidence_kind TEXT,
+          evidence_id TEXT,
+          evidence_at TIMESTAMP,
+          checked_at TIMESTAMP,
+          delivery_key TEXT UNIQUE,
+          slack_ts TEXT,
+          delivered_at TIMESTAMP,
+          last_error TEXT
+        );
+        """,
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "legacy-compatible base", _migration_1_base),
     Migration(2, "truth observations and events", _migration_2_truth_events),
@@ -480,6 +508,9 @@ MIGRATIONS: tuple[Migration, ...] = (
         7,
         "conversation threads and outreach truth",
         _migration_7_conversation_and_outreach_truth,
+    ),
+    Migration(
+        8, "Salesforce follow-up reminder state", _migration_8_salesforce_followup_state
     ),
 )
 

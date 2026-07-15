@@ -7,6 +7,7 @@ Usage (from the repo root, venv active):
     python -m grant_watch.cli drip [--force] [--dry-run]   # drip tick (30-min cron target)
     python -m grant_watch.cli outreach-retry [--dry-run]
     python -m grant_watch.cli salesforce-sync [--limit N] [--dry-run]
+    python -m grant_watch.cli salesforce-followups [--dry-run] [--smoke]
     python -m grant_watch.cli slack-failures [--mark-reviewed EVENT_ID]
 
 --dry-run polls and grades but writes NOTHING (no DB rows, no run log) — required by
@@ -186,6 +187,25 @@ def cmd_salesforce_sync(limit: int, dry_run: bool) -> int:
     return 1 if summary.partial or summary.unavailable else 0
 
 
+def cmd_salesforce_followups(dry_run: bool, smoke: bool) -> int:
+    """Run one GET-only Salesforce follow-up check and optional Slack delivery."""
+    from slack_sdk import WebClient
+
+    from .slack import salesforce_followups
+
+    channel = os.environ.get("SLACK_CHANNEL_ID", "")
+    if not channel:
+        print("SLACK_CHANNEL_ID is not set in .env", file=sys.stderr)
+        return 1
+    client = None if dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    conn = db.connect_readonly() if dry_run else db.connect()
+    outcome = salesforce_followups.run(
+        client, channel, conn, dry_run=dry_run, smoke=smoke
+    )
+    print(f"salesforce follow-ups: {outcome}")
+    return 1 if outcome.startswith("unknown:") else 0
+
+
 def cmd_slack_failures(mark_reviewed: str = "") -> int:
     """List unresolved Slack turns or mark one manually reconciled without replay."""
     conn = db.connect() if mark_reviewed else db.connect_readonly()
@@ -253,6 +273,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="query Salesforce but write no local snapshots",
     )
+    p_followups = sub.add_parser(
+        "salesforce-followups", help="check Grant-created Campaign Leads for follow-up"
+    )
+    p_followups.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="query Salesforce but write or post nothing",
+    )
+    p_followups.add_argument(
+        "--smoke",
+        action="store_true",
+        help="test a new eligible member without waiting three business days",
+    )
     p_failures = sub.add_parser(
         "slack-failures", help="list Slack turns needing manual reconciliation"
     )
@@ -274,6 +307,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_outreach_retry(args.dry_run)
     if args.command == "salesforce-sync":
         return cmd_salesforce_sync(args.limit, args.dry_run)
+    if args.command == "salesforce-followups":
+        return cmd_salesforce_followups(args.dry_run, args.smoke)
     if args.command == "slack-failures":
         return cmd_slack_failures(args.mark_reviewed)
     return cmd_status()
