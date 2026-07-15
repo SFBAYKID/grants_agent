@@ -69,6 +69,14 @@ def test_fallback_is_natural_and_menu_free() -> None:
     assert "status" not in fallback.lower()
 
 
+def test_natural_help_requests_are_deterministic() -> None:
+    """Users can learn Grant without slash commands, menus, or exact wording."""
+    assert grant._is_help_request("How do I use you?")
+    assert grant._is_help_request("what can you do")
+    assert grant._is_help_request("How can I use you")
+    assert not grant._is_help_request("show me California grants")
+
+
 def test_thread_facts_include_evidence_and_read_only_crm_context(tmp_path: Path) -> None:
     """Details hidden from the alert remain available for truthful thread answers."""
     from grant_watch import db

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import sqlite3
 import uuid
@@ -19,6 +20,7 @@ from enum import Enum
 import requests
 
 from .. import db
+from . import salesforce
 from .salesforce_campaign_gateway import (
     MAX_ACTION_ORGANIZATIONS,
     MEMBER_STATUS,
@@ -79,6 +81,43 @@ class CampaignDraft:
         if self.end_date:
             payload["EndDate"] = self.end_date
         return payload
+
+
+@dataclass(frozen=True)
+class PersonLeadDraft:
+    """One persisted verified contact proposed as a standalone Salesforce Lead."""
+
+    contact_id: int
+    grant_lead_id: int
+    person_name: str
+    company: str
+    email: str
+    state: str
+    title: str
+    phone: str
+    source_url: str
+
+    def payload(self, action_id: str, requester: str) -> dict[str, object]:
+        """Return exact Salesforce fields without guessing first/last-name splits."""
+        result: dict[str, object] = {
+            "Company": self.company,
+            "LastName": self.person_name,
+            "Email": self.email,
+            "Status": "New",
+            "LeadSource": "Other",
+            "Description": (
+                f"Created by Grant from verified public contact {self.contact_id} for "
+                f"Grant lead {self.grant_lead_id}. Evidence: {self.source_url}. "
+                f"Action {action_id}. Requested by Slack user {requester}."
+            ),
+        }
+        if self.state:
+            result["State"] = self.state
+        if self.title:
+            result["Title"] = self.title
+        if self.phone:
+            result["Phone"] = self.phone
+        return result
 
 
 @dataclass(frozen=True)
@@ -157,6 +196,69 @@ def write_channel_allowed(channel: str) -> bool:
 def writer_enabled() -> bool:
     """Return whether external Campaign writes are explicitly feature-enabled."""
     return os.environ.get("SALESFORCE_CAMPAIGN_WRITES_ENABLED", "0") == "1"
+
+
+def person_lead_writer_enabled() -> bool:
+    """Require a separate explicit gate for standalone person Lead creation."""
+    return os.environ.get("SALESFORCE_PERSON_LEAD_WRITES_ENABLED", "0") == "1"
+
+
+def _duplicate_person(email: str, company: str, state: str) -> list[salesforce.SFMatch]:
+    """Fail closed on exact email or any plausible organization CRM match."""
+    exact = salesforce.exact_email_matches(email)
+    if exact:
+        return exact
+    result = salesforce.lookup(company, state=state)
+    if result.status in {salesforce.SFResultStatus.UNAVAILABLE,
+                         salesforce.SFResultStatus.PARTIAL}:
+        raise ConnectionError(result.error or "Salesforce duplicate check incomplete")
+    return result.matches
+
+
+def prepare_person_lead_creation(conn: sqlite3.Connection, workspace: str,
+                                 channel: str, thread_ts: str, requester: str,
+                                 contact_id: int) -> PreparedAction:
+    """Freeze a verified contact and duplicate-safe one-Lead confirmation preview."""
+    _validate_context(workspace, channel, thread_ts, requester)
+    row = conn.execute(
+        """SELECT c.*,l.entity_name,l.state AS lead_state,l.canonical_entity_key
+             FROM contacts c JOIN leads l ON l.id=c.lead_id WHERE c.id=?""",
+        (contact_id,)).fetchone()
+    if row is None or str(row["contact_status"] or "") != "verified":
+        raise ValueError("contact is not verified")
+    evidence = json.loads(str(row["field_evidence_json"] or "{}"))
+    name, email, source = (str(row[key] or "").strip()
+                           for key in ("name", "email", "source_url"))
+    if not (evidence.get("name") and evidence.get("email") and name and source):
+        raise ValueError("contact name and email require current source evidence")
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise ValueError("contact email is invalid")
+    company = str(row["entity_name"] or "").strip()
+    state = str(row["lead_state"] or "").strip().upper()
+    duplicates = _duplicate_person(email, company, state)
+    if duplicates:
+        links = ", ".join(item.link for item in duplicates[:3])
+        raise ValueError(f"Salesforce already has a possible matching record: {links}")
+    action_id = str(uuid.uuid4())
+    draft = PersonLeadDraft(
+        contact_id, int(row["lead_id"]), name, company, email, state,
+        str(row["title"] or "").strip() if evidence.get("title") else "",
+        str(row["phone"] or "").strip() if evidence.get("phone") else "", source)
+    payload = draft.payload(action_id, requester)
+    plan = MemberPlan(
+        draft.grant_lead_id, str(row["canonical_entity_key"] or company.lower()),
+        company, state, "create_verified_person_lead", proposed_lead=payload,
+        note=json.dumps({"contact_id": contact_id, "source_url": source}))
+    stored_id, nonce, expires = _store_action(
+        conn, "create_person_lead", workspace, channel, thread_ts, requester,
+        {"lead": payload, "contact_id": contact_id, "source_url": source},
+        plans=[plan], action_id=action_id)
+    optional = "".join((f"\n• Title: {draft.title}" if draft.title else "",
+                        f"\n• Phone: {draft.phone}" if draft.phone else ""))
+    preview = (f"Create this Salesforce Lead?\n• Name: {name}\n• Organization: {company}"
+               f"\n• Email: {email}{optional}\n• Source: {source}"
+               "\nNo Campaign membership will be created.")
+    return PreparedAction(stored_id, nonce, preview, expires)
 
 
 def _validate_context(workspace: str, channel: str, thread_ts: str,
@@ -535,15 +637,23 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
         return ActionExecution(CampaignActionState.DRY_RUN,
                                "Dry run verified the approval; Salesforce was not written.")
     if not writer_enabled():
+        if row["action_type"] != "create_person_lead":
+            _finish_action(conn, action_id, CampaignActionState.FAILED,
+                           error="campaign writes feature flag disabled")
+            return ActionExecution(CampaignActionState.FAILED,
+                                   "Salesforce campaign writes are disabled; nothing was created.")
+    if row["action_type"] == "create_person_lead" and not person_lead_writer_enabled():
         _finish_action(conn, action_id, CampaignActionState.FAILED,
-                       error="campaign writes feature flag disabled")
+                       error="person Lead writes feature flag disabled")
         return ActionExecution(CampaignActionState.FAILED,
-                               "Salesforce campaign writes are disabled; nothing was created.")
+                               "Salesforce Lead creation is disabled; nothing was created.")
     try:
         if row["action_type"] == "create_campaign":
             return _confirm_campaign_create(conn, gateway, row)
         if row["action_type"] == "add_campaign_members":
             return _confirm_membership(conn, gateway, row)
+        if row["action_type"] == "create_person_lead":
+            return _confirm_person_lead(conn, gateway, row)
         raise ValueError("unknown Salesforce action type")
     except requests.Timeout as exc:
         _finish_action(conn, action_id, CampaignActionState.UNKNOWN,
@@ -603,6 +713,45 @@ def _confirm_campaign_create(conn: sqlite3.Connection,
         f"Created Salesforce Campaign {campaign.name}: {campaign.link}",
         campaign_id=campaign.record_id,
     )
+
+
+def _confirm_person_lead(conn: sqlite3.Connection,
+                         gateway: SalesforceCampaignGateway,
+                         row: sqlite3.Row) -> ActionExecution:
+    """Recheck duplicates, create one Lead, and verify it through exact-email readback."""
+    payload = dict(json.loads(str(row["payload_json"]))["lead"])
+    email = str(payload["Email"])
+    company = str(payload["Company"])
+    state = str(payload.get("State") or "")
+    duplicates = _duplicate_person(email, company, state)
+    if duplicates:
+        item = duplicates[0]
+        _finish_action(conn, str(row["id"]), CampaignActionState.COMPLETE)
+        with conn:
+            conn.execute(
+                """UPDATE crm_action_items SET state='already_present',salesforce_id=?
+                   WHERE action_id=?""", (item.record_id, row["id"]))
+        return ActionExecution(
+            CampaignActionState.COMPLETE,
+            f"{payload['LastName']} is already in Salesforce: {item.link}",
+            already_present=1)
+    _mark_external_write_started(conn, str(row["id"]))
+    result = gateway.create_lead(payload)
+    if not result.success or not result.record_id:
+        raise ValueError(result.error or "Salesforce returned no Lead ID")
+    validate_record_id(result.record_id, "Lead")
+    matches = salesforce.exact_email_matches(email)
+    created = [item for item in matches if item.record_id == result.record_id]
+    if len(created) != 1 or created[0].company != company:
+        raise ValueError("created Lead could not be verified by exact readback")
+    with conn:
+        conn.execute(
+            """UPDATE crm_action_items SET state='lead_created',salesforce_id=?
+               WHERE action_id=?""", (result.record_id, row["id"]))
+    _finish_action(conn, str(row["id"]), CampaignActionState.COMPLETE)
+    return ActionExecution(
+        CampaignActionState.COMPLETE,
+        f"Created {payload['LastName']} in Salesforce: {created[0].link}", added=1)
 
 
 def _confirm_membership(conn: sqlite3.Connection,

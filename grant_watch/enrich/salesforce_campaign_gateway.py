@@ -323,6 +323,10 @@ class SalesforceCampaignGateway:
         """Create approved Lead records through the collection endpoint."""
         return self._create_many("Lead", payloads)
 
+    def create_lead(self, payload: dict[str, object]) -> CreateResult:
+        """Create exactly one approved Lead through the singular endpoint."""
+        return self._create_one("Lead", payload)
+
     def create_members(self, payloads: list[dict[str, object]]) -> list[CreateResult]:
         """Create approved Campaign Members with per-record results."""
         return self._create_many("CampaignMember", payloads)

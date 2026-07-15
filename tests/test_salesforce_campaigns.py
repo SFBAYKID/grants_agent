@@ -77,6 +77,11 @@ class FakeGateway:
         return [gateway_mod.CreateResult(True, f"00Q0000000000{index:02d}")
                 for index, _payload in enumerate(payloads, start=10)]
 
+    def create_lead(self, _payload: dict[str, object]) -> gateway_mod.CreateResult:
+        """Create exactly one standalone fake Lead."""
+        self.calls.append("create_lead")
+        return gateway_mod.CreateResult(True, LEAD_ID)
+
     def create_members(self, payloads: list[dict[str, object]]) -> list[gateway_mod.CreateResult]:
         """Return configured partial results or all successful member creates."""
         self.calls.append("create_members")
@@ -113,6 +118,17 @@ def writer_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GRANT_SALESFORCE_WRITE_CHANNEL_IDS", "CGRANTS")
     monkeypatch.setenv("SALESFORCE_WRITE_MY_DOMAIN_URL", "https://writer.salesforce.test")
     monkeypatch.setenv("SALESFORCE_CAMPAIGN_WRITES_ENABLED", "1")
+    monkeypatch.setenv("SALESFORCE_PERSON_LEAD_WRITES_ENABLED", "1")
+
+
+def _verified_contact(conn: sqlite3.Connection, lead_id: int,
+                      evidence: dict[str, bool] | None = None) -> int:
+    """Persist one official-page contact for standalone Lead tests."""
+    return db.save_contact(
+        conn, lead_id, "Andrew Popp", "Principal", "andrew@district.test", "5551212",
+        "https://district.test/staff", "high", "district.test",
+        evidence if evidence is not None else {
+            "name": True, "email": True, "title": True, "phone": True})
 
 
 def test_record_links_validate_host_object_and_prefix() -> None:

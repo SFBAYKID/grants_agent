@@ -100,6 +100,37 @@ def readonly_soql(query: str) -> tuple[list[dict[str, Any]], str]:
     return records, instance_url
 
 
+def exact_email_matches(email: str) -> list[SFMatch]:
+    """Return Lead/Contact records whose Email exactly matches through GET-only SOQL."""
+    normalized = email.strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized):
+        raise ValueError("invalid email address")
+    literal = normalized.replace("\\", "\\\\").replace("'", "\\'")
+    matches: list[SFMatch] = []
+    for sobject, fields in (
+        ("Lead", "Id,Name,Company,State,Owner.Name"),
+        ("Contact", "Id,Name,MailingState,Account.Id,Account.Name,Owner.Name"),
+    ):
+        records, instance_url = readonly_soql(
+            f"SELECT {fields} FROM {sobject} WHERE Email='{literal}' LIMIT 20")
+        for record in records:
+            account = record.get("Account") or {}
+            owner = record.get("Owner") or {}
+            record_id = str(record.get("Id") or "")
+            if not record_id:
+                continue
+            matches.append(SFMatch(
+                sobject=sobject, record_id=record_id,
+                name=str(record.get("Name") or ""),
+                company=str(record.get("Company") or account.get("Name") or ""),
+                owner=str(owner.get("Name") or ""),
+                link=_link(instance_url, sobject, record_id), confidence="high",
+                state=str(record.get("State") or record.get("MailingState") or ""),
+                account_id=str(account.get("Id") or ""),
+            ))
+    return matches
+
+
 @dataclass
 class SFResult:
     """Typed lookup result; ``no_match`` is distinct from any outage."""

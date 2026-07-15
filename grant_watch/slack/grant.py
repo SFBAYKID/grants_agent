@@ -147,6 +147,15 @@ def _in_configured_channel(event: dict[str, Any]) -> bool:
                 and event.get("channel_type") != "im")
 
 
+def _is_help_request(text: str) -> bool:
+    """Recognize common natural-language requests for a concise product explanation."""
+    normalized = re.sub(r"[^a-z0-9 ]", " ", text.lower())
+    normalized = " ".join(normalized.split())
+    return any(phrase in normalized for phrase in (
+        "how do i use you", "how can i use you", "what can you do",
+        "how do you work", "what do i ask you"))
+
+
 def create_app() -> App:
     """Build the Bolt app and register every handler. Split from main() so tests can
     construct the app without opening a socket."""
@@ -528,6 +537,18 @@ def _converse_general(text: str, client: WebClient, channel: str,
         try:
             client.chat_postMessage(channel=channel, thread_ts=thread_ts,
                                     text="Hey! What can I help you with?")
+            return True
+        except Exception:
+            return False
+
+    if _is_help_request(text):
+        help_text = (
+            "I find fresh school and city funding or RFP leads, research contacts, "
+            "check Salesforce, and export results. Ask naturally—try “Show me five new "
+            "California school-security opportunities”—and I’ll handle the rest."
+        )
+        try:
+            client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=help_text)
             return True
         except Exception:
             return False

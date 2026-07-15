@@ -48,6 +48,7 @@ class ContactOutcome:
     email: str = ""
     phone: str = ""
     source_url: str = ""
+    contact_id: int = 0
 
 
 def enrich_lead_contact(conn: sqlite3.Connection, lead_id: int,
@@ -66,7 +67,8 @@ def enrich_lead_contact(conn: sqlite3.Connection, lead_id: int,
     if existing:
         c = existing[0]
         return ContactOutcome("verified", c["name"] or "", c["title"] or "",
-                              c["email"] or "", c["phone"] or "", c["source_url"] or "")
+                              c["email"] or "", c["phone"] or "", c["source_url"] or "",
+                              int(c["id"]))
     try:
         candidate = finder.find_contact(
             str(lead["entity_name"]), str(lead["state"] or ""),
@@ -76,11 +78,12 @@ def enrich_lead_contact(conn: sqlite3.Connection, lead_id: int,
     if candidate is None:
         db.mark_contact_not_found(conn, lead_id)
         return ContactOutcome("not_found")
-    db.save_contact(conn, lead_id, candidate.name, candidate.title, candidate.email,
-                    candidate.phone, candidate.source_url, candidate.confidence,
-                    candidate.official_domain, candidate.field_evidence)
+    contact_id = db.save_contact(
+        conn, lead_id, candidate.name, candidate.title, candidate.email,
+        candidate.phone, candidate.source_url, candidate.confidence,
+        candidate.official_domain, candidate.field_evidence)
     return ContactOutcome("verified", candidate.name, candidate.title,
-                          candidate.email, candidate.phone, candidate.source_url)
+                          candidate.email, candidate.phone, candidate.source_url, contact_id)
 
 
 def enrich_lead_contacts(conn: sqlite3.Connection, lead_id: int,
@@ -248,6 +251,17 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "name_or_link": {"type": "string"},
             },
             "required": ["name_or_link"],
+        },
+    },
+    {
+        "name": "salesforce_lead_create_preview",
+        "description": "Prepare, but do not execute, an immutable preview for creating "
+                       "one standalone Salesforce Lead from a persisted verified contact. "
+                       "Use only after the user explicitly asks to add that contact.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"contact_id": {"type": "integer"}},
+            "required": ["contact_id"],
         },
     },
     {
@@ -450,7 +464,8 @@ def find_contact(lead_id: int, on_progress: Progress | None = None) -> str:
     if outcome.status == "verified":
         phone = f" / {outcome.phone}" if outcome.phone else ""
         source = f" (found on {outcome.source_url})" if outcome.source_url else ""
-        return f"VERIFIED contact: {outcome.name} ({outcome.title}) — {outcome.email}{phone}{source}"
+        return (f"VERIFIED contact ID {outcome.contact_id}: {outcome.name} "
+                f"({outcome.title}) — {outcome.email}{phone}{source}")
     if outcome.status == "unreachable":
         return ("I couldn't reach their website or search to verify a contact right now — "
                 "nothing recorded, so it's worth trying again shortly.")
@@ -565,6 +580,22 @@ def salesforce_campaign_create_preview(
                               action.preview, action.expires_at)
 
 
+def salesforce_lead_create_preview(contact_id: int, requester_slack: str,
+                                   workspace: str, channel: str,
+                                   thread_ts: str) -> str:
+    """Prepare one duplicate-checked verified-person Lead preview."""
+    from ..enrich import salesforce_campaigns as crm
+
+    try:
+        action = crm.prepare_person_lead_creation(
+            db.connect(), workspace, channel, thread_ts, requester_slack, contact_id)
+    except (ValueError, PermissionError, KeyError, ConnectionError,
+            requests.RequestException) as exc:
+        return f"ERROR: Lead preview failed ({type(exc).__name__}): {str(exc)[:180]}"
+    return _crm_action_result(action.action_id, action.nonce,
+                              action.preview, action.expires_at)
+
+
 def salesforce_campaign_members_preview(
         args: dict[str, Any], requester_slack: str, workspace: str,
         channel: str, thread_ts: str) -> str:
@@ -638,6 +669,11 @@ def run_tool(name: str, args: dict[str, Any],
     if name == "salesforce_campaign_search":
         p("Searching Salesforce Campaigns")
         return salesforce_campaign_search(str(args.get("name_or_link", ""))), None
+    if name == "salesforce_lead_create_preview":
+        p("Preparing Salesforce Lead")
+        return salesforce_lead_create_preview(
+            int(args.get("contact_id", 0)), requester_slack, workspace,
+            channel, thread_ts), None
     if name == "salesforce_campaign_create_preview":
         p("Preparing Campaign preview")
         return salesforce_campaign_create_preview(
