@@ -77,11 +77,6 @@ class FakeGateway:
         return [gateway_mod.CreateResult(True, f"00Q0000000000{index:02d}")
                 for index, _payload in enumerate(payloads, start=10)]
 
-    def create_lead(self, _payload: dict[str, object]) -> gateway_mod.CreateResult:
-        """Create exactly one standalone fake Lead."""
-        self.calls.append("create_lead")
-        return gateway_mod.CreateResult(True, LEAD_ID)
-
     def create_members(self, payloads: list[dict[str, object]]) -> list[gateway_mod.CreateResult]:
         """Return configured partial results or all successful member creates."""
         self.calls.append("create_members")

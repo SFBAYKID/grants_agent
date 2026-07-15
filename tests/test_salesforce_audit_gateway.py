@@ -20,16 +20,19 @@ class Response:
     status_code = 200
     text = ""
 
-    def json(self) -> dict[str, object]:
-        """Return exact IDs for the three fixed subrequests."""
-        return {"compositeResponse": [
+    def __init__(self, responses: list[dict[str, object]] | None = None) -> None:
+        self.responses = responses or [
             {"referenceId": "grantResearchNote", "httpStatusCode": 201,
              "body": {"id": "069000000000001"}},
             {"referenceId": "grantResearchLink", "httpStatusCode": 201,
              "body": {"id": "06A000000000001"}},
             {"referenceId": "grantAuditTask", "httpStatusCode": 201,
              "body": {"id": "00T000000000001"}},
-        ]}
+        ]
+
+    def json(self) -> dict[str, object]:
+        """Return exact IDs for the three fixed subrequests."""
+        return {"compositeResponse": self.responses}
 
 
 def test_audit_bundle_is_one_fixed_all_or_none_transaction(
@@ -63,6 +66,117 @@ def test_audit_bundle_is_one_fixed_all_or_none_transaction(
     assert requests[2]["body"]["WhoId"] == LEAD_ID
     assert not any("Lead/" in item["url"] or "Campaign" in item["url"]
                    or "Opportunity" in item["url"] for item in requests)
+
+
+def test_existing_lead_enrichment_is_one_four_part_transaction(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lead fields and all audit artifacts share one all-or-none HTTP request."""
+    gateway = gateway_mod.SalesforceCampaignGateway()
+    monkeypatch.setattr(gateway, "_auth", lambda: ("token", "https://writer.test"))
+    monkeypatch.setattr(
+        gateway, "lead_audit_snapshot", lambda *_args: gateway_mod.LeadAuditSnapshot())
+    monkeypatch.setattr(
+        gateway, "lead_enrichment_snapshot",
+        lambda _lead_id: gateway_mod.LeadEnrichmentSnapshot(
+            LEAD_ID, "Test District", "person@test.example", "stamp", {}, "link"))
+    calls: list[dict[str, Any]] = []
+
+    def fake_post(url: str, **kwargs: Any) -> Response:
+        calls.append({"url": url, **kwargs})
+        return Response([
+            {"referenceId": "grantLeadUpdate", "httpStatusCode": 204, "body": None},
+            {"referenceId": "grantResearchNote", "httpStatusCode": 201,
+             "body": {"id": "069000000000001"}},
+            {"referenceId": "grantResearchLink", "httpStatusCode": 201,
+             "body": {"id": "06A000000000001"}},
+            {"referenceId": "grantAuditTask", "httpStatusCode": 201,
+             "body": {"id": "00T000000000001"}},
+        ])
+
+    monkeypatch.setattr(gateway_mod.requests, "post", fake_post)
+    result = gateway.enrich_lead_with_audit_bundle(
+        LEAD_ID, {"Website": "https://district.test"}, "stamp", ACTION_ID,
+        "Verified sources", "No customer outreach. Action " + ACTION_ID, "2026-07-15")
+
+    assert result.success and len(calls) == 1 and result.lead_id == LEAD_ID
+    body = calls[0]["json"]
+    assert body["allOrNone"] is True
+    items = body["compositeRequest"]
+    assert [item["referenceId"] for item in items] == [
+        "grantLeadUpdate", "grantResearchNote", "grantResearchLink", "grantAuditTask"]
+    assert items[0] == {
+        "method": "PATCH", "url": f"/services/data/v60.0/sobjects/Lead/{LEAD_ID}",
+        "referenceId": "grantLeadUpdate", "body": {"Website": "https://district.test"}}
+    assert items[2]["body"]["LinkedEntityId"] == LEAD_ID
+    assert items[3]["body"]["WhoId"] == LEAD_ID
+
+
+def test_person_lead_and_audit_are_one_four_part_transaction(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Standalone person creation cannot commit separately from its audit records."""
+    gateway = gateway_mod.SalesforceCampaignGateway()
+    monkeypatch.setattr(gateway, "_auth", lambda: ("token", "https://writer.test"))
+    calls: list[dict[str, Any]] = []
+
+    def fake_post(url: str, **kwargs: Any) -> Response:
+        calls.append({"url": url, **kwargs})
+        return Response([
+            {"referenceId": "grantPersonLead", "httpStatusCode": 201,
+             "body": {"id": LEAD_ID}},
+            {"referenceId": "grantResearchNote", "httpStatusCode": 201,
+             "body": {"id": "069000000000001"}},
+            {"referenceId": "grantResearchLink", "httpStatusCode": 201,
+             "body": {"id": "06A000000000001"}},
+            {"referenceId": "grantAuditTask", "httpStatusCode": 201,
+             "body": {"id": "00T000000000001"}},
+        ])
+
+    monkeypatch.setattr(gateway_mod.requests, "post", fake_post)
+    result = gateway.create_person_lead_with_audit_bundle(
+        {"Company": "Test District", "LastName": "Person",
+         "Email": "person@test.example", "Description": f"Action {ACTION_ID}"},
+        ACTION_ID, "Verified sources", "No customer outreach. Action " + ACTION_ID,
+        "2026-07-15")
+
+    assert result.success and len(calls) == 1 and result.lead_id == LEAD_ID
+    items = calls[0]["json"]["compositeRequest"]
+    assert [item["referenceId"] for item in items] == [
+        "grantPersonLead", "grantResearchNote", "grantResearchLink", "grantAuditTask"]
+    assert items[2]["body"]["LinkedEntityId"] == "@{grantPersonLead.id}"
+    assert items[3]["body"]["WhoId"] == "@{grantPersonLead.id}"
+
+
+def test_composite_rollback_preserves_exact_subrequest_error(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A received rollback retains the failing reference and Salesforce error body."""
+    gateway = gateway_mod.SalesforceCampaignGateway()
+    monkeypatch.setattr(gateway, "_auth", lambda: ("token", "https://writer.test"))
+    monkeypatch.setattr(
+        gateway, "lead_audit_snapshot", lambda *_args: gateway_mod.LeadAuditSnapshot())
+    monkeypatch.setattr(
+        gateway, "lead_enrichment_snapshot",
+        lambda _lead_id: gateway_mod.LeadEnrichmentSnapshot(
+            LEAD_ID, "Test District", "person@test.example", "stamp", {}, "link"))
+
+    def fake_post(_url: str, **_kwargs: Any) -> Response:
+        return Response([
+            {"referenceId": "grantLeadUpdate", "httpStatusCode": 400,
+             "body": [{"errorCode": "INVALID_FIELD", "message": "bad Website"}]},
+            {"referenceId": "grantResearchNote", "httpStatusCode": 412,
+             "body": [{"errorCode": "PROCESSING_HALTED"}]},
+            {"referenceId": "grantResearchLink", "httpStatusCode": 412,
+             "body": [{"errorCode": "PROCESSING_HALTED"}]},
+            {"referenceId": "grantAuditTask", "httpStatusCode": 412,
+             "body": [{"errorCode": "PROCESSING_HALTED"}]},
+        ])
+
+    monkeypatch.setattr(gateway_mod.requests, "post", fake_post)
+    result = gateway.enrich_lead_with_audit_bundle(
+        LEAD_ID, {"Website": "https://district.test"}, "stamp", ACTION_ID,
+        "Verified sources", "No customer outreach. Action " + ACTION_ID, "2026-07-15")
+    assert result.success is False
+    assert "grantLeadUpdate HTTP 400" in result.error
+    assert "INVALID_FIELD" in result.error and "grantAuditTask HTTP 412" in result.error
 
 
 def test_audit_readback_compares_note_link_task_and_truthful_copy(

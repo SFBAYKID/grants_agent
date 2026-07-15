@@ -29,6 +29,7 @@ class FakeGateway:
         self.calls: list[dict[str, object]] = []
         self.audit_actions: set[str] = set()
         self.audit_create_count = 0
+        self.fail_error = ""
 
     def lead_enrichment_snapshot(self, lead_id: str) -> gateway_mod.LeadEnrichmentSnapshot:
         """Return the current fake Lead state."""
@@ -37,13 +38,22 @@ class FakeGateway:
             LEAD_ID, self.company, "andrew@district.test", self.stamp,
             dict(self.values), "https://writer.test/lead")
 
-    def update_lead_enrichment(self, lead_id: str, delta: dict[str, object],
-                               expected_system_modstamp: str) -> None:
-        """Apply one allowlisted fake update."""
+    def enrich_lead_with_audit_bundle(
+            self, lead_id: str, delta: dict[str, object],
+            expected_system_modstamp: str, action_id: str, _note_body: str,
+            _task_description: str, _activity_date: str) -> gateway_mod.LeadAuditResult:
+        """Apply one all-or-none fake Lead/audit transaction."""
         assert lead_id == LEAD_ID and expected_system_modstamp == self.stamp
+        if self.fail_error:
+            return gateway_mod.LeadAuditResult(False, lead_id=lead_id, error=self.fail_error)
         self.calls.append(delta)
         self.values.update(delta)  # type: ignore[arg-type]  # test fake mirrors CRM JSON
         self.stamp = "2026-07-15T22:01:00.000+0000"
+        self.audit_create_count += 1
+        self.audit_actions.add(action_id)
+        return gateway_mod.LeadAuditResult(
+            True, "069000000000001", "06A000000000001", "00T000000000001",
+            lead_id=lead_id)
 
     def lead_audit_snapshot(self, _lead_id: str,
                             action_id: str) -> gateway_mod.LeadAuditSnapshot:
@@ -161,11 +171,31 @@ def test_feature_flag_off_prevents_update(
     assert result.state is campaigns.CampaignActionState.FAILED and gateway.calls == []
 
 
+def test_composite_failure_preserves_internal_reconciliation_detail(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A rolled-back Salesforce error stays internal while the action fails closed."""
+    conn, contact_id = _contact(tmp_path)
+    monkeypatch.setattr(record_actions, "fetch_profile", lambda *_args: _profile())
+    gateway = FakeGateway()
+    action = campaigns.prepare_lead_enrichment(
+        conn, gateway, "T", "CGRANTS", "1.1", "U", contact_id,
+        f"https://writer.test/lightning/r/Lead/{LEAD_ID}/view")
+    gateway.fail_error = "grantAuditTask HTTP 400: INVALID_FIELD"
+    result = campaigns.confirm_action(
+        conn, gateway, action.action_id, action.nonce, "T", "CGRANTS", "1.1", "U")
+    row = conn.execute("SELECT state,last_error FROM crm_actions").fetchone()
+    assert result.state is campaigns.CampaignActionState.FAILED
+    assert row["state"] == "failed" and "INVALID_FIELD" in row["last_error"]
+    assert gateway.calls == []
+
+
 def test_gateway_rejects_identity_or_routing_field_updates() -> None:
-    """The PATCH boundary cannot modify Email, Company, Owner, Status, or arbitrary fields."""
+    """The atomic boundary cannot modify identity, owner, status, or arbitrary fields."""
     gateway = gateway_mod.SalesforceCampaignGateway()
     with pytest.raises(ValueError, match="forbidden"):
-        gateway.update_lead_enrichment(LEAD_ID, {"Email": "other@example.com"}, "stamp")
+        gateway.enrich_lead_with_audit_bundle(
+            LEAD_ID, {"Email": "other@example.com"}, "stamp",
+            "11111111-2222-3333-4444-555555555555", "note", "task", "2026-07-15")
 
 
 def test_missing_audit_repair_creates_no_second_lead_update(

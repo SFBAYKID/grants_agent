@@ -20,6 +20,7 @@ import requests
 from . import salesforce
 from . import salesforce_campaigns as workflow
 from .salesforce_campaign_gateway import (
+    SalesforceCompositeRolledBack,
     SalesforceCampaignGateway,
     parse_record_link,
     validate_record_id,
@@ -358,29 +359,27 @@ def confirm_person_lead(conn: sqlite3.Connection, gateway: SalesforceCampaignGat
             f"{item.name or payload['LastName']} is already in Salesforce: {item.link}",
             already_present=1)
     workflow._mark_external_write_started(conn, str(row["id"]))
-    result = gateway.create_lead(payload)
-    if not result.success or not result.record_id:
-        raise ValueError(result.error or "Salesforce returned no Lead ID")
-    validate_record_id(result.record_id, "Lead")
-    created = [item for item in salesforce.exact_email_matches(email)
-               if item.record_id == result.record_id]
-    if len(created) != 1 or created[0].company != company:
-        raise ValueError("created Lead could not be verified by exact readback")
     action_id = str(row["id"])
     note_body = str(payload.get("Description") or "")
     task_body = _audit_task_description(
         action_id, "created and populated", list(payload))
-    audit = gateway.create_lead_audit_bundle(
-        result.record_id, action_id, note_body, task_body, _activity_date())
-    if not audit.success:
-        raise ValueError(audit.error or "Salesforce returned no audit record IDs")
+    result = gateway.create_person_lead_with_audit_bundle(
+        payload, action_id, note_body, task_body, _activity_date())
+    if not result.success or not result.lead_id:
+        raise SalesforceCompositeRolledBack(
+            result.error or "Salesforce returned no Lead and audit IDs")
+    validate_record_id(result.lead_id, "Lead")
+    created = [item for item in salesforce.exact_email_matches(email)
+               if item.record_id == result.lead_id]
+    if len(created) != 1 or created[0].company != company:
+        raise ValueError("created Lead could not be verified by exact readback")
     if not gateway.verify_lead_audit_bundle(
-            result.record_id, action_id, note_body, task_body, audit):
+            result.lead_id, action_id, note_body, task_body, result):
         raise ValueError("created Salesforce Lead audit trail could not be verified")
     with conn:
         conn.execute(
             """UPDATE crm_action_items SET state='lead_created',salesforce_id=?
-               WHERE action_id=?""", (result.record_id, row["id"]))
+               WHERE action_id=?""", (result.lead_id, row["id"]))
     workflow._finish_action(
         conn, str(row["id"]), workflow.CampaignActionState.COMPLETE)
     return workflow.ActionExecution(
@@ -436,8 +435,15 @@ def confirm_lead_enrichment(
     if before.system_modstamp != str(payload["system_modstamp"]):
         raise ValueError("Salesforce Lead changed after preview")
     workflow._mark_external_write_started(conn, str(row["id"]))
-    gateway.update_lead_enrichment(
-        lead_id, delta, str(payload["system_modstamp"]))
+    action_id = str(row["id"])
+    note_body = str(delta.get("Description") or "")
+    task_body = _audit_task_description(action_id, "updated", list(delta))
+    audit = gateway.enrich_lead_with_audit_bundle(
+        lead_id, delta, str(payload["system_modstamp"]), action_id,
+        note_body, task_body, _activity_date())
+    if not audit.success:
+        raise SalesforceCompositeRolledBack(
+            audit.error or "Salesforce returned no Lead audit IDs")
     after = gateway.lead_enrichment_snapshot(lead_id)
     for key, value in delta.items():
         actual = after.values.get(key)
@@ -446,13 +452,6 @@ def confirm_lead_enrichment(
                 raise ValueError("updated Lead enrollment did not match the preview")
         elif str(actual or "") != str(value):
             raise ValueError(f"updated Lead field {key} did not match the preview")
-    action_id = str(row["id"])
-    note_body = str(delta.get("Description") or "")
-    task_body = _audit_task_description(action_id, "updated", list(delta))
-    audit = gateway.create_lead_audit_bundle(
-        lead_id, action_id, note_body, task_body, _activity_date())
-    if not audit.success:
-        raise ValueError(audit.error or "Salesforce returned no audit record IDs")
     if not gateway.verify_lead_audit_bundle(
             lead_id, action_id, note_body, task_body, audit):
         raise ValueError("created Salesforce Lead audit trail could not be verified")
@@ -548,7 +547,8 @@ def confirm_lead_audit_repair(
     audit = gateway.create_lead_audit_bundle(
         lead_id, source_action, note_body, task_body, str(payload["activity_date"]))
     if not audit.success:
-        raise ValueError(audit.error or "Salesforce returned no audit record IDs")
+        raise SalesforceCompositeRolledBack(
+            audit.error or "Salesforce returned no audit record IDs")
     if not gateway.verify_lead_audit_bundle(
             lead_id, source_action, note_body, task_body, audit):
         raise ValueError("Salesforce Lead audit trail could not be verified")

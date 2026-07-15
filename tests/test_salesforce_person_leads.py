@@ -25,10 +25,15 @@ class FakeGateway:
         self.calls: list[str] = []
         self.audit_actions: set[str] = set()
 
-    def create_lead(self, _payload: dict[str, object]) -> gateway_mod.CreateResult:
-        """Return one deterministic Lead ID."""
-        self.calls.append("create_lead")
-        return gateway_mod.CreateResult(True, LEAD_ID)
+    def create_person_lead_with_audit_bundle(
+            self, _payload: dict[str, object], action_id: str, _note_body: str,
+            _task_description: str, _activity_date: str) -> gateway_mod.LeadAuditResult:
+        """Return one deterministic all-or-none Lead/audit result."""
+        self.calls.append("create_person_lead_with_audit")
+        self.audit_actions.add(action_id)
+        return gateway_mod.LeadAuditResult(
+            True, "069000000000001", "06A000000000001", "00T000000000001",
+            lead_id=LEAD_ID)
 
     def lead_audit_snapshot(self, _lead_id: str,
                             action_id: str) -> gateway_mod.LeadAuditSnapshot:
@@ -37,15 +42,6 @@ class FakeGateway:
             return gateway_mod.LeadAuditSnapshot(
                 "069000000000001", "06A000000000001", "00T000000000001")
         return gateway_mod.LeadAuditSnapshot()
-
-    def create_lead_audit_bundle(
-            self, _lead_id: str, action_id: str, _note_body: str,
-            _task_description: str, _activity_date: str) -> gateway_mod.LeadAuditResult:
-        """Create one deterministic fake Enhanced Note/link/Task transaction."""
-        self.calls.append("create_audit_bundle")
-        self.audit_actions.add(action_id)
-        return gateway_mod.LeadAuditResult(
-            True, "069000000000001", "06A000000000001", "00T000000000001")
 
     def verify_lead_audit_bundle(
             self, _lead_id: str, _action_id: str, _note_body: str,
@@ -124,7 +120,7 @@ def test_confirmation_creates_one_and_reads_back(monkeypatch: pytest.MonkeyPatch
     result = campaigns.confirm_action(
         conn, gateway, action.action_id, action.nonce,
         "TWORK", "CGRANTS", "1.1", "UCHASE")
-    assert result.added == 1 and gateway.calls == ["create_lead", "create_audit_bundle"]
+    assert result.added == 1 and gateway.calls == ["create_person_lead_with_audit"]
     item = conn.execute("SELECT state,salesforce_id FROM crm_action_items").fetchone()
     assert tuple(item) == ("lead_created", LEAD_ID)
 

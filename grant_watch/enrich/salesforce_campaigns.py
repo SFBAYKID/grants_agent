@@ -23,6 +23,7 @@ from . import salesforce
 from .salesforce_campaign_gateway import (
     MAX_ACTION_ORGANIZATIONS,
     MEMBER_STATUS,
+    SalesforceCompositeRolledBack,
     SalesforceCampaignGateway,
     SalesforceRecordRef,
     parse_record_link,
@@ -655,6 +656,14 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
             from . import salesforce_record_actions as records
             return records.confirm_lead_audit_repair(conn, gateway, row)
         raise ValueError("unknown Salesforce action type")
+    except SalesforceCompositeRolledBack as exc:
+        _finish_action(
+            conn, action_id, CampaignActionState.FAILED,
+            error=f"SalesforceCompositeRolledBack: {str(exc)[:240]}")
+        return ActionExecution(
+            CampaignActionState.FAILED,
+            "Salesforce rejected the all-or-none action; nothing was changed.",
+        )
     except requests.Timeout as exc:
         _finish_action(conn, action_id, CampaignActionState.UNKNOWN,
                        error=f"{type(exc).__name__}: reconciliation required")
@@ -666,8 +675,11 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
     except (requests.RequestException, ValueError, KeyError) as exc:
         current = _load_action(conn, action_id)
         if bool(current["external_write_started"]):
+            detail = str(exc).strip()[:240]
             _finish_action(conn, action_id, CampaignActionState.UNKNOWN,
-                           error=f"{type(exc).__name__}: reconciliation required")
+                           error=(f"{type(exc).__name__}: {detail}; reconciliation required"
+                                  if detail else
+                                  f"{type(exc).__name__}: reconciliation required"))
             return ActionExecution(
                 CampaignActionState.UNKNOWN,
                 "A Salesforce write had started before a later error. The outcome "

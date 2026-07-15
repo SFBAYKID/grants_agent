@@ -27,6 +27,11 @@ _LEAD_ENRICHMENT_FIELDS = {
     "Website", "Phone", "Street", "City", "State", "PostalCode", "Country",
     "Industry", "Description", "LinkedIn__c", "Number_of_Students__c",
 }
+_PERSON_LEAD_CREATE_FIELDS = {
+    "Company", "FirstName", "LastName", "Email", "Status", "LeadSource",
+    "Description", "State", "Title", "Phone", "Website", "Street", "City",
+    "PostalCode", "Country", "LinkedIn__c", "Industry", "Number_of_Students__c",
+}
 _ID_PREFIXES = {
     "Campaign": "701",
     "Lead": "00Q",
@@ -116,6 +121,7 @@ class LeadAuditResult:
     note_id: str = ""
     link_id: str = ""
     task_id: str = ""
+    lead_id: str = ""
     error: str = ""
 
 
@@ -131,6 +137,10 @@ class _TokenCache:
 
 
 _TOKEN_CACHE = _TokenCache()
+
+
+class SalesforceCompositeRolledBack(ValueError):
+    """A received all-or-none response proved that Salesforce committed nothing."""
 
 
 def _soql_literal(value: str) -> str:
@@ -358,23 +368,6 @@ class SalesforceCampaignGateway:
             str(body.get("SystemModstamp") or ""), values,
             self.lightning_link("Lead", lead_id))
 
-    def update_lead_enrichment(self, lead_id: str, delta: dict[str, object],
-                               expected_system_modstamp: str) -> None:
-        """PATCH only allowlisted Lead enrichment fields after a concurrency recheck."""
-        validate_record_id(lead_id, "Lead")
-        if not delta or not set(delta) <= _LEAD_ENRICHMENT_FIELDS:
-            raise ValueError("Lead enrichment contains forbidden or empty fields")
-        current = self.lead_enrichment_snapshot(lead_id)
-        if current.system_modstamp != expected_system_modstamp:
-            raise ValueError("Salesforce Lead changed after the preview")
-        token, instance = self._auth()
-        response = requests.patch(
-            f"{instance}/services/data/{API_VERSION}/sobjects/Lead/{lead_id}",
-            json=delta, headers={"Authorization": f"Bearer {token}"}, timeout=20)
-        if response.status_code not in (200, 204):
-            raise requests.HTTPError(
-                f"Lead enrichment HTTP {response.status_code}: {response.text[:200]}")
-
     def lead_audit_snapshot(self, lead_id: str, action_id: str) -> LeadAuditSnapshot:
         """Read the exact Enhanced Note/link and system Task for one Grant action."""
         validate_record_id(lead_id, "Lead")
@@ -403,11 +396,11 @@ class SalesforceCampaignGateway:
         task_id = str(tasks[0].get("Id") or "") if tasks else ""
         return LeadAuditSnapshot(note_id, link_id, task_id)
 
-    def create_lead_audit_bundle(
-            self, lead_id: str, action_id: str, note_body: str,
-            task_description: str, activity_date: str) -> LeadAuditResult:
-        """Atomically create one Enhanced Note/link and one honest administrative Task."""
-        validate_record_id(lead_id, "Lead")
+    @staticmethod
+    def _audit_subrequests(
+            lead_reference: str, action_id: str, note_body: str,
+            task_description: str, activity_date: str) -> list[dict[str, object]]:
+        """Build the fixed Enhanced Note/link/Task subrequests for one Lead reference."""
         marker = action_id.strip()
         title = f"Grant research — {marker}"
         clean_note = note_body.strip()
@@ -420,62 +413,84 @@ class SalesforceCampaignGateway:
             raise ValueError("Salesforce audit Task description is empty or too long")
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", activity_date):
             raise ValueError("Salesforce audit Task date is invalid")
+        encoded = base64.b64encode(clean_note.encode("utf-8")).decode("ascii")
+        return [
+            {
+                "method": "POST",
+                "url": f"/services/data/{API_VERSION}/sobjects/ContentNote",
+                "referenceId": "grantResearchNote",
+                "body": {"Title": title, "Content": encoded},
+            },
+            {
+                "method": "POST",
+                "url": f"/services/data/{API_VERSION}/sobjects/ContentDocumentLink",
+                "referenceId": "grantResearchLink",
+                "body": {
+                    "ContentDocumentId": "@{grantResearchNote.id}",
+                    "LinkedEntityId": lead_reference,
+                    "ShareType": "V",
+                    "Visibility": "InternalUsers",
+                },
+            },
+            {
+                "method": "POST",
+                "url": f"/services/data/{API_VERSION}/sobjects/Task",
+                "referenceId": "grantAuditTask",
+                "body": {
+                    "WhoId": lead_reference,
+                    "Subject": "Grant system: CRM research updated",
+                    "ActivityDate": activity_date,
+                    "Status": "Completed",
+                    "Priority": "Normal",
+                    "Description": clean_task,
+                },
+            },
+        ]
+
+    def _post_fixed_composite(
+            self, requests_body: list[dict[str, object]],
+            expected_statuses: dict[str, set[int]]) -> tuple[dict[str, dict[str, Any]], str]:
+        """Submit one all-or-none fixed composite and preserve subrequest errors."""
+        token, instance = self._auth()
+        response = requests.post(
+            f"{instance}/services/data/{API_VERSION}/composite",
+            json={"allOrNone": True, "compositeRequest": requests_body},
+            headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        if response.status_code not in (200, 201):
+            return {}, f"HTTP {response.status_code}: {response.text[:500]}"
+        payload: dict[str, Any] = response.json()  # Salesforce composite JSON is dynamic
+        by_ref = {str(item.get("referenceId") or ""): item
+                  for item in payload.get("compositeResponse") or []}
+        errors: list[str] = []
+        for reference, statuses in expected_statuses.items():
+            item = by_ref.get(reference) or {}
+            status = int(item.get("httpStatusCode") or 0)
+            if status not in statuses:
+                errors.append(
+                    f"{reference} HTTP {status}: {str(item.get('body') or '')[:300]}")
+        return by_ref, "; ".join(errors)
+
+    def create_lead_audit_bundle(
+            self, lead_id: str, action_id: str, note_body: str,
+            task_description: str, activity_date: str) -> LeadAuditResult:
+        """Atomically create one Enhanced Note/link and one honest administrative Task."""
+        validate_record_id(lead_id, "Lead")
+        marker = action_id.strip()
         existing = self.lead_audit_snapshot(lead_id, marker)
         if existing.complete:
             return LeadAuditResult(
                 True, existing.note_id, existing.link_id, existing.task_id)
         if existing.partial:
             raise ValueError("Salesforce audit trail is partial and requires reconciliation")
-        token, instance = self._auth()
-        encoded = base64.b64encode(clean_note.encode("utf-8")).decode("ascii")
-        request_body = {
-            "allOrNone": True,
-            "compositeRequest": [
-                {
-                    "method": "POST",
-                    "url": f"/services/data/{API_VERSION}/sobjects/ContentNote",
-                    "referenceId": "grantResearchNote",
-                    "body": {"Title": title, "Content": encoded},
-                },
-                {
-                    "method": "POST",
-                    "url": f"/services/data/{API_VERSION}/sobjects/ContentDocumentLink",
-                    "referenceId": "grantResearchLink",
-                    "body": {
-                        "ContentDocumentId": "@{grantResearchNote.id}",
-                        "LinkedEntityId": lead_id,
-                        "ShareType": "V",
-                        "Visibility": "InternalUsers",
-                    },
-                },
-                {
-                    "method": "POST",
-                    "url": f"/services/data/{API_VERSION}/sobjects/Task",
-                    "referenceId": "grantAuditTask",
-                    "body": {
-                        "WhoId": lead_id,
-                        "Subject": "Grant system: CRM research updated",
-                        "ActivityDate": activity_date,
-                        "Status": "Completed",
-                        "Priority": "Normal",
-                        "Description": clean_task,
-                    },
-                },
-            ],
-        }
-        response = requests.post(
-            f"{instance}/services/data/{API_VERSION}/composite",
-            json=request_body, headers={"Authorization": f"Bearer {token}"}, timeout=30)
-        if response.status_code not in (200, 201):
-            return LeadAuditResult(
-                False, error=f"HTTP {response.status_code}: {response.text[:200]}")
-        payload: dict[str, Any] = response.json()  # Salesforce composite JSON is dynamic
-        by_ref = {str(item.get("referenceId") or ""): item
-                  for item in payload.get("compositeResponse") or []}
-        expected = ("grantResearchNote", "grantResearchLink", "grantAuditTask")
-        if any(int(by_ref.get(ref, {}).get("httpStatusCode") or 0) not in (200, 201)
-               for ref in expected):
-            return LeadAuditResult(False, error="Salesforce audit transaction rolled back")
+        audit_requests = self._audit_subrequests(
+            lead_id, marker, note_body, task_description, activity_date)
+        by_ref, error = self._post_fixed_composite(audit_requests, {
+            "grantResearchNote": {200, 201},
+            "grantResearchLink": {200, 201},
+            "grantAuditTask": {200, 201},
+        })
+        if error:
+            return LeadAuditResult(False, error=error)
         note_id = str((by_ref["grantResearchNote"].get("body") or {}).get("id") or "")
         link_id = str((by_ref["grantResearchLink"].get("body") or {}).get("id") or "")
         task_id = str((by_ref["grantAuditTask"].get("body") or {}).get("id") or "")
@@ -483,6 +498,82 @@ class SalesforceCampaignGateway:
         validate_record_id(link_id, "ContentDocumentLink")
         validate_record_id(task_id, "Task")
         return LeadAuditResult(True, note_id, link_id, task_id)
+
+    def enrich_lead_with_audit_bundle(
+            self, lead_id: str, delta: dict[str, object],
+            expected_system_modstamp: str, action_id: str, note_body: str,
+            task_description: str, activity_date: str) -> LeadAuditResult:
+        """Atomically update one exact Lead and create its three audit artifacts."""
+        validate_record_id(lead_id, "Lead")
+        if not delta or not set(delta) <= _LEAD_ENRICHMENT_FIELDS:
+            raise ValueError("Lead enrichment contains forbidden or empty fields")
+        current = self.lead_enrichment_snapshot(lead_id)
+        if current.system_modstamp != expected_system_modstamp:
+            raise ValueError("Salesforce Lead changed after the preview")
+        existing = self.lead_audit_snapshot(lead_id, action_id)
+        if existing.complete:
+            return LeadAuditResult(
+                True, existing.note_id, existing.link_id, existing.task_id,
+                lead_id=lead_id)
+        if existing.partial:
+            raise ValueError("Salesforce audit trail is partial and requires reconciliation")
+        requests_body: list[dict[str, object]] = [{
+            "method": "PATCH",
+            "url": f"/services/data/{API_VERSION}/sobjects/Lead/{lead_id}",
+            "referenceId": "grantLeadUpdate",
+            "body": delta,
+        }]
+        requests_body.extend(self._audit_subrequests(
+            lead_id, action_id, note_body, task_description, activity_date))
+        by_ref, error = self._post_fixed_composite(requests_body, {
+            "grantLeadUpdate": {200, 204},
+            "grantResearchNote": {200, 201},
+            "grantResearchLink": {200, 201},
+            "grantAuditTask": {200, 201},
+        })
+        if error:
+            return LeadAuditResult(False, lead_id=lead_id, error=error)
+        note_id = str((by_ref["grantResearchNote"].get("body") or {}).get("id") or "")
+        link_id = str((by_ref["grantResearchLink"].get("body") or {}).get("id") or "")
+        task_id = str((by_ref["grantAuditTask"].get("body") or {}).get("id") or "")
+        validate_record_id(note_id, "ContentNote")
+        validate_record_id(link_id, "ContentDocumentLink")
+        validate_record_id(task_id, "Task")
+        return LeadAuditResult(True, note_id, link_id, task_id, lead_id=lead_id)
+
+    def create_person_lead_with_audit_bundle(
+            self, lead_payload: dict[str, object], action_id: str, note_body: str,
+            task_description: str, activity_date: str) -> LeadAuditResult:
+        """Atomically create one person Lead and its three exact audit artifacts."""
+        if (not lead_payload or not set(lead_payload) <= _PERSON_LEAD_CREATE_FIELDS
+                or not all(lead_payload.get(key) for key in ("Company", "LastName", "Email"))):
+            raise ValueError("person Lead payload contains forbidden or missing fields")
+        requests_body: list[dict[str, object]] = [{
+            "method": "POST",
+            "url": f"/services/data/{API_VERSION}/sobjects/Lead",
+            "referenceId": "grantPersonLead",
+            "body": lead_payload,
+        }]
+        lead_reference = "@{grantPersonLead.id}"
+        requests_body.extend(self._audit_subrequests(
+            lead_reference, action_id, note_body, task_description, activity_date))
+        by_ref, error = self._post_fixed_composite(requests_body, {
+            "grantPersonLead": {200, 201},
+            "grantResearchNote": {200, 201},
+            "grantResearchLink": {200, 201},
+            "grantAuditTask": {200, 201},
+        })
+        if error:
+            return LeadAuditResult(False, error=error)
+        lead_id = str((by_ref["grantPersonLead"].get("body") or {}).get("id") or "")
+        note_id = str((by_ref["grantResearchNote"].get("body") or {}).get("id") or "")
+        link_id = str((by_ref["grantResearchLink"].get("body") or {}).get("id") or "")
+        task_id = str((by_ref["grantAuditTask"].get("body") or {}).get("id") or "")
+        validate_record_id(lead_id, "Lead")
+        validate_record_id(note_id, "ContentNote")
+        validate_record_id(link_id, "ContentDocumentLink")
+        validate_record_id(task_id, "Task")
+        return LeadAuditResult(True, note_id, link_id, task_id, lead_id=lead_id)
 
     def verify_lead_audit_bundle(
             self, lead_id: str, action_id: str, note_body: str,
@@ -593,10 +684,6 @@ class SalesforceCampaignGateway:
     def create_leads(self, payloads: list[dict[str, object]]) -> list[CreateResult]:
         """Create approved Lead records through the collection endpoint."""
         return self._create_many("Lead", payloads)
-
-    def create_lead(self, payload: dict[str, object]) -> CreateResult:
-        """Create exactly one approved Lead through the singular endpoint."""
-        return self._create_one("Lead", payload)
 
     def create_members(self, payloads: list[dict[str, object]]) -> list[CreateResult]:
         """Create approved Campaign Members with per-record results."""
