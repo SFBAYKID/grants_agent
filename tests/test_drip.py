@@ -97,12 +97,17 @@ def test_jitter_skip_when_rng_high(tmp_path: Path) -> None:
     assert not go and "jitter" in reason
 
 
-def test_force_bypasses_everything(tmp_path: Path) -> None:
+def test_force_bypasses_schedule_but_not_absolute_cap(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     go, reason = drip.should_post(conn, "C1",
                                   datetime(2026, 7, 11, 3, 0, tzinfo=timezone.utc),
                                   random.Random(1), force=True)
     assert go and reason == "forced"
+    for index in range(drip.ABSOLUTE_CAP):
+        db.record_post(conn, "nugget", None, "C1", f"force.{index}", "s")
+    go, reason = drip.should_post(
+        conn, "C1", datetime.now(timezone.utc), random.Random(1), force=True)
+    assert not go and "absolute daily cap" in reason
 
 
 # ------------------------------------------------------------------ builders

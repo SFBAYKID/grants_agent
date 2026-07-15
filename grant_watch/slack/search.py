@@ -8,6 +8,7 @@ deadline an application close date.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from collections.abc import Callable
@@ -253,13 +254,15 @@ def _window_label(row: sqlite3.Row) -> str:
     end = row["funds_end"] or "?"
     event_type = str(row["current_event_type"] or "")
     event_date = str(row["current_event_occurred_on"] or "")
+    status = _window_status(row)
+    status_suffix = f" ({status})" if status != "unknown" else ""
     if event_type in {"award_announced", "award_obligated"}:
         prefix = f"award event {event_date}; " if event_date else ""
-        return f"{prefix}spend window {start} through {end}"
+        return f"{prefix}spend window {start} through {end}{status_suffix}"
     if event_type == "application_window_opened":
-        return f"applications open {start}; close {end}"
+        return f"applications open {start}; close {end}{status_suffix}"
     if event_type == "rfp_posted":
-        return f"posted {event_date or start}; response due {end}"
+        return f"posted {event_date or start}; response due {end}{status_suffix}"
     if row["lead_grade"] == "gold":
         return f"spend window {start} through {end}"
     if row["source"] == "grants.gov":
@@ -267,6 +270,21 @@ def _window_label(row: sqlite3.Row) -> str:
     if row["lead_grade"] == "silver":
         return f"posted {start}; response due {end}"
     return f"recorded window {start} through {end}"
+
+
+def _window_status(row: sqlite3.Row, today: date | None = None) -> str:
+    """Return active, expired, upcoming, or unknown from the stored window only."""
+    today = today or date.today()
+    try:
+        start = date.fromisoformat(str(row["funds_start"] or "")[:10])
+        end = date.fromisoformat(str(row["funds_end"] or "")[:10])
+    except ValueError:
+        return "unknown"
+    if end < today:
+        return "expired"
+    if start > today:
+        return "upcoming"
+    return "active"
 
 
 def _record_kind_for_row(row: sqlite3.Row) -> str:
@@ -363,6 +381,7 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                  name_contains: str = "", date_field: str = "", date_from: str = "",
                  date_to: str = "", limit: int = 50, export: str | bool = "",
                  result_scope: str = "top_n",
+                 active_only: bool = False,
                  with_contacts: bool = False,
                  on_progress: Progress | None = None, requester_slack: str = "",
                  workspace: str = "", channel: str = "", thread_ts: str = "",
@@ -425,6 +444,12 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
         if name_contains:
             where.append("UPPER(entity_name) LIKE ? ESCAPE '\\'")
             params.append(f"%{_like_literal(name_contains.strip().upper())}%")
+        if active_only:
+            where.append(
+                "current_event_type IN ('award_announced','award_obligated',"
+                "'application_window_opened','rfp_posted') "
+                "AND date(funds_end) >= date(?)")
+            params.append(date.today().isoformat())
 
         for clause, clause_params in (_org_clause(org_value), _record_clause(record_value)):
             if clause:
@@ -574,16 +599,25 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                           "FROM searchable_leads "
                           f"WHERE {where_sql} ORDER BY {order_sql}, id LIMIT ?")
             rows = connection.execute(select_sql, params + [row_limit]).fetchall()
+            complete_ids: list[int] = []
+            if requester_slack and workspace and channel and thread_ts:
+                id_limit = min(total, MAX_EXPORT_ROWS + 1)
+                complete_ids = [int(item["id"]) for item in connection.execute(
+                    f"{_SEARCH_CTE} SELECT id FROM searchable_leads "
+                    f"WHERE {where_sql} ORDER BY {order_sql}, id LIMIT ?",
+                    params + [id_limit],
+                ).fetchall()]
         finally:
             connection.close()
     except sqlite3.Error as exc:
         return f"ERROR: search failed ({exc}).", None
 
     columns = ["grant_lead_id", "record_kind", "entity_role",
-               *_SEARCH_COLUMNS, "date_context"]
+               *_SEARCH_COLUMNS, "date_context", "window_status"]
     data_rows: list[list[object]] = [
         [int(row["id"]), _record_kind_for_row(row), _entity_role_for_row(row),
-         *[row[column] for column in _SEARCH_COLUMNS], _window_label(row)]
+         *[row[column] for column in _SEARCH_COLUMNS], _window_label(row),
+         _window_status(row)]
         for row in rows
     ]
 
@@ -596,6 +630,7 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
             "enrollment_max": enrollment_max, "city": city,
             "name_contains": name_contains,
             "date_field": date_field, "date_from": date_from, "date_to": date_to,
+            "active_only": active_only,
         }
         session_key = f"{workspace}:{channel}:{thread_ts}:{requester_slack}"
         writable = db.connect(db_target)
@@ -603,7 +638,8 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
             snapshot_id = db.save_search_request(
                 writable, session_key, requester_slack, filters, scope_value,
                 None if scope_value == ResultScope.ALL.value else int(limit or 50),
-                export_value or "slack", [int(row["id"]) for row in rows])
+                export_value or "slack", complete_ids, total,
+                len(complete_ids) == total)
         finally:
             writable.close()
     snapshot_note = (f"\nInternal search snapshot: {snapshot_id}."
@@ -693,3 +729,93 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                       if org_value and org_value != "any" else "")
     return (f"Found {total} matching grants:\n" + "\n".join(lines) + more
             + inference_note + reference_note + snapshot_note), None
+
+
+def export_search_snapshot(requested_by: str, workspace: str, channel: str,
+                           thread_ts: str, export: str,
+                           request_id: str = "",
+                           db_path: Path | str | None = None) -> tuple[str, GeneratedArtifact | None]:
+    """Export the exact, ordered result set from a completed Slack search.
+
+    Follow-up requests such as "put those in Excel" must not reconstruct filters or
+    run a new search: either can silently change the set the user just approved. The
+    snapshot is restricted to the initiating user and Slack thread.
+    """
+    try:
+        export_value = _export_kind(export)
+    except ValueError as exc:
+        return f"ERROR: {exc}.", None
+    if not export_value:
+        return "ERROR: choose Excel or Google Sheet.", None
+    if not all((requested_by, workspace, channel, thread_ts)):
+        return "ERROR: a thread-bound search is required before exporting.", None
+
+    db_target = db_path or db.DEFAULT_DB_PATH
+    session_key = f"{workspace}:{channel}:{thread_ts}:{requested_by}"
+    writable = db.connect(db_target)
+    try:
+        snapshot = (db.get_search_request(writable, request_id, requested_by)
+                    if request_id else
+                    db.latest_search_request(writable, session_key, requested_by))
+        if snapshot is None or snapshot["session_key"] != session_key:
+            return "ERROR: no completed search from you in this thread was found.", None
+        if not bool(snapshot["result_complete"]):
+            return ("ERROR: that older search did not preserve its complete result set. "
+                    "Please run the search once more; no partial export was created."), None
+        lead_ids = [int(value) for value in json.loads(
+            str(snapshot["result_lead_ids_json"] or "[]"))]
+        if len(lead_ids) != int(snapshot["total_count"] or 0):
+            return "ERROR: the saved result set is incomplete; no partial export was created.", None
+        if not lead_ids:
+            return "ERROR: the saved search contains no results.", None
+
+        placeholders = ",".join("?" for _ in lead_ids)
+        connection = sqlite3.connect(f"file:{db_target}?mode=ro", uri=True, timeout=5.0)
+        try:
+            connection.row_factory = sqlite3.Row
+            fetched = connection.execute(
+                f"{_SEARCH_CTE} SELECT id, {', '.join(_SEARCH_COLUMNS)} "
+                f"FROM searchable_leads WHERE id IN ({placeholders})", lead_ids,
+            ).fetchall()
+        finally:
+            connection.close()
+        by_id = {int(row["id"]): row for row in fetched}
+        if any(lead_id not in by_id for lead_id in lead_ids):
+            return ("ERROR: one or more saved records are no longer available; "
+                    "no partial export was created."), None
+        rows = [by_id[lead_id] for lead_id in lead_ids]
+        columns = ["grant_lead_id", "record_kind", "entity_role",
+                   *_SEARCH_COLUMNS, "date_context", "window_status"]
+        data_rows = [
+            [int(row["id"]), _record_kind_for_row(row), _entity_role_for_row(row),
+             *[row[column] for column in _SEARCH_COLUMNS], _window_label(row),
+             _window_status(row)]
+            for row in rows
+        ]
+        job_id = db.create_export_job(
+            writable, requested_by, export_value,
+            f"{snapshot['id']}:{export_value}", str(snapshot["id"]))
+        if export_value == ExportFormat.GOOGLE_SHEET.value:
+            from .. import google_sheets, persequor_client
+
+            send_as = persequor_client.rep_email_for(requested_by) or ""
+            state_value, message = google_sheets.create_sheet(
+                "Grant search results", columns, data_rows, requested_by, send_as)
+            if state_value == "created":
+                external_id = message.split("/d/", 1)[-1].split("/", 1)[0]
+                db.finish_export_job(writable, job_id, "created", message, external_id)
+                return f"Exported the same {len(rows)} results: {message}", None
+            text, artifact = make_spreadsheet(
+                "grant_search.xlsx", [columns] + data_rows)
+            db.finish_export_job(writable, job_id, "fallback_excel", error=message)
+            return (f"Google Sheets was unavailable ({message}); I created an Excel "
+                    f"file with the same {len(rows)} results. {text}"), artifact
+
+        text, artifact = make_spreadsheet("grant_search.xlsx", [columns] + data_rows)
+        db.finish_export_job(writable, job_id, "created")
+        return f"Exported the same {len(rows)} results to Excel. {text}", artifact
+    except sqlite3.IntegrityError:
+        return ("ERROR: that exact export was already created. Use its existing file "
+                "or run a new search."), None
+    finally:
+        writable.close()

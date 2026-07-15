@@ -21,7 +21,7 @@ import requests
 
 from .. import db
 from ..spreadsheets import GeneratedArtifact
-from .search import search_leads
+from .search import export_search_snapshot, search_leads
 
 Progress = Callable[[str], None]
 
@@ -82,6 +82,36 @@ def enrich_lead_contact(conn: sqlite3.Connection, lead_id: int,
     return ContactOutcome("verified", candidate.name, candidate.title,
                           candidate.email, candidate.phone, candidate.source_url)
 
+
+def enrich_lead_contacts(conn: sqlite3.Connection, lead_id: int,
+                         on_progress: Progress | None = None) -> list[ContactOutcome]:
+    """Find and persist several distinct, official-page-verified decision-makers."""
+    from ..enrich import finder
+
+    lead = db.get_lead(conn, lead_id)
+    if lead is None:
+        raise ValueError(f"unknown Grant lead id {lead_id}")
+    existing = [row for row in db.contacts_for_lead(conn, lead_id)
+                if row["contact_status"] == "verified"]
+    known_emails = {str(row["email"] or "").lower() for row in existing}
+    candidates = finder.find_contacts(
+        str(lead["entity_name"]), str(lead["state"] or ""),
+        on_progress=on_progress)
+    for candidate in candidates:
+        if candidate.email.lower() in known_emails:
+            continue
+        db.save_contact(
+            conn, lead_id, candidate.name, candidate.title, candidate.email,
+            candidate.phone, candidate.source_url, candidate.confidence,
+            candidate.official_domain, candidate.field_evidence)
+        known_emails.add(candidate.email.lower())
+    rows = [row for row in db.contacts_for_lead(conn, lead_id)
+            if row["contact_status"] == "verified"]
+    return [ContactOutcome(
+        "verified", str(row["name"] or ""), str(row["title"] or ""),
+        str(row["email"] or ""), str(row["phone"] or ""),
+        str(row["source_url"] or "")) for row in rows]
+
 # Tool schemas passed to the Anthropic API (the model picks; we execute).
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
@@ -114,6 +144,51 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "export_search_snapshot",
+        "description": "Export the exact complete results from the user's latest "
+                       "search in this Slack thread. Use this for follow-ups like "
+                       "'put those in Excel'; never rerun search_leads with guessed "
+                       "filters.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "export": {"type": "string", "enum": ["excel", "google_sheet"]},
+                "search_request_id": {"type": "string"},
+            },
+            "required": ["export"],
+        },
+    },
+    {
+        "name": "refine_search",
+        "description": "Refine the user's latest search in this Slack thread while "
+                       "preserving every filter they did not change. Use for follow-ups "
+                       "such as 'only Los Angeles' or 'make it 90 days'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "state": {"type": "string"},
+                "city": {"type": "string"},
+                "org_type": {"type": "string"},
+                "program": {"type": "string"},
+                "grade": {"type": "string"},
+                "date_field": {"type": "string"},
+                "date_from": {"type": "string"},
+                "date_to": {"type": "string"},
+                "active_only": {"type": "boolean"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 5000},
+                "export": {"type": "string", "enum": ["", "excel", "google_sheet"]},
+                "result_scope": {"type": "string", "enum": ["top_n", "all"]},
+                "clear_filters": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": [
+                        "state", "city", "org_type", "program", "grade",
+                        "date_field", "date_from", "date_to", "active_only"]},
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "find_contact",
         "description": "Discover WHO to contact at an awardee (Tech Director, "
                        "Superintendent, etc.): searches the entity's real website, "
@@ -126,6 +201,19 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "properties": {
                 "lead_id": {"type": "integer"},
             },
+            "required": ["lead_id"],
+        },
+    },
+    {
+        "name": "find_contacts",
+        "description": "Search official organization pages for several verified "
+                       "decision-makers (Technology, Facilities, Operations, Business, "
+                       "Superintendent). Use when the user asks who else may influence "
+                       "the purchase. Never say no one else exists merely because one "
+                       "contact was already stored.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"lead_id": {"type": "integer"}},
             "required": ["lead_id"],
         },
     },
@@ -271,6 +359,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                            "description": "export every match or refuse above the declared cap"},
                 "result_scope": {"type": "string", "enum": ["top_n", "all"],
                                  "description": "top_n honors limit; all exports every match"},
+                "active_only": {"type": "boolean",
+                                "description": "exclude records whose spend/application/"
+                                               "response window has already ended"},
                 "with_contacts": {"type": "boolean",
                                   "description": "SECOND step only: after the rep says yes "
                                                  "to finding contacts, set true to enrich "
@@ -412,19 +503,19 @@ def _crm_action_result(action_id: str, nonce: str, preview: str,
 
 
 def salesforce_campaign_search(name_or_link: str) -> str:
-    """Read Campaign candidates without preparing or performing a write."""
-    from ..enrich import salesforce_campaigns as crm
+    """Read Campaign candidates with reader credentials; never require writer auth."""
+    from ..enrich import salesforce
 
-    gateway = crm.SalesforceCampaignGateway()
     query = name_or_link.strip()
     try:
         if query.startswith(("https://", "http://")):
-            _sobject, record_id = crm.parse_record_link(query, {"Campaign"})
-            records = [gateway.get_record("Campaign", record_id)]
+            records = [salesforce.get_campaign_from_link(query)]
         else:
-            records = gateway.search_campaigns(query)
+            records = salesforce.search_campaigns(query)
     except (ValueError, KeyError, requests.RequestException) as exc:
-        return f"ERROR: Campaign search failed ({type(exc).__name__}): {str(exc)[:160]}"
+        detail = ("reader connection is not configured" if isinstance(exc, KeyError)
+                  else str(exc)[:160])
+        return f"ERROR: Campaign search failed ({type(exc).__name__}): {detail}"
     if not records:
         return (f"No Salesforce Campaign found for '{query}'. Ask for a direct Campaign "
                 "link or offer to create a new Campaign.")
@@ -562,6 +653,52 @@ def run_tool(name: str, args: dict[str, Any],
             state=str(args.get("state", "")),
             program=str(args.get("program", "")),
             grade=str(args.get("grade", ""))), None
+    if name == "export_search_snapshot":
+        return export_search_snapshot(
+            requested_by=requester_slack, workspace=workspace, channel=channel,
+            thread_ts=thread_ts, export=str(args.get("export", "")),
+            request_id=str(args.get("search_request_id", "")))
+    if name == "refine_search":
+        session_key = f"{workspace}:{channel}:{thread_ts}:{requester_slack}"
+        conn = db.connect()
+        try:
+            snapshot = db.latest_search_request(conn, session_key, requester_slack)
+        finally:
+            conn.close()
+        if snapshot is None:
+            return "ERROR: no earlier search from you in this thread was found.", None
+        filters: dict[str, object] = json.loads(str(snapshot["filters_json"]))
+        for key in args.get("clear_filters", []):
+            filters[str(key)] = False if key == "active_only" else ""
+        for key in ("state", "city", "org_type", "program", "grade", "date_field",
+                    "date_from", "date_to", "active_only"):
+            if key in args:
+                filters[key] = args[key]
+        return search_leads(
+            state=str(filters.get("state") or ""),
+            org_type=str(filters.get("org_type") or ""),
+            program=str(filters.get("program") or ""),
+            grade=str(filters.get("grade") or ""),
+            record_kind=str(filters.get("record_kind") or ""),
+            amount_min=(float(filters["amount_min"])
+                        if filters.get("amount_min") is not None else None),
+            amount_max=(float(filters["amount_max"])
+                        if filters.get("amount_max") is not None else None),
+            enrollment_min=(int(filters["enrollment_min"])
+                            if filters.get("enrollment_min") is not None else None),
+            enrollment_max=(int(filters["enrollment_max"])
+                            if filters.get("enrollment_max") is not None else None),
+            city=str(filters.get("city") or ""),
+            name_contains=str(filters.get("name_contains") or ""),
+            date_field=str(filters.get("date_field") or ""),
+            date_from=str(filters.get("date_from") or ""),
+            date_to=str(filters.get("date_to") or ""),
+            active_only=bool(filters.get("active_only", False)),
+            limit=int(args.get("limit", snapshot["top_n"] or 50)),
+            export=str(args.get("export", "")),
+            result_scope=str(args.get("result_scope", snapshot["scope"] or "top_n")),
+            on_progress=p, requester_slack=requester_slack, workspace=workspace,
+            channel=channel, thread_ts=thread_ts)
     if name == "search_leads":
         try:
             return search_leads(
@@ -586,6 +723,7 @@ def run_tool(name: str, args: dict[str, Any],
                 limit=int(args.get("limit", 50) or 50),
                 export=args.get("export", ""),
                 result_scope=str(args.get("result_scope", "top_n")),
+                active_only=bool(args.get("active_only", False)),
                 with_contacts=bool(args.get("with_contacts", False)),
                 on_progress=p, requester_slack=requester_slack,
                 workspace=workspace, channel=channel, thread_ts=thread_ts)
@@ -596,6 +734,24 @@ def run_tool(name: str, args: dict[str, Any],
             return find_contact(int(args.get("lead_id", 0)), p), None
         except Exception as exc:  # enrichment API hiccup -> honest tool error
             return f"ERROR: enrichment failed ({type(exc).__name__}) — say so.", None
+    if name == "find_contacts":
+        try:
+            conn = db.connect()
+            try:
+                contacts = enrich_lead_contacts(conn, int(args.get("lead_id", 0)), p)
+            finally:
+                conn.close()
+            if not contacts:
+                return ("No additional verified contacts were found on the official "
+                        "pages checked. That does not prove no other decision-maker exists."), None
+            lines = [
+                f"- {item.name} — {item.title or 'title not published'} — "
+                f"{item.email} — {item.source_url}"
+                for item in contacts
+            ]
+            return f"Found {len(contacts)} verified contact(s):\n" + "\n".join(lines), None
+        except Exception as exc:
+            return f"ERROR: contact search failed ({type(exc).__name__}).", None
     if name == "find_person_linkedin":
         try:
             return find_person_linkedin(str(args.get("entity", "")),

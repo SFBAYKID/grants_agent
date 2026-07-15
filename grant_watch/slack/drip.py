@@ -121,6 +121,8 @@ def should_post(conn: sqlite3.Connection, channel: str, now_utc: datetime,
                 urgent: bool = False) -> tuple[bool, str]:
     """The full gate: window first, then pacing. Returns (go, reason)."""
     if force:
+        if len(db.posts_today(conn, channel, now_utc)) >= ABSOLUTE_CAP:
+            return False, f"absolute daily cap reached ({ABSOLUTE_CAP})"
         return True, "forced"
     if not in_window(now_utc):
         return False, "outside Mon-Fri 8am ET – 5pm PT window"

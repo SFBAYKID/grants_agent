@@ -83,6 +83,12 @@ as limit and result_scope="top_n"; use result_scope="all" only when they explici
 asked for every match. Pass export="excel" or export="google_sheet" if they chose a
 file, or no export if they chose Slack. Then give the ranked results briefly. If code
 reports more than 15 matches and asks for Excel or Google Sheet, ask that choice exactly.
+For a follow-up such as "put those in Excel" or "make that a Google Sheet," call
+export_search_snapshot. Do NOT rerun search_leads or add guessed filters: the export
+must contain the exact complete ordered result set the user just approved.
+For a follow-up that changes filters ("only Los Angeles," "make it 90 days," "include
+cities"), call refine_search. Supply only the changed fields; it preserves the rest of
+the user's latest thread-bound search.
 
 STEP 3 — THEN OFFER CONTACTS (never automatic). After the list, OFFER to find the best
 contact for each org as a SECOND step, because it's slower (~30s per org): "Want me to
@@ -105,6 +111,8 @@ DATE TRUTH RULES (non-negotiable):
 - opportunity_open/opportunity_close = Grants.gov application-window dates.
 - solicitation_posted/response_due = SILVER RFP dates.
 - spend_start/spend_end = GOLD award spending-window dates.
+- When the user asks for current, actionable, open, or upcoming funding, pass
+  active_only=true. Never present an expired spend/application/response window as open.
 - An unknown award-event date can never support "just," "recently," "landed," or
   "just received." Describe only the verified award record and its spend window.
 - The database does NOT store a verified award announcement/received date. If asked who
@@ -122,9 +130,13 @@ with the rep (export="google_sheet") — both land right here in Slack. After re
 offer to refine, export, or (per STEP 3) find contacts.
 
 TOOLS: web_search; lead_stats (typed read-only counts with no raw SQL);
-search_leads (filtered grant search + optional Excel export); find_contact
+search_leads (filtered grant search + optional initial export);
+export_search_snapshot (exact follow-up export); find_contact
+refine_search (preserves prior filters while changing only what the user requested);
 (searches an awardee's real website for a Technology Director / Superintendent /
-Principal, storing only emails that appear verbatim on a fetched page); salesforce_lookup
+Principal, storing only emails that appear verbatim on a fetched page); find_contacts
+(continues across official pages for additional Technology, Facilities, Operations,
+Business, or Superintendent contacts); salesforce_lookup
 (is this awardee already an Account/Lead/Opportunity in our CRM, and who owns it — with
 a clickable link). Use them
 whenever they'd genuinely help. When a rep asks "who do we contact?", run find_contact
@@ -132,6 +144,9 @@ AND salesforce_lookup — if it's already in Salesforce, hand them the link and 
 who owns it before they reach out. Never invent a link, number, contact, or fact: if a
 tool errored or found nothing, say so cheerfully and plainly. Present 'possible' CRM
 matches as possible, never asserted.
+When the rep asks "who else?", run find_contacts even if one contact is already stored.
+If it finds nobody additional, say only that no additional verified contact appeared on
+the pages checked; never infer that one person is the organization's sole decision-maker.
 
 SOURCE ATTRIBUTION: when the rep asks for details, show the exact current-event source
 record as a clickable Slack link using both source_record and source_url from FACTS.
@@ -241,7 +256,7 @@ def _parse_final(raw: str) -> dict[str, Any]:
         start, end = raw.index("{"), raw.rindex("}") + 1
         out = json.loads(raw[start:end])
         intent = out.get("intent", "question")
-        reply = str(out.get("reply", "")).strip()
+        reply = _sanitize_reply(str(out.get("reply", "")).strip())
         if intent not in ("offer_persequor", "draft_email", "snooze",
                           "bad_lead", "question", "chitchat"):
             intent = "question"
@@ -252,9 +267,17 @@ def _parse_final(raw: str) -> dict[str, Any]:
     # If the model spoke plain text instead of JSON, pass it through as chat.
     text = raw.strip()
     if text:
-        return {"intent": "question", "reply": text[:1500]}
+        return {"intent": "question", "reply": _sanitize_reply(text[:1500])}
     return {"intent": "question",
             "reply": "Hmm, I fumbled that one — mind rephrasing?"}
+
+
+def _sanitize_reply(text: str) -> str:
+    """Remove Slack's red inline-code styling while preserving full email fences."""
+    parts = text.split("```")
+    for index in range(0, len(parts), 2):
+        parts[index] = parts[index].replace("`", "")
+    return "```".join(parts)
 
 
 _CRM_ACTION_RE = re.compile(

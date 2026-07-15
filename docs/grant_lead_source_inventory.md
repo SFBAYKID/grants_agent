@@ -103,6 +103,10 @@ Lead definitions: **GOLD** = entity just received security funding. **SILVER** =
 
 ## TIER 3 — KNOWN CHANNELS, UNVERIFIED (next pass)
 
+The nationwide discovery and safe-adapter design is maintained in
+`docs/nationwide_source_strategy.md`. It covers all-state portal discovery without
+mislabeling a directory entry as a verified integration.
+
 ### 14. School board meeting agendas/minutes (BoardDocs, Simbli, etc.)
 - THE silver-lead source: boards must approve grant applications and vendor contracts.
   "Resolution to apply for SVPP/CSSGP" in minutes = applying now

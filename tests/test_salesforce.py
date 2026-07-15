@@ -67,6 +67,33 @@ def test_complete_empty_search_is_no_match(monkeypatch: pytest.MonkeyPatch) -> N
     assert result.status is salesforce.SFResultStatus.NO_MATCH
 
 
+def test_campaign_search_uses_reader_get_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Campaign discovery works without any writer configuration or mutation."""
+    monkeypatch.delenv("SALESFORCE_WRITE_MY_DOMAIN_URL", raising=False)
+    monkeypatch.setattr(salesforce, "_auth", lambda: ("reader", "https://sf.test"))
+    calls: list[tuple[str, dict[str, str], str, str]] = []
+
+    def read(path: str, params: dict[str, str], token: str,
+             instance: str) -> dict[str, object]:
+        calls.append((path, params, token, instance))
+        return {"records": [{"Id": "701000000000001", "Name": "Just Testing"}]}
+
+    monkeypatch.setattr(salesforce, "_readonly_get", read)
+    matches = salesforce.search_campaigns("Just Testing")
+    assert [match.name for match in matches] == ["Just Testing"]
+    assert calls[0][0] == "query" and calls[0][2] == "reader"
+    assert "Just Testing" in calls[0][1]["q"]
+
+
+def test_campaign_link_rejects_another_salesforce_org(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pasted Campaign link cannot cross the configured reader-org boundary."""
+    monkeypatch.setenv("SALESFORCE_MY_DOMAIN_URL", "https://reader.salesforce.test")
+    with pytest.raises(ValueError, match="configured reader org"):
+        salesforce.get_campaign_from_link(
+            "https://other.salesforce.test/lightning/r/Campaign/701000000000001/view")
+
+
 def test_open_opportunity_is_queried_through_confirmed_account(
         monkeypatch: pytest.MonkeyPatch) -> None:
     """Opportunity context must carry the exact matched AccountId."""

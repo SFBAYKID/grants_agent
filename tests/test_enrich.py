@@ -67,6 +67,32 @@ def test_finder_returns_none_when_pages_read_but_nothing_verifiable(
     assert finder.find_contact("Castle Rock School District", "WA") is None
 
 
+def test_finder_collects_multiple_distinct_official_contacts(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Finding IT does not stop the official-site search before Facilities is found."""
+    results = [
+        {"url": "https://district.example/technology",
+         "title": "Example School District Washington technology"},
+        {"url": "https://district.example/facilities",
+         "title": "Example School District Washington facilities"},
+    ]
+    candidates = {
+        "https://district.example/technology": ContactCandidate(
+            "Taylor Tech", "Technology Director", "tech@district.example", "",
+            "https://district.example/technology", "high"),
+        "https://district.example/facilities": ContactCandidate(
+            "Frank Facilities", "Facilities Director", "facilities@district.example", "",
+            "https://district.example/facilities", "high"),
+    }
+    monkeypatch.setattr(finder, "_search", lambda *_a, **_k: results)
+    monkeypatch.setattr(finder, "_scrape", lambda *_a, **_k: "x" * 400)
+    monkeypatch.setattr(
+        finder, "_extract", lambda _text, _entity, url: candidates[url])
+    found = finder.find_contacts("Example School District", "WA")
+    assert [candidate.email for candidate in found] == [
+        "tech@district.example", "facilities@district.example"]
+
+
 def test_contact_fields_require_independent_page_evidence() -> None:
     """A verified email cannot smuggle an invented title or phone into storage."""
     page = "Jane Doe — jdoe@crschools.org — Technology Director — (360) 555-0100"

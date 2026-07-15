@@ -224,23 +224,36 @@ _SEARCH_ANGLES = (
 )
 
 
-def find_contact(entity: str, state: str, max_pages: int = 6,
-                 on_progress: Progress | None = None) -> ContactCandidate | None:
-    """Full pipeline for one entity. Runs several title-targeted searches, scrapes the
-    most promising pages, and returns the first VERIFIED contact (prefers higher-value
-    titles). on_progress emits short (<=6 word) status phrases for Grant's live spinner.
+def _candidate_rank(candidate: ContactCandidate) -> tuple[int, int, str]:
+    """Rank verified contacts by decision relevance, evidence quality, then name."""
+    title = candidate.title.lower()
+    title_rank = next(
+        (index for index, target in enumerate(TARGET_TITLES) if target in title),
+        len(TARGET_TITLES),
+    )
+    confidence_rank = 0 if candidate.confidence == "high" else 1
+    return title_rank, confidence_rank, candidate.name.lower()
+
+
+def find_contacts(entity: str, state: str, max_pages: int = 10,
+                  max_contacts: int = 5,
+                  on_progress: Progress | None = None) -> list[ContactCandidate]:
+    """Read official-site pages and return several distinct verified decision-makers.
+
+    The search deliberately continues after finding a Technology contact so follow-up
+    questions such as "anyone else?" can also return Facilities, Operations, Business,
+    or Superintendent contacts when the official site publishes them.
 
     Return/raise contract is the honesty boundary (Constitution rule 1):
-      - a ContactCandidate  -> a verbatim-verified contact,
-      - None                -> we genuinely READ real pages and none had a verifiable
-                               contact (a truthful not_found),
+      - non-empty list      -> verbatim-verified contacts,
+      - empty list          -> real pages were read but none had a verifiable contact,
       - SourceUnreachable   -> we never actually read a page (search/scrape/extract all
                                failed); the caller must record NOTHING, not not_found.
     """
     say = on_progress or _NOOP
     say("Searching for the contact")
     seen_urls: set[str] = set()
-    candidates: list[ContactCandidate] = []
+    candidates: dict[str, ContactCandidate] = {}
     reached_search = False     # at least one Firecrawl search returned without error
     pages_read = 0             # real (>=200 char) pages we actually scraped
     clean_extractions = 0      # extractions that completed (gave a definite yes/no)
@@ -275,20 +288,30 @@ def find_contact(entity: str, state: str, max_pages: int = 6,
             clean_extractions += 1
             if cand is None:
                 continue
-            if cand.confidence == "high":  # a target-title match — take it immediately
-                say(f"Found {cand.name}")
-                return cand
-            candidates.append(cand)  # medium: hold in case nothing better turns up
+            key = cand.email.strip().lower()
+            current = candidates.get(key)
+            if current is None or _candidate_rank(cand) < _candidate_rank(current):
+                candidates[key] = cand
         if len(seen_urls) > max_pages:
             break
     if candidates:
-        say(f"Found {candidates[0].name}")
-        return candidates[0]
+        ranked = sorted(candidates.values(), key=_candidate_rank)[:max_contacts]
+        say(f"Found {len(ranked)} contacts")
+        return ranked
     # No candidate. Only claim not_found when we actually looked: reached search, read a
     # real page, AND extracted cleanly from it. Otherwise we could not look — say so.
     if not reached_search or pages_read == 0 or clean_extractions == 0:
         raise SourceUnreachable(f"could not read a source for {entity}")
-    return None
+    return []
+
+
+def find_contact(entity: str, state: str, max_pages: int = 6,
+                 on_progress: Progress | None = None) -> ContactCandidate | None:
+    """Compatibility helper returning the highest-ranked verified contact, if any."""
+    contacts = find_contacts(
+        entity, state, max_pages=max_pages, max_contacts=1,
+        on_progress=on_progress)
+    return contacts[0] if contacts else None
 
 
 def linkedin_person(entity: str, state: str,

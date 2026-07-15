@@ -106,6 +106,16 @@ def test_claim_intent_is_rejected_as_a_non_action() -> None:
     assert not hasattr(__import__("grant_watch.db", fromlist=["claim_lead"]), "claim_lead")
 
 
+def test_parse_final_removes_red_inline_code_but_preserves_email_fence() -> None:
+    """Server-side sanitation backs up the prompt's no-red-text instruction."""
+    from grant_watch.slack import conversation
+
+    parsed = conversation._parse_final(
+        '{"intent":"question","reply":"Use `this`, then:\\n```\\nEmail body\\n```"}')
+    assert "`this`" not in parsed["reply"]
+    assert "```\nEmail body\n```" in parsed["reply"]
+
+
 def test_digest_poster_module_remains_absent() -> None:
     """The earlier multi-lead poster cannot return through this UX correction."""
     assert not Path(grant.__file__).with_name("digest.py").exists()

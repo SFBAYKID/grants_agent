@@ -71,6 +71,15 @@ class SFMatch:
     is_closed: bool | None = None
 
 
+@dataclass(frozen=True)
+class CampaignMatch:
+    """One Campaign returned through the strictly read-only Salesforce client."""
+
+    record_id: str
+    name: str
+    link: str
+
+
 @dataclass
 class SFResult:
     """Typed lookup result; ``no_match`` is distinct from any outage."""
@@ -255,6 +264,45 @@ def _query_opportunities(account_id: str, token: str,
     )
     body = _readonly_get("query", {"q": soql}, token, instance_url)
     return list(body.get("records") or [])
+
+
+def search_campaigns(name: str) -> list[CampaignMatch]:
+    """Search Campaign names using reader credentials and GET-only SOQL."""
+    query = name.strip()
+    if not query:
+        raise ValueError("Campaign name is required")
+    token, instance_url = _auth()
+    safe = query.replace("\\", "\\\\").replace("'", "\\'")
+    body = _readonly_get(
+        "query",
+        {"q": ("SELECT Id,Name FROM Campaign "
+               f"WHERE Name LIKE '%{safe}%' ORDER BY LastModifiedDate DESC LIMIT 20")},
+        token, instance_url,
+    )
+    return [
+        CampaignMatch(str(record["Id"]), str(record.get("Name") or ""),
+                      _link(instance_url, "Campaign", str(record["Id"])))
+        for record in body.get("records") or [] if record.get("Id")
+    ]
+
+
+def get_campaign_from_link(link: str) -> CampaignMatch:
+    """Read one Campaign from a Lightning link belonging to the reader org."""
+    parsed = urlparse(link.strip())
+    configured = urlparse(os.environ.get("SALESFORCE_MY_DOMAIN_URL", "")).hostname
+    if not parsed.hostname or parsed.hostname.lower() != (configured or "").lower():
+        raise ValueError("Salesforce link is not from the configured reader org")
+    match = re.search(r"/lightning/r/Campaign/([A-Za-z0-9]{15,18})(?:/|$)", parsed.path)
+    if match is None or not match.group(1).startswith("701"):
+        raise ValueError("Salesforce link is not a Campaign record link")
+    record_id = match.group(1)
+    token, instance_url = _auth()
+    body = _readonly_get(
+        f"sobjects/Campaign/{record_id}", {"fields": "Id,Name"},
+        token, instance_url,
+    )
+    return CampaignMatch(record_id, str(body.get("Name") or ""),
+                         _link(instance_url, "Campaign", record_id))
 
 
 def lookup(entity: str, domain: str = "", phone: str = "", state: str = "",

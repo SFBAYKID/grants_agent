@@ -438,6 +438,12 @@ def _migration_7_conversation_and_outreach_truth(conn: sqlite3.Connection) -> No
         """UPDATE outreach SET submitted_at=sent_at, sent_at=NULL, approved_by=NULL
            WHERE status='submitted' AND submitted_at IS NULL"""
     )
+
+
+def _migration_8_complete_search_snapshots(conn: sqlite3.Connection) -> None:
+    """Record whether a search snapshot contains its complete ordered root set."""
+    _add_column(conn, "search_requests", "total_count INTEGER")
+    _add_column(conn, "search_requests", "result_complete INTEGER NOT NULL DEFAULT 0")
     _execute_script(conn,
         """
         CREATE TABLE IF NOT EXISTS slack_conversation_threads (
@@ -462,6 +468,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(6, "release safety state", _migration_6_release_safety_state),
     Migration(7, "conversation threads and outreach truth",
               _migration_7_conversation_and_outreach_truth),
+    Migration(8, "complete search snapshots", _migration_8_complete_search_snapshots),
 )
 
 

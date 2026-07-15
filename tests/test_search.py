@@ -18,7 +18,12 @@ from grant_watch.models import (
     VerificationStatus,
 )
 from grant_watch.slack import tools
-from grant_watch.slack.search import MAX_ENRICH_ROWS, MAX_EXPORT_ROWS, search_leads
+from grant_watch.slack.search import (
+    MAX_ENRICH_ROWS,
+    MAX_EXPORT_ROWS,
+    export_search_snapshot,
+    search_leads,
+)
 
 
 def _insert(conn: sqlite3.Connection, source: str, item_id: str, entity: str,
@@ -283,6 +288,68 @@ def test_export_job_persists_with_search_snapshot(tmp_path: Path) -> None:
     assert job is not None and job["state"] == "created"
     assert snapshot is not None and job["search_request_id"] == snapshot["id"]
     artifact.cleanup()
+
+
+def test_followup_export_uses_complete_frozen_result_set(tmp_path: Path) -> None:
+    """A preview followed by "export those" keeps all 20 ordered matches."""
+    path = _bulk_db(tmp_path, 20)
+    text, artifact = search_leads(
+        limit=5, requester_slack="U1", workspace="T1", channel="C1",
+        thread_ts="100.1", db_path=path)
+    assert artifact is None and "Found 20 matching grants" in text
+    conn = db.connect(path)
+    snapshot = conn.execute("SELECT * FROM search_requests").fetchone()
+    assert snapshot is not None
+    assert snapshot["total_count"] == 20
+    assert snapshot["result_complete"] == 1
+    conn.close()
+
+    exported, artifact = export_search_snapshot(
+        "U1", "T1", "C1", "100.1", "excel", db_path=path)
+    assert artifact is not None and "same 20 results" in exported
+    sheet = load_workbook(artifact.path).active
+    assert sheet.max_row == 21
+    assert [sheet.cell(row=index, column=1).value for index in range(2, 22)]
+    artifact.cleanup()
+
+
+def test_followup_export_cannot_cross_user_or_thread(tmp_path: Path) -> None:
+    """Frozen results remain scoped to their initiating Slack user and thread."""
+    path = _bulk_db(tmp_path, 2)
+    search_leads(limit=1, requester_slack="U1", workspace="T1", channel="C1",
+                 thread_ts="100.1", db_path=path)
+    text, artifact = export_search_snapshot(
+        "U2", "T1", "C1", "100.1", "excel", db_path=path)
+    assert artifact is None and "no completed search" in text
+
+
+def test_refinement_preserves_prior_filters(tmp_path: Path,
+                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    """'Only Tustin' changes city without dropping the earlier CA school filters."""
+    path = _db(tmp_path)
+    monkeypatch.setattr(db, "DEFAULT_DB_PATH", path)
+    original_connect = db.connect
+    monkeypatch.setattr(db, "connect", lambda db_path=path: original_connect(db_path))
+    search_leads(
+        state="CA", org_type="school", limit=5, requester_slack="U1",
+        workspace="T1", channel="C1", thread_ts="100.1", db_path=path)
+    text, artifact = tools.run_tool(
+        "refine_search", {"city": "Tustin", "limit": 5}, requester_slack="U1",
+        workspace="T1", channel="C1", thread_ts="100.1")
+    assert artifact is None
+    assert "Tustin Unified School District" in text
+    assert "City of Austin" not in text
+
+
+def test_active_only_excludes_expired_awards(tmp_path: Path) -> None:
+    """Current/actionable award searches cannot surface a closed spend window."""
+    path = _db(tmp_path)
+    conn = db.connect(path)
+    _insert(conn, "usaspending:16.071", "OLD", "Expired School District", "CA",
+            "SVPP", 99_000.0, "2020-01-01", "2023-01-01", LeadGrade.GOLD)
+    conn.close()
+    text, _ = search_leads(state="CA", active_only=True, limit=15, db_path=path)
+    assert "Expired School District" not in text
 
 
 def test_export_over_declared_cap_creates_no_partial_file(tmp_path: Path) -> None:

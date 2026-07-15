@@ -281,7 +281,8 @@ def status_summary(conn: sqlite3.Connection) -> list[tuple[str, str, int]]:
 
 def save_search_request(conn: sqlite3.Connection, session_key: str, requested_by: str,
                         filters: dict[str, object], scope: str, top_n: int | None,
-                        format_name: str, lead_ids: list[int]) -> str:
+                        format_name: str, lead_ids: list[int], total_count: int,
+                        result_complete: bool) -> str:
     """Persist one immutable completed search snapshot for follow-up CRM/export actions."""
     request_id = str(uuid.uuid4())
     now = _now()
@@ -289,11 +290,12 @@ def save_search_request(conn: sqlite3.Connection, session_key: str, requested_by
         conn.execute(
             """INSERT INTO search_requests
                  (id,session_key,requested_by,filters_json,scope,top_n,format,state,
-                  result_lead_ids_json,created_at,updated_at)
-               VALUES (?,?,?,?,?,?,?,'complete',?,?,?)""",
+                  result_lead_ids_json,total_count,result_complete,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,'complete',?,?,?,?,?)""",
             (request_id, session_key, requested_by,
              json.dumps(filters, sort_keys=True, default=str), scope, top_n,
-             format_name or None, json.dumps(lead_ids), now, now),
+             format_name or None, json.dumps(lead_ids), total_count,
+             int(result_complete), now, now),
         )
     return request_id
 
@@ -304,6 +306,17 @@ def get_search_request(conn: sqlite3.Connection, request_id: str,
     return conn.execute(
         "SELECT * FROM search_requests WHERE id=? AND requested_by=? AND state='complete'",
         (request_id, requested_by),
+    ).fetchone()
+
+
+def latest_search_request(conn: sqlite3.Connection, session_key: str,
+                          requested_by: str) -> sqlite3.Row | None:
+    """Return the newest completed search in one requester-bound Slack thread."""
+    return conn.execute(
+        """SELECT * FROM search_requests
+           WHERE session_key=? AND requested_by=? AND state='complete'
+           ORDER BY created_at DESC, id DESC LIMIT 1""",
+        (session_key, requested_by),
     ).fetchone()
 
 
