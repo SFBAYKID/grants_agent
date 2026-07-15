@@ -25,6 +25,10 @@ class FakeSlack:
             raise TimeoutError("ambiguous")
         return {"ts": "123.456"}
 
+    def auth_test(self) -> dict[str, str]:
+        """Return the workspace identity required for thread registration."""
+        return {"team_id": "TWORK", "user_id": "UGRANT"}
+
 
 def _eligible(tmp_path: Path) -> tuple[Any, followups.FollowupCandidate]:
     """Create one locally audited Grant Campaign/member provenance chain."""
@@ -158,3 +162,13 @@ def test_delivery_is_one_shot_and_timeout_never_retries(monkeypatch: Any,
     assert followups.run(slack, "C", conn, smoke=True).startswith("unknown:")
     assert followups.run(slack, "C", conn, smoke=True).startswith("skip:")
     assert len(slack.calls) == 1
+
+
+def test_delivered_reminder_registers_natural_reply_thread(monkeypatch: Any,
+                                                            tmp_path: Path) -> None:
+    """A reminder root is immediately recognized as a Grant conversation thread."""
+    conn, _ = _eligible(tmp_path)
+    _reader(monkeypatch)
+    slack = FakeSlack()
+    assert followups.run(slack, "C", conn, smoke=True).startswith("posted follow-up")
+    assert db.is_conversation_thread(conn, "TWORK", "C", "123.456")
