@@ -156,6 +156,45 @@ def _is_help_request(text: str) -> bool:
         "how do you work", "what do i ask you"))
 
 
+def _memory_reply(text: str, workspace: str, user: str, channel: str,
+                  message_ts: str) -> str | None:
+    """Handle explicit, bounded preference requests without model-authored storage."""
+    lowered = " ".join(text.lower().split())
+    conn = db.connect()
+    if "what do you remember" in lowered:
+        values = db.user_preferences(conn, workspace, user)
+        if not values:
+            return "I don’t have any saved preferences for you yet."
+        labels = {
+            "export_format": "default export",
+            "result_count": "default result count",
+            "preferred_states": "preferred states",
+        }
+        details = "; ".join(f"{labels[key]}: {value}" for key, value in values.items())
+        return f"I remember {details}."
+    if "forget everything" in lowered or "forget all" in lowered:
+        db.forget_user_preferences(
+            conn, workspace, user, None, channel, message_ts)
+        return "I forgot your saved preferences."
+    if not (lowered.startswith("remember ") or "always export" in lowered):
+        return None
+    export = next((item for item in ("excel", "google sheet", "slack")
+                   if item in lowered), "")
+    if export:
+        value = "google_sheet" if export == "google sheet" else export
+        db.set_user_preference(
+            conn, workspace, user, "export_format", value, channel, message_ts)
+        return f"I’ll remember that your default export is {export}."
+    count_match = re.search(r"(?:top|show|result count(?: is)?)\s+(\d{1,3})", lowered)
+    if count_match and 1 <= int(count_match.group(1)) <= 200:
+        count = int(count_match.group(1))
+        db.set_user_preference(
+            conn, workspace, user, "result_count", count, channel, message_ts)
+        return f"I’ll remember to show {count} results by default."
+    return ("I can remember your default export or result count. For example, "
+            "“Remember my default export is Excel.”")
+
+
 def create_app() -> App:
     """Build the Bolt app and register every handler. Split from main() so tests can
     construct the app without opening a socket."""
@@ -430,6 +469,15 @@ def _handle_drip_thread(conn: sqlite3.Connection, post: sqlite3.Row,
     user = event["user"]
     text = re.sub(r"<@[^>]+>", "", event.get("text") or "").strip()
     db.record_engagement(conn, int(post["id"]), user, "reply")
+    memory_reply = _memory_reply(
+        text, workspace, user, str(event["channel"]), str(event.get("ts") or ""))
+    if memory_reply is not None:
+        try:
+            client.chat_postMessage(
+                channel=event["channel"], thread_ts=post["ts"], text=memory_reply)
+            return True
+        except Exception:
+            return False
     row = db.get_lead(conn, int(post["lead_id"])) if post["lead_id"] else None
     context = _thread_history(client, event["channel"], post["ts"])
     status = _Status(client, event["channel"], post["ts"])
@@ -438,7 +486,8 @@ def _handle_drip_thread(conn: sqlite3.Connection, post: sqlite3.Row,
         out = conversation.respond(text, row, thread_context=context,
                                    on_progress=status.update, requester_slack=user,
                                    workspace=workspace, channel=event["channel"],
-                                   thread_ts=post["ts"])
+                                   thread_ts=post["ts"],
+                                   user_preferences=db.user_preferences(conn, workspace, user))
     except Exception as exc:  # API down ≠ silence; reply honestly
         return status.finalize(
             f"I'm having trouble thinking right now ({type(exc).__name__}) "
@@ -547,6 +596,14 @@ def _converse_general(text: str, client: WebClient, channel: str,
         except Exception:
             return False
 
+    memory_reply = _memory_reply(text, workspace, user, channel, thread_ts or "")
+    if memory_reply is not None:
+        try:
+            client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=memory_reply)
+            return True
+        except Exception:
+            return False
+
     if _is_help_request(text):
         help_text = (
             "I find fresh school and city funding or RFP leads, research contacts, "
@@ -562,11 +619,13 @@ def _converse_general(text: str, client: WebClient, channel: str,
     status = _Status(client, channel, thread_ts)
     status.start()
     try:
+        preferences = db.user_preferences(db.connect(), workspace, user)
         out = conversation.respond(text, None, on_progress=status.update,
                                    thread_context=_thread_history(
                                        client, channel, thread_ts) if thread_ts else None,
                                    requester_slack=user, workspace=workspace,
-                                   channel=channel, thread_ts=thread_ts or "")
+                                   channel=channel, thread_ts=thread_ts or "",
+                                   user_preferences=preferences)
         artifacts = out.get("files", [])
         failures = _deliver_artifacts(client, channel, thread_ts, artifacts)
         return status.finalize(

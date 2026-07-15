@@ -106,27 +106,41 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
     conn = db.connect(path)
     versions = [row[0] for row in conn.execute(
         "SELECT version FROM schema_migrations ORDER BY version")]
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     crm_tables = {
         row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name LIKE 'salesforce_%'"
-        )
-    }
+            "AND name LIKE 'salesforce_%'")}
     assert {"salesforce_lookup_state", "salesforce_matches"} <= crm_tables
     assert conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' "
-        "AND name='conversation_sessions'"
-    ).fetchone() is None
+        "AND name='conversation_sessions'").fetchone() is None
     assert conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' "
-        "AND name='slack_conversation_threads'"
-    ).fetchone() is not None
+        "AND name='slack_conversation_threads'").fetchone() is not None
     event = conn.execute(
-        "SELECT event_type, backfill, suppressed FROM funding_events"
-    ).fetchone()
+        "SELECT event_type, backfill, suppressed FROM funding_events").fetchone()
     assert tuple(event) == ("record_observed", 1, 1)
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_user_preferences_are_workspace_and_user_scoped(tmp_path: Path) -> None:
+    """Preference values never leak across users or Slack workspaces."""
+    conn = db.connect(tmp_path / "prefs.db")
+    db.set_user_preference(conn, "T1", "U1", "export_format", "excel", "C1", "1.1")
+    assert db.user_preferences(conn, "T1", "U1") == {"export_format": "excel"}
+    assert db.user_preferences(conn, "T1", "U2") == {}
+    assert db.user_preferences(conn, "T2", "U1") == {}
+
+
+def test_forget_removes_values_without_auditing_content(tmp_path: Path) -> None:
+    """Forget physically deletes content while the audit retains only its key/action."""
+    conn = db.connect(tmp_path / "prefs.db")
+    db.set_user_preference(conn, "T1", "U1", "result_count", 5, "C1", "1.1")
+    assert db.forget_user_preferences(conn, "T1", "U1", None, "C1", "1.2") == 1
+    assert db.user_preferences(conn, "T1", "U1") == {}
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(user_preference_events)")}
+    assert "value_json" not in columns
 
 
 def test_failed_migration_rolls_back_schema_and_version(

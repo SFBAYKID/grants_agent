@@ -654,6 +654,70 @@ def engagement_stats(conn: sqlite3.Connection) -> dict[str, int]:
     return stats
 
 
+_PREFERENCE_KEYS = {"export_format", "result_count", "preferred_states"}
+
+
+def set_user_preference(conn: sqlite3.Connection, workspace: str, slack_user: str,
+                        key: str, value: object, channel: str,
+                        message_ts: str) -> None:
+    """Upsert one explicit allowlisted preference without logging its value."""
+    if not workspace or not slack_user or key not in _PREFERENCE_KEYS:
+        raise ValueError("unsupported or unscoped preference")
+    encoded = json.dumps(value, sort_keys=True)
+    now = _now()
+    with conn:
+        conn.execute(
+            """INSERT INTO user_preferences
+                 (workspace,slack_user,preference_key,value_json,created_at,updated_at)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(workspace,slack_user,preference_key) DO UPDATE SET
+                 value_json=excluded.value_json,updated_at=excluded.updated_at""",
+            (workspace, slack_user, key, encoded, now, now))
+        conn.execute(
+            """INSERT INTO user_preference_events
+                 (workspace,slack_user,preference_key,action,occurred_at,
+                  source_channel,source_message_ts)
+               VALUES (?,?,?,'set',?,?,?)""",
+            (workspace, slack_user, key, now, channel, message_ts))
+
+
+def user_preferences(conn: sqlite3.Connection, workspace: str,
+                     slack_user: str) -> dict[str, object]:
+    """Read preferences only for the exact authenticated workspace/user pair."""
+    if not workspace or not slack_user:
+        return {}
+    return {str(row["preference_key"]): json.loads(str(row["value_json"]))
+            for row in conn.execute(
+                """SELECT preference_key,value_json FROM user_preferences
+                   WHERE workspace=? AND slack_user=? ORDER BY preference_key""",
+                (workspace, slack_user))}
+
+
+def forget_user_preferences(conn: sqlite3.Connection, workspace: str,
+                            slack_user: str, key: str | None, channel: str,
+                            message_ts: str) -> int:
+    """Physically delete one/all preference values and retain only key/action audit."""
+    if not workspace or not slack_user or (key is not None and key not in _PREFERENCE_KEYS):
+        raise ValueError("unsupported or unscoped preference")
+    rows = [str(row[0]) for row in conn.execute(
+        """SELECT preference_key FROM user_preferences
+           WHERE workspace=? AND slack_user=? AND (? IS NULL OR preference_key=?)""",
+        (workspace, slack_user, key, key))]
+    now = _now()
+    with conn:
+        conn.execute(
+            """DELETE FROM user_preferences WHERE workspace=? AND slack_user=?
+               AND (? IS NULL OR preference_key=?)""",
+            (workspace, slack_user, key, key))
+        conn.executemany(
+            """INSERT INTO user_preference_events
+                 (workspace,slack_user,preference_key,action,occurred_at,
+                  source_channel,source_message_ts)
+               VALUES (?,?,?,'forget',?,?,?)""",
+            [(workspace, slack_user, item, now, channel, message_ts) for item in rows])
+    return len(rows)
+
+
 def posts_today(conn: sqlite3.Connection, channel: str,
                 now_utc: datetime | None = None) -> list[sqlite3.Row]:
     """Today's proactive posts in Pacific time, where the Slack team operates."""

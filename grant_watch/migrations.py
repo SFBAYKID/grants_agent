@@ -486,6 +486,33 @@ def _migration_9_salesforce_followup_state(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_10_user_preferences(conn: sqlite3.Connection) -> None:
+    """Store explicit, allowlisted preferences by exact workspace and Slack user."""
+    _execute_script(conn,
+        """
+        CREATE TABLE IF NOT EXISTS user_preferences (
+          workspace TEXT NOT NULL,
+          slack_user TEXT NOT NULL,
+          preference_key TEXT NOT NULL,
+          value_json TEXT NOT NULL,
+          created_at TIMESTAMP NOT NULL,
+          updated_at TIMESTAMP NOT NULL,
+          PRIMARY KEY(workspace,slack_user,preference_key)
+        );
+        CREATE TABLE IF NOT EXISTS user_preference_events (
+          id INTEGER PRIMARY KEY,
+          workspace TEXT NOT NULL,
+          slack_user TEXT NOT NULL,
+          preference_key TEXT NOT NULL,
+          action TEXT NOT NULL CHECK(action IN ('set','forget')),
+          occurred_at TIMESTAMP NOT NULL,
+          source_channel TEXT NOT NULL,
+          source_message_ts TEXT NOT NULL
+        );
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "legacy-compatible base", _migration_1_base),
     Migration(2, "truth observations and events", _migration_2_truth_events),
@@ -497,6 +524,7 @@ MIGRATIONS: tuple[Migration, ...] = (
               _migration_7_conversation_and_outreach_truth),
     Migration(8, "complete search snapshots", _migration_8_complete_search_snapshots),
     Migration(9, "Salesforce follow-up reminder state", _migration_9_salesforce_followup_state),
+    Migration(10, "tenant-scoped user preferences", _migration_10_user_preferences),
 )
 
 
