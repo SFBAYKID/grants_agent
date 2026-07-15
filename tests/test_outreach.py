@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+import requests
 
 from grant_watch import db, persequor_client
 from grant_watch.enrich.finder import verify_on_page
@@ -119,6 +120,131 @@ def test_submit_persists_before_post_and_reports_unreachable(
     # the request was persisted BEFORE the failed POST (idempotency anchor)
     saved = conn.execute("SELECT draft FROM outreach WHERE channel='persequor'").fetchone()
     assert saved is not None and brief["request_id"] in saved["draft"]
+
+
+class _AcceptedResponse:
+    """Minimal requests-compatible accepted response for offline handoff tests."""
+
+    status_code = 202
+    text = "accepted"
+
+
+def test_retry_reuses_request_id_and_does_not_duplicate_row(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed POST is retried from one row with the original idempotency key."""
+    monkeypatch.setenv("OUTREACH_TEST_EMAIL", "chase@monarchconnected.com")
+    conn, row = _lead_row(tmp_path)
+    brief = persequor_client.build_brief(
+        row, None, "U01DPJVURHU", "chase@monarchconnected.com")
+    assert brief is not None
+
+    def fail_post(*_args: object, **_kwargs: object) -> object:
+        """Simulate a transient connection failure without network access."""
+        raise requests.ConnectionError("offline")
+
+    monkeypatch.setattr(persequor_client.requests, "post", fail_post)
+    state, _message = persequor_client.submit_brief(conn, int(row["id"]), brief)
+    assert state == "unreachable"
+    conn.execute("UPDATE outreach SET next_attempt_at='2000-01-01T00:00:00+00:00'")
+    conn.commit()
+
+    sent_ids: list[str] = []
+
+    def accept_post(_url: str, json: object, **_kwargs: object) -> _AcceptedResponse:
+        """Capture the retried id and simulate Persequor accepting it."""
+        assert isinstance(json, dict)
+        sent_ids.append(str(json["request_id"]))
+        return _AcceptedResponse()
+
+    monkeypatch.setattr(persequor_client.requests, "post", accept_post)
+    summary = persequor_client.retry_pending(conn)
+    saved = conn.execute("SELECT * FROM outreach").fetchall()
+    assert summary.submitted == 1
+    assert sent_ids == [brief["request_id"]]
+    assert len(saved) == 1 and saved[0]["status"] == "submitted"
+
+
+def test_request_id_is_stable_per_event_user_and_thread(tmp_path: Path) -> None:
+    """Repeated Slack clicks for the same event cannot mint another outreach key."""
+    conn, row = _lead_row(tmp_path)
+    first = persequor_client.request_id_for(row, "U1", "C1", "100.1")
+    second = persequor_client.request_id_for(row, "U1", "C1", "100.1")
+    other_thread = persequor_client.request_id_for(row, "U1", "C1", "100.2")
+    assert first == second
+    assert first != other_thread
+
+
+def test_repeated_submit_does_not_make_second_http_request(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A queued/sending persisted key is the local idempotency boundary."""
+    monkeypatch.setenv("OUTREACH_TEST_EMAIL", "chase@monarchconnected.com")
+    conn, row = _lead_row(tmp_path)
+    request_id = persequor_client.request_id_for(row, "U1", "C1", "100.1")
+    brief = persequor_client.build_brief(
+        row, None, "U1", "chase@monarchconnected.com", request_id=request_id)
+    assert brief is not None
+    calls = 0
+
+    def fail_post(*_args: object, **_kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        raise requests.ConnectionError("offline")
+
+    monkeypatch.setattr(persequor_client.requests, "post", fail_post)
+    first, _ = persequor_client.submit_brief(conn, int(row["id"]), brief)
+    second, message = persequor_client.submit_brief(conn, int(row["id"]), brief)
+    assert first == "unreachable" and second == "unreachable"
+    assert "did not create another copy" in message
+    assert calls == 1
+
+
+def test_retry_compare_and_set_skips_already_sending_row(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two retry workers cannot both POST the same queued outbox row."""
+    conn, row = _lead_row(tmp_path)
+    conn.execute(
+        """INSERT INTO outreach
+             (lead_id,channel,draft,request_id,status,attempts,created_at)
+           VALUES (?,'persequor','{}','req-race','sending',1,
+                   '2000-01-01T00:00:00+00:00')""",
+        (int(row["id"]),),
+    )
+    conn.commit()
+
+    def unexpected(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("already-sending row posted twice")
+
+    monkeypatch.setattr(persequor_client.requests, "post", unexpected)
+    saved = conn.execute(
+        "SELECT * FROM outreach WHERE request_id='req-race'").fetchone()
+    state, message = persequor_client._attempt_saved(conn, saved)
+    assert state == "unreachable"
+    assert "already being processed" in message
+
+
+def test_retry_dry_run_makes_no_request_or_write(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A retry dry-run only counts due rows and leaves attempts untouched."""
+    conn, row = _lead_row(tmp_path)
+    conn.execute(
+        """INSERT INTO outreach
+             (lead_id,channel,draft,request_id,status,attempts,created_at,next_attempt_at)
+           VALUES (?,'persequor','{}','req-dry','queued',1,
+                   '2000-01-01T00:00:00+00:00','2000-01-01T00:00:00+00:00')""",
+        (int(row["id"]),),
+    )
+    conn.commit()
+
+    def unexpected_post(*_args: object, **_kwargs: object) -> object:
+        """Fail the test if dry-run performs external I/O."""
+        raise AssertionError("dry-run posted")
+
+    monkeypatch.setattr(persequor_client.requests, "post", unexpected_post)
+    summary = persequor_client.retry_pending(conn, dry_run=True)
+    attempts = conn.execute(
+        "SELECT attempts FROM outreach WHERE request_id='req-dry'").fetchone()[0]
+    assert summary == persequor_client.RetrySummary(1, 0, 1, 0)
+    assert attempts == 1
 
 
 # ------------------------------------------------------------ contact storage

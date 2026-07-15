@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from datetime import date
-from typing import Any
+from typing import Any  # Anthropic tool-use response payloads are runtime-shaped.
 
 from anthropic import Anthropic
 
@@ -77,9 +78,10 @@ but do NOT re-ask what they answered. Confirm ONCE: if the recent thread shows y
 already confirmed and they said yes / go ahead, DON'T ask again — run the search now.
 
 STEP 2 — SEARCH. Once confirmed, call search_leads with their filters. Pass their count
-as limit; pass export="excel" or export="google_sheet" if they chose a file, or no
-export if they just want it in the thread. Then give the ranked results (or the file)
-briefly.
+as limit and result_scope="top_n"; use result_scope="all" only when they explicitly
+asked for every match. Pass export="excel" or export="google_sheet" if they chose a
+file, or no export if they chose Slack. Then give the ranked results briefly. If code
+reports more than 15 matches and asks for Excel or Google Sheet, ask that choice exactly.
 
 STEP 3 — THEN OFFER CONTACTS (never automatic). After the list, OFFER to find the best
 contact for each org as a SECOND step, because it's slower (~30s per org): "Want me to
@@ -89,11 +91,13 @@ filters, with_contacts=true and limit=<that count>. That finds each org's real c
 (a verified email or an honest not-found) and adds contact columns to the list/export.
 Never enrich contacts unless they ask.
 
-CITY TRUTH RULE: the database has NO reliable city/location field. If a rep asks about a
-CITY ("schools in San Francisco", "Chicago districts"), you can only filter by STATE and
-by name text (name_contains) — say that plainly ("I can't filter by city exactly, so I'll
-search Illinois and match 'Chicago' in the name — want me to go ahead?"). NEVER imply you
-filtered by city when you actually filtered by state.
+CITY/ENROLLMENT TRUTH RULE: for school districts, search_leads can match official NCES
+district enrollment and district-office city when the rep supplies a two-letter state.
+Pass city and/or enrollment_min/enrollment_max with the state. The tool discloses NCES
+coverage and excludes unmatched entities from an applied enrollment filter. If NCES is
+unavailable or does not match the source entity, repeat the limitation exactly and never
+claim that the city/enrollment filter was applied. This does not provide school-level
+enrollment or a reliable city field for non-school entities.
 
 DATE TRUTH RULES (non-negotiable):
 - discovered = when Grant first imported the record; never call it awarded/received.
@@ -107,24 +111,42 @@ DATE TRUTH RULES (non-negotiable):
 - For "next month," use the next CALENDAR month relative to CURRENT_DATE and pass exact
   inclusive date_from/date_to values. Never turn it into "the next 30 days."
 
-ORG TRUTH RULE: org_type means the entity itself (school/city/county/hospital), not a
-geographic city field; the database does not currently store a reliable city location.
+ORG TRUTH RULE: org_type means the entity itself (school/city/county/hospital). The city
+field is NCES district-office location only and must not be generalized to other orgs.
 
 Export is either an Excel file (export="excel") or a Google Sheet you create and share
 with the rep (export="google_sheet") — both land right here in Slack. After results,
 offer to refine, export, or (per STEP 3) find contacts.
 
-TOOLS: web_search; query_leads (read-only SQL, for questions search_leads can't express);
+TOOLS: web_search; lead_stats (typed read-only counts with no raw SQL);
 search_leads (filtered grant search + optional Excel export); find_contact
 (searches an awardee's real website for a Technology Director / Superintendent /
 Principal, storing only emails that appear verbatim on a fetched page); salesforce_lookup
 (is this awardee already an Account/Lead/Opportunity in our CRM, and who owns it — with
-a clickable link); make_spreadsheet (a real .xlsx attached to your reply). Use them
+a clickable link). Use them
 whenever they'd genuinely help. When a rep asks "who do we contact?", run find_contact
 AND salesforce_lookup — if it's already in Salesforce, hand them the link and tell them
 who owns it before they reach out. Never invent a link, number, contact, or fact: if a
 tool errored or found nothing, say so cheerfully and plainly. Present 'possible' CRM
 matches as possible, never asserted.
+
+SALESFORCE CAMPAIGNS — EXPLICIT APPROVALS, NEVER SILENT WRITES:
+- After returning a fixed lead set, you may OFFER: "Would you like me to add these leads
+  to a Salesforce Campaign?" Do not prepare anything until the user says yes.
+- Ask for the Campaign name or link, then call salesforce_campaign_search. Show the
+  result and ask the user to confirm the exact Campaign. Never select among multiple
+  or fuzzy results yourself.
+- If none exists, offer a new Campaign. Only after the user gives the name and says to
+  create it, call salesforce_campaign_create_preview. The preview gets a one-time Slack
+  confirmation button; typed yes alone never performs the write.
+- For a confirmed Campaign, call salesforce_campaign_members_preview with the exact
+  Grant lead IDs. First leave allow_org_leads=false. If an organization is unmatched,
+  ask the user for a Lead/Contact link. If they cannot find one, OFFER organization-only
+  Lead creation. Only after explicit approval call it again with allow_org_leads=true.
+- Organization-only means the real organization fills Company and LastName and all
+  person/contact fields stay blank. Never imply a person was found.
+- Campaign and member tools prepare audited previews only. Tell the user to inspect and
+  click the confirmation button. Never claim Salesforce was changed from a preview.
 
 THE OUTREACH HANDOFF (important): you do NOT write or send the outreach email —
 that's Persequor, a separate email agent. Persequor is CALL-ONLY: it only acts when
@@ -197,10 +219,34 @@ def _parse_final(raw: str) -> dict[str, Any]:
             "reply": "Hmm, I fumbled that one — mind rephrasing?"}
 
 
+_CRM_ACTION_RE = re.compile(
+    r"<grant-crm-action>(\{.*?\})</grant-crm-action>", re.DOTALL)
+
+
+def _extract_pending_action(text: str) -> tuple[str, dict[str, str] | None]:
+    """Remove a server-only CRM marker and return its validated button metadata."""
+    match = _CRM_ACTION_RE.search(text)
+    if match is None:
+        return text, None
+    clean = _CRM_ACTION_RE.sub("", text).strip()
+    try:
+        value = json.loads(match.group(1))
+        action = {
+            "action_id": str(value["action_id"]),
+            "nonce": str(value["nonce"]),
+            "preview": str(value["preview"]),
+            "expires_at": str(value["expires_at"]),
+        }
+    except (KeyError, TypeError, json.JSONDecodeError):
+        return clean, None
+    return clean, action
+
+
 def respond(user_text: str, row: sqlite3.Row | None,
             thread_context: list[str] | None = None,
             on_progress: tools.Progress | None = None,
-            requester_slack: str = "") -> dict[str, Any]:
+            requester_slack: str = "", workspace: str = "", channel: str = "",
+            thread_ts: str = "") -> dict[str, Any]:
     """One conversational turn, with tool use.
 
     Returns {'intent': str, 'reply': str, 'files': [GeneratedArtifact]}; grant.py owns
@@ -220,6 +266,7 @@ def respond(user_text: str, row: sqlite3.Row | None,
                     f"{context}\n\nUser says: {user_text}"),
     }]
     files: list[GeneratedArtifact] = []
+    pending_actions: list[dict[str, str]] = []
     model = os.environ.get("GRANT_MODEL", DEFAULT_MODEL)
 
     try:
@@ -233,6 +280,7 @@ def respond(user_text: str, row: sqlite3.Row | None,
                 raw = "".join(b.text for b in msg.content if b.type == "text")
                 out = _parse_final(raw)
                 out["files"] = files
+                out["pending_crm_actions"] = pending_actions
                 return out
             # Execute every tool call in this turn and feed results back.
             messages.append({"role": "assistant", "content": msg.content})
@@ -242,9 +290,13 @@ def respond(user_text: str, row: sqlite3.Row | None,
                     continue
                 text, artifact = tools.run_tool(
                     block.name, dict(block.input), say,
-                    requester_slack=requester_slack)
+                    requester_slack=requester_slack, workspace=workspace,
+                    channel=channel, thread_ts=thread_ts)
                 if artifact:
                     files.append(artifact)
+                text, action = _extract_pending_action(text)
+                if action is not None:
+                    pending_actions.append(action)
                 results.append({"type": "tool_result", "tool_use_id": block.id,
                                 "content": text})
             messages.append({"role": "user", "content": results})
@@ -254,5 +306,6 @@ def respond(user_text: str, row: sqlite3.Row | None,
         raise
 
     return {"intent": "question", "files": files,
+            "pending_crm_actions": pending_actions,
             "reply": "That took more digging than I expected and I hit my limit — "
                      "try narrowing the ask and I'll go again."}

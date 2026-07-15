@@ -20,6 +20,12 @@ def usaspending_16710_wa() -> dict[str, Any]:
 
 
 @pytest.fixture()
+def usaspending_nsgp_wa() -> dict[str, Any]:
+    """Real WA NSGP subaward response excerpt captured from the live no-key API."""
+    return json.loads((FIXTURES / "usaspending_nsgp_wa.json").read_text())
+
+
+@pytest.fixture()
 def grants_gov_payload() -> dict[str, Any]:
     """Real search2 response for 'school violence prevention' (25 hits)."""
     return json.loads((FIXTURES / "grants_gov_svp.json").read_text())
@@ -36,3 +42,15 @@ def webs_html() -> str:
     """Real WEBS bid-calendar HTML (187 <tr> rows; verified to contain ZERO security
     keywords on capture day — so 0 parsed items is the CORRECT expectation)."""
     return (FIXTURES / "webs_bidcalendar.html").read_text()
+
+
+@pytest.fixture()
+def ca_grants_opportunities_csv() -> str:
+    """Recorded-shape California opportunity rows with physical/cyber/closed cases."""
+    return (FIXTURES / "ca_grants_opportunities.csv").read_text()
+
+
+@pytest.fixture()
+def ca_grants_awards_csv() -> str:
+    """Recorded-shape California award rows with approved/denied/noise cases."""
+    return (FIXTURES / "ca_grants_awards.csv").read_text()

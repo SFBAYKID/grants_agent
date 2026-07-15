@@ -2,29 +2,48 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from openpyxl import load_workbook
 
+from grant_watch import db
+from grant_watch.models import Lead, LeadGrade, RawItem
 from grant_watch.slack import tools
+from grant_watch.spreadsheets import make_spreadsheet
 
 
-# ------------------------------------------------------------------ query_leads
-def test_query_leads_rejects_non_select() -> None:
-    assert tools.query_leads("DELETE FROM leads").startswith("ERROR")
-    assert tools.query_leads("update leads set status='x'").startswith("ERROR")
-    assert tools.query_leads("SELECT 1; DROP TABLE leads").startswith("ERROR")
+# ------------------------------------------------------------------ lead_stats
+def test_lead_stats_uses_typed_allowlisted_view(tmp_path: Path) -> None:
+    """Counts come from a throwaway DB without model-authored SQL or local state."""
+    path = tmp_path / "stats.db"
+    conn = db.connect(path)
+    db.upsert_lead(conn, Lead(
+        RawItem("test", "1", "award", "Alpha District", "CA", "SVPP",
+                100_000, "2026-01-01", "2027-01-01", "", {}),
+        LeadGrade.GOLD,
+    ))
+    out = tools.lead_stats(group_by="grade", db_path=path)
+    assert "gold: 1" in out
 
 
-def test_query_leads_runs_select() -> None:
-    out = tools.query_leads("SELECT COUNT(*) AS n FROM leads")
-    assert out.startswith("n") and not out.startswith("ERROR")
+def test_raw_sql_tool_is_not_exposed() -> None:
+    """The conversational model has no arbitrary database query capability."""
+    names = {schema["name"] for schema in tools.TOOL_SCHEMAS}
+    assert "query_leads" not in names
+    assert "make_spreadsheet" not in names
+    assert "lead_stats" in names
+    search_schema = next(schema for schema in tools.TOOL_SCHEMAS
+                         if schema["name"] == "search_leads")
+    properties = search_schema["input_schema"]["properties"]
+    assert {"city", "enrollment_min", "enrollment_max"} <= set(properties)
 
 
 # ------------------------------------------------------------------ spreadsheet
 def test_make_spreadsheet_builds_real_xlsx() -> None:
     """The spreadsheet helper creates a readable workbook with numeric cells intact."""
-    text, artifact = tools.make_spreadsheet("test export.xlsx",
-                                            [["entity", "amount"],
-                                             ["Castle Rock SD", 500000]])
+    text, artifact = make_spreadsheet("test export.xlsx",
+                                      [["entity", "amount"],
+                                       ["Castle Rock SD", 500000]])
     assert "attached" in text
     wb = load_workbook(artifact.path)
     ws = wb.active
@@ -35,7 +54,7 @@ def test_make_spreadsheet_builds_real_xlsx() -> None:
 
 def test_make_spreadsheet_sanitizes_filename() -> None:
     """User-supplied filenames cannot escape the private temporary directory."""
-    _, artifact = tools.make_spreadsheet("../..//evil name!!", [["a"]])
+    _, artifact = make_spreadsheet("../..//evil name!!", [["a"]])
     name = artifact.path.name
     assert "/" not in name and name.endswith(".xlsx")
     artifact.cleanup()
@@ -43,7 +62,7 @@ def test_make_spreadsheet_sanitizes_filename() -> None:
 
 def test_make_spreadsheet_neutralizes_formulas_but_keeps_negative_numbers() -> None:
     """External formula-like strings become text while genuine numbers remain numeric."""
-    _, artifact = tools.make_spreadsheet(
+    _, artifact = make_spreadsheet(
         "safe.xlsx",
         [["equals", "plus", "minus", "at", "spaced", "negative"],
          ["=1+1", "+cmd", "-formula", "@name", " \t=SUM(A1:A2)", -25.0]],

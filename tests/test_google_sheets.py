@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from googleapiclient.errors import HttpError
 
 from grant_watch import google_sheets
 
@@ -68,6 +69,26 @@ class _FakeFiles:
         return _FakeCall({"id": "SID123",
                           "webViewLink": "https://docs.google.com/spreadsheets/d/SID123"})
 
+    def delete(self, **kwargs: object) -> _FakeCall:
+        """Record cleanup of an incomplete/unshared spreadsheet."""
+        self._log["files.delete"] = kwargs
+        return _FakeCall({})
+
+
+class _HttpResponse:
+    """Minimal httplib2-style response carried by googleapiclient HttpError."""
+
+    status = 403
+    reason = "forbidden"
+
+
+class _FailCall:
+    """A Google API call that fails with an HTTP 403 when executed."""
+
+    def execute(self) -> object:
+        """Raise the same exception type the real Google client uses."""
+        raise HttpError(_HttpResponse(), b'{"error":"forbidden"}')
+
 
 class _FakePermissions:
     """Records permissions().create as permissions.create."""
@@ -75,9 +96,11 @@ class _FakePermissions:
     def __init__(self, log: dict[str, object]) -> None:
         self._log = log
 
-    def create(self, **kwargs: object) -> _FakeCall:
+    def create(self, **kwargs: object) -> _FakeCall | _FailCall:
         """Record the share call."""
         self._log["permissions.create"] = kwargs
+        if self._log.get("fail_share"):
+            return _FailCall()
         return _FakeCall({})
 
 
@@ -188,3 +211,18 @@ def test_create_sheet_maps_none_to_empty_cell(
         "x", ["a", "b"], [["only", None]], REP_SLACK, REP_EMAIL)
     values = log["values.update"]["body"]["values"]  # type: ignore[index]
     assert values[1] == ["only", ""]
+
+
+def test_share_failure_removes_sheet_and_reports_error(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """An unshared sheet is deleted and never reported as a successful export."""
+    log = _wire_fakes(monkeypatch, tmp_path)
+    log["fail_share"] = True
+    state, message = google_sheets.create_sheet(
+        "x", ["entity"], [["District"]], REP_SLACK, REP_EMAIL)
+    assert state == "error"
+    assert "could not be shared" in message
+    delete_kwargs = log["files.delete"]
+    assert isinstance(delete_kwargs, dict)
+    assert delete_kwargs["fileId"] == "SID123"
+    assert delete_kwargs["supportsAllDrives"] is True

@@ -17,7 +17,7 @@ from __future__ import annotations
 import random
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from slack_sdk import WebClient
@@ -30,7 +30,9 @@ _BULLETIN_RELEVANT_RE = re.compile(
     r"school|violence|security|surveillance|access control|cctv|hardening"
     r"|emergency|safety|svpp|cops", re.IGNORECASE)
 
-DAILY_CAP = 3            # posts per day across both kinds (start slow, raise later)
+DAILY_AIM = 2            # normal target; jitter decides whether a third is worthwhile
+DAILY_CAP = 3            # normal hard cap across both kinds
+ABSOLUTE_CAP = 4         # rare fourth only for a newly dated exceptional event
 MIN_GAP_MINUTES = 90     # never two posts closer than this
 POST_PROBABILITY = 0.45  # per-eligible-tick chance — the "sporadic" in the spec
 BULLETIN_MAX_PER_DAY = 1
@@ -57,6 +59,27 @@ def _fmt_amount(amount: float | None) -> str:
     return f"${amount / 1_000:.0f}K"
 
 
+def _row_value(row: sqlite3.Row, key: str) -> object | None:
+    """Read an optional joined column without requiring it in unit-level lead rows."""
+    return row[key] if key in row.keys() else None
+
+
+def _salesforce_context(row: sqlite3.Row) -> str:
+    """Render one concise, persisted read-only CRM link when a high match exists."""
+    opportunity_link = str(_row_value(row, "salesforce_opportunity_link") or "")
+    if opportunity_link:
+        name = str(_row_value(row, "salesforce_opportunity_name") or "open Opportunity")
+        owner = str(_row_value(row, "salesforce_opportunity_owner") or "")
+        owner_text = f", owned by {owner}" if owner else ""
+        return f"\nSalesforce: <{opportunity_link}|{name}>{owner_text}."
+    account_link = str(_row_value(row, "salesforce_account_link") or "")
+    if account_link:
+        owner = str(_row_value(row, "salesforce_account_owner") or "")
+        owner_text = f", owned by {owner}" if owner else ""
+        return f"\nSalesforce: <{account_link}|existing Account>{owner_text}."
+    return ""
+
+
 def build_nugget(row: sqlite3.Row) -> tuple[str, str]:
     """(text, style_tag) for an award nugget. Styles are tagged so engagement points
     can tell us which phrasing actually gets responses. All facts from the row."""
@@ -65,55 +88,89 @@ def build_nugget(row: sqlite3.Row) -> tuple[str, str]:
     amt = _fmt_amount(row["amount"])
     year = (row["funds_end"] or "")[:4]
     link = f"\n<{row['detail_url']}|award record>" if row["detail_url"] else ""
+    event_date = row["current_event_occurred_on"] or ""
+    source_name = "USAspending" if str(row["source"]).startswith("usaspending:") \
+        else "The source record"
+    evidence = (f"{source_name} records an award event dated {event_date}"
+                if event_date else f"{source_name} lists an award")
+    amount_phrase = f" for {amt}" if amt else ""
+    amount_with = f" with {amt}" if amt else ""
+    window_phrase = f"; its spend window runs through {year}" if year else ""
+    salesforce_context = _salesforce_context(row)
     styles = [
-        ("ask-me", f"Hey team — {entity} in {state} just got {amt} for school "
-                   f"security. Ask me here if you want it.{link}"),
-        ("window", f"{entity} ({row['state']}) just landed {amt} in "
-                   f"{row['program'] or 'security'} money — spend window runs through "
-                   f"{year}. Details here if you want them.{link}"),
-        ("worth-a-look", f"New one: {entity}, {state} — {amt} for "
-                         f"{row['program'] or 'security'}. Worth a look if that's your "
-                         f"territory.{link}"),
+        ("ask-me", f"{evidence} for {entity} in {state}{amount_phrase}{window_phrase}. "
+                   f"Ask me here if you want the details.{link}{salesforce_context}"),
+        ("window", f"Award record worth a look: {entity} ({row['state']}){amount_phrase} "
+                   f"in {row['program'] or 'security'} funding{window_phrase}."
+                   f"{link}{salesforce_context}"),
+        ("worth-a-look", f"{source_name} lists {entity}, {state}{amount_with} in "
+                         f"{row['program'] or 'security'} funding{window_phrase}. Worth a look "
+                         f"if that's your territory.{link}{salesforce_context}"),
     ]
     style, text = random.choice(styles)
     return text, style
 
 
 def build_bulletin(row: sqlite3.Row) -> tuple[str, str]:
-    """(text, style_tag) for a program-news bulletin from a grants.gov row.
-    Uses the opportunity TITLE (the news) with the posting agency as fallback."""
+    """Build truthful program news from an official opportunity record.
+
+    The opportunity title is the news, with the posting agency as fallback.
+    """
     what = (row["title"] or "").strip() or row["entity_name"] or "A federal program"
     close = f", closes {row['funds_end'][:10]}" if row["funds_end"] else ""
     link = f"\n<{row['detail_url']}|opportunity>" if row["detail_url"] else ""
-    text = (f"Heads up — \"{what}\" application window is open{close}. "
+    source_name = ("California Grants Portal"
+                   if row["source"] == "ca-grants-portal" else "Grants.gov")
+    text = (f"Heads up — {source_name} lists \"{what}\" as open{close}. "
             f"Worth mentioning to clients who'd apply.{link}")
     return text, "bulletin-open"
 
 
 def pacing_ok(conn: sqlite3.Connection, channel: str, now_utc: datetime,
-              rng: random.Random) -> tuple[bool, str]:
+              rng: random.Random, urgent: bool = False) -> tuple[bool, str]:
     """Cap + gap + jitter (window handled separately so each rule tests cleanly)."""
-    today = db.posts_today(conn, channel)
-    if len(today) >= DAILY_CAP:
+    today = db.posts_today(conn, channel, now_utc)
+    if len(today) >= ABSOLUTE_CAP:
+        return False, f"absolute daily cap reached ({ABSOLUTE_CAP})"
+    if len(today) >= DAILY_CAP and not urgent:
         return False, f"daily cap reached ({DAILY_CAP})"
+    if len(today) >= DAILY_CAP and any(bool(post["urgent"]) for post in today):
+        return False, "daily cap reached; exceptional slot already used"
     if today:
         last = datetime.fromisoformat(today[-1]["posted_at"])
         gap_min = (now_utc - last).total_seconds() / 60
         if gap_min < MIN_GAP_MINUTES:
             return False, f"only {gap_min:.0f}m since last post (min {MIN_GAP_MINUTES}m)"
-    if rng.random() > POST_PROBABILITY:
+    probability = POST_PROBABILITY if len(today) < DAILY_AIM else 0.25
+    if not urgent and rng.random() > probability:
         return False, "jitter skip (keeps timing feeling human)"
     return True, "eligible"
 
 
 def should_post(conn: sqlite3.Connection, channel: str, now_utc: datetime,
-                rng: random.Random, force: bool = False) -> tuple[bool, str]:
+                rng: random.Random, force: bool = False,
+                urgent: bool = False) -> tuple[bool, str]:
     """The full gate: window first, then pacing. Returns (go, reason)."""
     if force:
         return True, "forced"
     if not in_window(now_utc):
         return False, "outside Mon-Fri 8am ET – 5pm PT window"
-    return pacing_ok(conn, channel, now_utc, rng)
+    return pacing_ok(conn, channel, now_utc, rng, urgent=urgent)
+
+
+def _is_exceptional(row: sqlite3.Row, today: date) -> bool:
+    """Allow the rare fourth post only for a recent, verified, top-tier event."""
+    occurred_raw = str(row["current_event_occurred_on"] or "")
+    try:
+        occurred = date.fromisoformat(occurred_raw[:10])
+    except ValueError:
+        return False
+    if str(row["current_event_verification_status"] or "") != "verified":
+        return False
+    if occurred < today - timedelta(days=7) or occurred > today:
+        return False
+    base = scoring.lead_score(row["program"], row["amount"], occurred_raw, today)
+    return base >= 0.85
 
 
 def pick(conn: sqlite3.Connection, channel: str) -> tuple[str, sqlite3.Row] | None:
@@ -121,8 +178,14 @@ def pick(conn: sqlite3.Connection, channel: str) -> tuple[str, sqlite3.Row] | No
     only when no nugget is available and today's bulletin slot is unused."""
     nuggets = db.nugget_candidates(conn)
     if nuggets:
-        best = max(nuggets, key=lambda r: scoring.lead_score(
-            r["program"], r["amount"], r["funds_start"] or ""))
+        best = max(nuggets, key=lambda r: (
+            2 if r["salesforce_opportunity_link"] else
+            1 if r["salesforce_account_link"] else 0,
+            scoring.lead_score(
+                r["program"], r["amount"], r["current_event_occurred_on"] or "")
+            * scoring.feedback_multiplier(
+                db.program_outcome_points(conn, r["program"] or "")),
+        ))
         return "nugget", best
     bulletins_today = sum(1 for p in db.posts_today(conn, channel)
                           if p["kind"] == "bulletin")
@@ -139,17 +202,33 @@ def run_drip(client: WebClient | None, channel: str, conn: sqlite3.Connection,
     """One cron tick: maybe post one thing. Returns a human-readable outcome."""
     rng = rng or random.Random()
     now = datetime.now(timezone.utc)
-    go, reason = should_post(conn, channel, now, rng, force=force)
-    if not go:
-        return f"skip: {reason}"
     choice = pick(conn, channel)
     if choice is None:
         return "skip: nothing new worth saying"
     kind, row = choice
+    urgent = kind == "nugget" and _is_exceptional(row, now.date())
+    go, reason = should_post(conn, channel, now, rng, force=force, urgent=urgent)
+    if not go:
+        return f"skip: {reason}"
     text, style = build_nugget(row) if kind == "nugget" else build_bulletin(row)
     if dry_run:
         return f"[dry-run] would post {kind} ({style}): {text}"
-    resp = client.chat_postMessage(channel=channel, text=text, unfurl_links=False)
-    db.record_post(conn, kind, int(row["id"]), channel, resp["ts"], style)
+    event_id = int(row["current_event_id"]) if row["current_event_id"] else None
+    delivery_key = db.reserve_notification(
+        conn, int(row["id"]), event_id, channel, kind,
+        {"text": text, "style": style, "urgent": urgent})
+    if delivery_key is None:
+        return "skip: this funding event is already reserved or delivered"
+    assert client is not None
+    try:
+        resp = client.chat_postMessage(channel=channel, text=text, unfurl_links=False)
+    except Exception as exc:  # noqa: BLE001 — timeout is ambiguous; never blind-retry
+        db.finish_notification(
+            conn, delivery_key, "unknown", error=type(exc).__name__)
+        return ("unknown: Slack delivery could not be confirmed; Grant will not "
+                "auto-retry this event to avoid a duplicate")
+    db.record_post(conn, kind, int(row["id"]), channel, resp["ts"], style,
+                   delivery_key=delivery_key, event_id=event_id, urgent=urgent)
+    db.finish_notification(conn, delivery_key, "delivered", slack_ts=resp["ts"])
     db.mark_surfaced(conn, [int(row["id"])])
     return f"posted {kind} ({style}) for lead #{row['id']}: {row['entity_name']}"

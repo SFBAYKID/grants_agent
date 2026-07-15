@@ -1,22 +1,9 @@
-"""Salesforce cross-reference — STRICTLY READ-ONLY.
+"""Strictly read-only Salesforce matching with explicit availability outcomes.
 
-Grant answers "is this awardee already in our CRM, and who owns it?" so a rep never
-cold-emails an org a teammate is already working. It returns record links + owner.
-
-╔═══════════════════════════════════════════════════════════════════════════════════╗
-║ READ-ONLY IS A HARD RULE. This module issues ONLY GET /query and GET /search.       ║
-║ It contains NO create / update / delete / upsert — not now, not ever. All data      ║
-║ access goes through _readonly_get(), which refuses anything but GET. (The one POST  ║
-║ is the OAuth token request, which mints a read token — it changes no CRM data.)     ║
-║ Defense in depth: the connected app's run-as user should also have a read-only      ║
-║ profile, so even a bug cannot write.                                                ║
-╚═══════════════════════════════════════════════════════════════════════════════════╝
-
-Matching is intelligent, not exact: it searches by the DISTINCTIVE words of the name
-(so "ABC Schools" finds "ABC School District"), across all fields (so a domain, phone,
-or city can match too). Uncertain hits are labeled 'possible', never asserted
-(CLAUDE.md rule 1). Auth: OAuth client-credentials against the sandbox my-domain
-(verified 2026-07-14). Same code serves production once those creds go in.
+Account identity is established before Opportunity context is queried. Every CRM data
+request goes through ``_readonly_get``; this module contains no data POST/PATCH/DELETE.
+The OAuth token POST is authentication only. Campaign writes live in the separately
+credentialed ``salesforce_campaigns`` module.
 """
 
 from __future__ import annotations
@@ -26,141 +13,340 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from enum import Enum
+from typing import Any  # Salesforce REST response JSON is runtime-shaped.
+from urllib.parse import urlparse
 
 import requests
 
-API_VERSION = "v60.0"
-_TOKEN_CACHE: dict[str, Any] = {"access_token": None, "instance_url": None, "exp": 0.0}
-
+API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
 Progress = Callable[[str], None]
-_NOOP: Progress = lambda _msg: None
 
-# Generic org words dropped from the SEARCH TERM so name variations still match
-# (e.g. "Mt Morris Consolidated Schools" and "Mt Morris School District" both match
-# the distinctive term "Mt Morris").
-_GENERIC_WORDS = {
-    "school", "schools", "district", "districts", "unified", "consolidated", "public",
-    "city", "town", "county", "of", "the", "inc", "llc", "corp", "corporation",
-    "company", "co", "department", "dept", "hospital", "hospitals", "health", "system",
-    "systems", "medical", "center", "authority", "board", "education", "isd", "usd",
-}
+
+def _noop(_message: str) -> None:
+    """Ignore an optional progress update."""
+
+
+_NOOP: Progress = _noop
 
 
 @dataclass
-class SFMatch:
-    """One Salesforce record match with a clickable Lightning link."""
+class _TokenCache:
+    """In-process OAuth token cache; values never leave this module or logs."""
 
-    sobject: str          # Account | Lead | Opportunity
+    access_token: str = ""
+    instance_url: str = ""
+    expires_at: float = 0.0
+    credential_scope: str = ""
+
+
+_TOKEN_CACHE = _TokenCache()
+
+
+class SFResultStatus(str, Enum):
+    """Honest outcome of a Salesforce lookup."""
+
+    FOUND = "found"
+    NO_MATCH = "no_match"
+    AMBIGUOUS = "ambiguous"
+    PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True)
+class SFMatch:
+    """One Salesforce record reference with evidence-backed match confidence."""
+
+    sobject: str
     record_id: str
-    name: str             # record name (Account.Name / Lead full name)
-    company: str          # Lead.Company / '' for Account/Opp
+    name: str
+    company: str
     owner: str
     link: str
-    confidence: str       # high (strong match) | possible (fuzzy)
+    confidence: str
+    state: str = ""
+    website: str = ""
+    account_id: str = ""
+    stage: str = ""
+    is_closed: bool | None = None
 
 
 @dataclass
 class SFResult:
-    matched: bool = False
+    """Typed lookup result; ``no_match`` is distinct from any outage."""
+
+    status: SFResultStatus = SFResultStatus.NO_MATCH
     matches: list[SFMatch] = field(default_factory=list)
     error: str = ""
+    checked_at: float = field(default_factory=time.time)
+
+    @property
+    def matched(self) -> bool:
+        """Compatibility view used by Slack rendering."""
+        return bool(self.matches)
 
 
-def _auth() -> tuple[str, str]:
-    """Return (access_token, instance_url), cached until ~5 min before expiry."""
+_GENERIC_WORDS = {
+    "school", "schools", "district", "districts", "unified", "consolidated",
+    "public", "city", "town", "county", "of", "the", "inc", "llc", "corp",
+    "corporation", "company", "co", "department", "dept", "hospital",
+    "hospitals", "health", "system", "systems", "medical", "center", "authority",
+    "board", "education", "isd", "usd",
+}
+_SOSL_RESERVED_RE = re.compile(r"[?&|!{}\[\]()^~*:\\\"'+\-.,]")
+
+
+def _auth(force: bool = False) -> tuple[str, str]:
+    """Return a cached reader token and instance URL, refreshing when requested."""
     now = time.time()
-    if _TOKEN_CACHE["access_token"] and _TOKEN_CACHE["exp"] > now:
-        return _TOKEN_CACHE["access_token"], _TOKEN_CACHE["instance_url"]
-    dom = os.environ["SALESFORCE_MY_DOMAIN_URL"].rstrip("/")
-    resp = requests.post(f"{dom}/services/oauth2/token", data={
-        "grant_type": "client_credentials",
-        "client_id": os.environ["SALESFORCE_CLIENT_ID"],
-        "client_secret": os.environ["SALESFORCE_CLIENT_SECRET"],
-    }, timeout=20)
-    resp.raise_for_status()
-    body = resp.json()
-    _TOKEN_CACHE.update(access_token=body["access_token"],
-                        instance_url=body.get("instance_url", dom),
-                        exp=now + 25 * 60)
-    return _TOKEN_CACHE["access_token"], _TOKEN_CACHE["instance_url"]
+    domain = os.environ["SALESFORCE_MY_DOMAIN_URL"].rstrip("/")
+    client_id = os.environ["SALESFORCE_CLIENT_ID"]
+    credential_scope = f"{domain}|{client_id}"
+    if (not force and _TOKEN_CACHE.access_token and _TOKEN_CACHE.expires_at > now
+            and _TOKEN_CACHE.credential_scope == credential_scope):
+        return _TOKEN_CACHE.access_token, _TOKEN_CACHE.instance_url
+    response = requests.post(
+        f"{domain}/services/oauth2/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": os.environ["SALESFORCE_CLIENT_SECRET"],
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+    body: dict[str, Any] = response.json()  # third-party OAuth JSON is runtime-shaped
+    _TOKEN_CACHE.access_token = str(body["access_token"])
+    _TOKEN_CACHE.instance_url = str(body.get("instance_url") or domain).rstrip("/")
+    _TOKEN_CACHE.expires_at = now + 25 * 60
+    _TOKEN_CACHE.credential_scope = credential_scope
+    return _TOKEN_CACHE.access_token, _TOKEN_CACHE.instance_url
 
 
-def _readonly_get(path: str, params: dict[str, str], token: str, inst: str) -> dict:
-    """The ONLY data-access primitive: an authenticated GET. Read-only by construction
-    — this function cannot issue a write, and nothing else in this module talks to the
-    CRM data API."""
-    r = requests.get(f"{inst}/services/data/{API_VERSION}/{path}", params=params,
-                     headers={"Authorization": f"Bearer {token}"}, timeout=20)
-    r.raise_for_status()
-    return r.json()
+def _readonly_get(path: str, params: dict[str, str], token: str,
+                  instance_url: str) -> dict[str, Any]:
+    """Issue one GET-only CRM request and return its runtime-shaped JSON body."""
+    response = requests.get(
+        f"{instance_url}/services/data/{API_VERSION}/{path}",
+        params=params,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=20,
+    )
+    response.raise_for_status()
+    return response.json()  # type: ignore[no-any-return]  # requests JSON is untyped
 
 
 def distinctive_term(entity: str) -> str:
-    """Strip SOSL-reserved punctuation and generic org words, leaving the words that
-    actually identify the org — so variations of the name still match."""
-    cleaned = re.sub(r"[?&|!{}\[\]()^~*:\\\"'+\-.,]", " ", entity)
-    words = [w for w in cleaned.split()
-             if len(w) > 1 and w.lower() not in _GENERIC_WORDS]
+    """Remove SOSL punctuation and generic organization words from an entity."""
+    cleaned = _SOSL_RESERVED_RE.sub(" ", entity)
+    words = [word for word in cleaned.split()
+             if len(word) > 1 and word.lower() not in _GENERIC_WORDS]
     return " ".join(words) or cleaned.strip()
 
 
-def lookup(entity: str, domain: str = "", phone: str = "",
+def _tokens(value: str) -> set[str]:
+    """Return normalized distinctive identity tokens."""
+    return {word.lower() for word in distinctive_term(value).split() if word}
+
+
+def _domain(value: str) -> str:
+    """Normalize a website/domain to a lower-case hostname."""
+    if not value:
+        return ""
+    parsed = urlparse(value if "://" in value else f"https://{value}")
+    return (parsed.hostname or "").lower().removeprefix("www.")
+
+
+def _digits(value: str) -> str:
+    """Return phone digits only for deterministic suffix comparisons."""
+    return re.sub(r"\D", "", value)
+
+
+def _confidence(entity: str, candidate: str, requested_state: str,
+                candidate_state: str, requested_domain: str,
+                candidate_domain: str, requested_phone: str,
+                candidate_phone: str) -> str | None:
+    """Classify a candidate without allowing one-word overlaps to be high confidence."""
+    if requested_state and candidate_state and requested_state.upper() != candidate_state.upper():
+        return None
+    req_domain = _domain(requested_domain)
+    cand_domain = _domain(candidate_domain)
+    if req_domain and cand_domain and req_domain == cand_domain:
+        return "high"
+    req_phone = _digits(requested_phone)
+    cand_phone = _digits(candidate_phone)
+    if len(req_phone) >= 7 and len(cand_phone) >= 7 and req_phone[-7:] == cand_phone[-7:]:
+        return "high"
+    wanted = _tokens(entity)
+    found = _tokens(candidate)
+    if not wanted or not found:
+        return None
+    if wanted == found and len(wanted) >= 2:
+        return "high"
+    overlap = wanted & found
+    if len(wanted) >= 2 and overlap == wanted:
+        return "high"
+    if overlap:
+        return "possible"
+    return None
+
+
+def _link(instance_url: str, sobject: str, record_id: str) -> str:
+    """Build a Lightning record URL from an ID returned by Salesforce."""
+    return f"{instance_url}/lightning/r/{sobject}/{record_id}/view"
+
+
+def _query_accounts(entity: str, token: str, instance_url: str) -> list[dict[str, Any]]:
+    """Search Account only; organization identity must be decided before deals."""
+    term = distinctive_term(entity)
+    if not term:
+        return []
+    sosl = (
+        f"FIND {{{term}}} IN ALL FIELDS RETURNING "
+        "Account(Id,Name,BillingState,BillingCity,Website,Phone,Owner.Name LIMIT 20)"
+    )
+    body = _readonly_get("search", {"q": sosl}, token, instance_url)
+    return list(body.get("searchRecords") or [])
+
+
+def _query_people(entity: str, token: str,
+                  instance_url: str) -> list[dict[str, Any]]:
+    """Search Lead and Contact after Account identity has been evaluated."""
+    term = distinctive_term(entity)
+    if not term:
+        return []
+    sosl = (
+        f"FIND {{{term}}} IN ALL FIELDS RETURNING "
+        "Lead(Id,Name,Company,State,Website,Phone,Owner.Name LIMIT 20), "
+        "Contact(Id,Name,MailingState,Phone,Owner.Name,Account.Id,Account.Name LIMIT 20)"
+    )
+    body = _readonly_get("search", {"q": sosl}, token, instance_url)
+    return list(body.get("searchRecords") or [])
+
+
+def _query_opportunities(account_id: str, token: str,
+                         instance_url: str) -> list[dict[str, Any]]:
+    """Return open Opportunities related to exactly one confirmed Account."""
+    safe_id = re.sub(r"[^A-Za-z0-9]", "", account_id)
+    soql = (
+        "SELECT Id,Name,Owner.Name,StageName,IsClosed,AccountId,CloseDate "
+        f"FROM Opportunity WHERE AccountId='{safe_id}' AND IsClosed=false "
+        "ORDER BY CloseDate ASC LIMIT 20"
+    )
+    body = _readonly_get("query", {"q": soql}, token, instance_url)
+    return list(body.get("records") or [])
+
+
+def lookup(entity: str, domain: str = "", phone: str = "", state: str = "",
            on_progress: Progress | None = None) -> SFResult:
-    """Intelligent, read-only CRM search across Account/Lead/Opportunity by the org's
-    distinctive name (and, if given, domain/phone). Never raises — returns
-    SFResult(error=...) so Grant can speak honestly."""
+    """Find Account/people context and only Account-bound open Opportunities.
+
+    A successful, complete Account query is required for ``NO_MATCH``. Any failed
+    Account request is ``UNAVAILABLE``; later failures produce ``PARTIAL``.
+    """
     say = on_progress or _NOOP
     say("Checking Salesforce")
     try:
-        token, inst = _auth()
-    except (requests.RequestException, KeyError) as exc:
-        return SFResult(error=f"Salesforce auth failed ({type(exc).__name__})")
+        token, instance_url = _auth()
+        account_records = _query_accounts(entity, token, instance_url)
+    except (requests.RequestException, KeyError, ValueError) as exc:
+        return SFResult(
+            status=SFResultStatus.UNAVAILABLE,
+            error=f"Salesforce account lookup failed ({type(exc).__name__})",
+        )
 
-    # Search terms: distinctive name first, then any domain-core / phone digits given.
-    terms: list[str] = []
-    name_term = distinctive_term(entity)
-    if name_term:
-        terms.append(name_term)
-    if domain:
-        core = re.sub(r"^https?://(www\.)?", "", domain).split("/")[0].split(".")[0]
-        if core:
-            terms.append(core)
-    if phone:
-        digits = re.sub(r"\D", "", phone)
-        if len(digits) >= 7:
-            terms.append(digits[-7:])  # last 7 digits are the discriminating part
-
-    found: dict[str, SFMatch] = {}
-    entity_low = entity.lower()
-    for term in terms:
-        # IN ALL FIELDS lets a domain/phone/city match too, not just the name.
-        sosl = (f"FIND {{{term}}} IN ALL FIELDS RETURNING "
-                f"Account(Id,Name,Owner.Name), "
-                f"Lead(Id,Name,Company,Owner.Name), "
-                f"Opportunity(Id,Name,Owner.Name) LIMIT 20")
-        try:
-            records = _readonly_get("search", {"q": sosl}, token, inst).get(
-                "searchRecords", [])
-        except requests.RequestException:
+    matches: list[SFMatch] = []
+    high_accounts: list[SFMatch] = []
+    for record in account_records:
+        candidate_name = str(record.get("Name") or "")
+        candidate_state = str(record.get("BillingState") or "")
+        confidence = _confidence(
+            entity, candidate_name, state, candidate_state, domain,
+            str(record.get("Website") or ""), phone, str(record.get("Phone") or ""),
+        )
+        if confidence is None:
             continue
-        for rec in records:
-            if rec["Id"] in found:
-                continue
-            sobj = rec["attributes"]["type"]
-            name = rec.get("Name") or "(unnamed)"
-            company = rec.get("Company") or ""
-            owner = ((rec.get("Owner") or {}).get("Name")) or ""
-            hay = f"{name} {company}".lower()
-            conf = "high" if (name_term.lower() in hay or entity_low in hay
-                              or hay.strip() in entity_low) else "possible"
-            found[rec["Id"]] = SFMatch(
-                sobject=sobj, record_id=rec["Id"], name=name, company=company,
-                owner=owner, link=f"{inst}/lightning/r/{sobj}/{rec['Id']}/view",
-                confidence=conf)
+        owner = str((record.get("Owner") or {}).get("Name") or "")
+        match = SFMatch(
+            sobject="Account", record_id=str(record["Id"]), name=candidate_name,
+            company="", owner=owner,
+            link=_link(instance_url, "Account", str(record["Id"])),
+            confidence=confidence, state=candidate_state,
+            website=str(record.get("Website") or ""),
+        )
+        matches.append(match)
+        if confidence == "high":
+            high_accounts.append(match)
 
-    matches = sorted(found.values(),
-                     key=lambda m: 0 if m.confidence == "high" else 1)
+    partial = False
+    try:
+        people_records = _query_people(entity, token, instance_url)
+    except requests.RequestException:
+        people_records = []
+        partial = True
+    for record in people_records:
+        sobject = str((record.get("attributes") or {}).get("type") or "")
+        account = record.get("Account") or {}
+        company = str(record.get("Company") or account.get("Name") or "")
+        candidate_state = str(record.get("State") or record.get("MailingState") or "")
+        confidence = _confidence(
+            entity, company, state, candidate_state, domain,
+            str(record.get("Website") or ""), phone, str(record.get("Phone") or ""),
+        )
+        if confidence is None:
+            continue
+        record_id = str(record.get("Id") or "")
+        matches.append(SFMatch(
+            sobject=sobject, record_id=record_id,
+            name=str(record.get("Name") or ""), company=company,
+            owner=str((record.get("Owner") or {}).get("Name") or ""),
+            link=_link(instance_url, sobject, record_id), confidence=confidence,
+            state=candidate_state, website=str(record.get("Website") or ""),
+            account_id=str(account.get("Id") or ""),
+        ))
+
+    if len(high_accounts) == 1:
+        account = high_accounts[0]
+        try:
+            opportunities = _query_opportunities(account.record_id, token, instance_url)
+        except requests.RequestException:
+            opportunities = []
+            partial = True
+        for opportunity in opportunities:
+            record_id = str(opportunity.get("Id") or "")
+            matches.append(SFMatch(
+                sobject="Opportunity", record_id=record_id,
+                name=str(opportunity.get("Name") or ""), company="",
+                owner=str((opportunity.get("Owner") or {}).get("Name") or ""),
+                link=_link(instance_url, "Opportunity", record_id), confidence="high",
+                account_id=account.record_id,
+                stage=str(opportunity.get("StageName") or ""),
+                is_closed=bool(opportunity.get("IsClosed")),
+            ))
+
+    matches.sort(key=lambda item: (
+        0 if item.confidence == "high" else 1,
+        0 if item.sobject == "Account" else 1,
+        item.name.lower(),
+    ))
+    high_people_count = sum(
+        1 for item in matches
+        if item.confidence == "high" and item.sobject in {"Lead", "Contact"}
+    )
+    if partial:
+        status = SFResultStatus.PARTIAL
+    elif len(high_accounts) > 1:
+        status = SFResultStatus.AMBIGUOUS
+    elif len(high_accounts) == 1:
+        # Multiple people under one confirmed Account are expected and do not make
+        # the organization's identity ambiguous.
+        status = SFResultStatus.FOUND
+    elif high_people_count > 1 or (not high_people_count and matches):
+        status = SFResultStatus.AMBIGUOUS
+    elif matches:
+        status = SFResultStatus.FOUND
+    else:
+        status = SFResultStatus.NO_MATCH
     if matches:
         say(f"Found {len(matches)} in Salesforce")
-    return SFResult(matched=bool(matches), matches=matches)
+    return SFResult(status=status, matches=matches)

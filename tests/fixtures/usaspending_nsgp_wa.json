@@ -1,0 +1,27 @@
+{
+  "spending_level": "subawards",
+  "limit": 2,
+  "results": [
+    {
+      "internal_id": "E25-225",
+      "prime_award_internal_id": 266626356,
+      "Sub-Award ID": "E25-225",
+      "Sub-Awardee Name": "THE CHABAD JEWISH DISCOVERY CENTER",
+      "Sub-Award Amount": 148046.0,
+      "Sub-Award Date": "2024-11-15",
+      "Sub-Award Description": "FY 2024 NONPROFIT SECURITY GRANT PROGRAM (24NSGP) - FUNDING FOR PHYSICAL SECURITY ENHANCEMENTS.",
+      "prime_award_generated_internal_id": "ASST_NON_EMW-2024-UA-05076_070"
+    },
+    {
+      "internal_id": "E25-222",
+      "prime_award_internal_id": 266626356,
+      "Sub-Award ID": "E25-222",
+      "Sub-Awardee Name": "INTERNATIONAL SOCIETY FOR KRISHNA CONSCIOUSNESS OF WASHINGTON",
+      "Sub-Award Amount": 150000.0,
+      "Sub-Award Date": "2024-11-15",
+      "Sub-Award Description": "FY 2024 NONPROFIT SECURITY GRANT PROGRAM (24NSGP) - FUNDING FOR PHYSICAL SECURITY ENHANCEMENTS.",
+      "prime_award_generated_internal_id": "ASST_NON_EMW-2024-UA-05076_070"
+    }
+  ],
+  "page_metadata": {"page": 1, "hasNext": true}
+}

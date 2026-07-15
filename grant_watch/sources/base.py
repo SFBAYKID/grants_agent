@@ -9,7 +9,7 @@ without touching live servers (architectural.md §8).
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any  # requests accepts heterogeneous query/JSON scalar values.
 
 import requests
 

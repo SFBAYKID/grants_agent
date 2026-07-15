@@ -9,7 +9,7 @@ is capped and the remainder is summarized in a count line — never silently dro
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
+from typing import Any  # Slack Block Kit objects are heterogeneous JSON mappings.
 
 from slack_sdk import WebClient
 
@@ -35,11 +35,28 @@ def _fmt_amount(amount: float | None) -> str:
 
 def _why_now(row: sqlite3.Row) -> str:
     """One honest 'why now' line per lead — derived only from fields we actually have."""
+    if row["lead_grade"] == "silver":
+        return (f"open solicitation — response due {row['funds_end']}"
+                if row["funds_end"] else "open solicitation — deadline not stored")
+    if row["source"] in {"grants.gov", "ca-grants-portal"}:
+        return (f"application deadline {row['funds_end']}"
+                if row["funds_end"] else "application deadline not stored")
     if row["funds_end"]:
         return f"spend window open through {row['funds_end']}"
-    if row["lead_grade"] == "silver":
-        return "open solicitation — respond before the close date"
     return "newly seen this week"
+
+
+def _salesforce_line(row: sqlite3.Row) -> str:
+    """Render only fresh, high-confidence CRM context selected by the DB query."""
+    opportunity = row["salesforce_opportunity_link"]
+    if opportunity:
+        owner = row["salesforce_opportunity_owner"] or "owner unavailable"
+        return f"\n*Salesforce:* <{opportunity}|open opportunity> · {owner}"
+    account = row["salesforce_account_link"]
+    if account:
+        owner = row["salesforce_account_owner"] or "owner unavailable"
+        return f"\n*Salesforce:* <{account}|account> · {owner}"
+    return ""
 
 
 def _lead_blocks(row: sqlite3.Row) -> list[dict[str, Any]]:
@@ -49,7 +66,7 @@ def _lead_blocks(row: sqlite3.Row) -> list[dict[str, Any]]:
     link = f"\n<{row['detail_url']}|source record>" if row["detail_url"] else ""
     text = (f"{medal} *{row['entity_name']}* ({row['state'] or '?'}) — "
             f"{row['program'] or row['source']} · {_fmt_amount(row['amount'])}\n"
-            f"_{_why_now(row)}_{link}")
+            f"_{_why_now(row)}_{link}{_salesforce_line(row)}")
     return [
         {"type": "section", "text": {"type": "mrkdwn", "text": text}},
         {"type": "actions", "block_id": f"lead-{row['id']}",
@@ -78,12 +95,13 @@ def _bucket(blocks: list[dict[str, Any]], title: str, rows: list[sqlite3.Row],
 
 
 def _rank(rows: list[sqlite3.Row]) -> list[sqlite3.Row]:
-    """Quality gate: order GOLD by lead_score (freshness x $ x program fit) so the
-    capped digest always shows the STRONGEST leads, not the first-queried ones."""
-    return sorted(rows,
-                  key=lambda r: scoring.lead_score(r["program"], r["amount"],
-                                                   r["funds_start"] or ""),
-                  reverse=True)
+    """Put fresh verified CRM matches above net-new leads, then rank by lead quality."""
+    return sorted(rows, key=lambda row: (
+        2 if row["salesforce_opportunity_link"] else
+        1 if row["salesforce_account_link"] else 0,
+        scoring.lead_score(row["program"], row["amount"],
+                           row["current_event_occurred_on"] or ""),
+    ), reverse=True)
 
 
 def build_digest_blocks(buckets: dict[str, list[sqlite3.Row]]
@@ -95,7 +113,7 @@ def build_digest_blocks(buckets: dict[str, list[sqlite3.Row]]
                   "emoji": True}},
     ]
     shown: list[int] = []
-    shown += _bucket(blocks, "🥇 New GOLD — just got security money",
+    shown += _bucket(blocks, "🥇 GOLD — award records with open spend windows",
                      _rank(buckets["gold"]), GOLD_CAP)
     shown += _bucket(blocks, "🥈 New SILVER — open RFPs", buckets["silver"], SILVER_CAP)
     shown += _bucket(blocks, "⏳ Expiring windows (<90 days) — use it or lose it",
@@ -121,7 +139,22 @@ def post_digest(client: WebClient, channel: str, conn: sqlite3.Connection,
         print(json.dumps(blocks, indent=1))
         print(f"[dry-run] would post {len(shown_ids)} leads; nothing written")
         return len(shown_ids)
-    client.chat_postMessage(channel=channel, blocks=blocks,
-                            text="Grant — weekly lead digest")  # text = notification fallback
+    delivery_key = db.reserve_digest_notification(conn, channel, shown_ids)
+    if delivery_key is None:
+        return 0
+    try:
+        response = client.chat_postMessage(
+            channel=channel, blocks=blocks,
+            text="Grant — weekly lead digest")  # text = notification fallback
+    except Exception as exc:  # noqa: BLE001 — Slack timeout may still mean accepted
+        db.finish_notification(
+            conn, delivery_key, "unknown", error=type(exc).__name__)
+        raise
+    timestamp = str(response.get("ts") or "")
+    if not timestamp:
+        db.finish_notification(conn, delivery_key, "unknown",
+                               error="missing Slack timestamp")
+        raise RuntimeError("Slack did not confirm the digest message timestamp")
+    db.finish_notification(conn, delivery_key, "delivered", slack_ts=timestamp)
     db.mark_surfaced(conn, shown_ids)
     return len(shown_ids)

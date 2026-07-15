@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from datetime import date
 
-from grant_watch.models import LeadGrade, RawItem
-from grant_watch.scoring import grade, is_fresh
+from grant_watch.models import FundingEventType, LeadGrade, RawItem
+from grant_watch.scoring import feedback_multiplier, grade, is_fresh
 
 TODAY = date(2026, 7, 13)  # frozen so tests never rot
 
@@ -33,6 +33,12 @@ def test_expired_spend_window_is_watch() -> None:
     assert grade(_award(end="2019-08-31"), TODAY).grade is LeadGrade.WATCH
 
 
+def test_unknown_amount_or_window_is_watch() -> None:
+    """Missing money/window cannot support a GOLD money-available claim."""
+    assert grade(_award(amount=None), TODAY).grade is LeadGrade.WATCH
+    assert grade(_award(end=""), TODAY).grade is LeadGrade.WATCH
+
+
 def test_seed_source_counts_as_award() -> None:
     assert grade(_award(source="seed:svpp_csv"), TODAY).grade is LeadGrade.GOLD
 
@@ -40,7 +46,7 @@ def test_seed_source_counts_as_award() -> None:
 def test_rfp_sources_are_silver() -> None:
     rfp = _award(source="sam.gov", program="RFP:sam.gov", amount=None, end="2026-07-22")
     assert grade(rfp, TODAY).grade is LeadGrade.SILVER
-    assert grade(_award(source="webs", amount=None), TODAY).grade is LeadGrade.SILVER
+    assert grade(_award(source="webs", amount=None, end=""), TODAY).grade is LeadGrade.WATCH
 
 
 def test_grants_gov_signal_is_watch_not_gold() -> None:
@@ -50,6 +56,17 @@ def test_grants_gov_signal_is_watch_not_gold() -> None:
 
 
 def test_freshness_window() -> None:
-    assert is_fresh(_award(start="2025-10-01"), TODAY) is True
-    assert is_fresh(_award(start="2022-10-01"), TODAY) is False
-    assert is_fresh(_award(start=""), TODAY) is False
+    assert is_fresh(_award(
+        event_type=FundingEventType.AWARD_ANNOUNCED,
+        event_date="2026-06-01",
+    ), TODAY) is True
+    assert is_fresh(_award(event_date="2022-10-01"), TODAY) is False
+    # Spend start alone is not an award announcement date.
+    assert is_fresh(_award(start="2026-06-01", event_date=""), TODAY) is False
+
+
+def test_feedback_is_neutral_until_minimum_sample() -> None:
+    """A handful of clicks cannot destabilize the quality rank."""
+    assert feedback_multiplier([8] * 9) == 1.0
+    assert feedback_multiplier([8] * 10) > 1.0
+    assert feedback_multiplier([-8] * 10) < 1.0

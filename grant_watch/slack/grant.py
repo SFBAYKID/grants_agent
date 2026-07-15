@@ -9,20 +9,21 @@ posts — no @ needed there; @Grant works too and routes to the same brain. Mess
 mentioning @Persequor are ignored (that's their conversation). Friendly always; no
 inline backticks anywhere (Slack renders them red, and red text is banned).
 
-Digest-button flow: [Draft email] posts a copyable draft (the automated Persequor
-handoff ships later — docs/workflow_design.md §4); [Mark contacted] / [Snooze] set
-status; [Bad lead] opens a modal asking WHY (reason lands in leads.status_note).
+Digest-button flow: [Draft email] requests a Persequor draft (Persequor keeps the final
+human approval gate); [Mark contacted] / [Snooze] set status; [Bad lead] asks WHY and
+stores the reason as a scoring outcome.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
 import threading
-from collections import deque
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any, Protocol  # Slack Bolt event/view payloads are runtime-shaped.
+from weakref import WeakValueDictionary
 
 from dotenv import load_dotenv
 from slack_bolt import Ack, App
@@ -31,7 +32,7 @@ from slack_sdk import WebClient
 
 from .. import db
 from ..spreadsheets import GeneratedArtifact
-from . import digest, persequor
+from . import digest
 
 
 class SlackFileClient(Protocol):
@@ -53,35 +54,103 @@ HELP_TEXT = (
 )
 
 
-# Idempotency guard (architectural-critic C3): a conversational turn can run an
-# expensive contact-enrichment batch (real scrapes + Anthropic calls). Slack redelivers
-# un-acked events, and a rep can double-tap "yes" — either would double-spend and post
-# duplicate answers. We drop a repeated event_id and refuse a second concurrent run for a
-# thread already being handled. In-memory is sufficient: one long-lived bot process.
+# Per-thread locks serialize long turns without dropping the second human message.
+# Slack event identity itself is persisted in ``slack_event_receipts`` so restarts and
+# redelivery cannot duplicate tool calls or external actions.
 _dedup_lock = threading.Lock()
-_seen_events: deque[str] = deque(maxlen=512)
-_inflight_threads: set[str] = set()
+_thread_locks: WeakValueDictionary[str, threading.Lock] = WeakValueDictionary()
 
 
-def _claim_turn(event_id: str, thread_key: str) -> bool:
-    """True if this event should be processed now. False for a redelivered event_id or a
-    thread already in flight (caller must NOT process). Thread-safe; pairs with
-    _release_turn in a finally."""
+def _thread_lock(thread_key: str) -> threading.Lock:
+    """Return a shared lock for one Slack thread, creating it race-safely."""
     with _dedup_lock:
-        if event_id and event_id in _seen_events:
-            return False
-        if thread_key in _inflight_threads:
-            return False
-        if event_id:
-            _seen_events.append(event_id)
-        _inflight_threads.add(thread_key)
-        return True
+        lock = _thread_locks.get(thread_key)
+        if lock is None:
+            lock = threading.Lock()
+            _thread_locks[thread_key] = lock
+        return lock
 
 
-def _release_turn(thread_key: str) -> None:
-    """Release a thread claimed by _claim_turn so later turns can proceed."""
-    with _dedup_lock:
-        _inflight_threads.discard(thread_key)
+def _workspace_id(body: dict[str, Any], event: dict[str, Any] | None = None) -> str:
+    """Extract a Slack workspace ID across Events and Interactivity envelopes."""
+    team = body.get("team") or {}
+    return str(body.get("team_id") or team.get("id") or (event or {}).get("team") or "")
+
+
+def _active_human_channel_member(client: WebClient, user_id: str,
+                                 channel: str) -> bool:
+    """Recheck active human identity and configured-channel membership at commit."""
+    try:
+        user = client.users_info(user=user_id).get("user") or {}
+        if user.get("deleted") or user.get("is_bot") or user.get("is_app_user"):
+            return False
+        cursor = ""
+        while True:
+            response = client.conversations_members(
+                channel=channel, limit=200, cursor=cursor or None)
+            if user_id in response.get("members", []):
+                return True
+            cursor = str((response.get("response_metadata") or {}).get("next_cursor") or "")
+            if not cursor:
+                return False
+    except Exception:
+        return False
+
+
+def _crm_action_blocks(actions: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Render exact immutable previews with one-time confirm/cancel buttons."""
+    blocks: list[dict[str, Any]] = []
+    for action in actions:
+        value = json.dumps({
+            "action_id": action["action_id"], "nonce": action["nonce"],
+        }, separators=(",", ":"))
+        preview_blocks = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": chunk}}
+            for chunk in _split_slack_text(action["preview"])
+        ]
+        blocks.extend([*preview_blocks, {"type": "context", "elements": [{
+                "type": "mrkdwn", "text": f"Approval expires {action['expires_at']}."
+            }]},
+            {"type": "actions", "elements": [
+                {"type": "button", "action_id": "salesforce_confirm",
+                 "text": {"type": "plain_text", "text": "Confirm in Salesforce"},
+                 "style": "primary", "value": value,
+                 "confirm": {
+                     "title": {"type": "plain_text", "text": "Confirm Salesforce write"},
+                     "text": {"type": "mrkdwn", "text": "Create exactly the records in this preview?"},
+                     "confirm": {"type": "plain_text", "text": "Confirm"},
+                     "deny": {"type": "plain_text", "text": "Go back"},
+                 }},
+                {"type": "button", "action_id": "salesforce_cancel",
+                 "text": {"type": "plain_text", "text": "Cancel"},
+                 "value": action["action_id"]},
+            ]},
+        ])
+    return blocks
+
+
+def _split_slack_text(value: str, cap: int = 2_800) -> list[str]:
+    """Split long frozen previews at line boundaries under Slack's section limit."""
+    chunks: list[str] = []
+    current = ""
+    for line in value.splitlines() or [value]:
+        candidate = f"{current}\n{line}".strip() if current else line
+        if current and len(candidate) > cap:
+            chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks or [""]
+
+
+def _interaction_thread_ts(body: dict[str, Any]) -> str:
+    """Return the immutable Slack thread root for an interactive button payload."""
+    message = body.get("message") or {}
+    container = body.get("container") or {}
+    return str(container.get("thread_ts") or message.get("thread_ts")
+               or message.get("ts") or "")
 
 
 def create_app() -> App:
@@ -94,14 +163,24 @@ def create_app() -> App:
     def mark_contacted(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
         ack()
         lead_id = int(body["actions"][0]["value"])
-        db.set_lead_status(db.connect(), lead_id, "contacted")
+        user_id = str((body.get("user") or {}).get("id") or "")
+        conn = db.connect()
+        db.set_lead_status(conn, lead_id, "contacted")
+        db.record_outcome(
+            conn, lead_id, None, user_id, "contacted",
+            f"slack-action:{body.get('trigger_id', '')}:{lead_id}:contacted")
         _thread_reply(client, body, f"✅ Marked lead #{lead_id} contacted.")
 
     @app.action("grant_snooze")
     def snooze(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
         ack()
         lead_id = int(body["actions"][0]["value"])
-        db.set_lead_status(db.connect(), lead_id, "snoozed")
+        user_id = str((body.get("user") or {}).get("id") or "")
+        conn = db.connect()
+        db.set_lead_status(conn, lead_id, "snoozed")
+        db.record_outcome(
+            conn, lead_id, None, user_id, "snoozed",
+            f"slack-action:{body.get('trigger_id', '')}:{lead_id}:snoozed")
         _thread_reply(client, body, f"💤 Snoozed lead #{lead_id} — it can resurface later.")
 
     @app.action("grant_bad_lead")
@@ -131,20 +210,84 @@ def create_app() -> App:
         ack()
         lead_id = int(view["private_metadata"])
         reason = view["state"]["values"]["reason_block"]["reason"]["value"] or ""
-        db.set_lead_status(db.connect(), lead_id, "dead", note=reason)
+        user_id = str((body.get("user") or {}).get("id") or "")
+        conn = db.connect()
+        db.set_lead_status(conn, lead_id, "dead", note=reason)
+        db.record_outcome(
+            conn, lead_id, None, user_id, "bad_lead",
+            f"slack-view:{view.get('id', '')}:{lead_id}:bad-lead")
+
+    # ------------------------------------------------------ Salesforce approvals
+    @app.action("salesforce_confirm")
+    def salesforce_confirm(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
+        """Execute one requester-bound, immutable Salesforce create preview."""
+        ack()
+        from ..enrich import salesforce_campaigns as campaigns
+
+        user_id = str((body.get("user") or {}).get("id") or "")
+        channel = str((body.get("channel") or {}).get("id") or "")
+        workspace = _workspace_id(body)
+        thread_ts = _interaction_thread_ts(body)
+        try:
+            value = json.loads(str(body["actions"][0]["value"]))
+            action_id = str(value["action_id"])
+            nonce = str(value["nonce"])
+        except (KeyError, TypeError, json.JSONDecodeError):
+            _thread_reply(client, body, "Salesforce approval data was malformed; nothing changed.")
+            return
+        if not _active_human_channel_member(client, user_id, channel):
+            _thread_reply(client, body,
+                          "I couldn't verify you as an active member of this Grant channel, "
+                          "so Salesforce was not changed.")
+            return
+        conn = db.connect()
+        try:
+            result = campaigns.confirm_action(
+                conn, campaigns.SalesforceCampaignGateway(), action_id, nonce,
+                workspace, channel, thread_ts, user_id,
+            )
+        except (PermissionError, TimeoutError) as exc:
+            _thread_reply(client, body, f"Salesforce was not changed: {str(exc)}")
+            return
+        except ValueError:
+            try:
+                result = campaigns.stored_action_result(
+                    conn, action_id, workspace, channel, thread_ts, user_id)
+            except (PermissionError, ValueError) as exc:
+                _thread_reply(client, body, f"Salesforce was not changed: {str(exc)}")
+                return
+        if result.added > 0:
+            added_rows = conn.execute(
+                """SELECT lead_id FROM crm_action_items
+                   WHERE action_id=? AND state='added' AND lead_id IS NOT NULL""",
+                (action_id,),
+            ).fetchall()
+            for item in added_rows:
+                lead_id = int(item["lead_id"])
+                db.record_outcome(
+                    conn, lead_id, None, user_id, "campaign_added",
+                    f"salesforce-action:{action_id}:{lead_id}")
+        _thread_reply(client, body, result.message)
+
+    @app.action("salesforce_cancel")
+    def salesforce_cancel(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
+        """Cancel a ready Salesforce preview for its initiating user."""
+        ack()
+        from ..enrich import salesforce_campaigns as campaigns
+
+        action_id = str(body["actions"][0]["value"])
+        user_id = str((body.get("user") or {}).get("id") or "")
+        if campaigns.cancel_action(db.connect(), action_id, user_id):
+            _thread_reply(client, body, "Cancelled — Salesforce was not changed.")
+        else:
+            _thread_reply(client, body,
+                          "That preview was already handled or belongs to another user; "
+                          "Salesforce was not changed by this click.")
 
     # ---------------------------------------------------------------- draft (interim)
     @app.action("grant_draft_email")
     def draft_email(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
-        """Post the template draft in-thread for the rep to use MANUALLY.
-
-        HONESTY NOTE (architectural-critic C1, 2026-07-13): the automated
-        Grant→Persequor handoff is NOT wired yet — Persequor drops bot messages by
-        design, so the old 'Approve & hand to Persequor' button was a no-op that
-        falsely wrote contacted/sent_at. Until the real HTTP contract ships (see
-        docs/workflow_design.md §4), this button only offers a copyable draft and
-        says so plainly. No status changes, no outreach rows.
-        """
+        """Request a Persequor draft; Persequor retains the final human-send gate."""
         ack()
         conn = db.connect()
         lead_id = int(body["actions"][0]["value"])
@@ -152,13 +295,15 @@ def create_app() -> App:
         if row is None:
             _thread_reply(client, body, f"⚠️ Lead #{lead_id} not found — stale button?")
             return
-        draft = persequor.compose_draft(row)
-        _thread_reply(client, body,
-                      f"Draft for *{row['entity_name']}* — copy it into your own email "
-                      f"if you want to send today:\n```{draft}```\n"
-                      f"_Automated hand-off to Persequor isn't wired yet (in design). "
-                      f"If you do send it, click ✅ Mark contacted so the lead is "
-                      f"tracked honestly._")
+        user_id = str((body.get("user") or {}).get("id") or "")
+        channel = str((body.get("channel") or {}).get("id") or "")
+        thread_ts = str((body.get("message") or {}).get("thread_ts")
+                        or (body.get("message") or {}).get("ts") or "")
+        status = _Status(client, channel, thread_ts or None)
+        status.start()
+        reply = _request_outreach(
+            conn, row, user_id, status, channel, thread_ts)
+        status.finalize(reply)
 
     # ---------------------------------------------------------------- conversation
     bot_user_id: str = app.client.auth_test()["user_id"]
@@ -172,20 +317,36 @@ def create_app() -> App:
         text = re.sub(r"<@[^>]+>", "", event.get("text") or "").strip()
         thread_ts = event.get("thread_ts")
         thread_key = f"{event['channel']}:{thread_ts or event['ts']}"
-        if not _claim_turn(str(body.get("event_id", "")), thread_key):
-            return  # redelivered event, or this thread is already being handled
+        event_id = str(body.get("event_id", ""))
+        workspace = _workspace_id(body, event)
+        conn = db.connect()
+        if not db.claim_slack_event(
+                conn, event_id, workspace, str(event["channel"]),
+                str(thread_ts or event["ts"]), str(event.get("user") or "")):
+            return
         try:
-            conn = db.connect()
-            post = db.find_post_by_ts(conn, event["channel"], thread_ts or "")
-            if post is not None:
-                _handle_drip_thread(conn, post, event, say, client)
-            else:
-                # A general question outside a lead thread: answer in a thread on it.
-                _converse_general(text, client, event["channel"],
-                                  event.get("thread_ts") or event["ts"],
-                                  user=event.get("user", ""))
-        finally:
-            _release_turn(thread_key)
+            delivered = True
+            with _thread_lock(thread_key):
+                post = db.find_post_by_ts(conn, event["channel"], thread_ts or "")
+                if post is not None:
+                    delivered = _handle_drip_thread(
+                        conn, post, event, say, client, workspace=workspace)
+                else:
+                    delivered = _converse_general(
+                        text, client, event["channel"],
+                        event.get("thread_ts") or event["ts"],
+                        user=event.get("user", ""), workspace=workspace)
+        except Exception as exc:
+            db.finish_slack_event(conn, event_id,
+                                  error=f"{type(exc).__name__}: {str(exc)[:300]}",
+                                  action_state="unknown", delivery_state="unknown")
+            return
+        if delivered:
+            db.finish_slack_event(conn, event_id)
+        else:
+            db.finish_slack_event(
+                conn, event_id, error="final Slack response was not confirmed",
+                action_state="complete", delivery_state="failed")
 
     @app.event("message")
     def on_message(event: dict[str, Any], body: dict[str, Any],
@@ -203,20 +364,36 @@ def create_app() -> App:
         if not is_dm and not thread_ts:
             return  # top-level channel chatter isn't Grant's business
         thread_key = f"{event['channel']}:{thread_ts or event['ts']}"
-        if not _claim_turn(str(body.get("event_id", "")), thread_key):
-            return  # redelivered event, or this thread is already being handled
+        event_id = str(body.get("event_id", ""))
+        workspace = _workspace_id(body, event)
+        conn = db.connect()
+        if not db.claim_slack_event(
+                conn, event_id, workspace, str(event["channel"]),
+                str(thread_ts or event["ts"]), str(event.get("user") or "")):
+            return
         try:
-            if is_dm:
-                _converse_general(text.strip(), client, event["channel"], None,
-                                  user=event.get("user", ""))
-                return
-            conn = db.connect()
-            post = db.find_post_by_ts(conn, event["channel"], thread_ts)
-            if post is None:
-                return  # a thread on someone else's message
-            _handle_drip_thread(conn, post, event, say, client)
-        finally:
-            _release_turn(thread_key)
+            delivered = True
+            with _thread_lock(thread_key):
+                if is_dm:
+                    delivered = _converse_general(
+                        text.strip(), client, event["channel"], None,
+                        user=event.get("user", ""), workspace=workspace)
+                else:
+                    post = db.find_post_by_ts(conn, event["channel"], thread_ts)
+                    if post is not None:
+                        delivered = _handle_drip_thread(
+                            conn, post, event, say, client, workspace=workspace)
+        except Exception as exc:
+            db.finish_slack_event(conn, event_id,
+                                  error=f"{type(exc).__name__}: {str(exc)[:300]}",
+                                  action_state="unknown", delivery_state="unknown")
+            return
+        if delivered:
+            db.finish_slack_event(conn, event_id)
+        else:
+            db.finish_slack_event(
+                conn, event_id, error="final Slack response was not confirmed",
+                action_state="complete", delivery_state="failed")
 
     @app.event("reaction_added")
     def on_reaction(event: dict[str, Any]) -> None:
@@ -284,24 +461,32 @@ class _Status:
         except Exception:
             pass
 
-    def finalize(self, text: str) -> None:
+    def finalize(self, text: str,
+                 extra_blocks: list[dict[str, Any]] | None = None) -> bool:
         """Replace the spinner with the final answer (or post it if the spinner died)."""
+        blocks = None
+        if extra_blocks:
+            blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": text}}]
+            blocks.extend(extra_blocks)
         if self.ts:
             try:
-                self._client.chat_update(channel=self._channel, ts=self.ts, text=text)
-                return
+                self._client.chat_update(channel=self._channel, ts=self.ts, text=text,
+                                         blocks=blocks)
+                return True
             except Exception:
                 pass
         try:
             self._client.chat_postMessage(channel=self._channel,
-                                          thread_ts=self._thread_ts, text=text)
+                                          thread_ts=self._thread_ts, text=text,
+                                          blocks=blocks)
+            return True
         except Exception:
-            pass
+            return False
 
 
 def _handle_drip_thread(conn: sqlite3.Connection, post: sqlite3.Row,
                         event: dict[str, Any], say: Callable[..., object],
-                        client: WebClient) -> None:
+                        client: WebClient, workspace: str = "") -> bool:
     """A human spoke in a lead thread: award the point, understand the message,
     act on the intent, answer in the thread (uploading any files Grant produced).
     Any LLM failure degrades to an honest reply — never to a wrong action."""
@@ -316,12 +501,15 @@ def _handle_drip_thread(conn: sqlite3.Connection, post: sqlite3.Row,
     status.start()
     try:
         out = conversation.respond(text, row, thread_context=context,
-                                   on_progress=status.update, requester_slack=user)
+                                   on_progress=status.update, requester_slack=user,
+                                   workspace=workspace, channel=event["channel"],
+                                   thread_ts=post["ts"])
     except Exception as exc:  # API down ≠ silence; reply honestly
-        status.finalize(f"I'm having trouble thinking right now ({type(exc).__name__}) "
-                        f"— give me a minute and try again.")
-        return
+        return status.finalize(
+            f"I'm having trouble thinking right now ({type(exc).__name__}) "
+            f"— give me a minute and try again.")
     intent, reply, files = out["intent"], out["reply"], out.get("files", [])
+    pending_actions = out.get("pending_crm_actions", [])
 
     if intent == "draft_email" and row is not None:
         reply = _request_outreach(conn, row, user, status, event["channel"], post["ts"])
@@ -333,13 +521,20 @@ def _handle_drip_thread(conn: sqlite3.Connection, post: sqlite3.Row,
             reply = f"Already claimed by <@{row['assigned_to']}> — worth a quick word with them first."
     elif intent == "snooze" and row is not None:
         db.set_lead_status(conn, int(row["id"]), "snoozed")
+        db.record_outcome(
+            conn, int(row["id"]), int(post["id"]), user, "snoozed",
+            f"thread:{post['id']}:{event.get('ts', '')}:snoozed")
     elif intent == "bad_lead" and row is not None:
         db.set_lead_status(conn, int(row["id"]), "dead", note=f"bad lead per <@{user}>: {text}")
+        db.record_outcome(
+            conn, int(row["id"]), int(post["id"]), user, "bad_lead",
+            f"thread:{post['id']}:{event.get('ts', '')}:bad-lead")
     elif intent == "question":
         db.record_engagement(conn, int(post["id"]), user, "question")
 
     failures = _deliver_artifacts(client, event["channel"], post["ts"], files)
-    status.finalize(_with_upload_warning(reply, failures))
+    return status.finalize(_with_upload_warning(reply, failures),
+                           _crm_action_blocks(pending_actions))
 
 
 def _request_outreach(conn: sqlite3.Connection, row: sqlite3.Row, user: str,
@@ -361,14 +556,16 @@ def _request_outreach(conn: sqlite3.Connection, row: sqlite3.Row, user: str,
     contact = contacts[0] if contacts else None
     if contact is None:
         from . import tools as t
-        t.find_contact(int(row["id"]), row["entity_name"], row["state"] or "",
-                       status.update)
+        t.find_contact(int(row["id"]), status.update)
         contacts = [c for c in db.contacts_for_lead(conn, int(row["id"]))
                     if c["contact_status"] == "verified"]
         contact = contacts[0] if contacts else None
 
-    brief = persequor_client.build_brief(row, contact, user, send_as,
-                                         slack_channel=channel, slack_thread_ts=thread_ts)
+    request_id = persequor_client.request_id_for(
+        row, user, channel, thread_ts)
+    brief = persequor_client.build_brief(
+        row, contact, user, send_as, slack_channel=channel,
+        slack_thread_ts=thread_ts, request_id=request_id)
     if brief is None:
         return ("I couldn't verify a contact for them (nothing I can prove from "
                 "their site), and there's no test address configured — so no email "
@@ -404,7 +601,7 @@ def _thread_history(client: WebClient, channel: str, thread_ts: str) -> list[str
 
 def _converse_general(text: str, client: WebClient, channel: str,
                       thread_ts: str | None,
-                      user: str = "") -> None:
+                      user: str = "", workspace: str = "") -> bool:
     """Friendly LLM reply outside a lead thread (mention or DM), tools + spinner
     included. Falls back to the canned help text if the API is unavailable."""
     from . import conversation
@@ -415,20 +612,23 @@ def _converse_general(text: str, client: WebClient, channel: str,
         try:
             client.chat_postMessage(channel=channel, thread_ts=thread_ts,
                                     text="Hey! What can I help you with?")
+            return True
         except Exception:
-            pass
-        return
+            return False
 
     status = _Status(client, channel, thread_ts)
     status.start()
     try:
         out = conversation.respond(text, None, on_progress=status.update,
-                                   requester_slack=user)
+                                   requester_slack=user, workspace=workspace,
+                                   channel=channel, thread_ts=thread_ts or "")
         artifacts = out.get("files", [])
         failures = _deliver_artifacts(client, channel, thread_ts, artifacts)
-        status.finalize(_with_upload_warning(out["reply"], failures))
+        return status.finalize(
+            _with_upload_warning(out["reply"], failures),
+            _crm_action_blocks(out.get("pending_crm_actions", [])))
     except Exception:
-        status.finalize(_answer(text.lower()))
+        return status.finalize(_answer(text.lower()))
 
 
 def _deliver_artifacts(client: SlackFileClient, channel: str, thread_ts: str | None,

@@ -22,20 +22,20 @@ Data flow:
      normalize → score (GOLD/SILVER/watch) → dedup on (source, source_item_id)
             │
             ▼
-        leads DB  ──►  contact enrichment (Firecrawl crawl + Claude extraction)
-            │                 │  never fabricate — not_found is a valid outcome
-            ▼                 ▼
-   weekly cron ──► Grant (Slack digest + buttons) ──► human approves ──► @Persequor sends email
+ immutable observations/events ──► lead projection ──► contact + NCES + CRM snapshots
+            │                                  │  never fabricate — unknown is valid
+            ▼                                  ▼
+ scheduled workers ──► Grant (Slack/search/export) ──► approved Persequor/Campaign actions
 ```
 
-Phasing (see `CLAUDE.md` mission): Phase 1 pollers + local SQLite → Phase 2 contact enrichment →
-Phase 3 Grant/Slack/cron → Phase 4 DigitalOcean Postgres → Phase 5 state expansion.
+Local source, enrichment, Slack, search/export, read-only CRM, and create-only Campaign workflows are
+implemented. Production scheduling and live integration smoke tests remain separate deployment work.
 
 ---
 
 ## 2. Repository layout
 
-**Current (v1 scaffold, consolidated from Desktop):**
+**Current package:**
 
 ```
 grants_agent/
@@ -43,7 +43,11 @@ grants_agent/
 ├── architectural.md          # this file
 ├── .env / .env.example       # secrets (real .env git-ignored)
 ├── requirements.txt
-├── grant_watch.py            # v1 poller scaffold — NEVER run end-to-end; to be refactored
+├── grant_watch/              # typed application package
+│   ├── migrations.py         # ordered SQLite migrations and durable workflow state
+│   ├── sources/              # one official source per module
+│   ├── enrich/               # contacts, NCES, Salesforce reader + Campaign gateway
+│   └── slack/                # digest, proactive drip, conversation tools
 ├── data/svpp_active_awards_CA_MI_PA_WA.csv   # 75 verified GOLD seed leads
 ├── docs/FINDINGS.md
 ├── docs/grant_lead_source_inventory.md
@@ -52,83 +56,51 @@ grants_agent/
 └── .claude/agents/           # project-scoped agents (grants-ops-guardian, architectural-critic)
 ```
 
-**Target package (when we build the program — one responsibility per module, each well under the
-1000-line cap):**
+**Responsibility split (each file remains below the 1000-line cap):**
 
 ```
 grant_watch/
 ├── __init__.py
 ├── models.py           # typed Lead, Contact, Outreach, Run (dataclasses/pydantic)
-├── db/                 # schema, migrations, SQLite + Postgres backends
+├── db.py               # SQLite repository operations; schema lives in migrations.py
 ├── sources/            # ONE module per source: usaspending.py, grants_gov.py, pa_pccd.py,
 │                       #   mi_cssgp.py, nsgp.py, webs.py, sam_gov.py, ...
 ├── scoring.py          # GOLD/SILVER/watch + freshness; keyword relevance (Claude pass)
-├── enrich/             # firecrawl.py (crawl), extract.py (Claude staff-directory extraction)
+├── enrich/             # Firecrawl/Claude contacts, NCES, Salesforce reader and Campaign actions
 ├── slack/              # grant.py (bot), digest.py (message formatting), persequor.py (handoff)
 ├── cli.py              # entrypoints; --dry-run everywhere that posts/sends
 └── tests/              # pytest; recorded API fixtures (no live gov hammering)
 ```
 
-`grant_watch.py` (the single-file v1) is kept as reference until the package replaces it, then deleted
-(no dead code).
+## 3. Data model
 
----
+`grant_watch/migrations.py` is canonical. The important separation is:
 
-## 3. Data model (canonical — supersedes v1's flat `seen` table)
+- `source_observations`: immutable evidence payloads and observation hashes.
+- `funding_events`: typed event, evidenced date/precision, verification and suppression state.
+- `leads`: current projection used by search, ranking, Slack and enrichment.
+- durable workflow tables: Slack receipts, search snapshots, export jobs, outreach outbox,
+  notification outbox, outcomes/rewards, Salesforce snapshots and CRM action approvals.
 
-```sql
-CREATE TABLE leads (
-  id INTEGER PRIMARY KEY,
-  source TEXT NOT NULL,            -- 'usaspending:16.071', 'pccd_pdf', 'webs', ...
-  source_item_id TEXT NOT NULL,
-  lead_grade TEXT CHECK(lead_grade IN ('gold','silver','watch')),
-  entity_name TEXT NOT NULL,
-  entity_type TEXT,                -- district, city, nonpublic_school, nonprofit
-  state TEXT, county TEXT,
-  program TEXT,                    -- SVPP, NSGP, CSSGP, PCCD, STOP, RFP:<platform>
-  amount REAL,
-  funds_start DATE, funds_end DATE,
-  detail_url TEXT,
-  raw_json TEXT,
-  first_seen TIMESTAMP, last_seen TIMESTAMP,
-  status TEXT DEFAULT 'new',       -- new, surfaced, contacted, snoozed, replied, opportunity, dead
-  status_note TEXT,                -- human feedback, e.g. the [Bad lead] reason (feeds scoring)
-  UNIQUE(source, source_item_id)   -- the dedup key
-);
-CREATE TABLE contacts (
-  id INTEGER PRIMARY KEY,
-  lead_id INTEGER REFERENCES leads(id),
-  name TEXT, title TEXT, email TEXT, phone TEXT,
-  source_url TEXT, confidence TEXT CHECK(confidence IN ('high','medium','low')),
-  contact_status TEXT DEFAULT 'unverified'   -- unverified, verified, not_found (NEVER fabricate)
-);
-CREATE TABLE outreach (
-  id INTEGER PRIMARY KEY,
-  lead_id INTEGER, contact_id INTEGER,
-  channel TEXT, draft TEXT, approved_by TEXT,   -- approved_by is required before sent_at is set
-  sent_at TIMESTAMP, response TEXT
-);
-CREATE TABLE runs (
-  id INTEGER PRIMARY KEY, started TIMESTAMP, finished TIMESTAMP,
-  source TEXT, items_seen INT, items_new INT, errors TEXT
-);
-```
+Unknown amount, date, enrollment, contact, or CRM state stays unknown. Observation time never becomes
+an award date, and an old backfill is suppressed from "new" notifications.
 
 **Dedup rule:** `(source, source_item_id)`. The classic failure here is the SVPP CFDA split — the same
 program lives under `16.071` and `16.710`, so `source` must include the CFDA (`usaspending:16.071`) or
 the same award reappears/duplicates. See `docs/FINDINGS.md`.
 
-**Schema parity across backends:** SQLite (Phase 1) and Postgres (Phase 4) use the same logical schema.
-The Postgres migration must preserve every value; test parity, do not assume it.
+**Future backend parity requirement:** a Postgres migration must preserve every SQLite value and
+workflow state. Postgres support is not implemented; test parity rather than assuming it.
 
 ---
 
 ## 4. Data sources (summary — full map in `docs/grant_lead_source_inventory.md`)
 
-Verified live (2026-07-13): USASpending prime awards + **subawards** (NSGP end-recipients), Grants.gov
-`search2`, PA PCCD award PDFs, WEBS bid calendar. Blocked/unwired: SAM.gov (needs Chase's key), MI CSSGP
-PDFs, FEMA NSGP state lists, COPS autumn announcements, SSE 84.184A (new $93M program → district lead
-waves early 2027). Each source is one module in `sources/`, each labeled with its verification status.
+Verified live through 2026-07-14: USAspending prime awards and NSGP subawards, Grants.gov, SAM.gov,
+WEBS fetch/parser, California Grants Portal feeds, and the OregonBuys recent-bids feed. NCES district
+enrollment/location enrichment was also verified live. OregonBuys returned no security matches during
+the live check, so positive-row entity extraction remains needs-testing. See the source inventory for
+the per-source evidence and limitations.
 
 Discipline for every source: official API > published PDF > scraped portal; respect robots.txt;
 rate-limit; record `verified`/`assumed`/`needs-testing` per source in code and in summaries.
@@ -151,23 +123,26 @@ Grant cross-references each lead against Monarch's Salesforce so it can tell the
 already know: *"This district is already an Account — you logged a call 3 days ago"* with a deep link,
 or *"No record found — this is net-new."* This turns a raw lead into an actionable, context-aware nudge.
 
-- **Read-mostly, query-first.** The integration primarily runs SOQL queries (match Account/Lead/Contact
-  by entity name, domain, address; read recent Activities/Tasks) and returns record links. Any write-back
-  (e.g. creating a Lead) is a later, explicitly-scoped decision — not assumed.
+- **Read-only discovery by default.** A bounded worker queries Account, Lead and account-bound open
+  Opportunity records and stores status/links locally. Unavailable, partial and ambiguous are distinct
+  from no-match; an outage can never label a lead net-new.
+- **One narrow write exception: Campaign intake.** A separate credential may create Campaign,
+  CampaignMemberStatus, organization-only Lead, and CampaignMember records. It cannot update/delete
+  existing CRM records. Every execution requires an immutable Slack preview, one-time nonce, same
+  requester/channel, short expiry, and a final button confirmation. The feature flag defaults off.
 - **Sandbox for all development.** `test.salesforce.com`, sandbox `monarchdev`
   (`...--monarchdev.sandbox.my.salesforce.com`). Production Salesforce is never touched during dev.
 - **Production uses SEPARATE credentials from sandbox** — different org, different Connected App.
   Separate creds give least privilege, independent revocation, and blast-radius isolation (a sandbox
   leak or a dev mistake cannot reach live CRM). Do not reuse the sandbox key in production.
-- **Auth:** OAuth 2.0 **JWT Bearer flow** (server-to-server, no interactive login) with a **dedicated
-  least-privilege integration user** — query-focused permission set, not a human admin login. This suits
-  the weekly cron. Username-password + security-token is a fallback for quick local testing only.
-- **Matching is fuzzy and must not fabricate.** Entity-name matching across gov data and CRM is
-  imperfect; when uncertain, Grant says "possible match" with the link and lets the human confirm —
-  it never asserts a match it cannot support, and never invents a record or a "last contacted" date.
+- **Auth:** OAuth 2.0 **client credentials flow** with a dedicated least-privilege integration user
+  configured as the Connected App's run-as user — query-focused permission set, not a human admin
+  login. Grant implements this flow for both the separate reader and create-only writer clients.
+- **Matching must not fabricate.** Exact supporting signals (state/domain/phone and account binding)
+  determine confidence. Ambiguous matches remain possible matches and are not used as priority proof.
 - Env keys: `SALESFORCE_LOGIN_URL`, `SALESFORCE_SANDBOX_NAME`, `SALESFORCE_MY_DOMAIN_URL`,
-  `SALESFORCE_CLIENT_ID`, `SALESFORCE_CLIENT_SECRET`, `SALESFORCE_USERNAME`, `SALESFORCE_JWT_KEY_PATH`
-  (see `.env.example`).
+  `SALESFORCE_CLIENT_ID`, `SALESFORCE_CLIENT_SECRET` plus separate `SALESFORCE_WRITE_*` values for
+  the disabled Campaign gateway (see `.env.example`).
 
 ---
 
@@ -185,8 +160,9 @@ provisions):
 
 - A dedicated **Unix user** for grants (e.g. `grantwatch`), **no sudo**, confined to its own home.
 - A dedicated **SSH keypair** (e.g. `~/.ssh/grants_droplet`) used ONLY for that user.
-- A dedicated **`~/.ssh/config` Host alias** (e.g. `grants`) → the droplet IP, `User grantwatch`,
-  `IdentityFile ~/.ssh/grants_droplet`. The guardian uses ONLY `ssh grants`.
+- The guardian uses the explicit scoped command only: `ssh -i ~/.ssh/grants_droplet -o
+  IdentitiesOnly=yes "$GRANTS_DROPLET_USER@$GRANTS_DROPLET_HOST"`. It never relies on a shared SSH
+  alias, agent-selected identity, admin login, another tenant, `sudo`, or root.
 - A dedicated **Postgres role + database** scoped to grants — the role can reach only its own DB, is
   not a superuser, and cannot see other tenants' data.
 

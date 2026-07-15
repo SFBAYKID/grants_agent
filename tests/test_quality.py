@@ -7,7 +7,14 @@ from datetime import date
 from pathlib import Path
 
 from grant_watch import db
-from grant_watch.models import Lead, LeadGrade, RawItem
+from grant_watch.models import (
+    DatePrecision,
+    FundingEventType,
+    Lead,
+    LeadGrade,
+    RawItem,
+    VerificationStatus,
+)
 from grant_watch.scoring import lead_score
 from grant_watch.slack.digest import _rank
 
@@ -16,11 +23,19 @@ TODAY = date(2026, 7, 13)
 
 def _mk(conn, source: str, iid: str, entity: str, amount: float | None,
         start: str, end: str, grade_: LeadGrade = LeadGrade.GOLD,
-        program: str = "SVPP") -> None:
+        program: str = "SVPP", event_date: str = "2026-06-01") -> None:
+    is_seed = source.startswith("seed:")
     db.upsert_lead(conn, Lead(
         item=RawItem(source=source, item_id=iid, title="t", entity=entity,
                      state="WA", program=program, amount=amount, start=start,
-                     end=end, url="", raw={}),
+                     end=end, url="", raw={},
+                     event_type=(FundingEventType.RECORD_OBSERVED if is_seed
+                                 else FundingEventType.AWARD_OBLIGATED),
+                     event_date="" if is_seed else event_date,
+                     date_precision=(DatePrecision.UNKNOWN if is_seed
+                                     else DatePrecision.DAY),
+                     verification_status=VerificationStatus.VERIFIED,
+                     backfill=is_seed),
         grade=grade_))
 
 
@@ -81,9 +96,9 @@ def test_program_fit_downranks_software_heavy() -> None:
 def test_rank_orders_digest_rows(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     _mk(conn, "usaspending:16.071", "OLD", "Old Big District", 500_000.0,
-        "2022-10-01", "2028-09-30")
+        "2022-10-01", "2028-09-30", event_date="2022-10-01")
     _mk(conn, "usaspending:16.071", "FRESH", "Fresh District", 150_000.0,
-        "2026-05-01", "2029-09-30")
+        "2026-05-01", "2029-09-30", event_date="2026-05-01")
     ranked = _rank(db.digest_leads(conn)["gold"])
     assert ranked[0]["entity_name"] == "Fresh District"
 

@@ -4,31 +4,33 @@
 Core tools are honest by construction:
   web_search        real results from Firecrawl's search API; links are returned
                     verbatim, never invented. No key or an API error -> says so.
-  query_leads       read-only SELECT against Grant's own SQLite (opened mode=ro,
-                    SELECT-only enforced) — Grant can answer data questions with
-                    real numbers instead of vibes.
+  lead_stats        typed counts over an allowlisted lead view; no model-authored SQL.
   search_leads      typed source-aware filters with complete, formula-safe exports.
-  make_spreadsheet  builds a real .xlsx (openpyxl); grant.py uploads it to the
-                    thread and deletes the temp file.
 """
 
 from __future__ import annotations
 
+import json
 import os
-import re
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any  # LLM tool arguments and JSON schemas are runtime-shaped.
 
 import requests
 
 from .. import db
-from ..spreadsheets import GeneratedArtifact, make_spreadsheet
+from ..spreadsheets import GeneratedArtifact
 from .search import search_leads
 
 Progress = Callable[[str], None]
-_NOOP: Progress = lambda _msg: None
+
+
+def _noop(_message: str) -> None:
+    """Ignore an optional progress update."""
+
+
+_NOOP: Progress = _noop
 
 
 @dataclass(frozen=True)
@@ -48,14 +50,17 @@ class ContactOutcome:
     source_url: str = ""
 
 
-def enrich_lead_contact(conn: sqlite3.Connection, lead_id: int, entity: str,
-                        state: str, on_progress: Progress | None = None) -> ContactOutcome:
+def enrich_lead_contact(conn: sqlite3.Connection, lead_id: int,
+                        on_progress: Progress | None = None) -> ContactOutcome:
     """Find + persist ONE lead's best contact through finder's verbatim gate, reusing a
     caller-supplied connection so a batch enriches on a single handle. Idempotent: an
     existing verified contact is returned without re-scraping. A SourceUnreachable
     outage records nothing (retryable) and is NEVER written as not_found."""
     from ..enrich import finder  # local import: keeps poll/digest paths light
 
+    lead = db.get_lead(conn, lead_id)
+    if lead is None:
+        raise ValueError(f"unknown Grant lead id {lead_id}")
     existing = [c for c in db.contacts_for_lead(conn, lead_id)
                 if c["contact_status"] == "verified"]
     if existing:
@@ -63,14 +68,17 @@ def enrich_lead_contact(conn: sqlite3.Connection, lead_id: int, entity: str,
         return ContactOutcome("verified", c["name"] or "", c["title"] or "",
                               c["email"] or "", c["phone"] or "", c["source_url"] or "")
     try:
-        candidate = finder.find_contact(entity, state, on_progress=on_progress)
+        candidate = finder.find_contact(
+            str(lead["entity_name"]), str(lead["state"] or ""),
+            on_progress=on_progress)
     except finder.SourceUnreachable:
         return ContactOutcome("unreachable")  # could not look -> record nothing
     if candidate is None:
         db.mark_contact_not_found(conn, lead_id)
         return ContactOutcome("not_found")
     db.save_contact(conn, lead_id, candidate.name, candidate.title, candidate.email,
-                    candidate.phone, candidate.source_url, candidate.confidence)
+                    candidate.phone, candidate.source_url, candidate.confidence,
+                    candidate.official_domain, candidate.field_evidence)
     return ContactOutcome("verified", candidate.name, candidate.title,
                           candidate.email, candidate.phone, candidate.source_url)
 
@@ -89,18 +97,20 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "query_leads",
-        "description": "Run a read-only SQL SELECT on Grant's lead database. "
-                       "Tables: leads(id, source, source_item_id, lead_grade, "
-                       "entity_name, title, state, program, amount, funds_start, "
-                       "funds_end, detail_url, status, status_note, assigned_to), "
-                       "posts, engagement, runs. Use for any question about leads, "
-                       "counts, amounts, states, statuses.",
+        "name": "lead_stats",
+        "description": "Return real lead counts from an allowlisted view, optionally "
+                       "grouped by source, state, program, grade, or status. Use for "
+                       "count/summary questions; never write SQL.",
         "input_schema": {
             "type": "object",
-            "properties": {"sql": {"type": "string",
-                                   "description": "A single SELECT statement"}},
-            "required": ["sql"],
+            "properties": {
+                "group_by": {"type": "string",
+                             "enum": ["source", "state", "program", "grade", "status"]},
+                "state": {"type": "string"},
+                "program": {"type": "string"},
+                "grade": {"type": "string", "enum": ["gold", "silver", "watch"]},
+            },
+            "required": [],
         },
     },
     {
@@ -115,29 +125,94 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "lead_id": {"type": "integer"},
-                "entity": {"type": "string"},
-                "state": {"type": "string"},
             },
-            "required": ["lead_id", "entity", "state"],
+            "required": ["lead_id"],
         },
     },
     {
         "name": "salesforce_lookup",
         "description": "READ-ONLY check of whether an awardee already exists in "
-                       "Monarch's Salesforce (Account/Lead/Opportunity), returning the "
+                       "Monarch's Salesforce (Account/Lead/Contact/Opportunity), returning the "
                        "record link + owner. Matches intelligently on name variations, "
                        "and on domain/phone if you pass them. Use it before drafting "
                        "outreach so a rep doesn't contact an org a teammate owns. "
                        "Uncertain matches come back as 'possible' — say so, never "
-                       "assert. Grant can NEVER change Salesforce, only read it.",
+                       "assert. This lookup tool never changes Salesforce.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "entity": {"type": "string"},
+                "state": {"type": "string", "description": "2-letter state, optional"},
                 "domain": {"type": "string", "description": "org website, optional"},
                 "phone": {"type": "string", "description": "org phone, optional"},
             },
             "required": ["entity"],
+        },
+    },
+    {
+        "name": "salesforce_campaign_search",
+        "description": "Read-only search for a Salesforce Campaign by name or a pasted "
+                       "Campaign link. Show candidates and ask the user to confirm one. "
+                       "Never auto-select a fuzzy or multiple match.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name_or_link": {"type": "string"},
+            },
+            "required": ["name_or_link"],
+        },
+    },
+    {
+        "name": "salesforce_campaign_create_preview",
+        "description": "Prepare, but DO NOT execute, an immutable preview for creating "
+                       "a new Salesforce Campaign. Use only after the user explicitly "
+                       "asks to create one and has supplied a name. A Slack confirmation "
+                       "button performs the later write.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "campaign_type": {"type": "string", "default": "Other"},
+                "status": {"type": "string", "default": "Planned"},
+                "is_active": {"type": "boolean", "default": True},
+                "owner_id": {"type": "string", "description": "confirmed Salesforce User ID"},
+                "owner_label": {"type": "string"},
+                "start_date": {"type": "string"},
+                "end_date": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "salesforce_campaign_members_preview",
+        "description": "Prepare, but DO NOT execute, an exact preview for adding a "
+                       "frozen list of Grant lead IDs to a human-confirmed Campaign. "
+                       "First try existing Leads/Contacts. Set allow_org_leads=true "
+                       "only after the user explicitly approves creating organization-only "
+                       "Leads for unmatched organizations.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "campaign_link": {"type": "string"},
+                "search_request_id": {"type": "string",
+                                      "description": "persisted Grant search snapshot, preferred"},
+                "lead_ids": {"type": "array", "items": {"type": "integer"},
+                             "minItems": 1, "maxItems": 200},
+                "member_links": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "grant_lead_id": {"type": "integer"},
+                            "salesforce_link": {"type": "string"},
+                        },
+                        "required": ["grant_lead_id", "salesforce_link"],
+                    },
+                },
+                "allow_org_leads": {"type": "boolean", "default": False},
+            },
+            "required": ["campaign_link"],
         },
     },
     {
@@ -171,6 +246,14 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                                 "enum": ["award", "funding_opportunity", "solicitation"]},
                 "amount_min": {"type": "number"},
                 "amount_max": {"type": "number"},
+                "enrollment_min": {"type": "integer", "minimum": 0,
+                                   "description": "NCES district enrollment lower bound; "
+                                                  "state is required"},
+                "enrollment_max": {"type": "integer", "minimum": 0,
+                                   "description": "NCES district enrollment upper bound; "
+                                                  "state is required"},
+                "city": {"type": "string",
+                         "description": "exact NCES district-office city; state is required"},
                 "name_contains": {"type": "string"},
                 "date_field": {"type": "string",
                                "enum": ["discovered", "opportunity_open",
@@ -186,6 +269,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                                          "with_contacts enriches this many"},
                 "export": {"type": "string", "enum": ["excel", "google_sheet"],
                            "description": "export every match or refuse above the declared cap"},
+                "result_scope": {"type": "string", "enum": ["top_n", "all"],
+                                 "description": "top_n honors limit; all exports every match"},
                 "with_contacts": {"type": "boolean",
                                   "description": "SECOND step only: after the rep says yes "
                                                  "to finding contacts, set true to enrich "
@@ -196,25 +281,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "required": [],
         },
     },
-    {
-        "name": "make_spreadsheet",
-        "description": "Create a real .xlsx file that will be uploaded into this "
-                       "Slack thread. rows[0] is the header row. Use when the rep "
-                       "asks for a spreadsheet/export/Excel.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "filename": {"type": "string", "description": "e.g. wa_leads.xlsx"},
-                "rows": {"type": "array", "items": {"type": "array",
-                                                    "items": {"type": ["string", "number", "null"]}}},
-            },
-            "required": ["filename", "rows"],
-        },
-    },
 ]
-
-_SELECT_ONLY = re.compile(r"^\s*select\b", re.IGNORECASE)
-
 
 def web_search(query: str, on_progress: Progress | None = None) -> str:
     """Firecrawl search -> compact 'title — url — snippet' lines (max 5)."""
@@ -242,31 +309,53 @@ def web_search(query: str, on_progress: Progress | None = None) -> str:
     return "\n".join(lines)
 
 
-def query_leads(sql: str) -> str:
-    """Read-only SELECT against the lead DB. Returns up to 50 rows as text."""
-    if not _SELECT_ONLY.match(sql) or ";" in sql.rstrip().rstrip(";"):
-        return "ERROR: only a single SELECT statement is allowed."
-    uri = f"file:{db.DEFAULT_DB_PATH}?mode=ro"
+def lead_stats(group_by: str = "grade", state: str = "", program: str = "",
+               grade: str = "", db_path: str | os.PathLike[str] | None = None) -> str:
+    """Return typed lead counts without exposing SQL or unrelated database tables."""
+    columns = {
+        "source": "source", "state": "state", "program": "program",
+        "grade": "lead_grade", "status": "status",
+    }
+    column = columns.get(group_by or "grade")
+    if column is None:
+        return f"ERROR: unsupported grouping '{group_by}'."
+    where = ["COALESCE(status,'new') != 'dead'"]
+    params: list[str] = []
+    if state:
+        where.append("UPPER(state)=?")
+        params.append(state.strip().upper())
+    if program:
+        where.append("UPPER(program)=?")
+        params.append(program.strip().upper())
+    if grade:
+        if grade.lower() not in {"gold", "silver", "watch"}:
+            return f"ERROR: unsupported grade '{grade}'."
+        where.append("lead_grade=?")
+        params.append(grade.lower())
+    target = db_path or db.DEFAULT_DB_PATH
+    uri = f"file:{target}?mode=ro"
     try:
         conn = sqlite3.connect(uri, uri=True, timeout=5.0)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(sql).fetchmany(50)
+        rows = conn.execute(
+            f"SELECT COALESCE({column}, '(unknown)') AS value, COUNT(*) AS count "
+            f"FROM leads WHERE {' AND '.join(where)} GROUP BY {column} "
+            "ORDER BY count DESC, value LIMIT 100",
+            params,
+        ).fetchall()
+        conn.close()
     except sqlite3.Error as exc:
         return f"ERROR: {exc}"
     if not rows:
-        return "(no rows)"
-    cols = rows[0].keys()
-    out = [" | ".join(cols)]
-    out += [" | ".join(str(r[c]) for c in cols) for r in rows]
-    return "\n".join(out)
+        return "No leads matched those filters."
+    return f"Counts by {group_by or 'grade'}:\n" + "\n".join(
+        f"- {value}: {count}" for value, count in rows)
 
 
-def find_contact(lead_id: int, entity: str, state: str,
-                 on_progress: Progress | None = None) -> str:
+def find_contact(lead_id: int, on_progress: Progress | None = None) -> str:
     """Enrich one lead and report the outcome honestly (verified / not_found /
     unreachable). Thin string wrapper over enrich_lead_contact for the single-lead tool."""
     conn = db.connect()
-    outcome = enrich_lead_contact(conn, lead_id, entity, state, on_progress)
+    outcome = enrich_lead_contact(conn, lead_id, on_progress)
     if outcome.status == "verified":
         phone = f" / {outcome.phone}" if outcome.phone else ""
         source = f" (found on {outcome.source_url})" if outcome.source_url else ""
@@ -279,16 +368,19 @@ def find_contact(lead_id: int, entity: str, state: str,
             "name, or a human can supply one.")
 
 
-def salesforce_lookup(entity: str, domain: str = "", phone: str = "",
+def salesforce_lookup(entity: str, domain: str = "", phone: str = "", state: str = "",
                       on_progress: Progress | None = None) -> str:
     """Read-only CRM cross-reference — honest, link-carrying summary for Grant."""
     from ..enrich import salesforce
 
-    res = salesforce.lookup(entity, domain=domain, phone=phone, on_progress=on_progress)
+    res = salesforce.lookup(entity, domain=domain, phone=phone, state=state,
+                            on_progress=on_progress)
     if res.error:
         return f"ERROR: {res.error} — tell the user you couldn't reach Salesforce."
+    if res.status.value == "no_match":
+        return f"No Salesforce Account, Lead, or Contact found for '{entity}'."
     if not res.matched:
-        return f"No Salesforce record found for '{entity}' — looks net-new."
+        return "Salesforce lookup was incomplete — no net-new conclusion is safe."
     lines = []
     for m in res.matches[:6]:
         tag = "match" if m.confidence == "high" else "possible match"
@@ -299,7 +391,122 @@ def salesforce_lookup(entity: str, domain: str = "", phone: str = "",
              if len(res.matches) > 6 else "")
     header = ("One Salesforce result:" if len(res.matches) == 1
               else f"{len(res.matches)} Salesforce results (review before outreach):")
-    return header + "\n" + "\n".join(lines) + extra
+    qualifier = ("\nSalesforce returned partial results; do not treat omissions as net-new."
+                 if res.status.value == "partial" else "")
+    return header + "\n" + "\n".join(lines) + extra + qualifier
+
+
+def _crm_action_result(action_id: str, nonce: str, preview: str,
+                       expires_at: str) -> str:
+    """Append a machine-readable pending-action marker for grant.py to buttonize."""
+    marker = json.dumps({
+        "action_id": action_id,
+        "nonce": nonce,
+        "preview": preview,
+        "expires_at": expires_at,
+    }, separators=(",", ":"))
+    return f"{preview}\n<grant-crm-action>{marker}</grant-crm-action>"
+
+
+def salesforce_campaign_search(name_or_link: str) -> str:
+    """Read Campaign candidates without preparing or performing a write."""
+    from ..enrich import salesforce_campaigns as crm
+
+    gateway = crm.SalesforceCampaignGateway()
+    query = name_or_link.strip()
+    try:
+        if query.startswith(("https://", "http://")):
+            _sobject, record_id = crm.parse_record_link(query, {"Campaign"})
+            records = [gateway.get_record("Campaign", record_id)]
+        else:
+            records = gateway.search_campaigns(query)
+    except (ValueError, KeyError, requests.RequestException) as exc:
+        return f"ERROR: Campaign search failed ({type(exc).__name__}): {str(exc)[:160]}"
+    if not records:
+        return (f"No Salesforce Campaign found for '{query}'. Ask for a direct Campaign "
+                "link or offer to create a new Campaign.")
+    lines = [f"- {record.name} — {record.link}" for record in records]
+    instruction = ("Confirm this exact Campaign with the user before preparing members."
+                   if len(records) == 1 else
+                   "Multiple Campaigns matched; ask the user to choose one by link.")
+    return f"Found {len(records)} Campaign result(s):\n" + "\n".join(lines) + f"\n{instruction}"
+
+
+def salesforce_campaign_create_preview(
+        args: dict[str, Any], requester_slack: str, workspace: str,
+        channel: str, thread_ts: str) -> str:
+    """Persist a requester-bound Campaign creation preview and return its marker."""
+    from ..enrich import salesforce_campaigns as crm
+
+    gateway = crm.SalesforceCampaignGateway()
+    owner_id = str(args.get("owner_id", ""))
+    owner_label = str(args.get("owner_label", "Salesforce integration user"))
+    if not owner_id:
+        from .. import persequor_client
+
+        requester_email = persequor_client.rep_email_for(requester_slack) or ""
+        owners = gateway.find_active_user_by_email(requester_email)
+        if len(owners) == 1:
+            owner_id = owners[0].record_id
+            owner_label = owners[0].name
+    draft = crm.CampaignDraft(
+        name=str(args.get("name", "")),
+        campaign_type=str(args.get("campaign_type", "Other")),
+        status=str(args.get("status", "Planned")),
+        is_active=bool(args.get("is_active", True)),
+        owner_id=owner_id,
+        owner_label=owner_label,
+        start_date=str(args.get("start_date", "")),
+        end_date=str(args.get("end_date", "")),
+        description=str(args.get("description", "")),
+    )
+    try:
+        action = crm.prepare_campaign_creation(
+            db.connect(), gateway, workspace, channel,
+            thread_ts, requester_slack, draft,
+        )
+    except (ValueError, PermissionError, KeyError, requests.RequestException) as exc:
+        return f"ERROR: Campaign preview failed ({type(exc).__name__}): {str(exc)[:180]}"
+    return _crm_action_result(action.action_id, action.nonce,
+                              action.preview, action.expires_at)
+
+
+def salesforce_campaign_members_preview(
+        args: dict[str, Any], requester_slack: str, workspace: str,
+        channel: str, thread_ts: str) -> str:
+    """Resolve and persist an exact Campaign membership preview without creating data."""
+    from ..enrich import salesforce_campaigns as crm
+
+    gateway = crm.SalesforceCampaignGateway()
+    try:
+        _sobject, campaign_id = crm.parse_record_link(
+            str(args.get("campaign_link", "")), {"Campaign"})
+        campaign = gateway.get_record("Campaign", campaign_id)
+        links: dict[int, str] = {}
+        for item in args.get("member_links", []) or []:
+            if isinstance(item, dict):
+                links[int(item.get("grant_lead_id", 0))] = str(
+                    item.get("salesforce_link", ""))
+        conn = db.connect()
+        lead_ids = [int(item) for item in args.get("lead_ids", [])]
+        snapshot_id = str(args.get("search_request_id", ""))
+        if snapshot_id:
+            snapshot = db.get_search_request(conn, snapshot_id, requester_slack)
+            expected_session = f"{workspace}:{channel}:{thread_ts}:{requester_slack}"
+            if snapshot is None or snapshot["session_key"] != expected_session:
+                raise PermissionError("search snapshot is stale or belongs to another thread")
+            lead_ids = [int(item) for item in json.loads(
+                str(snapshot["result_lead_ids_json"]))]
+        action = crm.prepare_membership(
+            conn, gateway, workspace, channel, thread_ts, requester_slack,
+            campaign, lead_ids,
+            supplied_links=links,
+            allow_org_leads=bool(args.get("allow_org_leads", False)),
+        )
+    except (ValueError, PermissionError, KeyError, requests.RequestException) as exc:
+        return f"ERROR: Campaign member preview failed ({type(exc).__name__}): {str(exc)[:180]}"
+    return _crm_action_result(action.action_id, action.nonce,
+                              action.preview, action.expires_at)
 
 
 def find_person_linkedin(entity: str, state: str,
@@ -317,7 +524,8 @@ def find_person_linkedin(entity: str, state: str,
 
 def run_tool(name: str, args: dict[str, Any],
              on_progress: Progress | None = None,
-             requester_slack: str = "") -> tuple[str, GeneratedArtifact | None]:
+             requester_slack: str = "", workspace: str = "", channel: str = "",
+             thread_ts: str = "") -> tuple[str, GeneratedArtifact | None]:
     """Dispatch one tool call and return text plus an optional owned artifact.
 
     on_progress emits short status phrases for Grant's live spinner; requester_slack
@@ -329,12 +537,28 @@ def run_tool(name: str, args: dict[str, Any],
         try:
             return salesforce_lookup(str(args.get("entity", "")),
                                      str(args.get("domain", "")),
-                                     str(args.get("phone", "")), p), None
+                                     str(args.get("phone", "")),
+                                     str(args.get("state", "")), p), None
         except Exception as exc:
             return f"ERROR: Salesforce lookup failed ({type(exc).__name__}).", None
-    if name == "query_leads":
+    if name == "salesforce_campaign_search":
+        p("Searching Salesforce Campaigns")
+        return salesforce_campaign_search(str(args.get("name_or_link", ""))), None
+    if name == "salesforce_campaign_create_preview":
+        p("Preparing Campaign preview")
+        return salesforce_campaign_create_preview(
+            args, requester_slack, workspace, channel, thread_ts), None
+    if name == "salesforce_campaign_members_preview":
+        p("Resolving Campaign members")
+        return salesforce_campaign_members_preview(
+            args, requester_slack, workspace, channel, thread_ts), None
+    if name == "lead_stats":
         p("Checking the lead database")
-        return query_leads(str(args.get("sql", ""))), None
+        return lead_stats(
+            group_by=str(args.get("group_by", "grade")),
+            state=str(args.get("state", "")),
+            program=str(args.get("program", "")),
+            grade=str(args.get("grade", ""))), None
     if name == "search_leads":
         try:
             return search_leads(
@@ -347,21 +571,26 @@ def run_tool(name: str, args: dict[str, Any],
                             else None),
                 amount_max=(float(args["amount_max"]) if args.get("amount_max") is not None
                             else None),
+                enrollment_min=(int(args["enrollment_min"])
+                                if args.get("enrollment_min") is not None else None),
+                enrollment_max=(int(args["enrollment_max"])
+                                if args.get("enrollment_max") is not None else None),
+                city=str(args.get("city", "")),
                 name_contains=str(args.get("name_contains", "")),
                 date_field=str(args.get("date_field", "")),
                 date_from=str(args.get("date_from", "")),
                 date_to=str(args.get("date_to", "")),
                 limit=int(args.get("limit", 50) or 50),
                 export=args.get("export", ""),
+                result_scope=str(args.get("result_scope", "top_n")),
                 with_contacts=bool(args.get("with_contacts", False)),
-                on_progress=p, requester_slack=requester_slack)
+                on_progress=p, requester_slack=requester_slack,
+                workspace=workspace, channel=channel, thread_ts=thread_ts)
         except Exception as exc:
             return f"ERROR: search failed ({type(exc).__name__}).", None
     if name == "find_contact":
         try:
-            return find_contact(int(args.get("lead_id", 0)),
-                                str(args.get("entity", "")),
-                                str(args.get("state", "")), p), None
+            return find_contact(int(args.get("lead_id", 0)), p), None
         except Exception as exc:  # enrichment API hiccup -> honest tool error
             return f"ERROR: enrichment failed ({type(exc).__name__}) — say so.", None
     if name == "find_person_linkedin":
@@ -370,8 +599,4 @@ def run_tool(name: str, args: dict[str, Any],
                                         str(args.get("state", "")), p), None
         except Exception as exc:
             return f"ERROR: LinkedIn search failed ({type(exc).__name__}).", None
-    if name == "make_spreadsheet":
-        p("Preparing your spreadsheet")
-        return make_spreadsheet(str(args.get("filename", "")),
-                                list(args.get("rows", [])))
     return f"ERROR: unknown tool {name}", None
