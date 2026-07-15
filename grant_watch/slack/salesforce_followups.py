@@ -245,8 +245,15 @@ def run(client: WebClient | None, channel: str, conn: sqlite3.Connection,
             continue
         assert client is not None
         try:
+            identity = client.auth_test()
+            workspace = str(identity.get("team_id") or "")
+            bot_user = str(identity.get("user_id") or "Grant")
+            if not workspace:
+                raise RuntimeError("Slack workspace identity unavailable")
             response = client.chat_postMessage(channel=channel, text=text, mrkdwn=False,
                                                unfurl_links=False, unfurl_media=False)
+            db.register_conversation_thread(
+                conn, workspace, channel, str(response["ts"]), bot_user)
         except Exception as exc:  # noqa: BLE001 — ambiguous sends are never retried
             with conn:
                 conn.execute(
