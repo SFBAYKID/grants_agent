@@ -220,13 +220,12 @@ class SalesforceCampaignGateway:
         return values["Type"], values["Status"]
 
     def opportunity_stages(self) -> set[str]:
-        """Return active Opportunity StageName values from writer-org metadata."""
-        body = self._get("sobjects/Opportunity/describe")
-        for field in body.get("fields") or []:
-            if field.get("name") == "StageName":
-                return {str(item.get("value")) for item in field.get("picklistValues") or []
-                        if item.get("active")}
-        return set()
+        """Return active open stages so a new record remains visible to readback."""
+        body = self._get("query", {"q": (
+            "SELECT MasterLabel FROM OpportunityStage "
+            "WHERE IsActive=true AND IsClosed=false ORDER BY SortOrder")})
+        return {str(item.get("MasterLabel")) for item in body.get("records") or []
+                if item.get("MasterLabel")}
 
     def find_active_user_by_email(self, email: str) -> list[SalesforceRecordRef]:
         """Resolve an owner only by exact active-user email; never guess by name."""
