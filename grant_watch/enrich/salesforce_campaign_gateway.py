@@ -545,9 +545,28 @@ class SalesforceCampaignGateway:
             self, lead_payload: dict[str, object], action_id: str, note_body: str,
             task_description: str, activity_date: str) -> LeadAuditResult:
         """Atomically create one person Lead and its three exact audit artifacts."""
-        if (not lead_payload or not set(lead_payload) <= _PERSON_LEAD_CREATE_FIELDS
-                or not all(lead_payload.get(key) for key in ("Company", "LastName", "Email"))):
+        if not lead_payload.get("Email"):
             raise ValueError("person Lead payload contains forbidden or missing fields")
+        return self._create_lead_with_audit_bundle(
+            lead_payload, action_id, note_body, task_description, activity_date)
+
+    def create_organization_lead_with_audit_bundle(
+            self, lead_payload: dict[str, object], action_id: str, note_body: str,
+            task_description: str, activity_date: str) -> LeadAuditResult:
+        """Atomically create one organization-only Lead with blank person fields."""
+        forbidden_person = {"FirstName", "Email", "Title", "MobilePhone"}
+        if forbidden_person & set(lead_payload):
+            raise ValueError("organization Lead cannot contain person fields")
+        return self._create_lead_with_audit_bundle(
+            lead_payload, action_id, note_body, task_description, activity_date)
+
+    def _create_lead_with_audit_bundle(
+            self, lead_payload: dict[str, object], action_id: str, note_body: str,
+            task_description: str, activity_date: str) -> LeadAuditResult:
+        """Submit one allowlisted Lead and its audit artifacts as one transaction."""
+        if (not lead_payload or not set(lead_payload) <= _PERSON_LEAD_CREATE_FIELDS
+                or not all(lead_payload.get(key) for key in ("Company", "LastName"))):
+            raise ValueError("Lead payload contains forbidden or missing fields")
         requests_body: list[dict[str, object]] = [{
             "method": "POST",
             "url": f"/services/data/{API_VERSION}/sobjects/Lead",

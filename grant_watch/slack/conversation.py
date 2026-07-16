@@ -22,6 +22,7 @@ from typing import Any  # Anthropic tool-use response payloads are runtime-shape
 
 from anthropic import Anthropic
 
+from .. import db
 from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact
 from . import tools
@@ -171,6 +172,11 @@ STANDALONE SALESFORCE LEADS — EXPLICIT APPROVAL ONLY:
   by find_contact for a persisted verified contact. Never construct Lead fields yourself.
 - Call salesforce_lead_create_preview. It performs duplicate checks and returns an exact
   preview with a confirmation button. Ask the user to inspect and click that button.
+- If no verified person/email exists and the user still asks for a standalone Lead,
+  call salesforce_organization_lead_create_preview with the exact lead_id from FACTS.
+  It leaves person/email fields blank and never invents a contact. If the user says
+  “just create a lead,” “standalone lead,” or “add this to Salesforce,” prepare this
+  preview directly; do not ask about contact research or a Campaign again.
 - Never claim creation succeeded until the confirmation result returns a Salesforce link.
 - If the exact Lead already exists and the user asks to fill missing details, call
   salesforce_lead_enrichment_preview with its exact link and verified contact ID.
@@ -370,6 +376,49 @@ def _extract_pending_action(text: str) -> tuple[str, dict[str, str] | None]:
     return clean, action
 
 
+def _explicit_lead_creation_request(
+        text: str, thread_context: list[str] | None = None) -> bool:
+    """Recognize a direct request for one standalone Salesforce Lead."""
+    normalized = " ".join(text.lower().replace("stand-alone", "standalone").split())
+    if re.search(r"\bstand\s*alone\s+lead\b|\bstandalone\s+lead\b", normalized):
+        return True
+    if re.search(r"\bcreate\s+it\s+anyway\b", normalized):
+        return any("lead" in item.lower() for item in (thread_context or [])[-3:])
+    action = bool(re.search(r"\b(create|add|put|make)\b", normalized))
+    target = bool(re.search(r"\b(?:salesforce|lead)\b", normalized))
+    return action and target
+
+
+def _has_verified_person(lead_id: int) -> bool:
+    """Return whether Grant stores a real name and email for this exact lead."""
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            """SELECT 1 FROM contacts
+               WHERE lead_id=? AND contact_status='verified'
+                 AND TRIM(COALESCE(name,''))!=''
+                 AND TRIM(COALESCE(email,''))!='' LIMIT 1""",
+            (lead_id,),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
+def _organization_preview_failure(tool_text: str) -> str:
+    """Translate a safe preview failure into brief, nontechnical Slack language."""
+    if "matching record" in tool_text:
+        link = next(iter(re.findall(r"https?://[^\s,]+", tool_text)), "")
+        suffix = f" Here is the possible match: {link}" if link else ""
+        return ("Salesforce may already have this organization, so I did not create a "
+                f"duplicate.{suffix}")
+    if "verified current funding source" in tool_text:
+        return ("I can’t safely create this Lead because its verified funding source is "
+                "missing. Nothing was changed.")
+    return ("I couldn’t safely prepare that Salesforce Lead because the duplicate check "
+            "did not complete. Nothing was changed.")
+
+
 def respond(user_text: str, row: sqlite3.Row | None,
             thread_context: list[str] | None = None,
             on_progress: tools.Progress | None = None,
@@ -383,8 +432,22 @@ def respond(user_text: str, row: sqlite3.Row | None,
     cleans it before re-raising. The dict remains dynamic because Anthropic message
     blocks are third-party runtime objects rather than a stable local model.
     """
-    client = Anthropic()  # ANTHROPIC_API_KEY from env
     say = on_progress or (lambda _msg: None)
+    if (row is not None and _explicit_lead_creation_request(user_text, thread_context)
+            and not _has_verified_person(int(row["id"]))):
+        say("Preparing Salesforce Lead")
+        tool_text = tools.salesforce_organization_lead_create_preview(
+            int(row["id"]), requester_slack, workspace, channel, thread_ts)
+        _clean, action = _extract_pending_action(tool_text)
+        if action is None:
+            return {"intent": "question", "files": [], "pending_crm_actions": [],
+                    "reply": _organization_preview_failure(tool_text)}
+        return {
+            "intent": "question", "files": [], "pending_crm_actions": [action],
+            "reply": ("I couldn’t verify a person or email, so I prepared one "
+                      "organization-only Salesforce Lead. Review it below and confirm."),
+        }
+    client = Anthropic()  # ANTHROPIC_API_KEY from env
     # Keep a wider window so the confirmed filters (STEP 1) survive a few interleaved
     # messages before the rep replies "yes, top 5" (architectural-critic H1).
     context = ("\n\nRecent thread:\n" + "\n".join(thread_context[-10:])

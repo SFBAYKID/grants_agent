@@ -166,6 +166,11 @@ def person_lead_writer_enabled() -> bool:
     return os.environ.get("SALESFORCE_PERSON_LEAD_WRITES_ENABLED", "0") == "1"
 
 
+def organization_lead_writer_enabled() -> bool:
+    """Require a separate explicit gate for standalone organization Lead creation."""
+    return os.environ.get("SALESFORCE_ORGANIZATION_LEAD_WRITES_ENABLED", "0") == "1"
+
+
 def opportunity_writer_enabled() -> bool:
     """Require a distinct explicit gate for Opportunity creation."""
     return os.environ.get("SALESFORCE_OPPORTUNITY_WRITES_ENABLED", "0") == "1"
@@ -209,6 +214,16 @@ def prepare_person_lead_creation(conn: sqlite3.Connection, workspace: str,
 
     return records.prepare_person_lead_creation(
         conn, workspace, channel, thread_ts, requester, contact_id)
+
+
+def prepare_organization_lead_creation(
+        conn: sqlite3.Connection, workspace: str, channel: str, thread_ts: str,
+        requester: str, grant_lead_id: int) -> PreparedAction:
+    """Delegate one organization-only standalone Lead preview."""
+    from . import salesforce_record_actions as records
+
+    return records.prepare_organization_lead_creation(
+        conn, workspace, channel, thread_ts, requester, grant_lead_id)
 
 
 def prepare_lead_enrichment(
@@ -619,6 +634,12 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
                        error="person Lead writes feature flag disabled")
         return ActionExecution(CampaignActionState.FAILED,
                                "Salesforce Lead creation is disabled; nothing was created.")
+    if (row["action_type"] == "create_organization_lead"
+            and not organization_lead_writer_enabled()):
+        _finish_action(conn, action_id, CampaignActionState.FAILED,
+                       error="organization Lead writes feature flag disabled")
+        return ActionExecution(CampaignActionState.FAILED,
+                               "Salesforce Lead creation is disabled; nothing was created.")
     if row["action_type"] == "create_opportunity" and not opportunity_writer_enabled():
         _finish_action(conn, action_id, CampaignActionState.FAILED,
                        error="Opportunity writes feature flag disabled")
@@ -631,7 +652,8 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
         return ActionExecution(CampaignActionState.FAILED,
                                "Salesforce Lead enrichment is disabled; nothing changed.")
     if (row["action_type"] in {
-            "create_person_lead", "enrich_existing_lead", "repair_lead_audit"}
+            "create_person_lead", "create_organization_lead",
+            "enrich_existing_lead", "repair_lead_audit"}
             and not lead_audit_writer_enabled()):
         _finish_action(conn, action_id, CampaignActionState.FAILED,
                        error="Grant Salesforce audit records feature flag disabled")
@@ -646,6 +668,9 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
         if row["action_type"] == "create_person_lead":
             from . import salesforce_record_actions as records
             return records.confirm_person_lead(conn, gateway, row)
+        if row["action_type"] == "create_organization_lead":
+            from . import salesforce_record_actions as records
+            return records.confirm_organization_lead(conn, gateway, row)
         if row["action_type"] == "create_opportunity":
             from . import salesforce_record_actions as records
             return records.confirm_opportunity(conn, gateway, row)

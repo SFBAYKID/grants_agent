@@ -123,10 +123,12 @@ for days. Grant records draft submission separately from any later verified send
   `monarchdev`
   first; prod creds separate. Blocked on: Chase creating the Connected App + user.
 - Live sandbox authentication and match-quality sampling remain **needs-testing**.
-- Campaign intake is the only write exception: separate credentials, feature flag off,
-  exact preview, same-user Slack confirmation, create-only allowlist, and durable
-  per-record outcomes. New organization Leads may be created only to become Campaign
-  Members; Account/Contact/Opportunity records are never modified.
+- Salesforce writes use separate credentials and default-off action-specific feature flags.
+  Every action has an exact preview, same-user Slack confirmation, fixed field allowlist,
+  and durable outcome. Standalone organization-only Leads are allowed when no person is
+  verified; their person/email fields remain blank. Opportunity creation requires an exact
+  existing Account. Existing Lead enrichment fills blanks only. No delete, merge, convert,
+  Account write, or Contact write action exists.
 
 ## 7. Deployment order
 

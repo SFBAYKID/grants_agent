@@ -128,10 +128,12 @@ or *"No record found — this is net-new."* This turns a raw lead into an action
 - **Read-only discovery by default.** A bounded worker queries Account, Lead and account-bound open
   Opportunity records and stores status/links locally. Unavailable, partial and ambiguous are distinct
   from no-match; an outage can never label a lead net-new.
-- **One narrow write exception: Campaign intake.** A separate credential may create Campaign,
-  CampaignMemberStatus, organization-only Lead, and CampaignMember records. It cannot update/delete
-  existing CRM records. Every execution requires an immutable Slack preview, one-time nonce, same
-  requester/channel, short expiry, and a final button confirmation. The feature flag defaults off.
+- **Narrow, separately gated write actions.** A separate credential may create Campaigns and bounded
+  Campaign membership, one person or organization-only Lead, one Account-bound Opportunity, or fill
+  blank fields on one exact Lead. Lead create/update actions atomically include a visible Note and an
+  administrative Activity. There is no delete/merge/convert action. Every execution requires an
+  immutable Slack preview, one-time nonce, same requester/channel, short expiry, and a final button
+  confirmation. Each write category has a default-off feature flag.
 - **Sandbox for all development.** `test.salesforce.com`, sandbox `monarchdev`
   (`...--monarchdev.sandbox.my.salesforce.com`). Production Salesforce is never touched during dev.
 - **Production uses SEPARATE credentials from sandbox** — different org, different Connected App.

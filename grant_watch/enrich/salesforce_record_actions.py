@@ -17,6 +17,8 @@ from datetime import datetime
 
 import requests
 
+from .. import db
+from ..models import VerificationStatus
 from . import salesforce
 from . import salesforce_campaigns as workflow
 from .salesforce_campaign_gateway import (
@@ -97,6 +99,49 @@ class PersonLeadDraft:
 
 
 @dataclass(frozen=True)
+class OrganizationLeadDraft:
+    """One verified Grant organization proposed without fabricated person fields."""
+
+    grant_lead_id: int
+    company: str
+    state: str
+    source_url: str
+    organization: OrganizationProfile
+    enrollment: int | None
+    industry: str
+
+    def payload(self, action_id: str, requester: str) -> dict[str, object]:
+        """Return organization facts only; Salesforce requires Company and LastName."""
+        result: dict[str, object] = {
+            "Company": self.company,
+            "LastName": self.company,
+            "Status": "New",
+            "LeadSource": "Other",
+            "Description": (
+                "Created by Grant as an organization-only Lead. No individual contact "
+                "or email was verified, so all person fields are blank. "
+                f"Grant lead {self.grant_lead_id}. Funding evidence: {self.source_url}. "
+                f"Action {action_id}. Requested by Slack user {requester}."
+            ),
+        }
+        for key, value in (
+            ("Phone", self.organization.main_phone),
+            ("Website", self.organization.website),
+            ("Street", self.organization.street),
+            ("City", self.organization.city),
+            ("State", self.organization.state or self.state),
+            ("PostalCode", self.organization.postal_code),
+            ("Country", self.organization.country),
+            ("Industry", self.industry),
+        ):
+            if value:
+                result[key] = value
+        if self.enrollment is not None:
+            result["Number_of_Students__c"] = self.enrollment
+        return result
+
+
+@dataclass(frozen=True)
 class OpportunityDraft:
     """Allowlisted fields for one Opportunity under an exact existing Account."""
 
@@ -131,6 +176,15 @@ def duplicate_person(email: str, company: str, state: str) -> list[salesforce.SF
     if result.status in {salesforce.SFResultStatus.UNAVAILABLE,
                          salesforce.SFResultStatus.PARTIAL}:
         raise ConnectionError(result.error or "Salesforce duplicate check incomplete")
+    return result.matches
+
+
+def duplicate_organization(company: str, state: str) -> list[salesforce.SFMatch]:
+    """Fail closed on any plausible existing Salesforce organization or deal."""
+    result = salesforce.lookup(company, state=state)
+    if result.status in {salesforce.SFResultStatus.UNAVAILABLE,
+                         salesforce.SFResultStatus.PARTIAL}:
+        raise ConnectionError(result.error or "Salesforce organization check incomplete")
     return result.matches
 
 
@@ -220,6 +274,80 @@ def prepare_person_lead_creation(
     preview += "\n• Add a system Activity describing exactly what Grant created"
     preview += "\n• The Activity will say that no customer outreach occurred"
     return workflow.PreparedAction(stored_id, nonce, preview, expires)
+
+
+def prepare_organization_lead_creation(
+        conn: sqlite3.Connection, workspace: str, channel: str, thread_ts: str,
+        requester: str, grant_lead_id: int) -> workflow.PreparedAction:
+    """Freeze one organization-only Lead preview after a complete duplicate check."""
+    workflow._validate_context(workspace, channel, thread_ts, requester)
+    row = db.get_lead(conn, grant_lead_id)
+    if row is None:
+        raise ValueError("Grant lead is stale or unknown")
+    company = str(row["entity_name"] or "").strip()
+    state = str(row["state"] or "").strip().upper()
+    source_url = str(row["current_event_source_url"] or "").strip()
+    if not company or len(company) > 80:
+        raise ValueError("organization name must be between 1 and 80 characters")
+    if (str(row["current_event_verification_status"] or "")
+            != VerificationStatus.VERIFIED.value or not source_url):
+        raise ValueError("a verified current funding source is required")
+    duplicates = duplicate_organization(company, state)
+    if duplicates:
+        links = ", ".join(item.link for item in duplicates[:3])
+        raise ValueError(f"Salesforce already has a possible matching record: {links}")
+    site = conn.execute(
+        """SELECT official_domain,source_url FROM contacts
+           WHERE lead_id=? AND TRIM(COALESCE(official_domain,''))!=''
+           ORDER BY CASE contact_status WHEN 'verified' THEN 0 ELSE 1 END,id LIMIT 1""",
+        (grant_lead_id,),
+    ).fetchone()
+    official_domain = str(site["official_domain"] or "").strip() if site else ""
+    site_source = str(site["source_url"] or "").strip() if site else ""
+    if official_domain:
+        try:
+            organization = fetch_profile(
+                company, official_domain, site_source or f"https://{official_domain}/")
+        except (KeyError, ValueError, RuntimeError, requests.RequestException):
+            organization = OrganizationProfile(
+                website=f"https://{official_domain}/", source_url=site_source)
+    else:
+        organization = OrganizationProfile()
+    entity_text = f"{row['entity_type'] or ''} {company}".lower()
+    industry = "K-12 Schools" if any(
+        word in entity_text for word in ("school", "district", "k-12")) else ""
+    enrollment = int(row["enrollment"]) if row["enrollment"] is not None else None
+    draft = OrganizationLeadDraft(
+        grant_lead_id, company, state, source_url, organization, enrollment, industry)
+    action_id = str(uuid.uuid4())
+    payload = draft.payload(action_id, requester)
+    plan = workflow.MemberPlan(
+        grant_lead_id, str(row["canonical_entity_key"] or company.lower()),
+        company, state, "create_standalone_org_lead", proposed_lead=payload,
+        note=json.dumps({"source_url": source_url, "person_fields": "blank"}))
+    stored_id, nonce, expires = workflow._store_action(
+        conn, "create_organization_lead", workspace, channel, thread_ts, requester,
+        {"lead": payload, "grant_lead_id": grant_lead_id,
+         "source_url": source_url}, plans=[plan], action_id=action_id)
+    lines = [
+        "Create this organization-only Salesforce Lead?",
+        f"• Organization: {company}",
+        "• Contact: no verified person or email; those fields stay blank",
+        f"• Funding source: {source_url}",
+    ]
+    for label, key in (
+        ("Website", "Website"), ("Phone", "Phone"), ("Street", "Street"),
+        ("City", "City"), ("State", "State"), ("Postal Code", "PostalCode"),
+        ("Industry", "Industry"), ("Students", "Number_of_Students__c"),
+    ):
+        if payload.get(key):
+            lines.append(f"• {label}: {payload[key]}")
+    lines.extend((
+        "• Add a visible Salesforce Note with Grant’s verified funding research",
+        "• Add a system Activity saying no customer outreach occurred",
+        "No Campaign membership or Opportunity will be created.",
+    ))
+    return workflow.PreparedAction(stored_id, nonce, "\n".join(lines), expires)
 
 
 def prepare_opportunity_creation(
@@ -386,6 +514,58 @@ def confirm_person_lead(conn: sqlite3.Connection, gateway: SalesforceCampaignGat
         workflow.CampaignActionState.COMPLETE,
         f"Created {created[0].name or payload['LastName']} in Salesforce: "
         f"{created[0].link}", added=1)
+
+
+def confirm_organization_lead(
+        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
+        row: sqlite3.Row) -> workflow.ActionExecution:
+    """Recheck duplicates and atomically create one organization-only Lead."""
+    payload = dict(json.loads(str(row["payload_json"]))["lead"])
+    company = str(payload["Company"])
+    state = str(payload.get("State") or "")
+    duplicates = duplicate_organization(company, state)
+    if duplicates:
+        item = duplicates[0]
+        workflow._finish_action(
+            conn, str(row["id"]), workflow.CampaignActionState.COMPLETE)
+        with conn:
+            conn.execute(
+                """UPDATE crm_action_items SET state='already_present',salesforce_id=?
+                   WHERE action_id=?""", (item.record_id, row["id"]))
+        return workflow.ActionExecution(
+            workflow.CampaignActionState.COMPLETE,
+            f"{company} is already in Salesforce: {item.link}",
+            already_present=1)
+    workflow._mark_external_write_started(conn, str(row["id"]))
+    action_id = str(row["id"])
+    note_body = str(payload.get("Description") or "")
+    task_body = (
+        _audit_task_description(action_id, "created and populated", list(payload))
+        + " No individual contact or email was verified; person fields were left blank."
+    )
+    result = gateway.create_organization_lead_with_audit_bundle(
+        payload, action_id, note_body, task_body, _activity_date())
+    if not result.success or not result.lead_id:
+        raise SalesforceCompositeRolledBack(
+            result.error or "Salesforce returned no Lead and audit IDs")
+    validate_record_id(result.lead_id, "Lead")
+    created = gateway.get_record("Lead", result.lead_id)
+    if (created.company != company
+            or (state and created.state and created.state.upper() != state.upper())):
+        raise ValueError("created organization Lead did not match the approved preview")
+    if not gateway.verify_lead_audit_bundle(
+            result.lead_id, action_id, note_body, task_body, result):
+        raise ValueError("created Salesforce Lead audit trail could not be verified")
+    with conn:
+        conn.execute(
+            """UPDATE crm_action_items SET state='lead_created',salesforce_id=?
+               WHERE action_id=?""", (result.lead_id, row["id"]))
+    workflow._finish_action(
+        conn, str(row["id"]), workflow.CampaignActionState.COMPLETE)
+    return workflow.ActionExecution(
+        workflow.CampaignActionState.COMPLETE,
+        f"Created an organization-only Salesforce Lead for {company}: {created.link}",
+        added=1)
 
 
 def confirm_opportunity(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,

@@ -146,6 +146,47 @@ def test_person_lead_and_audit_are_one_four_part_transaction(
     assert items[3]["body"]["WhoId"] == "@{grantPersonLead.id}"
 
 
+def test_organization_lead_is_one_fixed_delete_free_transaction(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Organization-only creation has one Lead and no person, bulk, or delete request."""
+    gateway = gateway_mod.SalesforceCampaignGateway()
+    monkeypatch.setattr(gateway, "_auth", lambda: ("token", "https://writer.test"))
+    calls: list[dict[str, Any]] = []
+
+    def fake_post(url: str, **kwargs: Any) -> Response:
+        """Capture the exact all-or-none request."""
+        calls.append({"url": url, **kwargs})
+        return Response([
+            {"referenceId": "grantPersonLead", "httpStatusCode": 201,
+             "body": {"id": LEAD_ID}},
+            {"referenceId": "grantResearchNote", "httpStatusCode": 201,
+             "body": {"id": "069000000000001"}},
+            {"referenceId": "grantResearchLink", "httpStatusCode": 201,
+             "body": {"id": "06A000000000001"}},
+            {"referenceId": "grantAuditTask", "httpStatusCode": 201,
+             "body": {"id": "00T000000000001"}},
+        ])
+
+    monkeypatch.setattr(gateway_mod.requests, "post", fake_post)
+    payload = {
+        "Company": "Test District", "LastName": "Test District",
+        "State": "CA", "Description": f"Action {ACTION_ID}",
+    }
+    result = gateway.create_organization_lead_with_audit_bundle(
+        payload, ACTION_ID, "Verified sources",
+        "No customer outreach. Action " + ACTION_ID, "2026-07-15")
+
+    assert result.success and len(calls) == 1 and result.lead_id == LEAD_ID
+    body = calls[0]["json"]
+    assert body["allOrNone"] is True
+    items = body["compositeRequest"]
+    assert len(items) == 4 and items[0]["method"] == "POST"
+    assert items[0]["body"] == payload
+    assert not ({"FirstName", "Email", "Title", "MobilePhone"} & set(payload))
+    assert all(item["method"] != "DELETE" for item in items)
+    assert not any("/composite/sobjects" in item["url"] for item in items)
+
+
 def test_composite_rollback_preserves_exact_subrequest_error(
         monkeypatch: pytest.MonkeyPatch) -> None:
     """A received rollback retains the failing reference and Salesforce error body."""

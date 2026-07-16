@@ -276,11 +276,13 @@ def create_app() -> App:
                 "SELECT action_type FROM crm_actions WHERE id=?", (action_id,)).fetchone()
             outcome_kind = ("salesforce_lead_created"
                             if action_type_row is not None
-                            and action_type_row["action_type"] == "create_person_lead"
+                            and action_type_row["action_type"] in {
+                                "create_person_lead", "create_organization_lead"}
                             else "campaign_added")
             added_rows = conn.execute(
                 """SELECT lead_id FROM crm_action_items
-                   WHERE action_id=? AND state='added' AND lead_id IS NOT NULL""",
+                   WHERE action_id=? AND state IN ('added','lead_created')
+                     AND lead_id IS NOT NULL""",
                 (action_id,),
             ).fetchall()
             for item in added_rows:

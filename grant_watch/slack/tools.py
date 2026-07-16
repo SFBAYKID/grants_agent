@@ -265,6 +265,17 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "salesforce_organization_lead_create_preview",
+        "description": "Prepare, but do not execute, one organization-only standalone "
+                       "Salesforce Lead from the exact persisted Grant lead. Use when "
+                       "the user explicitly wants a Lead but no person/email is verified.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"grant_lead_id": {"type": "integer"}},
+            "required": ["grant_lead_id"],
+        },
+    },
+    {
         "name": "salesforce_lead_enrichment_preview",
         "description": "Prepare, but do not execute, a fill-blank-only enrichment "
                        "preview for one exact Salesforce Lead using its verified contact.",
@@ -636,6 +647,22 @@ def salesforce_lead_create_preview(contact_id: int, requester_slack: str,
                               action.preview, action.expires_at)
 
 
+def salesforce_organization_lead_create_preview(
+        grant_lead_id: int, requester_slack: str, workspace: str,
+        channel: str, thread_ts: str) -> str:
+    """Prepare one verified, duplicate-checked organization-only Lead preview."""
+    from ..enrich import salesforce_campaigns as crm
+
+    try:
+        action = crm.prepare_organization_lead_creation(
+            db.connect(), workspace, channel, thread_ts, requester_slack, grant_lead_id)
+    except (ValueError, PermissionError, KeyError, ConnectionError,
+            requests.RequestException) as exc:
+        return f"ERROR: Lead preview failed ({type(exc).__name__}): {str(exc)[:180]}"
+    return _crm_action_result(action.action_id, action.nonce,
+                              action.preview, action.expires_at)
+
+
 def salesforce_lead_enrichment_preview(
         contact_id: int, lead_link: str, requester_slack: str,
         workspace: str, channel: str, thread_ts: str) -> str:
@@ -775,6 +802,11 @@ def run_tool(name: str, args: dict[str, Any],
         p("Preparing Salesforce Lead")
         return salesforce_lead_create_preview(
             int(args.get("contact_id", 0)), requester_slack, workspace,
+            channel, thread_ts), None
+    if name == "salesforce_organization_lead_create_preview":
+        p("Preparing organization Lead")
+        return salesforce_organization_lead_create_preview(
+            int(args.get("grant_lead_id", 0)), requester_slack, workspace,
             channel, thread_ts), None
     if name == "salesforce_lead_enrichment_preview":
         p("Checking verified Salesforce details")
