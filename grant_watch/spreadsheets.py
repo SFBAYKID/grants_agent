@@ -47,13 +47,16 @@ def neutralize_spreadsheet_value(value: object) -> SpreadsheetValue:
     return text
 
 
-def neutralize_spreadsheet_rows(rows: list[list[object]]) -> list[list[SpreadsheetValue]]:
+def neutralize_spreadsheet_rows(
+    rows: list[list[object]],
+) -> list[list[SpreadsheetValue]]:
     """Return rows safe for Excel and Google Sheets without changing real numbers."""
     return [[neutralize_spreadsheet_value(value) for value in row] for row in rows]
 
 
-def make_spreadsheet(filename: str,
-                     rows: list[list[object]]) -> tuple[str, GeneratedArtifact]:
+def make_spreadsheet(
+    filename: str, rows: list[list[object]]
+) -> tuple[str, GeneratedArtifact]:
     """Build a complete formula-safe XLSX and return its owned temporary artifact."""
     safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", filename or "grant_export.xlsx")
     if not safe_name.lower().endswith(".xlsx"):
@@ -71,5 +74,7 @@ def make_spreadsheet(filename: str,
     artifact = GeneratedArtifact(directory / safe_name)
     workbook.save(artifact.path)
     data_rows = max(0, len(rows) - 1)
-    return (f"Spreadsheet created with {data_rows} data rows; it will be attached.",
-            artifact)
+    return (
+        f"Spreadsheet created with {data_rows} data rows; it will be attached.",
+        artifact,
+    )

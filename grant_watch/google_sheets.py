@@ -30,12 +30,17 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any  # Google discovery resources/worksheet cells are runtime-shaped.
+
+# Google discovery clients are runtime-generated proxy objects with no stable protocol.
+GoogleResource = Any
 
 # The Google client libraries are optional at import time so the rest of Grant (and the
 # offline test suite) never hard-depends on them; we import lazily inside the call.
-_SCOPES = ("https://www.googleapis.com/auth/drive",
-           "https://www.googleapis.com/auth/spreadsheets")
+_SCOPES = (
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/spreadsheets",
+)
 _SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 _MAX_TITLE = 120
 
@@ -64,8 +69,25 @@ def _key_path() -> Path | None:
     return path if path.is_file() else None
 
 
-def create_sheet(title: str, columns: list[str], rows: list[list[object]],
-                 requested_by_slack: str, send_as: str) -> tuple[str, str]:
+def _remove_incomplete_file(drive: GoogleResource, sheet_id: str) -> str:
+    """Best-effort delete an incomplete/unshared sheet and report the exact outcome."""
+    try:
+        drive.files().delete(fileId=sheet_id, supportsAllDrives=True).execute()
+        return "incomplete Google file removed"
+    except Exception as exc:  # noqa: BLE001 — cleanup failure must be disclosed
+        return (
+            f"cleanup also failed ({type(exc).__name__}); shared-drive file "
+            f"{sheet_id} needs administrator review"
+        )
+
+
+def create_sheet(
+    title: str,
+    columns: list[str],
+    rows: list[list[object]],
+    requested_by_slack: str,
+    send_as: str,
+) -> tuple[str, str]:
     """Create a Google Sheet of the given rows in the Grant Exports shared drive and
     share it with the requesting rep. Returns (state, message); message is the sheet URL
     only when state == 'created'. Any other state is truthful and makes search.py return
@@ -80,6 +102,8 @@ def create_sheet(title: str, columns: list[str], rows: list[list[object]],
 
     # Import here so a missing google client library degrades to the Excel fallback
     # instead of breaking Grant's import graph.
+    drive: GoogleResource | None = None
+    sheet_id = ""
     try:
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
@@ -89,55 +113,104 @@ def create_sheet(title: str, columns: list[str], rows: list[list[object]],
 
     try:
         creds = service_account.Credentials.from_service_account_file(
-            str(key_path), scopes=list(_SCOPES))
+            str(key_path), scopes=list(_SCOPES)
+        )
         drive = build("drive", "v3", credentials=creds, cache_discovery=False)
         sheets = build("sheets", "v4", credentials=creds, cache_discovery=False)
 
         # 1) Create the empty sheet inside the shared drive (Workspace-owned, no quota).
-        created = drive.files().create(
-            body={"name": (title or "Grant export")[:_MAX_TITLE],
-                  "mimeType": _SHEET_MIME, "parents": [drive_id]},
-            fields="id,webViewLink", supportsAllDrives=True).execute()
-        sheet_id = created["id"]
+        created = (
+            drive.files()
+            .create(
+                body={
+                    "name": (title or "Grant export")[:_MAX_TITLE],
+                    "mimeType": _SHEET_MIME,
+                    "parents": [drive_id],
+                },
+                fields="id,webViewLink",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+        sheet_id = str(created["id"])
         sheet_url = created.get("webViewLink") or (
-            f"https://docs.google.com/spreadsheets/d/{sheet_id}")
+            f"https://docs.google.com/spreadsheets/d/{sheet_id}"
+        )
 
         # 2) Write header + every row in one RAW update (search already enforced the
         #    all-or-nothing row cap upstream, so this is the complete result set).
         values: list[list[Any]] = [list(columns)]
         values.extend([_cell(value) for value in row] for row in rows)
         sheets.spreadsheets().values().update(
-            spreadsheetId=sheet_id, range="A1", valueInputOption="RAW",
-            body={"values": values}).execute()
+            spreadsheetId=sheet_id,
+            range="A1",
+            valueInputOption="RAW",
+            body={"values": values},
+        ).execute()
 
         # 3) Freeze + bold the header row so the export is readable at a glance.
         sheets.spreadsheets().batchUpdate(
             spreadsheetId=sheet_id,
-            body={"requests": [
-                {"updateSheetProperties": {
-                    "properties": {"sheetId": 0,
-                                   "gridProperties": {"frozenRowCount": 1}},
-                    "fields": "gridProperties.frozenRowCount"}},
-                {"repeatCell": {
-                    "range": {"sheetId": 0, "startRowIndex": 0, "endRowIndex": 1},
-                    "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
-                    "fields": "userEnteredFormat.textFormat.bold"}},
-            ]}).execute()
+            body={
+                "requests": [
+                    {
+                        "updateSheetProperties": {
+                            "properties": {
+                                "sheetId": 0,
+                                "gridProperties": {"frozenRowCount": 1},
+                            },
+                            "fields": "gridProperties.frozenRowCount",
+                        }
+                    },
+                    {
+                        "repeatCell": {
+                            "range": {
+                                "sheetId": 0,
+                                "startRowIndex": 0,
+                                "endRowIndex": 1,
+                            },
+                            "cell": {
+                                "userEnteredFormat": {"textFormat": {"bold": True}}
+                            },
+                            "fields": "userEnteredFormat.textFormat.bold",
+                        }
+                    },
+                ]
+            },
+        ).execute()
 
         # 4) Share with the requesting rep so the link opens in their own account.
-        #    Best-effort: if this one call fails, the sheet still exists in the shared
-        #    drive for Chase/managers to re-share, so we surface the URL rather than
-        #    discarding a good export.
+        #    An unshared sheet is not a successful user export. Remove it and let the
+        #    caller deliver Excel; if cleanup itself fails, disclose the exact file id.
         try:
             drive.permissions().create(
-                fileId=sheet_id, sendNotificationEmail=False, supportsAllDrives=True,
-                body={"type": "user", "role": "writer",
-                      "emailAddress": send_as}).execute()
-        except HttpError:
-            return "created", sheet_url
+                fileId=sheet_id,
+                sendNotificationEmail=False,
+                supportsAllDrives=True,
+                body={"type": "user", "role": "writer", "emailAddress": send_as},
+            ).execute()
+        except HttpError as exc:
+            cleanup = _remove_incomplete_file(drive, sheet_id)
+            return (
+                "error",
+                f"Google Sheet could not be shared (HTTP {exc.resp.status}); {cleanup}",
+            )
 
         return "created", sheet_url
     except HttpError as exc:
-        return "error", f"Google Sheets API error (HTTP {exc.resp.status})"
+        cleanup = (
+            _remove_incomplete_file(drive, sheet_id)
+            if drive is not None and sheet_id
+            else "no Google file was created"
+        )
+        return "error", f"Google Sheets API error (HTTP {exc.resp.status}); {cleanup}"
     except Exception as exc:  # noqa: BLE001 — export must degrade to Excel, never crash
-        return "error", f"Google Sheet export failed ({type(exc).__name__})"
+        cleanup = (
+            _remove_incomplete_file(drive, sheet_id)
+            if drive is not None and sheet_id
+            else "no Google file was created"
+        )
+        return (
+            "error",
+            f"Google Sheet export failed ({type(exc).__name__}); {cleanup}",
+        )
