@@ -274,13 +274,16 @@ def create_app() -> App:
         if result.added > 0:
             action_type_row = conn.execute(
                 "SELECT action_type FROM crm_actions WHERE id=?", (action_id,)).fetchone()
-            outcome_kind = ("salesforce_lead_created"
-                            if action_type_row is not None
-                            and action_type_row["action_type"] in {
-                                "create_person_lead", "create_organization_lead",
-                                "create_linkedin_person_lead",
-                                "attach_linkedin_person_to_lead"}
-                            else "campaign_added")
+            action_type = (str(action_type_row["action_type"])
+                           if action_type_row is not None else "")
+            if action_type == "attach_linkedin_person_to_lead":
+                outcome_kind = "salesforce_lead_updated"
+            elif action_type in {
+                    "create_person_lead", "create_organization_lead",
+                    "create_linkedin_person_lead"}:
+                outcome_kind = "salesforce_lead_created"
+            else:
+                outcome_kind = "campaign_added"
             added_rows = conn.execute(
                 """SELECT lead_id FROM crm_action_items
                    WHERE action_id=? AND state IN ('added','lead_created')

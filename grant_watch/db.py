@@ -615,6 +615,7 @@ _OUTCOME_POINTS = {
     "contacted": 6,
     "campaign_added": 8,
     "salesforce_lead_created": 8,
+    "salesforce_lead_updated": 8,
 }
 
 
