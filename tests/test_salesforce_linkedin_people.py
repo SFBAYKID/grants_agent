@@ -183,6 +183,17 @@ def test_existing_placeholder_is_updated_once_without_email_or_duplicate(
     assert payload["delta"]["FirstName"] == 'Vartan "Vic"'
     assert payload["delta"]["LastName"] == "Chalabian"
     assert payload["delta"]["LinkedIn__c"] == PROFILE
+    assert payload["identity_state"] == "CA"
+    assert payload["approval_preview"] == prepared.preview
+    assert payload["note_body"] in prepared.preview
+    assert payload["task_description"] in prepared.preview
+    for field in (
+            "First name", "Last name", "Organization", "Title", "Email", "State",
+            "Industry", "LinkedIn", "Funding source", "Grant research notes",
+            "Completed system Activity"):
+        assert field in prepared.preview
+    assert "Vartan \"Vic\"" in prepared.preview
+    assert "https://www.usaspending.gov/award/example" in prepared.preview
     result = campaigns.confirm_action(
         conn, gateway, prepared.action_id, prepared.nonce,
         "TWORK", "CGRANTS", "1.1", "UCHASE")
@@ -229,6 +240,59 @@ def test_create_payload_fills_verified_org_fields_and_never_guesses_email(
     assert payload["Industry"] == "K-12 Schools"
     assert payload["LinkedIn__c"] == PROFILE
     assert "No email was found or verified" in payload["Description"]
+    action_payload = json.loads(str(stored["payload_json"]))
+    assert action_payload["approval_preview"] == prepared.preview
+    assert action_payload["note_body"] in prepared.preview
+    assert action_payload["task_description"] in prepared.preview
+    assert action_payload["identity_state"] == "CA"
+    for field in ("Phone", "Website", "Street", "City", "State", "Postal code",
+                  "Country", "Industry", "LinkedIn", "Funding source"):
+        assert field in prepared.preview
+
+
+def test_placeholder_selection_requires_exact_state_evidence(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A same-name Salesforce Lead with blank state cannot receive person updates."""
+    conn, _row = _grant_lead(tmp_path)
+    possible = campaigns.salesforce.SFMatch(
+        "Lead", LEAD_ID, COMPANY, COMPANY, "Chase",
+        "https://salesforce.test/lead", "high", state="")
+    monkeypatch.setattr(actions, "duplicate_organization", lambda *_args: [possible])
+    with pytest.raises(ValueError, match="possible matching record"):
+        actions._matching_placeholder(conn, PlaceholderGateway(), COMPANY, "CA")
+
+
+def test_create_confirmation_rejects_grant_state_drift_before_write(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A changed Grant identity state cannot bypass the frozen duplicate boundary."""
+    conn, _row = _grant_lead(tmp_path)
+    candidate = _candidate(conn)
+    monkeypatch.setattr(actions, "duplicate_organization", lambda *_args: [])
+
+    class NoCreateGateway(PlaceholderGateway):
+        """Fail loudly if confirmation reaches the external create method."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.create_calls = 0
+
+        def create_linkedin_person_lead_with_audit_bundle(
+                self, *_args: object) -> gateway_mod.LeadAuditResult:
+            """Record an unauthorized write attempt."""
+            self.create_calls += 1
+            raise AssertionError("state drift reached Salesforce create")
+
+    gateway = NoCreateGateway()
+    prepared = actions.prepare_linkedin_person(
+        conn, gateway, "TWORK", "CGRANTS", "1.1", "UCHASE",
+        candidate.candidate_id)
+    with conn:
+        conn.execute("UPDATE leads SET state='NV' WHERE id=1")
+    result = campaigns.confirm_action(
+        conn, gateway, prepared.action_id, prepared.nonce,
+        "TWORK", "CGRANTS", "1.1", "UCHASE")
+    assert result.state == campaigns.CampaignActionState.FAILED
+    assert gateway.create_calls == 0
 
 
 def test_unknown_org_action_reconciles_by_reads_without_another_write(

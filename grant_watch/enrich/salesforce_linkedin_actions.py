@@ -175,7 +175,7 @@ def _matching_placeholder(
     matches = duplicate_organization(company, state)
     lead_ids = [item.record_id for item in matches
                 if item.sobject == "Lead" and item.company.casefold() == company.casefold()
-                and (not state or not item.state or item.state.upper() == state)]
+                and bool(state) and item.state.upper() == state]
     if len(lead_ids) > 1:
         raise ValueError("Salesforce has multiple matching Leads; no record was selected")
     if not lead_ids:
@@ -228,7 +228,10 @@ def prepare_linkedin_person(
     placeholder_id = _matching_placeholder(conn, gateway, draft.company, draft.state)
     desired = draft.desired_fields(action_id, requester)
     operation = "create_linkedin_person_lead"
-    payload: dict[str, object] = {"lead": desired, "candidate_id": candidate_id}
+    payload: dict[str, object] = {
+        "lead": desired, "candidate_id": candidate_id,
+        "identity_state": draft.state,
+    }
     preview_verb = "Create"
     if placeholder_id:
         snapshot = gateway.linkedin_person_lead_snapshot(placeholder_id)
@@ -243,9 +246,56 @@ def prepare_linkedin_person(
         payload = {
             "lead_id": placeholder_id, "delta": delta,
             "system_modstamp": snapshot.system_modstamp,
-            "company": draft.company, "candidate_id": candidate_id,
+            "company": draft.company, "identity_state": draft.state,
+            "candidate_id": candidate_id,
         }
         preview_verb = "Update the existing organization Lead for"
+    fields = desired if not placeholder_id else dict(payload["delta"])
+    note_body = draft.research_note(action_id, requester)
+    task_verb = "updated" if placeholder_id else "created and populated"
+    task_description = _audit_task_description(action_id, task_verb, list(fields))
+    labels = {
+        "FirstName": "First name", "LastName": "Last name", "Company": "Organization",
+        "Title": "Title", "Phone": "Phone", "Website": "Website",
+        "Street": "Street", "City": "City", "State": "State",
+        "PostalCode": "Postal code", "Country": "Country", "Industry": "Industry",
+        "LinkedIn__c": "LinkedIn", "Number_of_Students__c": "Students",
+        "Description": "Research notes", "Status": "Status", "LeadSource": "Lead source",
+    }
+    shown = [
+        ("First name", str(desired.get("FirstName") or "not published")),
+        ("Last name", str(desired["LastName"])),
+        ("Organization", draft.company),
+        ("Title", draft.title or "not published"),
+        ("Email", "not found or verified; stays blank"),
+    ]
+    shown.extend((labels[key], str(desired[key])) for key in (
+        "Phone", "Website", "Street", "City", "State", "PostalCode", "Country",
+        "Industry", "LinkedIn__c", "Number_of_Students__c",
+    ) if desired.get(key) not in (None, ""))
+    change_names = [labels[key] for key in fields if key in labels]
+    lines = [
+        f"{preview_verb} {draft.name} in Salesforce?",
+        *(f"• {label}: {value}" for label, value in shown),
+        f"• Funding source: {draft.funding_url}",
+        "",
+        "Fields Grant will change if confirmed:",
+        *(f"• {name}" for name in change_names),
+        "",
+        "Grant research notes and visible Salesforce Note:",
+        note_body,
+        "",
+        "Completed system Activity:",
+        task_description,
+        "",
+        "No Campaign, Campaign Member, Opportunity, or additional Lead will be created.",
+    ]
+    preview = "\n".join(lines)
+    payload.update({
+        "note_body": note_body,
+        "task_description": task_description,
+        "approval_preview": preview,
+    })
     plan = workflow.MemberPlan(
         draft.grant_lead_id, f"linkedin:{candidate_id}", draft.company, draft.state,
         operation, proposed_lead=desired,
@@ -253,25 +303,7 @@ def prepare_linkedin_person(
     stored_id, nonce, expires = workflow._store_action(
         conn, operation, workspace, channel, thread_ts, requester, payload,
         plans=[plan], action_id=action_id)
-    fields = desired if not placeholder_id else dict(payload["delta"])
-    lines = [
-        f"{preview_verb} {draft.name} in Salesforce?",
-        f"• Organization: {draft.company}",
-        f"• Role: {draft.title or 'not shown'}",
-        f"• LinkedIn: {draft.profile_url}",
-        "• Email: not found or verified; stays blank",
-    ]
-    labels = {"Number_of_Students__c": "Students", "LinkedIn__c": "LinkedIn"}
-    hidden = {"Company", "FirstName", "LastName", "Title", "LinkedIn__c",
-              "Description", "Status", "LeadSource"}
-    lines.extend(f"• {labels.get(key, key)}: {value}"
-                 for key, value in fields.items() if key not in hidden)
-    lines.extend((
-        "• Add a visible Salesforce Note with the exact research sources",
-        "• Add a completed system Activity; no customer outreach will be recorded",
-        "No Campaign, Campaign Member, Opportunity, or additional Lead will be created.",
-    ))
-    return workflow.PreparedAction(stored_id, nonce, "\n".join(lines), expires)
+    return workflow.PreparedAction(stored_id, nonce, preview, expires)
 
 
 def _verify_identity(snapshot: object, company: str, fields: dict[str, object]) -> bool:
@@ -296,6 +328,8 @@ def confirm_linkedin_person(
         str(row["thread_ts"]), str(row["requested_by"]))
     draft = _draft(conn, candidate)
     action_id = str(row["id"])
+    if draft.state.upper() != str(payload.get("identity_state") or "").upper():
+        raise ValueError("Grant lead state changed after preview")
     if row["action_type"] == "create_linkedin_person_lead":
         fields = dict(payload["lead"])
         if duplicate_organization(draft.company, draft.state):
@@ -304,9 +338,10 @@ def confirm_linkedin_person(
                 draft.profile_url, draft.company, str(fields["LastName"])):
             raise ValueError("That LinkedIn person is already in Salesforce")
         workflow._mark_external_write_started(conn, action_id)
-        note_body = str(fields["Description"])
-        task_body = _audit_task_description(
-            action_id, "created and populated", list(fields))
+        note_body = str(payload.get("note_body") or fields["Description"])
+        task_body = str(payload.get("task_description")
+                        or _audit_task_description(
+                            action_id, "created and populated", list(fields)))
         result = gateway.create_linkedin_person_lead_with_audit_bundle(
             fields, action_id, note_body, task_body, _activity_date())
         if not result.success or not result.lead_id:
@@ -318,6 +353,7 @@ def confirm_linkedin_person(
         before = gateway.linkedin_person_lead_snapshot(lead_id)
         if (before.company.casefold() != draft.company.casefold()
                 or before.system_modstamp != str(payload["system_modstamp"])
+                or before.state.upper() != str(payload.get("identity_state") or "").upper()
                 or before.last_name.casefold() != draft.company.casefold()
                 or any((before.first_name, before.email, before.title,
                         before.linkedin_url))):
@@ -328,8 +364,10 @@ def confirm_linkedin_person(
         if others:
             raise ValueError("That LinkedIn person is already in Salesforce")
         workflow._mark_external_write_started(conn, action_id)
-        note_body = draft.research_note(action_id, str(row["requested_by"]))
-        task_body = _audit_task_description(action_id, "updated", list(fields))
+        note_body = str(payload.get("note_body")
+                        or draft.research_note(action_id, str(row["requested_by"])))
+        task_body = str(payload.get("task_description")
+                        or _audit_task_description(action_id, "updated", list(fields)))
         result = gateway.attach_linkedin_person_with_audit_bundle(
             lead_id, fields, str(payload["system_modstamp"]), action_id,
             note_body, task_body, _activity_date())
