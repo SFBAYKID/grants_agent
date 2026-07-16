@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -90,12 +91,16 @@ def _angle(row: sqlite3.Row) -> str:
 
 
 def rep_email_for(slack_id: str) -> str | None:
-    """send_as is ALWAYS derived from the roster map — never free-form."""
+    """Return one unique valid roster email for a Slack user, never free-form."""
     data = json.loads(REPS_PATH.read_text())
-    for rep in data["reps"]:
-        if rep["slack_id"] == slack_id:
-            return rep["email"]
-    return None
+    matches = [
+        str(rep.get("email") or "").strip().lower()
+        for rep in data["reps"]
+        if rep.get("slack_id") == slack_id
+    ]
+    if len(matches) != 1 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", matches[0]):
+        return None
+    return matches[0]
 
 
 def request_id_for(row: sqlite3.Row, requested_by_slack: str,

@@ -135,6 +135,10 @@ or *"No record found — this is net-new."* This turns a raw lead into an action
   administrative Activity. There is no delete/merge/convert action. Every execution requires an
   immutable Slack preview, one-time nonce, same requester/channel, short expiry, and a final button
   confirmation. Each write category has a default-off feature flag.
+- **New Leads belong to the requesting rep.** Grant maps the immutable Slack requester through the
+  trusted rep roster to exactly one active Salesforce User, freezes that owner in the preview, and
+  revalidates it immediately before creation. Missing, ambiguous, changed, or inactive ownership fails
+  closed. Existing-Lead enrichment never changes ownership.
 - **Organization details do not depend on a person.** One exact existing Lead may receive a
   fill-blank-only preview from verified official-site and funding evidence even when no contact or
   email exists. The preview fails closed unless Salesforce returns one exact organization Lead; it

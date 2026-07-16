@@ -13,11 +13,14 @@ import requests
 from grant_watch import db
 from grant_watch.enrich import salesforce_campaigns as campaigns
 from grant_watch.enrich import salesforce_campaign_gateway as gateway_mod
+from grant_watch.enrich import salesforce_ownership as ownership
 from grant_watch.models import Lead, LeadGrade, RawItem
 
 CAMPAIGN_ID = "701000000000001"
 LEAD_ID = "00Q000000000001"
 CONTACT_ID = "003000000000001"
+OWNER_ID = "005000000000001"
+OWNER = ownership.RequesterOwner(OWNER_ID, "Chase Test", "chase@example.test")
 
 
 @dataclass
@@ -29,6 +32,7 @@ class FakeGateway:
     existing: set[str] = field(default_factory=set)
     member_results: list[gateway_mod.CreateResult] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
+    created_leads: dict[str, dict[str, object]] = field(default_factory=dict)
 
     def campaign_picklists(self) -> tuple[set[str], set[str]]:
         """Return the sandbox-verified defaults used by Grant-created Campaigns."""
@@ -74,8 +78,20 @@ class FakeGateway:
     def create_leads(self, payloads: list[dict[str, object]]) -> list[gateway_mod.CreateResult]:
         """Return one unique Salesforce Lead ID per approved org payload."""
         self.calls.append("create_leads")
-        return [gateway_mod.CreateResult(True, f"00Q0000000000{index:02d}")
-                for index, _payload in enumerate(payloads, start=10)]
+        results = [gateway_mod.CreateResult(True, f"00Q0000000000{index:02d}")
+                   for index, _payload in enumerate(payloads, start=10)]
+        self.created_leads.update(
+            {result.record_id: payload for result, payload in zip(results, payloads)})
+        return results
+
+    def lead_creation_snapshot(
+            self, lead_id: str) -> gateway_mod.LeadCreationSnapshot:
+        """Read back one exact fake organization Lead and its frozen owner."""
+        payload = self.created_leads[lead_id]
+        return gateway_mod.LeadCreationSnapshot(
+            lead_id, str(payload["Company"]), "", str(payload["LastName"]), "",
+            str(payload.get("State") or ""), str(payload["OwnerId"]),
+            campaigns_link("Lead", lead_id))
 
     def create_members(self, payloads: list[dict[str, object]]) -> list[gateway_mod.CreateResult]:
         """Return configured partial results or all successful member creates."""
@@ -114,6 +130,10 @@ def writer_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SALESFORCE_WRITE_MY_DOMAIN_URL", "https://writer.salesforce.test")
     monkeypatch.setenv("SALESFORCE_CAMPAIGN_WRITES_ENABLED", "1")
     monkeypatch.setenv("SALESFORCE_PERSON_LEAD_WRITES_ENABLED", "1")
+    monkeypatch.setattr(
+        ownership, "resolve_requester_owner", lambda *_args: OWNER)
+    monkeypatch.setattr(
+        ownership, "require_frozen_requester_owner", lambda *_args: OWNER)
 
 
 def _verified_contact(conn: sqlite3.Connection, lead_id: int,
@@ -368,6 +388,8 @@ def test_org_only_lead_preview_contains_no_person_fields(tmp_path: Path) -> None
     item = conn.execute("SELECT proposed_json FROM crm_action_items").fetchone()
     proposed = json.loads(item["proposed_json"])["proposed_lead"]
     assert proposed["Company"] == "Alpha School District"
+    assert proposed["OwnerId"] == OWNER_ID
+    assert "Owner for new Leads: Chase Test" in action.preview
     assert proposed["LastName"] == "Alpha School District"
     for forbidden in ("FirstName", "Email", "Title", "Phone"):
         assert forbidden not in proposed

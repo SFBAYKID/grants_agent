@@ -15,6 +15,7 @@ from grant_watch.enrich import salesforce_campaign_gateway as gateway_mod
 from grant_watch.enrich import salesforce_campaigns as campaigns
 from grant_watch.enrich import salesforce_linkedin_actions as actions
 from grant_watch.enrich import salesforce_record_actions as record_actions
+from grant_watch.enrich import salesforce_ownership as ownership
 from grant_watch.enrich.organization_profile import OrganizationProfile
 from grant_watch.models import (
     FundingEventType,
@@ -29,6 +30,8 @@ LEAD_ID = "00Q000000000001"
 PRIOR_ACTION = "11111111-1111-4111-8111-111111111111"
 PROFILE = "https://www.linkedin.com/in/vic-chalabian"
 COMPANY = "Birmingham Community Charter High School"
+OWNER_ID = "005000000000001"
+OWNER = ownership.RequesterOwner(OWNER_ID, "Chase Test", "chase@example.test")
 
 
 def _grant_lead(tmp_path: Path) -> tuple[sqlite3.Connection, sqlite3.Row]:
@@ -65,6 +68,10 @@ def write_flags(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SALESFORCE_PERSON_LEAD_WRITES_ENABLED", "1")
     monkeypatch.setenv("SALESFORCE_LEAD_ENRICHMENT_UPDATES_ENABLED", "1")
     monkeypatch.setenv("SALESFORCE_GRANT_AUDIT_RECORDS_ENABLED", "1")
+    monkeypatch.setattr(
+        ownership, "resolve_requester_owner", lambda *_args: OWNER)
+    monkeypatch.setattr(
+        ownership, "require_frozen_requester_owner", lambda *_args: OWNER)
 
 
 class PlaceholderGateway:
@@ -224,6 +231,7 @@ def test_existing_placeholder_is_updated_once_without_email_or_duplicate(
         "TWORK", "CGRANTS", "1.1", "UCHASE")
     assert result.added == 1 and gateway.updated is not None
     assert "Email" not in gateway.updated
+    assert "OwnerId" not in gateway.updated
     assert conn.execute(
         "SELECT status FROM linkedin_person_candidates WHERE id=?",
         (candidate.candidate_id,)).fetchone()[0] == "consumed"
@@ -264,6 +272,7 @@ def test_create_payload_fills_verified_org_fields_and_never_guesses_email(
     assert payload["Street"] == "17000 Haynes Street"
     assert payload["Industry"] == "K-12 Schools"
     assert payload["LinkedIn__c"] == PROFILE
+    assert payload["OwnerId"] == OWNER_ID and "Owner: Chase Test" in prepared.preview
     assert "No email was found or verified" in payload["Description"]
     action_payload = json.loads(str(stored["payload_json"]))
     assert action_payload["approval_preview"] == prepared.preview

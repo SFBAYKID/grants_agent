@@ -22,6 +22,7 @@ from ..models import VerificationStatus
 from ..presentation import display_entity_name
 from . import salesforce
 from . import salesforce_campaigns as workflow
+from . import salesforce_ownership as ownership
 from .salesforce_campaign_gateway import (
     LeadAuditResult,
     SalesforceCompositeRolledBack,
@@ -84,6 +85,8 @@ class PersonLeadDraft:
     organization: OrganizationProfile
     enrollment: int | None
     industry: str
+    owner_id: str
+    owner_name: str
 
     def payload(self, _action_id: str, _requester: str) -> dict[str, object]:
         """Return exact Salesforce fields; split only an unambiguous two-token name."""
@@ -110,6 +113,7 @@ class PersonLeadDraft:
             "LastName": name_parts[1] if simple_name else self.person_name,
             "Email": self.email, "Status": "New", "LeadSource": "Other",
             "Description": "\n".join(research),
+            "OwnerId": self.owner_id,
         }
         if simple_name:
             result["FirstName"] = name_parts[0]
@@ -148,6 +152,8 @@ class OrganizationLeadDraft:
     organization: OrganizationProfile
     enrollment: int | None
     industry: str
+    owner_id: str
+    owner_name: str
 
     def payload(self, _action_id: str, _requester: str) -> dict[str, object]:
         """Return organization facts only; Salesforce requires Company and LastName."""
@@ -156,6 +162,7 @@ class OrganizationLeadDraft:
             "LastName": self.company,
             "Status": "New",
             "LeadSource": "Other",
+            "OwnerId": self.owner_id,
             "Description": _organization_research_summary(
                 self.company, self.source_url, self.organization,
                 "No individual contact or verified email was found. This is an "
@@ -239,6 +246,7 @@ def _audit_task_description(action: str, verb: str, fields: list[str],
         "Description": "research notes", "LinkedIn__c": "LinkedIn profile",
         "Number_of_Students__c": "student enrollment", "Status": "status",
         "LeadSource": "lead source",
+        "OwnerId": "owner",
     }
     field_text = ", ".join(sorted(labels.get(field, field) for field in fields))
     field_text = field_text or "audit records only"
@@ -255,8 +263,9 @@ def _activity_date() -> str:
 
 
 def prepare_person_lead_creation(
-        conn: sqlite3.Connection, workspace: str, channel: str, thread_ts: str,
-        requester: str, contact_id: int) -> workflow.PreparedAction:
+        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
+        workspace: str, channel: str, thread_ts: str, requester: str,
+        contact_id: int) -> workflow.PreparedAction:
     """Freeze a verified contact and duplicate-safe one-Lead confirmation preview."""
     workflow._validate_context(workspace, channel, thread_ts, requester)
     row = conn.execute(
@@ -279,6 +288,7 @@ def prepare_person_lead_creation(
     if duplicates:
         links = ", ".join(item.link for item in duplicates[:3])
         raise ValueError(f"Salesforce already has a possible matching record: {links}")
+    owner = ownership.resolve_requester_owner(gateway, requester)
     action_id = str(uuid.uuid4())
     try:
         organization = fetch_profile(
@@ -293,7 +303,7 @@ def prepare_person_lead_creation(
         contact_id, int(row["lead_id"]), name, display_entity_name(company), email, state,
         str(row["title"] or "").strip() if evidence.get("title") else "",
         str(row["phone"] or "").strip() if evidence.get("phone") else "", source,
-        organization, enrollment, industry)
+        organization, enrollment, industry, owner.record_id, owner.name)
     payload = draft.payload(action_id, requester)
     plan = workflow.MemberPlan(
         draft.grant_lead_id, str(row["canonical_entity_key"] or company.lower()),
@@ -301,7 +311,8 @@ def prepare_person_lead_creation(
         note=json.dumps({"contact_id": contact_id, "source_url": source}))
     stored_id, nonce, expires = workflow._store_action(
         conn, "create_person_lead", workspace, channel, thread_ts, requester,
-        {"lead": payload, "contact_id": contact_id, "source_url": source},
+        {"lead": payload, "contact_id": contact_id, "source_url": source,
+         "owner": owner.stored()},
         plans=[plan], action_id=action_id)
     optional = "".join((f"\n• Title: {draft.title}" if draft.title else "",
                         f"\n• Phone: {draft.phone}" if draft.phone else ""))
@@ -320,12 +331,14 @@ def prepare_person_lead_creation(
     preview += "\n• Add a visible Salesforce Note with Grant’s verified research sources"
     preview += "\n• Add a system Activity describing exactly what Grant created"
     preview += "\n• The Activity will say that no customer outreach occurred"
+    preview += f"\n• Owner: {owner.name}"
     return workflow.PreparedAction(stored_id, nonce, preview, expires)
 
 
 def prepare_organization_lead_creation(
-        conn: sqlite3.Connection, workspace: str, channel: str, thread_ts: str,
-        requester: str, grant_lead_id: int) -> workflow.PreparedAction:
+        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
+        workspace: str, channel: str, thread_ts: str, requester: str,
+        grant_lead_id: int) -> workflow.PreparedAction:
     """Freeze one organization-only Lead preview after a complete duplicate check."""
     workflow._validate_context(workspace, channel, thread_ts, requester)
     row = db.get_lead(conn, grant_lead_id)
@@ -343,6 +356,7 @@ def prepare_organization_lead_creation(
     if duplicates:
         links = ", ".join(item.link for item in duplicates[:3])
         raise ValueError(f"Salesforce already has a possible matching record: {links}")
+    owner = ownership.resolve_requester_owner(gateway, requester)
     site = conn.execute(
         """SELECT official_domain,source_url FROM contacts
            WHERE lead_id=? AND TRIM(COALESCE(official_domain,''))!=''
@@ -375,7 +389,7 @@ def prepare_organization_lead_creation(
     enrollment = int(row["enrollment"]) if row["enrollment"] is not None else None
     draft = OrganizationLeadDraft(
         grant_lead_id, display_entity_name(company), state, source_url,
-        organization, enrollment, industry)
+        organization, enrollment, industry, owner.record_id, owner.name)
     action_id = str(uuid.uuid4())
     payload = draft.payload(action_id, requester)
     plan = workflow.MemberPlan(
@@ -385,11 +399,13 @@ def prepare_organization_lead_creation(
     stored_id, nonce, expires = workflow._store_action(
         conn, "create_organization_lead", workspace, channel, thread_ts, requester,
         {"lead": payload, "grant_lead_id": grant_lead_id,
-         "source_url": source_url}, plans=[plan], action_id=action_id)
+         "source_url": source_url, "owner": owner.stored()},
+        plans=[plan], action_id=action_id)
     lines = [
         "Create this organization-only Salesforce Lead?",
         f"• Organization: {draft.company}",
         "• Contact: no verified person or email",
+        f"• Owner: {owner.name}",
         "• Salesforce Lead name: uses the organization name because Salesforce requires it",
         f"• Funding source: {source_url}",
     ]
@@ -529,7 +545,8 @@ def prepare_lead_enrichment(
 def confirm_person_lead(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
                         row: sqlite3.Row) -> workflow.ActionExecution:
     """Recheck duplicates, create one Lead, and verify exact-email readback."""
-    payload = dict(json.loads(str(row["payload_json"]))["lead"])
+    frozen = json.loads(str(row["payload_json"]))
+    payload = dict(frozen["lead"])
     email, company = str(payload["Email"]), str(payload["Company"])
     duplicates = workflow._duplicate_person(
         email, company, str(payload.get("State") or ""))
@@ -545,6 +562,8 @@ def confirm_person_lead(conn: sqlite3.Connection, gateway: SalesforceCampaignGat
             workflow.CampaignActionState.COMPLETE,
             f"{item.name or payload['LastName']} is already in Salesforce: {item.link}",
             already_present=1)
+    owner = ownership.require_frozen_requester_owner(
+        gateway, str(row["requested_by"]), frozen.get("owner"))
     workflow._mark_external_write_started(conn, str(row["id"]))
     action_id = str(row["id"])
     note_body = str(payload.get("Description") or "")
@@ -556,9 +575,9 @@ def confirm_person_lead(conn: sqlite3.Connection, gateway: SalesforceCampaignGat
         raise SalesforceCompositeRolledBack(
             result.error or "Salesforce returned no Lead and audit IDs")
     validate_record_id(result.lead_id, "Lead")
-    created = [item for item in salesforce.exact_email_matches(email)
-               if item.record_id == result.lead_id]
-    if len(created) != 1 or created[0].company != company:
+    created = gateway.lead_creation_snapshot(result.lead_id)
+    if (created.company != company or created.email.casefold() != email.casefold()
+            or created.owner_id != owner.record_id):
         raise ValueError("created Lead could not be verified by exact readback")
     if not gateway.verify_lead_audit_bundle(
             result.lead_id, action_id, note_body, task_body, result):
@@ -571,15 +590,15 @@ def confirm_person_lead(conn: sqlite3.Connection, gateway: SalesforceCampaignGat
         conn, str(row["id"]), workflow.CampaignActionState.COMPLETE)
     return workflow.ActionExecution(
         workflow.CampaignActionState.COMPLETE,
-        f"Created {created[0].name or payload['LastName']} in Salesforce: "
-        f"{created[0].link}", added=1)
+        f"Created {payload['LastName']} in Salesforce: {created.link}", added=1)
 
 
 def confirm_organization_lead(
         conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
         row: sqlite3.Row) -> workflow.ActionExecution:
     """Recheck duplicates and atomically create one organization-only Lead."""
-    payload = dict(json.loads(str(row["payload_json"]))["lead"])
+    frozen = json.loads(str(row["payload_json"]))
+    payload = dict(frozen["lead"])
     company = str(payload["Company"])
     state = str(payload.get("State") or "")
     duplicates = duplicate_organization(company, state)
@@ -595,6 +614,8 @@ def confirm_organization_lead(
             workflow.CampaignActionState.COMPLETE,
             f"{company} is already in Salesforce: {item.link}",
             already_present=1)
+    owner = ownership.require_frozen_requester_owner(
+        gateway, str(row["requested_by"]), frozen.get("owner"))
     workflow._mark_external_write_started(conn, str(row["id"]))
     action_id = str(row["id"])
     note_body = str(payload.get("Description") or "")
@@ -609,9 +630,10 @@ def confirm_organization_lead(
         raise SalesforceCompositeRolledBack(
             result.error or "Salesforce returned no Lead and audit IDs")
     validate_record_id(result.lead_id, "Lead")
-    created = gateway.get_record("Lead", result.lead_id)
+    created = gateway.lead_creation_snapshot(result.lead_id)
     if (created.company != company
-            or (state and created.state and created.state.upper() != state.upper())):
+            or (state and created.state and created.state.upper() != state.upper())
+            or created.owner_id != owner.record_id):
         raise ValueError("created organization Lead did not match the approved preview")
     if not gateway.verify_lead_audit_bundle(
             result.lead_id, action_id, note_body, task_body, result):
@@ -639,7 +661,8 @@ def reconcile_unknown_organization_lead(
     ).fetchone()
     if row is None:
         raise ValueError("no unknown organization Lead action has that ID")
-    payload = dict(json.loads(str(row["payload_json"]))["lead"])
+    frozen = json.loads(str(row["payload_json"]))
+    payload = dict(frozen["lead"])
     company = str(payload["Company"])
     state = str(payload.get("State") or "")
     matches = duplicate_organization(company, state)
@@ -654,6 +677,7 @@ def reconcile_unknown_organization_lead(
     if (exact.company.casefold() != company.casefold()
             or exact.last_name.casefold() != company.casefold()
             or any((exact.first_name, exact.email, exact.title, exact.linkedin_url))
+            or exact.owner_id != str(payload.get("OwnerId") or "")
             or f"Action {action_id}" not in exact.description):
         raise ValueError("matching Salesforce Lead is not the exact Grant placeholder")
     audit = gateway.lead_audit_snapshot(lead_id, action_id)

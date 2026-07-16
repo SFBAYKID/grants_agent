@@ -34,6 +34,7 @@ _PERSON_LEAD_CREATE_FIELDS = {
     "Company", "FirstName", "LastName", "Email", "Status", "LeadSource",
     "Description", "State", "Title", "Phone", "Website", "Street", "City",
     "PostalCode", "Country", "LinkedIn__c", "Industry", "Number_of_Students__c",
+    "OwnerId",
 }
 _ID_PREFIXES = {
     "Campaign": "701",
@@ -58,6 +59,7 @@ class SalesforceRecordRef:
     link: str
     company: str = ""
     state: str = ""
+    email: str = ""
 
 
 
@@ -98,6 +100,20 @@ class LeadEnrichmentSnapshot:
 
 
 @dataclass(frozen=True)
+class LeadCreationSnapshot:
+    """Exact identity and ownership fields read back after one Lead create."""
+
+    record_id: str
+    company: str
+    first_name: str
+    last_name: str
+    email: str
+    state: str
+    owner_id: str
+    link: str
+
+
+@dataclass(frozen=True)
 class LinkedInPersonLeadSnapshot:
     """Exact person and placeholder fields used for a singular Lead identity update."""
 
@@ -112,6 +128,7 @@ class LinkedInPersonLeadSnapshot:
     state: str
     system_modstamp: str
     link: str
+    owner_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -311,6 +328,20 @@ class SalesforceCampaignGateway:
             ))
         return results
 
+    @staticmethod
+    def _validate_lead_create_payload(
+            payload: dict[str, object], organization_only: bool = False) -> None:
+        """Require exact allowlisted fields and a valid explicit owner for every Lead."""
+        if (not payload or not set(payload) <= _PERSON_LEAD_CREATE_FIELDS
+                or not all(payload.get(key)
+                           for key in ("Company", "LastName", "OwnerId"))):
+            raise ValueError("Lead payload contains forbidden or missing fields")
+        validate_record_id(str(payload["OwnerId"]), "User")
+        if organization_only and {
+                "FirstName", "Email", "Title", "MobilePhone", "LinkedIn__c",
+        } & set(payload):
+            raise ValueError("organization Lead cannot contain person fields")
+
     def lightning_link(self, sobject: str, record_id: str) -> str:
         """Build a writer-org Lightning record link."""
         _, instance = self._auth()
@@ -350,6 +381,7 @@ class SalesforceCampaignGateway:
         return [SalesforceRecordRef(
             "User", str(record["Id"]), str(record.get("Name") or ""),
             self.lightning_link("User", str(record["Id"])),
+            email=str(record.get("Email") or ""),
         ) for record in records]
 
     def search_campaigns(self, name: str) -> list[SalesforceRecordRef]:
@@ -417,12 +449,24 @@ class SalesforceCampaignGateway:
             str(body.get("SystemModstamp") or ""), values,
             self.lightning_link("Lead", lead_id))
 
+    def lead_creation_snapshot(self, lead_id: str) -> LeadCreationSnapshot:
+        """Read back exact identity and owner fields after one singular Lead create."""
+        validate_record_id(lead_id, "Lead")
+        fields = "Id,Company,FirstName,LastName,Email,State,OwnerId"
+        body = self._get(f"sobjects/Lead/{lead_id}", {"fields": fields})
+        return LeadCreationSnapshot(
+            lead_id, str(body.get("Company") or ""),
+            str(body.get("FirstName") or ""), str(body.get("LastName") or ""),
+            str(body.get("Email") or ""), str(body.get("State") or ""),
+            str(body.get("OwnerId") or ""), self.lightning_link("Lead", lead_id),
+        )
+
     def linkedin_person_lead_snapshot(self, lead_id: str) -> LinkedInPersonLeadSnapshot:
         """Read one exact Lead before attaching a LinkedIn-only person identity."""
         validate_record_id(lead_id, "Lead")
         fields = (
             "Id,Company,FirstName,LastName,Email,Title,LinkedIn__c,Description,"
-            "State,SystemModstamp"
+            "State,SystemModstamp,OwnerId"
         )
         body = self._get(f"sobjects/Lead/{lead_id}", {"fields": fields})
         return LinkedInPersonLeadSnapshot(
@@ -431,6 +475,7 @@ class SalesforceCampaignGateway:
             str(body.get("Title") or ""), str(body.get("LinkedIn__c") or ""),
             str(body.get("Description") or ""), str(body.get("State") or ""),
             str(body.get("SystemModstamp") or ""), self.lightning_link("Lead", lead_id),
+            str(body.get("OwnerId") or ""),
         )
 
     def exact_linkedin_person_leads(
@@ -700,9 +745,7 @@ class SalesforceCampaignGateway:
             self, lead_payload: dict[str, object], action_id: str, note_body: str,
             task_description: str, activity_date: str) -> LeadAuditResult:
         """Submit one allowlisted Lead and its audit artifacts as one transaction."""
-        if (not lead_payload or not set(lead_payload) <= _PERSON_LEAD_CREATE_FIELDS
-                or not all(lead_payload.get(key) for key in ("Company", "LastName"))):
-            raise ValueError("Lead payload contains forbidden or missing fields")
+        self._validate_lead_create_payload(lead_payload)
         requests_body: list[dict[str, object]] = [{
             "method": "POST",
             "url": f"/services/data/{API_VERSION}/sobjects/Lead",
@@ -835,6 +878,8 @@ class SalesforceCampaignGateway:
 
     def create_leads(self, payloads: list[dict[str, object]]) -> list[CreateResult]:
         """Create approved Lead records through the collection endpoint."""
+        for payload in payloads:
+            self._validate_lead_create_payload(payload, organization_only=True)
         return self._create_many("Lead", payloads)
 
     def create_members(self, payloads: list[dict[str, object]]) -> list[CreateResult]:

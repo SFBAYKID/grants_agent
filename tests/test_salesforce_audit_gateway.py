@@ -134,7 +134,8 @@ def test_person_lead_and_audit_are_one_four_part_transaction(
     monkeypatch.setattr(gateway_mod.requests, "post", fake_post)
     result = gateway.create_person_lead_with_audit_bundle(
         {"Company": "Test District", "LastName": "Person",
-         "Email": "person@test.example", "Description": f"Action {ACTION_ID}"},
+         "Email": "person@test.example", "Description": f"Action {ACTION_ID}",
+         "OwnerId": "005000000000001"},
         ACTION_ID, "Verified sources", "No customer outreach. Action " + ACTION_ID,
         "2026-07-15")
 
@@ -171,6 +172,7 @@ def test_organization_lead_is_one_fixed_delete_free_transaction(
     payload = {
         "Company": "Test District", "LastName": "Test District",
         "State": "CA", "Description": f"Action {ACTION_ID}",
+        "OwnerId": "005000000000001",
     }
     result = gateway.create_organization_lead_with_audit_bundle(
         payload, ACTION_ID, "Verified sources",

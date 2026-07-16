@@ -20,6 +20,7 @@ from .. import db, linkedin_candidates
 from ..presentation import display_entity_name
 from . import finder
 from . import salesforce_campaigns as workflow
+from . import salesforce_ownership as ownership
 from .organization_profile import OrganizationProfile, fetch_profile
 from .salesforce_campaign_gateway import (
     SalesforceCampaignGateway,
@@ -227,10 +228,15 @@ def prepare_linkedin_person(
         raise ValueError(f"That LinkedIn person may already be in Salesforce: {links}")
     placeholder_id = _matching_placeholder(conn, gateway, draft.company, draft.state)
     desired = draft.desired_fields(action_id, requester)
+    requester_owner: ownership.RequesterOwner | None = None
+    if not placeholder_id:
+        requester_owner = ownership.resolve_requester_owner(gateway, requester)
+        desired["OwnerId"] = requester_owner.record_id
     operation = "create_linkedin_person_lead"
     payload: dict[str, object] = {
         "lead": desired, "candidate_id": candidate_id,
         "identity_state": draft.state,
+        "owner": requester_owner.stored() if requester_owner else None,
     }
     preview_verb = "Create"
     if placeholder_id:
@@ -261,6 +267,7 @@ def prepare_linkedin_person(
         "PostalCode": "Postal code", "Country": "Country", "Industry": "Industry",
         "LinkedIn__c": "LinkedIn", "Number_of_Students__c": "Students",
         "Description": "Research notes", "Status": "Status", "LeadSource": "Lead source",
+        "OwnerId": "Owner",
     }
     shown = [
         ("First name", str(desired.get("FirstName") or "not published")),
@@ -273,6 +280,8 @@ def prepare_linkedin_person(
         "Phone", "Website", "Street", "City", "State", "PostalCode", "Country",
         "Industry", "LinkedIn__c", "Number_of_Students__c",
     ) if desired.get(key) not in (None, ""))
+    if requester_owner:
+        shown.append(("Owner", requester_owner.name))
     change_names = [labels[key] for key in fields if key in labels]
     lines = [
         f"{preview_verb} {draft.name} in Salesforce?",
@@ -337,6 +346,8 @@ def confirm_linkedin_person(
         if gateway.exact_linkedin_person_leads(
                 draft.profile_url, draft.company, str(fields["LastName"])):
             raise ValueError("That LinkedIn person is already in Salesforce")
+        owner = ownership.require_frozen_requester_owner(
+            gateway, str(row["requested_by"]), payload.get("owner"))
         workflow._mark_external_write_started(conn, action_id)
         note_body = str(payload.get("note_body") or fields["Description"])
         task_body = str(payload.get("task_description")
@@ -374,7 +385,9 @@ def confirm_linkedin_person(
         if not result.success:
             raise SalesforceCompositeRolledBack(result.error or "Salesforce rolled back")
     after = gateway.linkedin_person_lead_snapshot(lead_id)
-    if not _verify_identity(after, draft.company, fields):
+    if (not _verify_identity(after, draft.company, fields)
+            or (row["action_type"] == "create_linkedin_person_lead"
+                and after.owner_id != owner.record_id)):
         raise ValueError("Salesforce Lead person fields did not match the approved preview")
     if not gateway.verify_lead_audit_bundle(
             lead_id, action_id, note_body, task_body, result):

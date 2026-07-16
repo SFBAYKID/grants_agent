@@ -84,6 +84,9 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 - A LinkedIn result with no verified email can be carried into a same-thread Salesforce preview for
   that exact person. Grant states that Email will remain blank and never substitutes an
   organization-only Lead when the user selected a person.
+- Every newly created Lead preview shows the requesting rep as owner. Grant resolves that owner only
+  through the trusted Slack roster and one exact active Salesforce User, rechecks it at confirmation,
+  and verifies the resulting OwnerId. Existing Lead updates preserve their current owner.
 - A fresh chat may name an exact `Grant lead N` and preview blank-only organization enrichment on one
   exact existing Salesforce Lead. This path does not require a contact or email, and its Note starts
   with the organization and useful sales facts rather than internal tool or action terminology.

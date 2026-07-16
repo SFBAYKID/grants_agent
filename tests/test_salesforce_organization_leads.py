@@ -12,6 +12,7 @@ from grant_watch import db
 from grant_watch.enrich import salesforce_campaign_gateway as gateway_mod
 from grant_watch.enrich import salesforce_campaigns as campaigns
 from grant_watch.enrich import salesforce_record_actions as record_actions
+from grant_watch.enrich import salesforce_ownership as ownership
 from grant_watch.enrich import finder
 from grant_watch.enrich.organization_profile import OrganizationProfile
 from grant_watch.models import (
@@ -23,6 +24,8 @@ from grant_watch.models import (
 )
 
 LEAD_ID = "00Q000000000001"
+OWNER_ID = "005000000000001"
+OWNER = ownership.RequesterOwner(OWNER_ID, "Chase Test", "chase@example.test")
 
 
 class FakeGateway:
@@ -48,6 +51,15 @@ class FakeGateway:
             "https://salesforce.test/lead", company="Corning Union Elementary School District",
             state="CA")
 
+    def lead_creation_snapshot(
+            self, _lead_id: str) -> gateway_mod.LeadCreationSnapshot:
+        """Return the exact approved identity and owner after creation."""
+        payload = self.calls[-1]
+        return gateway_mod.LeadCreationSnapshot(
+            LEAD_ID, str(payload["Company"]), "", str(payload["LastName"]), "",
+            str(payload.get("State") or ""), str(payload["OwnerId"]),
+            "https://salesforce.test/lead")
+
     def verify_lead_audit_bundle(
             self, _lead_id: str, _action_id: str, _note_body: str,
             _task_description: str, _result: gateway_mod.LeadAuditResult) -> bool:
@@ -62,6 +74,10 @@ def config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SALESFORCE_ORGANIZATION_LEAD_WRITES_ENABLED", "1")
     monkeypatch.setenv("SALESFORCE_GRANT_AUDIT_RECORDS_ENABLED", "1")
     monkeypatch.setenv("SALESFORCE_CAMPAIGN_WRITES_ENABLED", "0")
+    monkeypatch.setattr(
+        ownership, "resolve_requester_owner", lambda *_args: OWNER)
+    monkeypatch.setattr(
+        ownership, "require_frozen_requester_owner", lambda *_args: OWNER)
     monkeypatch.setattr(finder, "find_official_site", lambda *_args: finder.OfficialSite(
         "corningelementary.org", "https://www.corningelementary.org/contact",
         "Corning Union Elementary School District official site"))
@@ -102,6 +118,7 @@ def test_preview_has_no_person_fields_and_uses_current_event_source(
     assert row["action_type"] == "create_organization_lead"
     assert payload["Company"] == payload["LastName"] == (
         "Corning Union Elementary School District")
+    assert payload["OwnerId"] == OWNER_ID and "Owner: Chase Test" in action.preview
     assert not ({"FirstName", "Email", "Title", "LinkedIn__c"} & set(payload))
     assert "https://www.grants.ca.gov/award/corning" in payload["Description"]
     assert "no verified person or email" in action.preview
@@ -157,6 +174,92 @@ def test_duplicate_at_confirmation_prevents_create(
         conn, gateway, action.action_id, action.nonce,
         "TWORK", "CGRANTS", "1.1", "UCHASE")
     assert result.already_present == 1 and gateway.calls == []
+
+
+def test_changed_requester_owner_fails_before_external_write(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A changed requester mapping cannot substitute a new owner at confirmation."""
+    conn, grant_lead_id = _lead(tmp_path)
+    monkeypatch.setattr(record_actions, "duplicate_organization", lambda *_args: [])
+    action = campaigns.prepare_organization_lead_creation(
+        conn, "TWORK", "CGRANTS", "1.1", "UCHASE", grant_lead_id)
+
+    def changed(*_args: object) -> ownership.RequesterOwner:
+        """Represent a roster or active-user change after the immutable preview."""
+        raise ValueError("the requesting rep's Salesforce ownership changed after preview")
+
+    monkeypatch.setattr(ownership, "require_frozen_requester_owner", changed)
+    gateway = FakeGateway()
+    result = campaigns.confirm_action(
+        conn, gateway, action.action_id, action.nonce,
+        "TWORK", "CGRANTS", "1.1", "UCHASE")
+    assert result.state is campaigns.CampaignActionState.FAILED
+    assert gateway.calls == []
+    assert conn.execute(
+        "SELECT external_write_started FROM crm_actions").fetchone()[0] == 0
+
+
+def test_wrong_owner_readback_is_unknown_not_success(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A Lead created under the wrong owner is never reported as completed."""
+    conn, grant_lead_id = _lead(tmp_path)
+    monkeypatch.setattr(record_actions, "duplicate_organization", lambda *_args: [])
+    action = campaigns.prepare_organization_lead_creation(
+        conn, "TWORK", "CGRANTS", "1.1", "UCHASE", grant_lead_id)
+
+    class WrongOwnerGateway(FakeGateway):
+        """Return a mismatched owner after the external create began."""
+
+        def lead_creation_snapshot(
+                self, lead_id: str) -> gateway_mod.LeadCreationSnapshot:
+            """Preserve identity but prove that Salesforce routed ownership wrongly."""
+            snapshot = super().lead_creation_snapshot(lead_id)
+            return gateway_mod.LeadCreationSnapshot(
+                snapshot.record_id, snapshot.company, snapshot.first_name,
+                snapshot.last_name, snapshot.email, snapshot.state,
+                "005000000000099", snapshot.link)
+
+    gateway = WrongOwnerGateway()
+    result = campaigns.confirm_action(
+        conn, gateway, action.action_id, action.nonce,
+        "TWORK", "CGRANTS", "1.1", "UCHASE")
+    assert result.state is campaigns.CampaignActionState.UNKNOWN
+    assert len(gateway.calls) == 1
+
+
+def test_unknown_reconciliation_rejects_wrong_owner(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """An unknown organization Lead cannot reconcile under a different owner."""
+    conn, grant_lead_id = _lead(tmp_path)
+    monkeypatch.setattr(record_actions, "duplicate_organization", lambda *_args: [])
+    action = campaigns.prepare_organization_lead_creation(
+        conn, "TWORK", "CGRANTS", "1.1", "UCHASE", grant_lead_id)
+    conn.execute(
+        "UPDATE crm_actions SET state='unknown',external_write_started=1 WHERE id=?",
+        (action.action_id,))
+    conn.commit()
+    match = campaigns.salesforce.SFMatch(
+        "Lead", LEAD_ID, "Corning Union Elementary School District",
+        "Corning Union Elementary School District", "Other Owner",
+        "https://salesforce.test/lead", "high", state="CA")
+    monkeypatch.setattr(
+        record_actions, "duplicate_organization", lambda *_args: [match])
+
+    class WrongOwnerReconciliationGateway(FakeGateway):
+        """Return an exact Grant placeholder with an unapproved owner."""
+
+        def linkedin_person_lead_snapshot(
+                self, _lead_id: str) -> gateway_mod.LinkedInPersonLeadSnapshot:
+            """Freeze all identity fields except the intentionally wrong owner."""
+            return gateway_mod.LinkedInPersonLeadSnapshot(
+                LEAD_ID, "Corning Union Elementary School District", "",
+                "Corning Union Elementary School District", "", "", "",
+                f"Action {action.action_id}", "CA", "stamp",
+                "https://salesforce.test/lead", "005000000000099")
+
+    with pytest.raises(ValueError, match="exact Grant placeholder"):
+        record_actions.reconcile_unknown_organization_lead(
+            conn, WrongOwnerReconciliationGateway(), action.action_id)
 
 
 def test_disabled_gate_prevents_external_write(

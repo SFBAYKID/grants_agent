@@ -20,6 +20,7 @@ import requests
 
 from .. import db
 from . import salesforce
+from . import salesforce_ownership as ownership
 from .salesforce_campaign_gateway import (
     MAX_ACTION_ORGANIZATIONS,
     MEMBER_STATUS,
@@ -213,7 +214,8 @@ def prepare_person_lead_creation(conn: sqlite3.Connection, workspace: str,
     from . import salesforce_record_actions as records
 
     return records.prepare_person_lead_creation(
-        conn, workspace, channel, thread_ts, requester, contact_id)
+        conn, SalesforceCampaignGateway(), workspace, channel, thread_ts,
+        requester, contact_id)
 
 
 def prepare_organization_lead_creation(
@@ -223,7 +225,8 @@ def prepare_organization_lead_creation(
     from . import salesforce_record_actions as records
 
     return records.prepare_organization_lead_creation(
-        conn, workspace, channel, thread_ts, requester, grant_lead_id)
+        conn, SalesforceCampaignGateway(), workspace, channel, thread_ts,
+        requester, grant_lead_id)
 
 
 def prepare_lead_enrichment(
@@ -351,8 +354,8 @@ def prepare_campaign_creation(conn: sqlite3.Connection,
     return PreparedAction(action_id, nonce, preview, expires)
 
 
-def _org_lead_payload(row: sqlite3.Row, requester: str,
-                      action_id: str) -> dict[str, object]:
+def _org_lead_payload(row: sqlite3.Row, requester: str, action_id: str,
+                      owner: ownership.RequesterOwner) -> dict[str, object]:
     """Build an honest organization-only Lead with no invented person fields."""
     entity = str(row["entity_name"] or "").strip()
     payload: dict[str, object] = {
@@ -360,6 +363,7 @@ def _org_lead_payload(row: sqlite3.Row, requester: str,
         "LastName": entity,
         "Status": "New",
         "LeadSource": "Other",
+        "OwnerId": owner.record_id,
         "Description": (
             "Created by Grant as an organization-only lead. No individual contact "
             f"has been verified. Grant lead {row['id']}; action {action_id}; "
@@ -403,6 +407,7 @@ def prepare_membership(conn: sqlite3.Connection, gateway: SalesforceCampaignGate
     action_seed = str(uuid.uuid4())
     supplied_links = supplied_links or {}
     plans_by_key: dict[str, MemberPlan] = {}
+    requester_owner: ownership.RequesterOwner | None = None
     for row in rows:
         key = str(row["canonical_entity_key"] or db.canonical_entity_key(
             str(row["entity_name"]), str(row["state"] or "")))
@@ -442,10 +447,13 @@ def prepare_membership(conn: sqlite3.Connection, gateway: SalesforceCampaignGate
                 note="Supplied Salesforce record does not match this organization/state.",
             )
         elif allow_org_leads:
+            if requester_owner is None:
+                requester_owner = ownership.resolve_requester_owner(gateway, requester)
             plan = MemberPlan(
                 int(row["id"]), key, str(row["entity_name"]), str(row["state"] or ""),
                 "create_org_lead",
-                proposed_lead=_org_lead_payload(row, requester, action_seed),
+                proposed_lead=_org_lead_payload(
+                    row, requester, action_seed, requester_owner),
                 note="No individual contact verified; organization name fills Company and LastName.",
             )
         else:
@@ -462,6 +470,7 @@ def prepare_membership(conn: sqlite3.Connection, gateway: SalesforceCampaignGate
         "allow_org_leads": allow_org_leads,
         "member_status": MEMBER_STATUS,
         "provenance_seed": action_seed,
+        "owner": requester_owner.stored() if requester_owner else None,
     }
     existing = sum(plan.operation == "existing_record" for plan in plans)
     creating = sum(plan.operation == "create_org_lead" for plan in plans)
@@ -499,6 +508,7 @@ def prepare_membership(conn: sqlite3.Connection, gateway: SalesforceCampaignGate
         preview += (
             "\nOrganization-only records use the exact organization for Company and "
             "LastName and leave all person/contact fields blank."
+            f"\n• Owner for new Leads: {requester_owner.name}"
         )
     return PreparedAction(action_id, nonce, preview, expires)
 
@@ -786,15 +796,6 @@ def _confirm_membership(conn: sqlite3.Connection,
     item_rows = list(conn.execute(
         "SELECT * FROM crm_action_items WHERE action_id=? ORDER BY id", (row["id"],)
     ))
-    if not gateway.member_status_exists(campaign_id):
-        _mark_external_write_started(conn, str(row["id"]))
-        status_result = gateway.create_member_status(campaign_id)
-        if not status_result.success:
-            error = status_result.error or "member status creation failed"
-            _finish_action(conn, str(row["id"]), CampaignActionState.FAILED, error=error)
-            return ActionExecution(CampaignActionState.FAILED,
-                                   f"No members were added because {MEMBER_STATUS} could not be created.")
-
     record_ids: dict[int, str] = {}
     create_rows: list[sqlite3.Row] = []
     create_payloads: list[dict[str, object]] = []
@@ -812,15 +813,37 @@ def _confirm_membership(conn: sqlite3.Connection,
                 conn.execute("UPDATE crm_action_items SET state='unresolved' WHERE id=?",
                              (item["id"],))
 
+    if create_payloads:
+        frozen = json.loads(str(row["payload_json"]))
+        ownership.require_frozen_requester_owner(
+            gateway, str(row["requested_by"]), frozen.get("owner"))
+
+    if not gateway.member_status_exists(campaign_id):
+        _mark_external_write_started(conn, str(row["id"]))
+        status_result = gateway.create_member_status(campaign_id)
+        if not status_result.success:
+            error = status_result.error or "member status creation failed"
+            _finish_action(conn, str(row["id"]), CampaignActionState.FAILED, error=error)
+            return ActionExecution(
+                CampaignActionState.FAILED,
+                f"No members were added because {MEMBER_STATUS} could not be created.")
+
     failed = 0
     if create_payloads:
         _mark_external_write_started(conn, str(row["id"]))
         lead_results = gateway.create_leads(create_payloads)
         if len(lead_results) != len(create_rows):
             raise ValueError("Salesforce Lead result count did not match request")
-        for item, result in zip(create_rows, lead_results):
+        for item, submitted, result in zip(
+                create_rows, create_payloads, lead_results):
             with conn:
                 if result.success and result.record_id:
+                    created = gateway.lead_creation_snapshot(result.record_id)
+                    if (created.company != str(submitted["Company"])
+                            or created.last_name != str(submitted["LastName"])
+                            or created.owner_id != str(submitted["OwnerId"])):
+                        raise ValueError(
+                            "created Campaign Lead did not match its approved owner")
                     record_ids[int(item["id"])] = result.record_id
                     conn.execute(
                         "UPDATE crm_action_items SET state='lead_created',salesforce_id=? WHERE id=?",

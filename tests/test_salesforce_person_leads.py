@@ -12,10 +12,13 @@ from grant_watch import db
 from grant_watch.enrich import salesforce_campaigns as campaigns
 from grant_watch.enrich import salesforce_campaign_gateway as gateway_mod
 from grant_watch.enrich import salesforce_record_actions as record_actions
+from grant_watch.enrich import salesforce_ownership as ownership
 from grant_watch.enrich.organization_profile import OrganizationProfile
 from grant_watch.models import Lead, LeadGrade, RawItem
 
 LEAD_ID = "00Q000000000001"
+OWNER_ID = "005000000000001"
+OWNER = ownership.RequesterOwner(OWNER_ID, "Chase Test", "chase@example.test")
 
 
 class FakeGateway:
@@ -49,6 +52,14 @@ class FakeGateway:
         """Accept the deterministic fake audit readback."""
         return True
 
+    def lead_creation_snapshot(
+            self, _lead_id: str) -> gateway_mod.LeadCreationSnapshot:
+        """Return the exact approved person identity and owner."""
+        return gateway_mod.LeadCreationSnapshot(
+            LEAD_ID, "Dinuba Unified School District", "Andrew", "Popp",
+            "andrew@district.test", "CA", OWNER_ID,
+            "https://salesforce.test/lead")
+
 
 @pytest.fixture(autouse=True)
 def config(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -57,6 +68,10 @@ def config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SALESFORCE_PERSON_LEAD_WRITES_ENABLED", "1")
     monkeypatch.setenv("SALESFORCE_GRANT_AUDIT_RECORDS_ENABLED", "1")
     monkeypatch.setenv("SALESFORCE_CAMPAIGN_WRITES_ENABLED", "0")
+    monkeypatch.setattr(
+        ownership, "resolve_requester_owner", lambda *_args: OWNER)
+    monkeypatch.setattr(
+        ownership, "require_frozen_requester_owner", lambda *_args: OWNER)
     monkeypatch.setattr(
         record_actions, "fetch_profile",
         lambda *_args: OrganizationProfile(website="https://district.test/",
@@ -102,6 +117,7 @@ def test_preview_freezes_exact_contact_without_write(monkeypatch: pytest.MonkeyP
     payload = json.loads(str(row["payload_json"]))["lead"]
     assert (row["action_type"], row["state"]) == ("create_person_lead", "ready")
     assert payload["FirstName"] == "Andrew" and payload["LastName"] == "Popp"
+    assert payload["OwnerId"] == OWNER_ID and "Owner: Chase Test" in action.preview
     assert "No Campaign membership" in action.preview
 
 
