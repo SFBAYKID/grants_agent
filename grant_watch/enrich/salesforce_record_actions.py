@@ -315,7 +315,18 @@ def prepare_organization_lead_creation(
             organization = OrganizationProfile(
                 website=f"https://{official_domain}/", source_url=site_source)
     else:
-        organization = OrganizationProfile()
+        from . import finder
+
+        official = finder.find_official_site(company, state)
+        if official is None:
+            organization = OrganizationProfile()
+        else:
+            try:
+                organization = fetch_profile(
+                    company, official.domain, official.url)
+            except (KeyError, ValueError, RuntimeError, requests.RequestException):
+                organization = OrganizationProfile(
+                    website=f"https://{official.domain}/", source_url=official.url)
     entity_text = f"{row['entity_type'] or ''} {company}".lower()
     industry = "K-12 Schools" if any(
         word in entity_text for word in ("school", "district", "k-12")) else ""

@@ -147,6 +147,23 @@ def test_linkedin_result_returns_typed_organization_match(
         "Pat Person - Technology Director | LinkedIn | Birmingham Community Charter High School")
 
 
+def test_official_site_discovery_rejects_unrelated_result_and_binds_org(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bounded official-site lookup skips directories and binds the named school."""
+    monkeypatch.setattr(finder, "_search", lambda *_args, **_kwargs: [
+        {"url": "https://www.greatschools.org/california/example",
+         "title": "Example School ratings", "description": "directory"},
+        {"url": "https://www.birminghamcharter.com/contact",
+         "title": "Birmingham Community Charter High School",
+         "description": "Official school contact information in California"},
+    ])
+    result = finder.find_official_site(
+        "Birmingham Community Charter High School", "CA")
+    assert result == finder.OfficialSite(
+        "birminghamcharter.com", "https://www.birminghamcharter.com/contact",
+        "Birmingham Community Charter High School | Official school contact information in California")
+
+
 def test_linkedin_timeout_returns_no_result_instead_of_hanging(
         monkeypatch: pytest.MonkeyPatch) -> None:
     """A bounded Firecrawl timeout becomes an honest non-result for the Slack turn."""

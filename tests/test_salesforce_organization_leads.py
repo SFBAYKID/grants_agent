@@ -12,6 +12,7 @@ from grant_watch import db
 from grant_watch.enrich import salesforce_campaign_gateway as gateway_mod
 from grant_watch.enrich import salesforce_campaigns as campaigns
 from grant_watch.enrich import salesforce_record_actions as record_actions
+from grant_watch.enrich import finder
 from grant_watch.enrich.organization_profile import OrganizationProfile
 from grant_watch.models import (
     FundingEventType,
@@ -61,6 +62,9 @@ def config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SALESFORCE_ORGANIZATION_LEAD_WRITES_ENABLED", "1")
     monkeypatch.setenv("SALESFORCE_GRANT_AUDIT_RECORDS_ENABLED", "1")
     monkeypatch.setenv("SALESFORCE_CAMPAIGN_WRITES_ENABLED", "0")
+    monkeypatch.setattr(finder, "find_official_site", lambda *_args: finder.OfficialSite(
+        "corningelementary.org", "https://www.corningelementary.org/contact",
+        "Corning Union Elementary School District official site"))
     monkeypatch.setattr(record_actions, "fetch_profile", lambda *_args: OrganizationProfile(
         website="https://www.corningelementary.org/", street="1590 South Street",
         city="Corning", state="CA", postal_code="96021", main_phone="530-824-7700",
@@ -103,6 +107,9 @@ def test_preview_has_no_person_fields_and_uses_current_event_source(
     assert "no verified person or email" in action.preview
     assert "organization name because Salesforce requires it" in action.preview
     assert "does not represent a person" in payload["Description"]
+    assert payload["Website"] == "https://www.corningelementary.org/"
+    assert payload["Phone"] == "530-824-7700"
+    assert payload["Street"] == "1590 South Street"
     assert "No Campaign membership or Opportunity" in action.preview
 
 

@@ -79,6 +79,15 @@ class LinkedInPerson:
     evidence_excerpt: str
 
 
+@dataclass(frozen=True)
+class OfficialSite:
+    """One organization-bound official-site search result."""
+
+    domain: str
+    url: str
+    evidence_excerpt: str
+
+
 def verify_on_page(page_text: str, email: str, name: str) -> bool:
     """THE anti-hallucination gate (pure, unit-tested): the email must appear
     VERBATIM in the fetched page, and the first two name tokens must appear too.
@@ -337,6 +346,31 @@ def _linkedin_result_matches(entity: str, result: dict[str, Any]) -> bool:
         if token not in _GENERIC_ENTITY_WORDS and len(token) > 2
     }
     return len(tokens) >= 2 and tokens.issubset(set(normalized_haystack.split()))
+
+
+def find_official_site(entity: str, state: str,
+                       on_progress: Progress | None = None) -> OfficialSite | None:
+    """Find one bounded, organization-matched official site for CRM enrichment."""
+    say = on_progress or _NOOP
+    say("Finding the official website")
+    try:
+        results = _search(f"{entity} {state} official website address phone", limit=5)
+    except (requests.RequestException, RuntimeError):
+        return None
+    for result in results:
+        if not _looks_official(entity, state, result):
+            continue
+        url = str(result.get("url") or "").strip()
+        domain = _host(url)
+        if not domain:
+            continue
+        evidence = " | ".join(filter(None, (
+            str(result.get("title") or "").strip(),
+            str(result.get("description") or "").strip(),
+        )))[:1000]
+        say("Found the official website")
+        return OfficialSite(domain, url, evidence)
+    return None
 
 
 def linkedin_person(entity: str, state: str,

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import requests
 
 from .. import db, linkedin_candidates
+from . import finder
 from . import salesforce_campaigns as workflow
 from .organization_profile import OrganizationProfile, fetch_profile
 from .salesforce_campaign_gateway import (
@@ -127,7 +128,17 @@ def _draft(conn: sqlite3.Connection, candidate: linkedin_candidates.LinkedInCand
             organization = OrganizationProfile(
                 website=f"https://{domain}/", source_url=site_source)
     else:
-        organization = OrganizationProfile()
+        official = finder.find_official_site(
+            candidate.organization, str(row["state"] or ""))
+        if official is None:
+            organization = OrganizationProfile()
+        else:
+            try:
+                organization = fetch_profile(
+                    candidate.organization, official.domain, official.url)
+            except (KeyError, ValueError, RuntimeError, requests.RequestException):
+                organization = OrganizationProfile(
+                    website=f"https://{official.domain}/", source_url=official.url)
     entity_text = f"{row['entity_type'] or ''} {candidate.organization}".lower()
     industry = "K-12 Schools" if any(
         word in entity_text for word in ("school", "district", "k-12")) else ""
