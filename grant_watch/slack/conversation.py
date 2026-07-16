@@ -34,6 +34,7 @@ from .crm_routing import (
     _is_organization_enrichment_request,
     _load_referenced_lead,
     _organization_preview_failure,
+    _pending_org_enrichment_reply,
     _requested_person_name,
     _requests_person_without_verified_email,
 )
@@ -619,6 +620,11 @@ def respond(user_text: str, row: sqlite3.Row | None,
             "reply": ("I prepared a preview to fill the existing Lead’s blank "
                       "organization fields. No email is required and nothing has changed yet."),
         }
+    pending_org_reply = _pending_org_enrichment_reply(
+        user_text, workspace, channel, thread_ts, requester_slack)
+    if pending_org_reply is not None:
+        return {"intent": "question", "files": [], "pending_crm_actions": [],
+                "reply": pending_org_reply}
     if row is not None and _is_location_question(user_text):
         say("Checking the official website")
         try:

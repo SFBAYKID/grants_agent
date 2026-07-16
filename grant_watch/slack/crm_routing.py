@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import sqlite3
+from datetime import datetime, timezone
+from typing import Any
 
 from .. import db
 
@@ -136,3 +139,66 @@ def _organization_preview_failure(tool_text: str) -> str:
                 "missing. Nothing was changed.")
     return ("I couldn’t safely prepare that Salesforce Lead because the duplicate check "
             "did not complete. Nothing was changed.")
+
+
+def _is_pending_org_preview_question(text: str) -> bool:
+    """Recognize a plain-English question about the exact pending org preview."""
+    normalized = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower()).split())
+    preview = "preview" in normalized or "if confirmed" in normalized
+    asks_email = "email" in normalized and any(
+        phrase in normalized for phrase in ("require", "need", "add", "without"))
+    asks_changes = any(
+        phrase in normalized for phrase in ("what will change", "what changes", "exactly what"))
+    return preview and (asks_email or asks_changes)
+
+
+def _pending_org_enrichment_reply(
+        text: str, workspace: str, channel: str, thread_ts: str,
+        requester: str) -> str | None:
+    """Explain one requester-bound pending org preview from its immutable payload."""
+    if not _is_pending_org_preview_question(text):
+        return None
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            """SELECT payload_json,payload_hash,expires_at FROM crm_actions
+               WHERE action_type='enrich_existing_lead' AND state='ready'
+                 AND workspace=? AND channel=? AND thread_ts=? AND requested_by=?
+               ORDER BY created_at DESC LIMIT 1""",
+            (workspace, channel, thread_ts, requester),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    payload_json = str(row["payload_json"])
+    if hashlib.sha256(payload_json.encode("utf-8")).hexdigest() != str(row["payload_hash"]):
+        return None
+    try:
+        if datetime.fromisoformat(str(row["expires_at"])) <= datetime.now(timezone.utc):
+            return None
+    except ValueError:
+        return None
+    try:
+        payload: dict[str, Any] = json.loads(payload_json)
+        delta = dict(payload["delta"])
+    except (KeyError, TypeError, json.JSONDecodeError):
+        return None
+    labels = {
+        "Website": "Website", "Phone": "Phone", "Street": "Street",
+        "City": "City", "State": "State", "PostalCode": "Postal code",
+        "Country": "Country", "Industry": "Industry",
+        "Number_of_Students__c": "Student enrollment",
+        "Description": "Research notes",
+    }
+    fields = [labels[key] for key in delta if key in labels]
+    if not fields:
+        return None
+    bullets = "\n".join(f"• {field}" for field in fields)
+    return (
+        "No. This preview does not require or add an email.\n\n"
+        "If you confirm it, Grant will update only these fields on the one Lead shown:\n\n"
+        f"{bullets}\n\n"
+        "It will also add a visible research Note and a completed administrative "
+        "Activity. It will not create another Lead, person, Campaign, or Opportunity."
+    )

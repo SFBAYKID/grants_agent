@@ -16,6 +16,7 @@ from grant_watch.enrich import salesforce
 from grant_watch.enrich import salesforce_record_actions as record_actions
 from grant_watch.enrich.organization_profile import OrganizationProfile
 from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem, VerificationStatus
+from grant_watch.slack import conversation
 
 LEAD_ID = "00Q000000000001"
 
@@ -206,6 +207,48 @@ def test_industry_uses_reviewed_entity_type_not_organization_name() -> None:
     assert record_actions._verified_industry("school") == "K-12 Schools"
     assert record_actions._verified_industry("school_district") == "K-12 Schools"
     assert record_actions._verified_industry("county") == ""
+
+
+def test_pending_preview_followup_is_plain_english_and_uses_frozen_delta(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A follow-up explains the exact pending preview without another model turn."""
+    conn, lead_id = _lead(tmp_path)
+    monkeypatch.setattr(enrichment, "_profile", lambda *_args: _profile())
+    campaigns.prepare_organization_lead_enrichment(
+        conn, FakeGateway(), "T", "CGRANTS", "1.1", "U", lead_id,
+        f"https://writer.test/lightning/r/Lead/{LEAD_ID}/view")
+    database = tmp_path / "org-enrichment.db"
+    real_connect = db.connect
+    monkeypatch.setattr(conversation.db, "connect", lambda: real_connect(database))
+    result = conversation.respond(
+        "Does this preview require an email, and exactly what will change if confirmed?",
+        None, requester_slack="U", workspace="T", channel="CGRANTS", thread_ts="1.1")
+    reply = result["reply"]
+    assert "does not require or add an email" in reply
+    assert "• Street" in reply and "• Postal code" in reply
+    assert "• Research notes" in reply
+    assert "salesforce_" not in reply and "payload" not in reply
+    assert result["pending_crm_actions"] == []
+
+
+def test_pending_preview_followup_rejects_tampered_payload(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A read-only explanation still refuses an altered approval envelope."""
+    conn, lead_id = _lead(tmp_path)
+    monkeypatch.setattr(enrichment, "_profile", lambda *_args: _profile())
+    campaigns.prepare_organization_lead_enrichment(
+        conn, FakeGateway(), "T", "CGRANTS", "1.1", "U", lead_id,
+        f"https://writer.test/lightning/r/Lead/{LEAD_ID}/view")
+    conn.execute("UPDATE crm_actions SET payload_json='{}'")
+    conn.commit()
+    database = tmp_path / "org-enrichment.db"
+    real_connect = db.connect
+    monkeypatch.setattr(conversation.db, "connect", lambda: real_connect(database))
+    monkeypatch.setattr(
+        conversation, "Anthropic",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("model should not run")))
+    assert conversation._pending_org_enrichment_reply(
+        "What changes if this preview is confirmed?", "T", "CGRANTS", "1.1", "U") is None
 
 
 def test_reconciled_legacy_placeholder_notes_are_safely_replaced(
