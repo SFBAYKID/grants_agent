@@ -112,6 +112,38 @@ def test_recent_batch_state_and_namespace_filters_scope_the_counts() -> None:
         ),
         ("list reviewed sources in NH", "reviewed_sources", "NH", "all"),
         ("show the last 5 discovery batches", "recent_batches", "", "all"),
+        ("show recent discovery batch for CA", "recent_batches", "CA", "all"),
+        (
+            "show recent discoveries in California",
+            "reviewed_sources",
+            "CA",
+            "all",
+        ),
+        (
+            "what did the raw discovery search find in California?",
+            "recent_batches",
+            "CA",
+            "all",
+        ),
+        (
+            "How much of California's school district research is done?",
+            "coverage",
+            "CA",
+            "school_district",
+        ),
+        (
+            "What has Grant actually reviewed in New Hampshire?",
+            "reviewed_sources",
+            "NH",
+            "all",
+        ),
+        ("lemme see the reviewed NH sources", "reviewed_sources", "NH", "all"),
+        (
+            "How many Texas counties are still not researched?",
+            "coverage",
+            "TX",
+            "county",
+        ),
     ],
 )
 def test_natural_language_status_requests_parse_deterministically(
@@ -135,6 +167,15 @@ def test_source_status_followup_uses_thread_context() -> None:
     assert request.view == "summary"
 
 
+def test_read_only_search_wording_is_not_mistaken_for_paid_execution() -> None:
+    """Questions about stored search evidence remain read-only inventory requests."""
+    request = status.parse_status_request(
+        "What did the raw discovery search find in California?"
+    )
+    assert request is not None
+    assert request.paid_execution_requested is False
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -144,6 +185,7 @@ def test_source_status_followup_uses_thread_context() -> None:
         "Search for new sources in California",
         "Run Firecrawl for California",
         "Launch discovery in California",
+        "Go run Firecrawl source discovery for California right now",
     ],
 )
 def test_paid_discovery_request_is_disabled_before_any_network_tool(

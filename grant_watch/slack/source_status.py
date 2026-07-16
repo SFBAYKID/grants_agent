@@ -190,7 +190,11 @@ def _state_from_text(text: str) -> str:
     for name in sorted(STATE_NAMES, key=len, reverse=True):
         if re.search(rf"\b{re.escape(name)}\b", lowered):
             return STATE_NAMES[name]
-    match = re.search(r"(?:\bin\s+|\bstate\s+)([A-Za-z]{2})\b", text)
+    match = re.search(r"(?:\bin\s+|\bfor\s+|\bfrom\s+|\bstate\s+)([A-Za-z]{2})\b", text)
+    if match is None:
+        # An all-caps code is explicit even when placed between words, as in
+        # "reviewed NH sources". Lowercase two-letter words remain ignored.
+        match = re.search(r"\b([A-Z]{2})\b", text)
     if match is not None:
         code = match.group(1).upper()
         if code in STATE_NAMES.values():
@@ -218,43 +222,67 @@ def parse_status_request(
     combined = f"{context} {user_text}".strip()
     lowered = combined.lower()
     current = user_text.lower()
+    paid_action = re.match(
+        r"^\s*(?:please\s+|grant[, :]*)?"
+        r"(?:go\s+)?"
+        r"(?:can you\s+|could you\s+|would you\s+|i want you to\s+)?"
+        r"(?:run|start|launch|execute|search(?:\s+for)?|find)\b",
+        current,
+    )
     paid_execution = bool(
-        re.search(r"\b(run|start|launch|execute|search(?:\s+for)?|find)\b", current)
+        paid_action
         and re.search(
             r"\b(discovery|firecrawl|source research|new sources?)\b", current
         )
     )
-    inventory_context = paid_execution or any(
-        phrase in lowered
-        for phrase in (
-            "source discovery",
-            "discovery status",
-            "source inventory",
-            "research coverage",
-            "sources reviewed",
-            "reviewed sources",
-            "sources remaining",
-            "sources have we found",
-            "firecrawl batch",
-            "discovery batch",
+    inventory_context = (
+        paid_execution
+        or any(
+            phrase in lowered
+            for phrase in (
+                "source discovery",
+                "discovery status",
+                "source inventory",
+                "research coverage",
+                "sources reviewed",
+                "reviewed sources",
+                "sources remaining",
+                "sources have we found",
+                "firecrawl batch",
+                "discovery batch",
+                "recent discoveries",
+                "raw discovery search",
+            )
+        )
+        or bool(
+            re.search(r"\bschool district research\b", lowered)
+            or re.search(r"\breviewed\b.*\bsources?\b", lowered)
+            or re.search(r"\bgrant\s+(?:actually\s+)?reviewed\b", lowered)
+            or re.search(r"\bnot (?:yet )?researched\b", lowered)
         )
     )
     if not inventory_context:
         return None
-    if "batch" in current:
+    if "batch" in current or "raw discovery search" in current:
         view = "recent_batches"
+    elif "recent discoveries" in current:
+        view = "reviewed_sources"
     elif any(word in current for word in ("reviewed", "promoted", "list sources")):
         view = "reviewed_sources"
-    elif any(
-        word in current
-        for word in (
-            "coverage",
-            "remaining",
-            "left",
-            "researched",
-            "counties",
-            "districts",
-            "cities",
+    elif (
+        "school district research" in current
+        or "not researched" in current
+        or any(
+            word in current
+            for word in (
+                "coverage",
+                "remaining",
+                "left",
+                "researched",
+                "counties",
+                "districts",
+                "cities",
+            )
         )
     ):
         view = "coverage"
