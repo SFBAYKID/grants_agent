@@ -161,13 +161,13 @@ def test_composite_rollback_preserves_exact_subrequest_error(
     def fake_post(_url: str, **_kwargs: Any) -> Response:
         return Response([
             {"referenceId": "grantLeadUpdate", "httpStatusCode": 400,
-             "body": [{"errorCode": "INVALID_FIELD", "message": "bad Website"}]},
+             "body": [{"errorCode": "PROCESSING_HALTED"}]},
             {"referenceId": "grantResearchNote", "httpStatusCode": 412,
              "body": [{"errorCode": "PROCESSING_HALTED"}]},
             {"referenceId": "grantResearchLink", "httpStatusCode": 412,
              "body": [{"errorCode": "PROCESSING_HALTED"}]},
-            {"referenceId": "grantAuditTask", "httpStatusCode": 412,
-             "body": [{"errorCode": "PROCESSING_HALTED"}]},
+            {"referenceId": "grantAuditTask", "httpStatusCode": 400,
+             "body": [{"errorCode": "INVALID_FIELD", "message": "bad Status"}]},
         ])
 
     monkeypatch.setattr(gateway_mod.requests, "post", fake_post)
@@ -175,8 +175,8 @@ def test_composite_rollback_preserves_exact_subrequest_error(
         LEAD_ID, {"Website": "https://district.test"}, "stamp", ACTION_ID,
         "Verified sources", "No customer outreach. Action " + ACTION_ID, "2026-07-15")
     assert result.success is False
-    assert "grantLeadUpdate HTTP 400" in result.error
-    assert "INVALID_FIELD" in result.error and "grantAuditTask HTTP 412" in result.error
+    assert result.error.startswith("grantAuditTask HTTP 400")
+    assert "INVALID_FIELD" in result.error and "grantLeadUpdate HTTP 400" in result.error
 
 
 def test_audit_readback_compares_note_link_task_and_truthful_copy(

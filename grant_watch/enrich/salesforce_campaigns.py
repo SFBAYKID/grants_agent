@@ -659,7 +659,7 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
     except SalesforceCompositeRolledBack as exc:
         _finish_action(
             conn, action_id, CampaignActionState.FAILED,
-            error=f"SalesforceCompositeRolledBack: {str(exc)[:240]}")
+            error=f"SalesforceCompositeRolledBack: {str(exc)[:1000]}")
         return ActionExecution(
             CampaignActionState.FAILED,
             "Salesforce rejected the all-or-none action; nothing was changed.",

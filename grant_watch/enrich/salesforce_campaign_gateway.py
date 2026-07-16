@@ -429,7 +429,6 @@ class SalesforceCampaignGateway:
                     "ContentDocumentId": "@{grantResearchNote.id}",
                     "LinkedEntityId": lead_reference,
                     "ShareType": "V",
-                    "Visibility": "InternalUsers",
                 },
             },
             {
@@ -441,7 +440,6 @@ class SalesforceCampaignGateway:
                     "Subject": "Grant system: CRM research updated",
                     "ActivityDate": activity_date,
                     "Status": "Completed",
-                    "Priority": "Normal",
                     "Description": clean_task,
                 },
             },
@@ -461,14 +459,16 @@ class SalesforceCampaignGateway:
         payload: dict[str, Any] = response.json()  # Salesforce composite JSON is dynamic
         by_ref = {str(item.get("referenceId") or ""): item
                   for item in payload.get("compositeResponse") or []}
-        errors: list[str] = []
+        errors: list[tuple[bool, str]] = []
         for reference, statuses in expected_statuses.items():
             item = by_ref.get(reference) or {}
             status = int(item.get("httpStatusCode") or 0)
             if status not in statuses:
-                errors.append(
-                    f"{reference} HTTP {status}: {str(item.get('body') or '')[:300]}")
-        return by_ref, "; ".join(errors)
+                body = str(item.get("body") or "")[:500]
+                errors.append(("PROCESSING_HALTED" in body,
+                               f"{reference} HTTP {status}: {body}"))
+        errors.sort(key=lambda item: item[0])
+        return by_ref, "; ".join(message for _halted, message in errors)
 
     def create_lead_audit_bundle(
             self, lead_id: str, action_id: str, note_body: str,
@@ -602,7 +602,8 @@ class SalesforceCampaignGateway:
             and str(link.get("ContentDocumentId") or "") == note_id
             and str(link.get("LinkedEntityId") or "") == lead_id
             and str(link.get("ShareType") or "") == "V"
-            and str(link.get("Visibility") or "") == "InternalUsers"
+            and str(link.get("Visibility") or "") in {
+                "AllUsers", "InternalUsers", "SharedUsers"}
             and str(task.get("WhoId") or "") == lead_id
             and str(task.get("Subject") or "") == "Grant system: CRM research updated"
             and str(task.get("Status") or "") == "Completed"
