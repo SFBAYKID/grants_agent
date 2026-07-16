@@ -101,6 +101,8 @@ def test_preview_has_no_person_fields_and_uses_current_event_source(
     assert not ({"FirstName", "Email", "Title", "LinkedIn__c"} & set(payload))
     assert "https://www.grants.ca.gov/award/corning" in payload["Description"]
     assert "no verified person or email" in action.preview
+    assert "organization name because Salesforce requires it" in action.preview
+    assert "does not represent a person" in payload["Description"]
     assert "No Campaign membership or Opportunity" in action.preview
 
 

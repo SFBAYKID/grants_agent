@@ -119,7 +119,9 @@ class OrganizationLeadDraft:
             "LeadSource": "Other",
             "Description": (
                 "Created by Grant as an organization-only Lead. No individual contact "
-                "or email was verified, so all person fields are blank. "
+                "or email was verified. Salesforce requires LastName, so it contains "
+                "the organization name and does not represent a person; FirstName, "
+                "Email, and Title are blank. "
                 f"Grant lead {self.grant_lead_id}. Funding evidence: {self.source_url}. "
                 f"Action {action_id}. Requested by Slack user {requester}."
             ),
@@ -332,7 +334,8 @@ def prepare_organization_lead_creation(
     lines = [
         "Create this organization-only Salesforce Lead?",
         f"• Organization: {company}",
-        "• Contact: no verified person or email; those fields stay blank",
+        "• Contact: no verified person or email",
+        "• Salesforce Lead name: uses the organization name because Salesforce requires it",
         f"• Funding source: {source_url}",
     ]
     for label, key in (
@@ -541,7 +544,8 @@ def confirm_organization_lead(
     note_body = str(payload.get("Description") or "")
     task_body = (
         _audit_task_description(action_id, "created and populated", list(payload))
-        + " No individual contact or email was verified; person fields were left blank."
+        + " No individual contact or email was verified. Salesforce-required LastName "
+        "contains the organization name and does not represent a person."
     )
     result = gateway.create_organization_lead_with_audit_bundle(
         payload, action_id, note_body, task_body, _activity_date())
