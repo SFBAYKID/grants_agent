@@ -63,9 +63,7 @@ class CampaignDraft:
 
     def payload(self, action_id: str, requester: str) -> dict[str, object]:
         """Return the exact Salesforce create fields shown in the preview."""
-        provenance = (
-            f"Created by Grant. Action {action_id}. Requested by Slack user {requester}."
-        )
+        provenance = f"Created by Grant. Action {action_id}. Requested by Slack user {requester}."
         description = f"{self.description.strip()}\n{provenance}".strip()
         payload: dict[str, object] = {
             "Name": self.name.strip(),
@@ -107,8 +105,6 @@ class PreparedAction:
     expires_at: str
 
 
-
-
 @dataclass(frozen=True)
 class ActionExecution:
     """Human-readable aggregate of a confirmed action's exact outcomes."""
@@ -121,7 +117,6 @@ class ActionExecution:
     unresolved: int = 0
     failed: int = 0
     unknown: int = 0
-
 
 
 def _now() -> datetime:
@@ -142,8 +137,6 @@ def _stable_json(value: object) -> str:
 def _hash(value: str) -> str:
     """Hash nonces and immutable payloads before persistence."""
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 
 
 def write_channel_allowed(channel: str) -> bool:
@@ -187,16 +180,38 @@ def lead_audit_writer_enabled() -> bool:
 
 
 def prepare_opportunity_creation(
-        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
-        workspace: str, channel: str, thread_ts: str, requester: str,
-        account_link: str, name: str, stage_name: str, close_date: str,
-        owner_id: str, owner_name: str, amount: float | None = None) -> PreparedAction:
+    conn: sqlite3.Connection,
+    gateway: SalesforceCampaignGateway,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+    account_link: str,
+    name: str,
+    stage_name: str,
+    close_date: str,
+    owner_id: str,
+    owner_name: str,
+    amount: float | None = None,
+) -> PreparedAction:
     """Delegate one Opportunity preview to the single-record action module."""
     from . import salesforce_record_actions as records
 
     return records.prepare_opportunity_creation(
-        conn, gateway, workspace, channel, thread_ts, requester, account_link,
-        name, stage_name, close_date, owner_id, owner_name, amount)
+        conn,
+        gateway,
+        workspace,
+        channel,
+        thread_ts,
+        requester,
+        account_link,
+        name,
+        stage_name,
+        close_date,
+        owner_id,
+        owner_name,
+        amount,
+    )
 
 
 def _duplicate_person(email: str, company: str, state: str) -> list[salesforce.SFMatch]:
@@ -206,62 +221,126 @@ def _duplicate_person(email: str, company: str, state: str) -> list[salesforce.S
     return records.duplicate_person(email, company, state)
 
 
-def prepare_person_lead_creation(conn: sqlite3.Connection, workspace: str,
-                                 channel: str, thread_ts: str, requester: str,
-                                 contact_id: int) -> PreparedAction:
+def prepare_person_lead_creation(
+    conn: sqlite3.Connection,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+    contact_id: int,
+) -> PreparedAction:
     """Delegate one verified-person Lead preview to the record action module."""
     from . import salesforce_record_actions as records
 
     return records.prepare_person_lead_creation(
-        conn, workspace, channel, thread_ts, requester, contact_id)
+        conn, workspace, channel, thread_ts, requester, contact_id
+    )
 
 
 def prepare_organization_lead_creation(
-        conn: sqlite3.Connection, workspace: str, channel: str, thread_ts: str,
-        requester: str, grant_lead_id: int) -> PreparedAction:
+    conn: sqlite3.Connection,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+    grant_lead_id: int,
+) -> PreparedAction:
     """Delegate one organization-only standalone Lead preview."""
     from . import salesforce_record_actions as records
 
     return records.prepare_organization_lead_creation(
-        conn, workspace, channel, thread_ts, requester, grant_lead_id)
+        conn, workspace, channel, thread_ts, requester, grant_lead_id
+    )
 
 
 def prepare_lead_enrichment(
-        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
-        workspace: str, channel: str, thread_ts: str, requester: str,
-        contact_id: int, lead_link: str) -> PreparedAction:
+    conn: sqlite3.Connection,
+    gateway: SalesforceCampaignGateway,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+    contact_id: int,
+    lead_link: str,
+) -> PreparedAction:
     """Delegate blank-only existing Lead enrichment to the record action module."""
     from . import salesforce_record_actions as records
 
     return records.prepare_lead_enrichment(
-        conn, gateway, workspace, channel, thread_ts, requester, contact_id, lead_link)
+        conn, gateway, workspace, channel, thread_ts, requester, contact_id, lead_link
+    )
+
+
+def prepare_organization_lead_enrichment(
+    conn: sqlite3.Connection,
+    gateway: SalesforceCampaignGateway,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+    grant_lead_id: int,
+    lead_link: str,
+) -> PreparedAction:
+    """Delegate blank-only organization enrichment that needs no contact or email."""
+    from .salesforce_org_enrichment import (
+        prepare_organization_lead_enrichment as prepare,
+    )
+
+    return prepare(
+        conn,
+        gateway,
+        workspace,
+        channel,
+        thread_ts,
+        requester,
+        grant_lead_id,
+        lead_link,
+    )
 
 
 def prepare_lead_audit_repair(
-        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
-        workspace: str, channel: str, thread_ts: str, requester: str,
-        lead_link: str) -> PreparedAction:
+    conn: sqlite3.Connection,
+    gateway: SalesforceCampaignGateway,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+    lead_link: str,
+) -> PreparedAction:
     """Delegate one exact Lead's missing audit-trail repair preview."""
     from . import salesforce_record_actions as records
 
     return records.prepare_lead_audit_repair(
-        conn, gateway, workspace, channel, thread_ts, requester, lead_link)
+        conn, gateway, workspace, channel, thread_ts, requester, lead_link
+    )
 
 
-def _validate_context(workspace: str, channel: str, thread_ts: str,
-                      requester: str) -> None:
+def _validate_context(
+    workspace: str, channel: str, thread_ts: str, requester: str
+) -> None:
     """Validate the immutable Slack action context before storing a preview."""
     if not all((workspace, channel, thread_ts, requester)):
-        raise ValueError("Salesforce actions require workspace, channel, thread, and user")
+        raise ValueError(
+            "Salesforce actions require workspace, channel, thread, and user"
+        )
     if not write_channel_allowed(channel):
-        raise PermissionError("Salesforce writes are limited to configured Grant channels")
+        raise PermissionError(
+            "Salesforce writes are limited to configured Grant channels"
+        )
 
 
-def _store_action(conn: sqlite3.Connection, action_type: str, workspace: str,
-                  channel: str, thread_ts: str, requester: str,
-                  payload: dict[str, object], campaign_id: str = "",
-                  plans: list[MemberPlan] | None = None,
-                  action_id: str | None = None) -> tuple[str, str, str]:
+def _store_action(
+    conn: sqlite3.Connection,
+    action_type: str,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+    payload: dict[str, object],
+    campaign_id: str = "",
+    plans: list[MemberPlan] | None = None,
+    action_id: str | None = None,
+) -> tuple[str, str, str]:
     """Persist an immutable preview and return action ID, nonce, and expiry."""
     action_id = action_id or str(uuid.uuid4())
     nonce = secrets.token_urlsafe(24)
@@ -273,16 +352,20 @@ def _store_action(conn: sqlite3.Connection, action_type: str, workspace: str,
         proposed = {
             "entity_name": plan.entity_name,
             "state": plan.state,
-            "salesforce_ref": asdict(plan.salesforce_ref) if plan.salesforce_ref else None,
+            "salesforce_ref": asdict(plan.salesforce_ref)
+            if plan.salesforce_ref
+            else None,
             "proposed_lead": plan.proposed_lead,
             "note": plan.note,
         }
-        stored_plans.append({
-            "lead_id": plan.lead_id,
-            "canonical_entity_key": plan.canonical_entity_key,
-            "operation": plan.operation,
-            "proposed": proposed,
-        })
+        stored_plans.append(
+            {
+                "lead_id": plan.lead_id,
+                "canonical_entity_key": plan.canonical_entity_key,
+                "operation": plan.operation,
+                "proposed": proposed,
+            }
+        )
     items_hash = _hash(_stable_json(stored_plans))
     with conn:
         conn.execute(
@@ -291,26 +374,49 @@ def _store_action(conn: sqlite3.Connection, action_type: str, workspace: str,
                   payload_json,payload_hash,items_hash,nonce_hash,expires_at,
                   campaign_id,created_at,updated_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (action_id, action_type, workspace, channel, thread_ts, requester,
-             CampaignActionState.READY.value, payload_json, _hash(payload_json),
-             items_hash, _hash(nonce), _iso(expires), campaign_id or None,
-             _iso(now), _iso(now)),
+            (
+                action_id,
+                action_type,
+                workspace,
+                channel,
+                thread_ts,
+                requester,
+                CampaignActionState.READY.value,
+                payload_json,
+                _hash(payload_json),
+                items_hash,
+                _hash(nonce),
+                _iso(expires),
+                campaign_id or None,
+                _iso(now),
+                _iso(now),
+            ),
         )
         for plan, stored in zip(plans or [], stored_plans):
             conn.execute(
                 """INSERT INTO crm_action_items
                      (action_id,lead_id,canonical_entity_key,operation,proposed_json,state)
                    VALUES (?,?,?,?,?,'ready')""",
-                (action_id, plan.lead_id, plan.canonical_entity_key, plan.operation,
-                 _stable_json(stored["proposed"])),
+                (
+                    action_id,
+                    plan.lead_id,
+                    plan.canonical_entity_key,
+                    plan.operation,
+                    _stable_json(stored["proposed"]),
+                ),
             )
     return action_id, nonce, _iso(expires)
 
 
-def prepare_campaign_creation(conn: sqlite3.Connection,
-                              gateway: SalesforceCampaignGateway,
-                              workspace: str, channel: str, thread_ts: str,
-                              requester: str, draft: CampaignDraft) -> PreparedAction:
+def prepare_campaign_creation(
+    conn: sqlite3.Connection,
+    gateway: SalesforceCampaignGateway,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+    draft: CampaignDraft,
+) -> PreparedAction:
     """Validate and persist a new-Campaign preview without writing Salesforce."""
     _validate_context(workspace, channel, thread_ts, requester)
     if not draft.name.strip() or len(draft.name.strip()) > 80:
@@ -325,9 +431,18 @@ def prepare_campaign_creation(conn: sqlite3.Connection,
     action_seed = str(uuid.uuid4())
     payload = draft.payload(action_seed, requester)
     action_id, nonce, expires = _store_action(
-        conn, "create_campaign", workspace, channel, thread_ts, requester,
-        {"campaign": payload, "owner_label": draft.owner_label,
-         "provenance_seed": action_seed}, action_id=action_seed,
+        conn,
+        "create_campaign",
+        workspace,
+        channel,
+        thread_ts,
+        requester,
+        {
+            "campaign": payload,
+            "owner_label": draft.owner_label,
+            "provenance_seed": action_seed,
+        },
+        action_id=action_seed,
     )
     preview = (
         f"Create Salesforce Campaign *{payload['Name']}*\n"
@@ -339,8 +454,9 @@ def prepare_campaign_creation(conn: sqlite3.Connection,
     return PreparedAction(action_id, nonce, preview, expires)
 
 
-def _org_lead_payload(row: sqlite3.Row, requester: str,
-                      action_id: str) -> dict[str, object]:
+def _org_lead_payload(
+    row: sqlite3.Row, requester: str, action_id: str
+) -> dict[str, object]:
     """Build an honest organization-only Lead with no invented person fields."""
     entity = str(row["entity_name"] or "").strip()
     payload: dict[str, object] = {
@@ -359,8 +475,9 @@ def _org_lead_payload(row: sqlite3.Row, requester: str,
     return payload
 
 
-def _record_matches_organization(record: SalesforceRecordRef,
-                                 entity_name: str, state: str) -> bool:
+def _record_matches_organization(
+    record: SalesforceRecordRef, entity_name: str, state: str
+) -> bool:
     """Require a supplied/found person record to belong to the Grant organization."""
     if not record.company.strip():
         return False
@@ -371,11 +488,18 @@ def _record_matches_organization(record: SalesforceRecordRef,
     return not (state and record.state and state.upper() != record.state.upper())
 
 
-def prepare_membership(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
-                       workspace: str, channel: str, thread_ts: str, requester: str,
-                       campaign: SalesforceRecordRef, lead_ids: list[int],
-                       supplied_links: dict[int, str] | None = None,
-                       allow_org_leads: bool = False) -> PreparedAction:
+def prepare_membership(
+    conn: sqlite3.Connection,
+    gateway: SalesforceCampaignGateway,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+    campaign: SalesforceRecordRef,
+    lead_ids: list[int],
+    supplied_links: dict[int, str] | None = None,
+    allow_org_leads: bool = False,
+) -> PreparedAction:
     """Resolve a frozen Grant lead set and persist the exact membership preview."""
     _validate_context(workspace, channel, thread_ts, requester)
     validate_record_id(campaign.record_id, "Campaign")
@@ -383,17 +507,22 @@ def prepare_membership(conn: sqlite3.Connection, gateway: SalesforceCampaignGate
     if not unique_ids or len(unique_ids) > MAX_ACTION_ORGANIZATIONS:
         raise ValueError("Choose between 1 and 200 Grant leads")
     placeholders = ",".join("?" for _ in unique_ids)
-    rows = list(conn.execute(
-        f"SELECT * FROM leads WHERE id IN ({placeholders}) ORDER BY id", unique_ids,
-    ))
+    rows = list(
+        conn.execute(
+            f"SELECT * FROM leads WHERE id IN ({placeholders}) ORDER BY id",
+            unique_ids,
+        )
+    )
     if len(rows) != len(unique_ids):
         raise ValueError("One or more Grant lead IDs are stale or unknown")
     action_seed = str(uuid.uuid4())
     supplied_links = supplied_links or {}
     plans_by_key: dict[str, MemberPlan] = {}
     for row in rows:
-        key = str(row["canonical_entity_key"] or db.canonical_entity_key(
-            str(row["entity_name"]), str(row["state"] or "")))
+        key = str(
+            row["canonical_entity_key"]
+            or db.canonical_entity_key(str(row["entity_name"]), str(row["state"] or ""))
+        )
         if key in plans_by_key:
             continue
         supplied = supplied_links.get(int(row["id"]))
@@ -403,42 +532,65 @@ def prepare_membership(conn: sqlite3.Connection, gateway: SalesforceCampaignGate
             sobject, record_id = parse_record_link(supplied, {"Lead", "Contact"})
             supplied_record = gateway.get_record(sobject, record_id)
             if _record_matches_organization(
-                    supplied_record, str(row["entity_name"]), str(row["state"] or "")):
+                supplied_record, str(row["entity_name"]), str(row["state"] or "")
+            ):
                 candidates = [supplied_record]
             else:
                 candidates = []
                 supplied_mismatch = True
         else:
-            candidates = [candidate for candidate in gateway.find_people(
-                str(row["entity_name"]), str(row["state"] or ""))
+            candidates = [
+                candidate
+                for candidate in gateway.find_people(
+                    str(row["entity_name"]), str(row["state"] or "")
+                )
                 if _record_matches_organization(
-                    candidate, str(row["entity_name"]), str(row["state"] or ""))]
+                    candidate, str(row["entity_name"]), str(row["state"] or "")
+                )
+            ]
         if len(candidates) == 1:
             plan = MemberPlan(
-                int(row["id"]), key, str(row["entity_name"]), str(row["state"] or ""),
-                "existing_record", salesforce_ref=candidates[0],
+                int(row["id"]),
+                key,
+                str(row["entity_name"]),
+                str(row["state"] or ""),
+                "existing_record",
+                salesforce_ref=candidates[0],
             )
         elif len(candidates) > 1:
             plan = MemberPlan(
-                int(row["id"]), key, str(row["entity_name"]), str(row["state"] or ""),
-                "ambiguous", note="Multiple Salesforce Leads/Contacts require selection.",
+                int(row["id"]),
+                key,
+                str(row["entity_name"]),
+                str(row["state"] or ""),
+                "ambiguous",
+                note="Multiple Salesforce Leads/Contacts require selection.",
             )
         elif supplied_mismatch:
             plan = MemberPlan(
-                int(row["id"]), key, str(row["entity_name"]), str(row["state"] or ""),
+                int(row["id"]),
+                key,
+                str(row["entity_name"]),
+                str(row["state"] or ""),
                 "unresolved",
                 note="Supplied Salesforce record does not match this organization/state.",
             )
         elif allow_org_leads:
             plan = MemberPlan(
-                int(row["id"]), key, str(row["entity_name"]), str(row["state"] or ""),
+                int(row["id"]),
+                key,
+                str(row["entity_name"]),
+                str(row["state"] or ""),
                 "create_org_lead",
                 proposed_lead=_org_lead_payload(row, requester, action_seed),
                 note="No individual contact verified; organization name fills Company and LastName.",
             )
         else:
             plan = MemberPlan(
-                int(row["id"]), key, str(row["entity_name"]), str(row["state"] or ""),
+                int(row["id"]),
+                key,
+                str(row["entity_name"]),
+                str(row["state"] or ""),
                 "unresolved",
                 note="Provide a Salesforce Lead/Contact link or approve an organization-only Lead.",
             )
@@ -457,10 +609,19 @@ def prepare_membership(conn: sqlite3.Connection, gateway: SalesforceCampaignGate
     if existing + creating == 0:
         raise ValueError(
             "No organizations can be added yet; resolve a Salesforce Lead/Contact "
-            "or approve organization-only Leads before confirming")
+            "or approve organization-only Leads before confirming"
+        )
     action_id, nonce, expires = _store_action(
-        conn, "add_campaign_members", workspace, channel, thread_ts, requester,
-        payload, campaign.record_id, plans, action_id=action_seed,
+        conn,
+        "add_campaign_members",
+        workspace,
+        channel,
+        thread_ts,
+        requester,
+        payload,
+        campaign.record_id,
+        plans,
+        action_id=action_seed,
     )
     mapping_lines: list[str] = []
     for plan in plans:
@@ -468,10 +629,12 @@ def prepare_membership(conn: sqlite3.Connection, gateway: SalesforceCampaignGate
         if plan.operation == "existing_record" and plan.salesforce_ref is not None:
             mapping_lines.append(
                 f"• {label} → {plan.salesforce_ref.sobject} "
-                f"{plan.salesforce_ref.name}: {plan.salesforce_ref.link}")
+                f"{plan.salesforce_ref.name}: {plan.salesforce_ref.link}"
+            )
         elif plan.operation == "create_org_lead":
             mapping_lines.append(
-                f"• {label} → create organization-only Lead; no person fields")
+                f"• {label} → create organization-only Lead; no person fields"
+            )
         else:
             mapping_lines.append(f"• {label} → skipped: {plan.note}")
     preview = (
@@ -499,9 +662,15 @@ def _load_action(conn: sqlite3.Connection, action_id: str) -> sqlite3.Row:
     return row
 
 
-def _authorize_action(conn: sqlite3.Connection, row: sqlite3.Row, nonce: str,
-                      workspace: str, channel: str, thread_ts: str,
-                      requester: str) -> None:
+def _authorize_action(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    nonce: str,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+) -> None:
     """Revalidate immutable context, initiator, nonce, state, and expiry."""
     if row["workspace"] != workspace or row["channel"] != channel:
         raise PermissionError("Salesforce approval context does not match")
@@ -519,14 +688,19 @@ def _authorize_action(conn: sqlite3.Connection, row: sqlite3.Row, nonce: str,
         raise TimeoutError("Salesforce approval preview expired")
     if _hash(str(row["payload_json"])) != row["payload_hash"]:
         raise ValueError("Salesforce approval payload changed after preview")
-    stored_items = [{
-        "lead_id": item["lead_id"],
-        "canonical_entity_key": item["canonical_entity_key"],
-        "operation": item["operation"],
-        "proposed": json.loads(str(item["proposed_json"])),
-    } for item in conn.execute(
-        """SELECT lead_id,canonical_entity_key,operation,proposed_json
-             FROM crm_action_items WHERE action_id=? ORDER BY id""", (row["id"],))]
+    stored_items = [
+        {
+            "lead_id": item["lead_id"],
+            "canonical_entity_key": item["canonical_entity_key"],
+            "operation": item["operation"],
+            "proposed": json.loads(str(item["proposed_json"])),
+        }
+        for item in conn.execute(
+            """SELECT lead_id,canonical_entity_key,operation,proposed_json
+             FROM crm_action_items WHERE action_id=? ORDER BY id""",
+            (row["id"],),
+        )
+    ]
     if _hash(_stable_json(stored_items)) != row["items_hash"]:
         raise ValueError("Salesforce approval item mapping changed after preview")
 
@@ -537,28 +711,45 @@ def cancel_action(conn: sqlite3.Connection, action_id: str, requester: str) -> b
         cur = conn.execute(
             """UPDATE crm_actions SET state=?,updated_at=?
                WHERE id=? AND requested_by=? AND state=?""",
-            (CampaignActionState.CANCELLED.value, _iso(_now()), action_id, requester,
-             CampaignActionState.READY.value),
+            (
+                CampaignActionState.CANCELLED.value,
+                _iso(_now()),
+                action_id,
+                requester,
+                CampaignActionState.READY.value,
+            ),
         )
     return cur.rowcount == 1
 
 
-def stored_action_result(conn: sqlite3.Connection, action_id: str, workspace: str,
-                         channel: str, thread_ts: str,
-                         requester: str) -> ActionExecution:
+def stored_action_result(
+    conn: sqlite3.Connection,
+    action_id: str,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+) -> ActionExecution:
     """Return a prior action's persisted result for safe repeated button clicks."""
     row = _load_action(conn, action_id)
-    if (row["workspace"] != workspace or row["channel"] != channel
-            or row["thread_ts"] != thread_ts or row["requested_by"] != requester):
+    if (
+        row["workspace"] != workspace
+        or row["channel"] != channel
+        or row["thread_ts"] != thread_ts
+        or row["requested_by"] != requester
+    ):
         raise PermissionError("Salesforce action does not belong to this user/context")
     try:
         state = CampaignActionState(str(row["state"]))
     except ValueError:
         state = CampaignActionState.UNKNOWN
-    counts = {str(item[0]): int(item[1]) for item in conn.execute(
-        "SELECT state,COUNT(*) FROM crm_action_items WHERE action_id=? GROUP BY state",
-        (action_id,),
-    )}
+    counts = {
+        str(item[0]): int(item[1])
+        for item in conn.execute(
+            "SELECT state,COUNT(*) FROM crm_action_items WHERE action_id=? GROUP BY state",
+            (action_id,),
+        )
+    }
     added = counts.get("added", 0)
     already = counts.get("already_present", 0)
     unresolved = counts.get("unresolved", 0)
@@ -567,9 +758,15 @@ def stored_action_result(conn: sqlite3.Connection, action_id: str, workspace: st
         f"This Salesforce action is already {state.value}: {added} added, "
         f"{already} already present, {unresolved} unresolved, {failed} failed."
     )
-    return ActionExecution(state, message, campaign_id=str(row["campaign_id"] or ""),
-                           added=added, already_present=already,
-                           unresolved=unresolved, failed=failed)
+    return ActionExecution(
+        state,
+        message,
+        campaign_id=str(row["campaign_id"] or ""),
+        added=added,
+        already_present=already,
+        unresolved=unresolved,
+        failed=failed,
+    )
 
 
 def _begin_commit(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
@@ -578,8 +775,13 @@ def _begin_commit(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
         cur = conn.execute(
             """UPDATE crm_actions SET state=?,approved_at=?,updated_at=?,attempts=attempts+1
                WHERE id=? AND state=?""",
-            (CampaignActionState.COMMITTING.value, _iso(_now()), _iso(_now()), row["id"],
-             CampaignActionState.READY.value),
+            (
+                CampaignActionState.COMMITTING.value,
+                _iso(_now()),
+                _iso(_now()),
+                row["id"],
+                CampaignActionState.READY.value,
+            ),
         )
     if cur.rowcount != 1:
         raise ValueError("Salesforce action was already claimed or completed")
@@ -594,23 +796,40 @@ def _mark_external_write_started(conn: sqlite3.Connection, action_id: str) -> No
         )
 
 
-def _finish_action(conn: sqlite3.Connection, action_id: str,
-                   state: CampaignActionState, campaign_id: str = "",
-                   error: str = "") -> None:
+def _finish_action(
+    conn: sqlite3.Connection,
+    action_id: str,
+    state: CampaignActionState,
+    campaign_id: str = "",
+    error: str = "",
+) -> None:
     """Persist the terminal/unknown outcome without deleting audit history."""
     with conn:
         conn.execute(
             """UPDATE crm_actions SET state=?,campaign_id=COALESCE(?,campaign_id),
                       last_error=?,committed_at=?,updated_at=? WHERE id=?""",
-            (state.value, campaign_id or None, error or None, _iso(_now()), _iso(_now()),
-             action_id),
+            (
+                state.value,
+                campaign_id or None,
+                error or None,
+                _iso(_now()),
+                _iso(_now()),
+                action_id,
+            ),
         )
 
 
-def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
-                   action_id: str, nonce: str, workspace: str, channel: str,
-                   thread_ts: str, requester: str,
-                   dry_run: bool = False) -> ActionExecution:
+def confirm_action(
+    conn: sqlite3.Connection,
+    gateway: SalesforceCampaignGateway,
+    action_id: str,
+    nonce: str,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+    dry_run: bool = False,
+) -> ActionExecution:
     """Execute a stored create-only action after all approval gates pass."""
     row = _load_action(conn, action_id)
     try:
@@ -621,55 +840,116 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
     _begin_commit(conn, row)
     if dry_run:
         _finish_action(conn, action_id, CampaignActionState.DRY_RUN)
-        return ActionExecution(CampaignActionState.DRY_RUN,
-                               "Dry run verified the approval; Salesforce was not written.")
+        return ActionExecution(
+            CampaignActionState.DRY_RUN,
+            "Dry run verified the approval; Salesforce was not written.",
+        )
     if not writer_enabled():
         if row["action_type"] in {"create_campaign", "add_campaign_members"}:
-            _finish_action(conn, action_id, CampaignActionState.FAILED,
-                           error="campaign writes feature flag disabled")
-            return ActionExecution(CampaignActionState.FAILED,
-                                   "Salesforce campaign writes are disabled; nothing was created.")
-    if (row["action_type"] in {
-            "create_person_lead", "create_linkedin_person_lead",
-            "attach_linkedin_person_to_lead"}
-            and not person_lead_writer_enabled()):
-        _finish_action(conn, action_id, CampaignActionState.FAILED,
-                       error="person Lead writes feature flag disabled")
-        return ActionExecution(CampaignActionState.FAILED,
-                               "Salesforce Lead creation is disabled; nothing was created.")
-    if (row["action_type"] == "create_organization_lead"
-            and not organization_lead_writer_enabled()):
-        _finish_action(conn, action_id, CampaignActionState.FAILED,
-                       error="organization Lead writes feature flag disabled")
-        return ActionExecution(CampaignActionState.FAILED,
-                               "Salesforce Lead creation is disabled; nothing was created.")
-    if row["action_type"] == "create_opportunity" and not opportunity_writer_enabled():
-        _finish_action(conn, action_id, CampaignActionState.FAILED,
-                       error="Opportunity writes feature flag disabled")
-        return ActionExecution(CampaignActionState.FAILED,
-                               "Salesforce Opportunity creation is disabled; nothing was created.")
-    if (row["action_type"] == "enrich_existing_lead"
-            and not lead_enrichment_writer_enabled()):
-        _finish_action(conn, action_id, CampaignActionState.FAILED,
-                       error="Lead enrichment updates feature flag disabled")
-        return ActionExecution(CampaignActionState.FAILED,
-                                   "Salesforce Lead enrichment is disabled; nothing changed.")
-    if (row["action_type"] == "attach_linkedin_person_to_lead"
-            and not lead_enrichment_writer_enabled()):
-        _finish_action(conn, action_id, CampaignActionState.FAILED,
-                       error="Lead identity update feature flag disabled")
-        return ActionExecution(CampaignActionState.FAILED,
-                               "Salesforce Lead updates are disabled; nothing changed.")
-    if (row["action_type"] in {
-            "create_person_lead", "create_organization_lead",
-            "create_linkedin_person_lead", "attach_linkedin_person_to_lead",
-            "enrich_existing_lead", "repair_lead_audit"}
-            and not lead_audit_writer_enabled()):
-        _finish_action(conn, action_id, CampaignActionState.FAILED,
-                       error="Grant Salesforce audit records feature flag disabled")
+            _finish_action(
+                conn,
+                action_id,
+                CampaignActionState.FAILED,
+                error="campaign writes feature flag disabled",
+            )
+            return ActionExecution(
+                CampaignActionState.FAILED,
+                "Salesforce campaign writes are disabled; nothing was created.",
+            )
+    if (
+        row["action_type"]
+        in {
+            "create_person_lead",
+            "create_linkedin_person_lead",
+            "attach_linkedin_person_to_lead",
+        }
+        and not person_lead_writer_enabled()
+    ):
+        _finish_action(
+            conn,
+            action_id,
+            CampaignActionState.FAILED,
+            error="person Lead writes feature flag disabled",
+        )
         return ActionExecution(
             CampaignActionState.FAILED,
-            "Salesforce Notes and Activities are disabled; nothing was submitted.")
+            "Salesforce Lead creation is disabled; nothing was created.",
+        )
+    if (
+        row["action_type"] == "create_organization_lead"
+        and not organization_lead_writer_enabled()
+    ):
+        _finish_action(
+            conn,
+            action_id,
+            CampaignActionState.FAILED,
+            error="organization Lead writes feature flag disabled",
+        )
+        return ActionExecution(
+            CampaignActionState.FAILED,
+            "Salesforce Lead creation is disabled; nothing was created.",
+        )
+    if row["action_type"] == "create_opportunity" and not opportunity_writer_enabled():
+        _finish_action(
+            conn,
+            action_id,
+            CampaignActionState.FAILED,
+            error="Opportunity writes feature flag disabled",
+        )
+        return ActionExecution(
+            CampaignActionState.FAILED,
+            "Salesforce Opportunity creation is disabled; nothing was created.",
+        )
+    if (
+        row["action_type"] == "enrich_existing_lead"
+        and not lead_enrichment_writer_enabled()
+    ):
+        _finish_action(
+            conn,
+            action_id,
+            CampaignActionState.FAILED,
+            error="Lead enrichment updates feature flag disabled",
+        )
+        return ActionExecution(
+            CampaignActionState.FAILED,
+            "Salesforce Lead enrichment is disabled; nothing changed.",
+        )
+    if (
+        row["action_type"] == "attach_linkedin_person_to_lead"
+        and not lead_enrichment_writer_enabled()
+    ):
+        _finish_action(
+            conn,
+            action_id,
+            CampaignActionState.FAILED,
+            error="Lead identity update feature flag disabled",
+        )
+        return ActionExecution(
+            CampaignActionState.FAILED,
+            "Salesforce Lead updates are disabled; nothing changed.",
+        )
+    if (
+        row["action_type"]
+        in {
+            "create_person_lead",
+            "create_organization_lead",
+            "create_linkedin_person_lead",
+            "attach_linkedin_person_to_lead",
+            "enrich_existing_lead",
+            "repair_lead_audit",
+        }
+        and not lead_audit_writer_enabled()
+    ):
+        _finish_action(
+            conn,
+            action_id,
+            CampaignActionState.FAILED,
+            error="Grant Salesforce audit records feature flag disabled",
+        )
+        return ActionExecution(
+            CampaignActionState.FAILED,
+            "Salesforce Notes and Activities are disabled; nothing was submitted.",
+        )
     try:
         if row["action_type"] == "create_campaign":
             return _confirm_campaign_create(conn, gateway, row)
@@ -677,65 +957,92 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
             return _confirm_membership(conn, gateway, row)
         if row["action_type"] == "create_person_lead":
             from . import salesforce_record_actions as records
+
             return records.confirm_person_lead(conn, gateway, row)
         if row["action_type"] == "create_organization_lead":
             from . import salesforce_record_actions as records
+
             return records.confirm_organization_lead(conn, gateway, row)
         if row["action_type"] in {
-                "create_linkedin_person_lead", "attach_linkedin_person_to_lead"}:
+            "create_linkedin_person_lead",
+            "attach_linkedin_person_to_lead",
+        }:
             from . import salesforce_linkedin_actions as linkedin_actions
+
             return linkedin_actions.confirm_linkedin_person(conn, gateway, row)
         if row["action_type"] == "create_opportunity":
             from . import salesforce_record_actions as records
+
             return records.confirm_opportunity(conn, gateway, row)
         if row["action_type"] == "enrich_existing_lead":
             from . import salesforce_record_actions as records
+
             return records.confirm_lead_enrichment(conn, gateway, row)
         if row["action_type"] == "repair_lead_audit":
             from . import salesforce_record_actions as records
+
             return records.confirm_lead_audit_repair(conn, gateway, row)
         raise ValueError("unknown Salesforce action type")
     except SalesforceCompositeRolledBack as exc:
         _finish_action(
-            conn, action_id, CampaignActionState.FAILED,
-            error=f"SalesforceCompositeRolledBack: {str(exc)[:1000]}")
+            conn,
+            action_id,
+            CampaignActionState.FAILED,
+            error=f"SalesforceCompositeRolledBack: {str(exc)[:1000]}",
+        )
         return ActionExecution(
             CampaignActionState.FAILED,
             "Salesforce rejected the all-or-none action; nothing was changed.",
         )
     except requests.Timeout as exc:
-        _finish_action(conn, action_id, CampaignActionState.UNKNOWN,
-                       error=f"{type(exc).__name__}: reconciliation required")
+        _finish_action(
+            conn,
+            action_id,
+            CampaignActionState.UNKNOWN,
+            error=f"{type(exc).__name__}: reconciliation required",
+        )
         return ActionExecution(
             CampaignActionState.UNKNOWN,
             "Salesforce timed out after submission. The result is unknown; Grant will not retry "
-            "until a human reconciles Salesforce.", unknown=1,
+            "until a human reconciles Salesforce.",
+            unknown=1,
         )
     except (requests.RequestException, ValueError, KeyError) as exc:
         current = _load_action(conn, action_id)
         if bool(current["external_write_started"]):
             detail = str(exc).strip()[:240]
-            _finish_action(conn, action_id, CampaignActionState.UNKNOWN,
-                           error=(f"{type(exc).__name__}: {detail}; reconciliation required"
-                                  if detail else
-                                  f"{type(exc).__name__}: reconciliation required"))
+            _finish_action(
+                conn,
+                action_id,
+                CampaignActionState.UNKNOWN,
+                error=(
+                    f"{type(exc).__name__}: {detail}; reconciliation required"
+                    if detail
+                    else f"{type(exc).__name__}: reconciliation required"
+                ),
+            )
             return ActionExecution(
                 CampaignActionState.UNKNOWN,
                 "A Salesforce write had started before a later error. The outcome "
                 "requires reconciliation; Grant will not retry it automatically.",
-                campaign_id=str(current["campaign_id"] or ""), unknown=1,
+                campaign_id=str(current["campaign_id"] or ""),
+                unknown=1,
             )
-        _finish_action(conn, action_id, CampaignActionState.FAILED,
-                       error=f"{type(exc).__name__}: {str(exc)[:300]}")
+        _finish_action(
+            conn,
+            action_id,
+            CampaignActionState.FAILED,
+            error=f"{type(exc).__name__}: {str(exc)[:300]}",
+        )
         return ActionExecution(
             CampaignActionState.FAILED,
             f"Salesforce rejected the action ({type(exc).__name__}); nothing was submitted.",
         )
 
 
-def _confirm_campaign_create(conn: sqlite3.Connection,
-                             gateway: SalesforceCampaignGateway,
-                             row: sqlite3.Row) -> ActionExecution:
+def _confirm_campaign_create(
+    conn: sqlite3.Connection, gateway: SalesforceCampaignGateway, row: sqlite3.Row
+) -> ActionExecution:
     """Create one Campaign and read it back before reporting success."""
     payload = json.loads(str(row["payload_json"]))
     _mark_external_write_started(conn, str(row["id"]))
@@ -743,22 +1050,33 @@ def _confirm_campaign_create(conn: sqlite3.Connection,
     if not result.success:
         error = result.error or "Salesforce returned no Campaign ID"
         _finish_action(conn, str(row["id"]), CampaignActionState.FAILED, error=error)
-        return ActionExecution(CampaignActionState.FAILED,
-                               f"Campaign creation failed: {error}")
+        return ActionExecution(
+            CampaignActionState.FAILED, f"Campaign creation failed: {error}"
+        )
     if not result.record_id:
-        _finish_action(conn, str(row["id"]), CampaignActionState.UNKNOWN,
-                       error="Salesforce reported success without a Campaign ID")
+        _finish_action(
+            conn,
+            str(row["id"]),
+            CampaignActionState.UNKNOWN,
+            error="Salesforce reported success without a Campaign ID",
+        )
         return ActionExecution(
             CampaignActionState.UNKNOWN,
             "Salesforce reported success without a Campaign ID; reconciliation is required.",
             unknown=1,
         )
     with conn:
-        conn.execute("UPDATE crm_actions SET campaign_id=? WHERE id=?",
-                     (result.record_id, row["id"]))
+        conn.execute(
+            "UPDATE crm_actions SET campaign_id=? WHERE id=?",
+            (result.record_id, row["id"]),
+        )
     campaign = gateway.get_record("Campaign", result.record_id)
-    _finish_action(conn, str(row["id"]), CampaignActionState.COMPLETE,
-                   campaign_id=campaign.record_id)
+    _finish_action(
+        conn,
+        str(row["id"]),
+        CampaignActionState.COMPLETE,
+        campaign_id=campaign.record_id,
+    )
     return ActionExecution(
         CampaignActionState.COMPLETE,
         f"Created Salesforce Campaign {campaign.name}: {campaign.link}",
@@ -766,22 +1084,28 @@ def _confirm_campaign_create(conn: sqlite3.Connection,
     )
 
 
-def _confirm_membership(conn: sqlite3.Connection,
-                        gateway: SalesforceCampaignGateway,
-                        row: sqlite3.Row) -> ActionExecution:
+def _confirm_membership(
+    conn: sqlite3.Connection, gateway: SalesforceCampaignGateway, row: sqlite3.Row
+) -> ActionExecution:
     """Create approved Leads/status/members and report every partial outcome."""
     campaign_id = validate_record_id(str(row["campaign_id"]), "Campaign")
-    item_rows = list(conn.execute(
-        "SELECT * FROM crm_action_items WHERE action_id=? ORDER BY id", (row["id"],)
-    ))
+    item_rows = list(
+        conn.execute(
+            "SELECT * FROM crm_action_items WHERE action_id=? ORDER BY id", (row["id"],)
+        )
+    )
     if not gateway.member_status_exists(campaign_id):
         _mark_external_write_started(conn, str(row["id"]))
         status_result = gateway.create_member_status(campaign_id)
         if not status_result.success:
             error = status_result.error or "member status creation failed"
-            _finish_action(conn, str(row["id"]), CampaignActionState.FAILED, error=error)
-            return ActionExecution(CampaignActionState.FAILED,
-                                   f"No members were added because {MEMBER_STATUS} could not be created.")
+            _finish_action(
+                conn, str(row["id"]), CampaignActionState.FAILED, error=error
+            )
+            return ActionExecution(
+                CampaignActionState.FAILED,
+                f"No members were added because {MEMBER_STATUS} could not be created.",
+            )
 
     record_ids: dict[int, str] = {}
     create_rows: list[sqlite3.Row] = []
@@ -797,8 +1121,10 @@ def _confirm_membership(conn: sqlite3.Connection,
         else:
             unresolved += 1
             with conn:
-                conn.execute("UPDATE crm_action_items SET state='unresolved' WHERE id=?",
-                             (item["id"],))
+                conn.execute(
+                    "UPDATE crm_action_items SET state='unresolved' WHERE id=?",
+                    (item["id"],),
+                )
 
     failed = 0
     if create_payloads:
@@ -828,20 +1154,28 @@ def _confirm_membership(conn: sqlite3.Connection,
     for item_id, record_id in record_ids.items():
         if record_id in existing:
             with conn:
-                conn.execute("UPDATE crm_action_items SET state='already_present' WHERE id=?",
-                             (item_id,))
+                conn.execute(
+                    "UPDATE crm_action_items SET state='already_present' WHERE id=?",
+                    (item_id,),
+                )
             continue
         field = "LeadId" if record_id.startswith("00Q") else "ContactId"
         member_rows.append(item_id)
-        member_payloads.append({
-            "CampaignId": campaign_id, field: record_id, "Status": MEMBER_STATUS,
-        })
+        member_payloads.append(
+            {
+                "CampaignId": campaign_id,
+                field: record_id,
+                "Status": MEMBER_STATUS,
+            }
+        )
     added = 0
     if member_payloads:
         _mark_external_write_started(conn, str(row["id"]))
         member_results = gateway.create_members(member_payloads)
         if len(member_results) != len(member_rows):
-            raise ValueError("Salesforce CampaignMember result count did not match request")
+            raise ValueError(
+                "Salesforce CampaignMember result count did not match request"
+            )
         for item_id, result in zip(member_rows, member_results):
             with conn:
                 if result.success and result.record_id:
@@ -857,13 +1191,28 @@ def _confirm_membership(conn: sqlite3.Connection,
                         "UPDATE crm_action_items SET state='failed',error=? WHERE id=?",
                         (result.error or "CampaignMember create failed", item_id),
                     )
-    state = (CampaignActionState.COMPLETE
-             if failed == 0 and unresolved == 0 else CampaignActionState.PARTIAL)
-    _finish_action(conn, str(row["id"]), state, campaign_id=campaign_id,
-                   error=f"{failed} item failures" if failed else "")
+    state = (
+        CampaignActionState.COMPLETE
+        if failed == 0 and unresolved == 0
+        else CampaignActionState.PARTIAL
+    )
+    _finish_action(
+        conn,
+        str(row["id"]),
+        state,
+        campaign_id=campaign_id,
+        error=f"{failed} item failures" if failed else "",
+    )
     message = (
         f"Salesforce campaign update: {added} added, {already} already present, "
         f"{unresolved} unresolved, {failed} failed."
     )
-    return ActionExecution(state, message, campaign_id=campaign_id, added=added,
-                           already_present=already, unresolved=unresolved, failed=failed)
+    return ActionExecution(
+        state,
+        message,
+        campaign_id=campaign_id,
+        added=added,
+        already_present=already,
+        unresolved=unresolved,
+        failed=failed,
+    )

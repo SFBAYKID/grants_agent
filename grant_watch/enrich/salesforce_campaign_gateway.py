@@ -21,19 +21,50 @@ API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
 MAX_ACTION_ORGANIZATIONS = 200
 MEMBER_STATUS = "Identified by Grant"
 _ALLOWED_CREATE_OBJECTS = {
-    "Campaign", "CampaignMemberStatus", "Lead", "CampaignMember", "Opportunity"}
+    "Campaign",
+    "CampaignMemberStatus",
+    "Lead",
+    "CampaignMember",
+    "Opportunity",
+}
 _ALLOWED_BULK_CREATE_OBJECTS = {"Lead", "CampaignMember"}
 _LEAD_ENRICHMENT_FIELDS = {
-    "Website", "Phone", "Street", "City", "State", "PostalCode", "Country",
-    "Industry", "Description", "LinkedIn__c", "Number_of_Students__c",
+    "Website",
+    "Phone",
+    "Street",
+    "City",
+    "State",
+    "PostalCode",
+    "Country",
+    "Industry",
+    "Description",
+    "LinkedIn__c",
+    "Number_of_Students__c",
 }
 _LINKEDIN_PERSON_UPDATE_FIELDS = _LEAD_ENRICHMENT_FIELDS | {
-    "FirstName", "LastName", "Title",
+    "FirstName",
+    "LastName",
+    "Title",
 }
 _PERSON_LEAD_CREATE_FIELDS = {
-    "Company", "FirstName", "LastName", "Email", "Status", "LeadSource",
-    "Description", "State", "Title", "Phone", "Website", "Street", "City",
-    "PostalCode", "Country", "LinkedIn__c", "Industry", "Number_of_Students__c",
+    "Company",
+    "FirstName",
+    "LastName",
+    "Email",
+    "Status",
+    "LeadSource",
+    "Description",
+    "State",
+    "Title",
+    "Phone",
+    "Website",
+    "Street",
+    "City",
+    "PostalCode",
+    "Country",
+    "LinkedIn__c",
+    "Industry",
+    "Number_of_Students__c",
 }
 _ID_PREFIXES = {
     "Campaign": "701",
@@ -58,7 +89,6 @@ class SalesforceRecordRef:
     link: str
     company: str = ""
     state: str = ""
-
 
 
 @dataclass(frozen=True)
@@ -145,7 +175,6 @@ class LeadAuditResult:
     error: str = ""
 
 
-
 @dataclass
 class _TokenCache:
     """Writer-token cache isolated from the reader credentials."""
@@ -174,13 +203,32 @@ def _configured_host() -> str:
     return (urlparse(raw).hostname or "").lower()
 
 
+def _research_note_title(note_body: str, action_id: str) -> str:
+    """Give a Salesforce Note a useful subject while retaining its unique audit marker."""
+    first = next(
+        (line.strip() for line in note_body.splitlines() if line.strip()), "Research"
+    )
+    for prefix in ("Grant research summary for ", "Grant contact research for "):
+        if first.startswith(prefix):
+            first = first.removeprefix(prefix)
+            break
+    suffix = f" — {action_id}"
+    available = 255 - len("Grant research — ") - len(suffix)
+    subject = first[: max(1, available)].rstrip(" —")
+    return f"Grant research — {subject}{suffix}"
+
+
 def validate_record_id(record_id: str, expected_sobject: str) -> str:
     """Validate a 15/18-character Salesforce ID and its object prefix."""
     clean = record_id.strip()
     expected_prefix = _ID_PREFIXES.get(expected_sobject)
     if expected_prefix is None:
         raise ValueError(f"unsupported Salesforce object '{expected_sobject}'")
-    if len(clean) not in (15, 18) or not clean.isalnum() or not clean.startswith(expected_prefix):
+    if (
+        len(clean) not in (15, 18)
+        or not clean.isalnum()
+        or not clean.startswith(expected_prefix)
+    ):
         raise ValueError(f"not a valid {expected_sobject} Salesforce ID")
     return clean
 
@@ -211,8 +259,12 @@ class SalesforceCampaignGateway:
         domain = os.environ["SALESFORCE_WRITE_MY_DOMAIN_URL"].rstrip("/")
         client_id = os.environ["SALESFORCE_WRITE_CLIENT_ID"]
         credential_scope = f"{domain}|{client_id}"
-        if (not force and _TOKEN_CACHE.token and _TOKEN_CACHE.expires_at > now
-                and _TOKEN_CACHE.credential_scope == credential_scope):
+        if (
+            not force
+            and _TOKEN_CACHE.token
+            and _TOKEN_CACHE.expires_at > now
+            and _TOKEN_CACHE.credential_scope == credential_scope
+        ):
             return _TOKEN_CACHE.token, _TOKEN_CACHE.instance_url
         response = requests.post(
             f"{domain}/services/oauth2/token",
@@ -224,7 +276,9 @@ class SalesforceCampaignGateway:
             timeout=20,
         )
         response.raise_for_status()
-        body: dict[str, Any] = response.json()  # Salesforce OAuth JSON is runtime-shaped
+        body: dict[str, Any] = (
+            response.json()
+        )  # Salesforce OAuth JSON is runtime-shaped
         _TOKEN_CACHE.token = str(body["access_token"])
         _TOKEN_CACHE.instance_url = str(body.get("instance_url") or domain).rstrip("/")
         _TOKEN_CACHE.expires_at = now + 25 * 60
@@ -235,8 +289,10 @@ class SalesforceCampaignGateway:
         """Issue a read request with writer credentials for pre-create validation."""
         token, instance = self._auth()
         response = requests.get(
-            f"{instance}/services/data/{API_VERSION}/{path}", params=params or {},
-            headers={"Authorization": f"Bearer {token}"}, timeout=20,
+            f"{instance}/services/data/{API_VERSION}/{path}",
+            params=params or {},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20,
         )
         response.raise_for_status()
         return response.json()  # type: ignore[no-any-return]  # third-party JSON
@@ -248,7 +304,8 @@ class SalesforceCampaignGateway:
             token, instance = self._auth()
             response = requests.get(
                 f"{instance}{encoded_or_path}",
-                headers={"Authorization": f"Bearer {token}"}, timeout=20,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=20,
             )
             response.raise_for_status()
             return response.content.decode("utf-8")
@@ -264,15 +321,22 @@ class SalesforceCampaignGateway:
         token, instance = self._auth()
         response = requests.post(
             f"{instance}/services/data/{API_VERSION}/sobjects/{sobject}",
-            json=payload, headers={"Authorization": f"Bearer {token}"}, timeout=20,
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20,
         )
         if response.status_code not in (200, 201):
-            return CreateResult(False, error=f"HTTP {response.status_code}: {response.text[:200]}")
-        body: dict[str, Any] = response.json()  # Salesforce create JSON is runtime-shaped
+            return CreateResult(
+                False, error=f"HTTP {response.status_code}: {response.text[:200]}"
+            )
+        body: dict[str, Any] = (
+            response.json()
+        )  # Salesforce create JSON is runtime-shaped
         return CreateResult(bool(body.get("success", True)), str(body.get("id") or ""))
 
-    def _create_many(self, sobject: str,
-                     payloads: list[dict[str, object]]) -> list[CreateResult]:
+    def _create_many(
+        self, sobject: str, payloads: list[dict[str, object]]
+    ) -> list[CreateResult]:
         """Create up to 200 records with per-record results and allOrNone disabled."""
         if sobject not in _ALLOWED_BULK_CREATE_OBJECTS:
             raise ValueError(f"Salesforce create forbidden for {sobject}")
@@ -284,8 +348,10 @@ class SalesforceCampaignGateway:
         records = [{"attributes": {"type": sobject}, **payload} for payload in payloads]
         response = requests.post(
             f"{instance}/services/data/{API_VERSION}/composite/sobjects",
-            params={"allOrNone": "false"}, json={"records": records},
-            headers={"Authorization": f"Bearer {token}"}, timeout=30,
+            params={"allOrNone": "false"},
+            json={"records": records},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
         )
         response.raise_for_status()
         body: list[dict[str, Any]] = response.json()  # third-party collection result
@@ -293,9 +359,13 @@ class SalesforceCampaignGateway:
         for item in body:
             errors = item.get("errors") or []
             error = "; ".join(str(err.get("message") or err) for err in errors)
-            results.append(CreateResult(
-                bool(item.get("success")), str(item.get("id") or ""), error,
-            ))
+            results.append(
+                CreateResult(
+                    bool(item.get("success")),
+                    str(item.get("id") or ""),
+                    error,
+                )
+            )
         return results
 
     def lightning_link(self, sobject: str, record_id: str) -> str:
@@ -311,18 +381,28 @@ class SalesforceCampaignGateway:
             name = str(field.get("name") or "")
             if name in values:
                 values[name] = {
-                    str(item.get("value")) for item in field.get("picklistValues") or []
+                    str(item.get("value"))
+                    for item in field.get("picklistValues") or []
                     if item.get("active")
                 }
         return values["Type"], values["Status"]
 
     def opportunity_stages(self) -> set[str]:
         """Return active open stages so a new record remains visible to readback."""
-        body = self._get("query", {"q": (
-            "SELECT MasterLabel FROM OpportunityStage "
-            "WHERE IsActive=true AND IsClosed=false ORDER BY SortOrder")})
-        return {str(item.get("MasterLabel")) for item in body.get("records") or []
-                if item.get("MasterLabel")}
+        body = self._get(
+            "query",
+            {
+                "q": (
+                    "SELECT MasterLabel FROM OpportunityStage "
+                    "WHERE IsActive=true AND IsClosed=false ORDER BY SortOrder"
+                )
+            },
+        )
+        return {
+            str(item.get("MasterLabel"))
+            for item in body.get("records") or []
+            if item.get("MasterLabel")
+        }
 
     def find_active_user_by_email(self, email: str) -> list[SalesforceRecordRef]:
         """Resolve an owner only by exact active-user email; never guess by name."""
@@ -334,10 +414,15 @@ class SalesforceCampaignGateway:
             f"WHERE IsActive=true AND Email='{literal}' LIMIT 2"
         )
         records = self._get("query", {"q": soql}).get("records") or []
-        return [SalesforceRecordRef(
-            "User", str(record["Id"]), str(record.get("Name") or ""),
-            self.lightning_link("User", str(record["Id"])),
-        ) for record in records]
+        return [
+            SalesforceRecordRef(
+                "User",
+                str(record["Id"]),
+                str(record.get("Name") or ""),
+                self.lightning_link("User", str(record["Id"])),
+            )
+            for record in records
+        ]
 
     def search_campaigns(self, name: str) -> list[SalesforceRecordRef]:
         """Return exact/contains Campaign candidates for human selection."""
@@ -347,10 +432,15 @@ class SalesforceCampaignGateway:
             f"WHERE Name LIKE '%{literal}%' ORDER BY LastModifiedDate DESC LIMIT 20"
         )
         records = self._get("query", {"q": soql}).get("records") or []
-        return [SalesforceRecordRef(
-            "Campaign", str(record["Id"]), str(record.get("Name") or ""),
-            self.lightning_link("Campaign", str(record["Id"])),
-        ) for record in records]
+        return [
+            SalesforceRecordRef(
+                "Campaign",
+                str(record["Id"]),
+                str(record.get("Name") or ""),
+                self.lightning_link("Campaign", str(record["Id"])),
+            )
+            for record in records
+        ]
 
     def get_record(self, sobject: str, record_id: str) -> SalesforceRecordRef:
         """Read back a Campaign, Lead, or Contact before showing confirmation."""
@@ -364,26 +454,41 @@ class SalesforceCampaignGateway:
         body = self._get(f"sobjects/{sobject}/{record_id}", {"fields": fields})
         account = body.get("Account") or {}
         return SalesforceRecordRef(
-            sobject=sobject, record_id=record_id, name=str(body.get("Name") or ""),
+            sobject=sobject,
+            record_id=record_id,
+            name=str(body.get("Name") or ""),
             link=self.lightning_link(sobject, record_id),
             company=str(body.get("Company") or account.get("Name") or ""),
-            state=str(body.get("State") or body.get("MailingState")
-                      or body.get("BillingState") or ""),
+            state=str(
+                body.get("State")
+                or body.get("MailingState")
+                or body.get("BillingState")
+                or ""
+            ),
         )
 
     def open_opportunities(self, account_id: str) -> list[OpportunityRecord]:
         """Return every open Opportunity under one exact validated Account."""
         validate_record_id(account_id, "Account")
-        soql = ("SELECT Id,Name,AccountId,StageName,CloseDate,OwnerId,Amount,IsClosed "
-                f"FROM Opportunity WHERE AccountId='{account_id}' AND IsClosed=false")
+        soql = (
+            "SELECT Id,Name,AccountId,StageName,CloseDate,OwnerId,Amount,IsClosed "
+            f"FROM Opportunity WHERE AccountId='{account_id}' AND IsClosed=false"
+        )
         records = self._get("query", {"q": soql}).get("records") or []
-        return [OpportunityRecord(
-            str(item["Id"]), str(item.get("Name") or ""), str(item.get("AccountId") or ""),
-            str(item.get("StageName") or ""), str(item.get("CloseDate") or ""),
-            str(item.get("OwnerId") or ""),
-            float(item["Amount"]) if item.get("Amount") is not None else None,
-            bool(item.get("IsClosed")),
-            self.lightning_link("Opportunity", str(item["Id"]))) for item in records]
+        return [
+            OpportunityRecord(
+                str(item["Id"]),
+                str(item.get("Name") or ""),
+                str(item.get("AccountId") or ""),
+                str(item.get("StageName") or ""),
+                str(item.get("CloseDate") or ""),
+                str(item.get("OwnerId") or ""),
+                float(item["Amount"]) if item.get("Amount") is not None else None,
+                bool(item.get("IsClosed")),
+                self.lightning_link("Opportunity", str(item["Id"])),
+            )
+            for item in records
+        ]
 
     def create_opportunity(self, payload: dict[str, object]) -> CreateResult:
         """Create exactly one explicitly approved Opportunity."""
@@ -397,12 +502,21 @@ class SalesforceCampaignGateway:
         values: dict[str, str | float | None] = {}
         for key in _LEAD_ENRICHMENT_FIELDS:
             value = body.get(key)
-            values[key] = (float(value) if key == "Number_of_Students__c"
-                           and value is not None else str(value) if value is not None else None)
+            values[key] = (
+                float(value)
+                if key == "Number_of_Students__c" and value is not None
+                else str(value)
+                if value is not None
+                else None
+            )
         return LeadEnrichmentSnapshot(
-            lead_id, str(body.get("Company") or ""), str(body.get("Email") or ""),
-            str(body.get("SystemModstamp") or ""), values,
-            self.lightning_link("Lead", lead_id))
+            lead_id,
+            str(body.get("Company") or ""),
+            str(body.get("Email") or ""),
+            str(body.get("SystemModstamp") or ""),
+            values,
+            self.lightning_link("Lead", lead_id),
+        )
 
     def linkedin_person_lead_snapshot(self, lead_id: str) -> LinkedInPersonLeadSnapshot:
         """Read one exact Lead before attaching a LinkedIn-only person identity."""
@@ -413,15 +527,22 @@ class SalesforceCampaignGateway:
         )
         body = self._get(f"sobjects/Lead/{lead_id}", {"fields": fields})
         return LinkedInPersonLeadSnapshot(
-            lead_id, str(body.get("Company") or ""), str(body.get("FirstName") or ""),
-            str(body.get("LastName") or ""), str(body.get("Email") or ""),
-            str(body.get("Title") or ""), str(body.get("LinkedIn__c") or ""),
-            str(body.get("Description") or ""), str(body.get("State") or ""),
-            str(body.get("SystemModstamp") or ""), self.lightning_link("Lead", lead_id),
+            lead_id,
+            str(body.get("Company") or ""),
+            str(body.get("FirstName") or ""),
+            str(body.get("LastName") or ""),
+            str(body.get("Email") or ""),
+            str(body.get("Title") or ""),
+            str(body.get("LinkedIn__c") or ""),
+            str(body.get("Description") or ""),
+            str(body.get("State") or ""),
+            str(body.get("SystemModstamp") or ""),
+            self.lightning_link("Lead", lead_id),
         )
 
     def exact_linkedin_person_leads(
-            self, profile_url: str, company: str, last_name: str) -> list[SalesforceRecordRef]:
+        self, profile_url: str, company: str, last_name: str
+    ) -> list[SalesforceRecordRef]:
         """Find exact profile or person/company Lead duplicates without fuzzy matching."""
         profile = _soql_literal(profile_url.strip())
         company_literal = _soql_literal(company.strip())
@@ -432,11 +553,17 @@ class SalesforceCampaignGateway:
             "LIMIT 20"
         )
         records = self._get("query", {"q": soql}).get("records") or []
-        return [SalesforceRecordRef(
-            "Lead", str(item["Id"]), str(item.get("Name") or ""),
-            self.lightning_link("Lead", str(item["Id"])),
-            str(item.get("Company") or ""), str(item.get("State") or ""),
-        ) for item in records]
+        return [
+            SalesforceRecordRef(
+                "Lead",
+                str(item["Id"]),
+                str(item.get("Name") or ""),
+                self.lightning_link("Lead", str(item["Id"])),
+                str(item.get("Company") or ""),
+                str(item.get("State") or ""),
+            )
+            for item in records
+        ]
 
     def lead_audit_snapshot(self, lead_id: str, action_id: str) -> LeadAuditSnapshot:
         """Read the exact Enhanced Note/link and system Task for one Grant action."""
@@ -444,23 +571,45 @@ class SalesforceCampaignGateway:
         marker = action_id.strip()
         if not re.fullmatch(r"[0-9a-f-]{36}", marker):
             raise ValueError("Grant audit action ID is invalid")
-        title = _soql_literal(f"Grant research — {marker}")
-        links = self._get("query", {"q": (
-            "SELECT Id,ContentDocumentId,LinkedEntityId,ContentDocument.Title "
-            "FROM ContentDocumentLink "
-            f"WHERE LinkedEntityId='{lead_id}' AND ContentDocument.Title='{title}' LIMIT 2"
-        )}).get("records") or []
+        title_marker = _soql_literal(marker)
+        links = (
+            self._get(
+                "query",
+                {
+                    "q": (
+                        "SELECT Id,ContentDocumentId,LinkedEntityId,ContentDocument.Title "
+                        "FROM ContentDocumentLink "
+                        f"WHERE LinkedEntityId='{lead_id}' AND "
+                        f"ContentDocument.Title LIKE '%{title_marker}%' LIMIT 2"
+                    )
+                },
+            ).get("records")
+            or []
+        )
         if len(links) > 1:
-            raise ValueError("multiple Salesforce research Notes share one action marker")
+            raise ValueError(
+                "multiple Salesforce research Notes share one action marker"
+            )
         link_id = str(links[0].get("Id") or "") if links else ""
         note_id = str(links[0].get("ContentDocumentId") or "") if links else ""
         task_subject = _soql_literal("Grant system: CRM research updated")
-        candidates = self._get("query", {"q": (
-            "SELECT Id,Description FROM Task "
-            f"WHERE WhoId='{lead_id}' AND Subject='{task_subject}' LIMIT 200"
-        )}).get("records") or []
-        tasks = [item for item in candidates
-                 if f"Action {marker}" in str(item.get("Description") or "")]
+        candidates = (
+            self._get(
+                "query",
+                {
+                    "q": (
+                        "SELECT Id,Description FROM Task "
+                        f"WHERE WhoId='{lead_id}' AND Subject='{task_subject}' LIMIT 200"
+                    )
+                },
+            ).get("records")
+            or []
+        )
+        tasks = [
+            item
+            for item in candidates
+            if f"Action {marker}" in str(item.get("Description") or "")
+        ]
         if len(tasks) > 1:
             raise ValueError("multiple Salesforce Tasks share one Grant action marker")
         task_id = str(tasks[0].get("Id") or "") if tasks else ""
@@ -468,15 +617,19 @@ class SalesforceCampaignGateway:
 
     @staticmethod
     def _audit_subrequests(
-            lead_reference: str, action_id: str, note_body: str,
-            task_description: str, activity_date: str) -> list[dict[str, object]]:
+        lead_reference: str,
+        action_id: str,
+        note_body: str,
+        task_description: str,
+        activity_date: str,
+    ) -> list[dict[str, object]]:
         """Build the fixed Enhanced Note/link/Task subrequests for one Lead reference."""
         marker = action_id.strip()
-        title = f"Grant research — {marker}"
         clean_note = note_body.strip()
         clean_task = task_description.strip()
         if not re.fullmatch(r"[0-9a-f-]{36}", marker):
             raise ValueError("Grant audit action ID is invalid")
+        title = _research_note_title(clean_note, marker)
         if len(title) > 255 or not clean_note or len(clean_note) > 32_000:
             raise ValueError("Salesforce research Note is empty or too long")
         if not clean_task or len(clean_task) > 32_000:
@@ -516,49 +669,70 @@ class SalesforceCampaignGateway:
         ]
 
     def _post_fixed_composite(
-            self, requests_body: list[dict[str, object]],
-            expected_statuses: dict[str, set[int]]) -> tuple[dict[str, dict[str, Any]], str]:
+        self,
+        requests_body: list[dict[str, object]],
+        expected_statuses: dict[str, set[int]],
+    ) -> tuple[dict[str, dict[str, Any]], str]:
         """Submit one all-or-none fixed composite and preserve subrequest errors."""
         token, instance = self._auth()
         response = requests.post(
             f"{instance}/services/data/{API_VERSION}/composite",
             json={"allOrNone": True, "compositeRequest": requests_body},
-            headers={"Authorization": f"Bearer {token}"}, timeout=30)
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
         if response.status_code not in (200, 201):
             return {}, f"HTTP {response.status_code}: {response.text[:500]}"
-        payload: dict[str, Any] = response.json()  # Salesforce composite JSON is dynamic
-        by_ref = {str(item.get("referenceId") or ""): item
-                  for item in payload.get("compositeResponse") or []}
+        payload: dict[str, Any] = (
+            response.json()
+        )  # Salesforce composite JSON is dynamic
+        by_ref = {
+            str(item.get("referenceId") or ""): item
+            for item in payload.get("compositeResponse") or []
+        }
         errors: list[tuple[bool, str]] = []
         for reference, statuses in expected_statuses.items():
             item = by_ref.get(reference) or {}
             status = int(item.get("httpStatusCode") or 0)
             if status not in statuses:
                 body = str(item.get("body") or "")[:500]
-                errors.append(("PROCESSING_HALTED" in body,
-                               f"{reference} HTTP {status}: {body}"))
+                errors.append(
+                    ("PROCESSING_HALTED" in body, f"{reference} HTTP {status}: {body}")
+                )
         errors.sort(key=lambda item: item[0])
         return by_ref, "; ".join(message for _halted, message in errors)
 
     def create_lead_audit_bundle(
-            self, lead_id: str, action_id: str, note_body: str,
-            task_description: str, activity_date: str) -> LeadAuditResult:
+        self,
+        lead_id: str,
+        action_id: str,
+        note_body: str,
+        task_description: str,
+        activity_date: str,
+    ) -> LeadAuditResult:
         """Atomically create one Enhanced Note/link and one honest administrative Task."""
         validate_record_id(lead_id, "Lead")
         marker = action_id.strip()
         existing = self.lead_audit_snapshot(lead_id, marker)
         if existing.complete:
             return LeadAuditResult(
-                True, existing.note_id, existing.link_id, existing.task_id)
+                True, existing.note_id, existing.link_id, existing.task_id
+            )
         if existing.partial:
-            raise ValueError("Salesforce audit trail is partial and requires reconciliation")
+            raise ValueError(
+                "Salesforce audit trail is partial and requires reconciliation"
+            )
         audit_requests = self._audit_subrequests(
-            lead_id, marker, note_body, task_description, activity_date)
-        by_ref, error = self._post_fixed_composite(audit_requests, {
-            "grantResearchNote": {200, 201},
-            "grantResearchLink": {200, 201},
-            "grantAuditTask": {200, 201},
-        })
+            lead_id, marker, note_body, task_description, activity_date
+        )
+        by_ref, error = self._post_fixed_composite(
+            audit_requests,
+            {
+                "grantResearchNote": {200, 201},
+                "grantResearchLink": {200, 201},
+                "grantAuditTask": {200, 201},
+            },
+        )
         if error:
             return LeadAuditResult(False, error=error)
         note_id = str((by_ref["grantResearchNote"].get("body") or {}).get("id") or "")
@@ -570,9 +744,15 @@ class SalesforceCampaignGateway:
         return LeadAuditResult(True, note_id, link_id, task_id)
 
     def enrich_lead_with_audit_bundle(
-            self, lead_id: str, delta: dict[str, object],
-            expected_system_modstamp: str, action_id: str, note_body: str,
-            task_description: str, activity_date: str) -> LeadAuditResult:
+        self,
+        lead_id: str,
+        delta: dict[str, object],
+        expected_system_modstamp: str,
+        action_id: str,
+        note_body: str,
+        task_description: str,
+        activity_date: str,
+    ) -> LeadAuditResult:
         """Atomically update one exact Lead and create its three audit artifacts."""
         validate_record_id(lead_id, "Lead")
         if not delta or not set(delta) <= _LEAD_ENRICHMENT_FIELDS:
@@ -583,24 +763,38 @@ class SalesforceCampaignGateway:
         existing = self.lead_audit_snapshot(lead_id, action_id)
         if existing.complete:
             return LeadAuditResult(
-                True, existing.note_id, existing.link_id, existing.task_id,
-                lead_id=lead_id)
+                True,
+                existing.note_id,
+                existing.link_id,
+                existing.task_id,
+                lead_id=lead_id,
+            )
         if existing.partial:
-            raise ValueError("Salesforce audit trail is partial and requires reconciliation")
-        requests_body: list[dict[str, object]] = [{
-            "method": "PATCH",
-            "url": f"/services/data/{API_VERSION}/sobjects/Lead/{lead_id}",
-            "referenceId": "grantLeadUpdate",
-            "body": delta,
-        }]
-        requests_body.extend(self._audit_subrequests(
-            lead_id, action_id, note_body, task_description, activity_date))
-        by_ref, error = self._post_fixed_composite(requests_body, {
-            "grantLeadUpdate": {200, 204},
-            "grantResearchNote": {200, 201},
-            "grantResearchLink": {200, 201},
-            "grantAuditTask": {200, 201},
-        })
+            raise ValueError(
+                "Salesforce audit trail is partial and requires reconciliation"
+            )
+        requests_body: list[dict[str, object]] = [
+            {
+                "method": "PATCH",
+                "url": f"/services/data/{API_VERSION}/sobjects/Lead/{lead_id}",
+                "referenceId": "grantLeadUpdate",
+                "body": delta,
+            }
+        ]
+        requests_body.extend(
+            self._audit_subrequests(
+                lead_id, action_id, note_body, task_description, activity_date
+            )
+        )
+        by_ref, error = self._post_fixed_composite(
+            requests_body,
+            {
+                "grantLeadUpdate": {200, 204},
+                "grantResearchNote": {200, 201},
+                "grantResearchLink": {200, 201},
+                "grantAuditTask": {200, 201},
+            },
+        )
         if error:
             return LeadAuditResult(False, lead_id=lead_id, error=error)
         note_id = str((by_ref["grantResearchNote"].get("body") or {}).get("id") or "")
@@ -612,37 +806,64 @@ class SalesforceCampaignGateway:
         return LeadAuditResult(True, note_id, link_id, task_id, lead_id=lead_id)
 
     def attach_linkedin_person_with_audit_bundle(
-            self, lead_id: str, delta: dict[str, object],
-            expected_system_modstamp: str, action_id: str, note_body: str,
-            task_description: str, activity_date: str) -> LeadAuditResult:
+        self,
+        lead_id: str,
+        delta: dict[str, object],
+        expected_system_modstamp: str,
+        action_id: str,
+        note_body: str,
+        task_description: str,
+        activity_date: str,
+    ) -> LeadAuditResult:
         """Atomically attach one LinkedIn person to one exact placeholder Lead."""
         validate_record_id(lead_id, "Lead")
-        if (not delta or not set(delta) <= _LINKEDIN_PERSON_UPDATE_FIELDS
-                or not all(delta.get(key) for key in ("LastName", "LinkedIn__c"))
-                or "Email" in delta):
-            raise ValueError("LinkedIn person update contains forbidden or missing fields")
+        if (
+            not delta
+            or not set(delta) <= _LINKEDIN_PERSON_UPDATE_FIELDS
+            or not all(delta.get(key) for key in ("LastName", "LinkedIn__c"))
+            or "Email" in delta
+        ):
+            raise ValueError(
+                "LinkedIn person update contains forbidden or missing fields"
+            )
         current = self.linkedin_person_lead_snapshot(lead_id)
         if current.system_modstamp != expected_system_modstamp:
             raise ValueError("Salesforce Lead changed after the preview")
         existing = self.lead_audit_snapshot(lead_id, action_id)
         if existing.complete:
             return LeadAuditResult(
-                True, existing.note_id, existing.link_id, existing.task_id,
-                lead_id=lead_id)
+                True,
+                existing.note_id,
+                existing.link_id,
+                existing.task_id,
+                lead_id=lead_id,
+            )
         if existing.partial:
-            raise ValueError("Salesforce audit trail is partial and requires reconciliation")
-        requests_body: list[dict[str, object]] = [{
-            "method": "PATCH",
-            "url": f"/services/data/{API_VERSION}/sobjects/Lead/{lead_id}",
-            "referenceId": "grantLeadUpdate",
-            "body": delta,
-        }]
-        requests_body.extend(self._audit_subrequests(
-            lead_id, action_id, note_body, task_description, activity_date))
-        by_ref, error = self._post_fixed_composite(requests_body, {
-            "grantLeadUpdate": {200, 204}, "grantResearchNote": {200, 201},
-            "grantResearchLink": {200, 201}, "grantAuditTask": {200, 201},
-        })
+            raise ValueError(
+                "Salesforce audit trail is partial and requires reconciliation"
+            )
+        requests_body: list[dict[str, object]] = [
+            {
+                "method": "PATCH",
+                "url": f"/services/data/{API_VERSION}/sobjects/Lead/{lead_id}",
+                "referenceId": "grantLeadUpdate",
+                "body": delta,
+            }
+        ]
+        requests_body.extend(
+            self._audit_subrequests(
+                lead_id, action_id, note_body, task_description, activity_date
+            )
+        )
+        by_ref, error = self._post_fixed_composite(
+            requests_body,
+            {
+                "grantLeadUpdate": {200, 204},
+                "grantResearchNote": {200, 201},
+                "grantResearchLink": {200, 201},
+                "grantAuditTask": {200, 201},
+            },
+        )
         if error:
             return LeadAuditResult(False, lead_id=lead_id, error=error)
         note_id = str((by_ref["grantResearchNote"].get("body") or {}).get("id") or "")
@@ -654,56 +875,93 @@ class SalesforceCampaignGateway:
         return LeadAuditResult(True, note_id, link_id, task_id, lead_id=lead_id)
 
     def create_person_lead_with_audit_bundle(
-            self, lead_payload: dict[str, object], action_id: str, note_body: str,
-            task_description: str, activity_date: str) -> LeadAuditResult:
+        self,
+        lead_payload: dict[str, object],
+        action_id: str,
+        note_body: str,
+        task_description: str,
+        activity_date: str,
+    ) -> LeadAuditResult:
         """Atomically create one person Lead and its three exact audit artifacts."""
         if not lead_payload.get("Email"):
             raise ValueError("person Lead payload contains forbidden or missing fields")
         return self._create_lead_with_audit_bundle(
-            lead_payload, action_id, note_body, task_description, activity_date)
+            lead_payload, action_id, note_body, task_description, activity_date
+        )
 
     def create_linkedin_person_lead_with_audit_bundle(
-            self, lead_payload: dict[str, object], action_id: str, note_body: str,
-            task_description: str, activity_date: str) -> LeadAuditResult:
+        self,
+        lead_payload: dict[str, object],
+        action_id: str,
+        note_body: str,
+        task_description: str,
+        activity_date: str,
+    ) -> LeadAuditResult:
         """Atomically create one no-email LinkedIn person Lead and audit artifacts."""
-        if (lead_payload.get("Email") or not lead_payload.get("LinkedIn__c")
-                or not lead_payload.get("LastName")):
+        if (
+            lead_payload.get("Email")
+            or not lead_payload.get("LinkedIn__c")
+            or not lead_payload.get("LastName")
+        ):
             raise ValueError("LinkedIn person Lead requires a profile and no email")
         return self._create_lead_with_audit_bundle(
-            lead_payload, action_id, note_body, task_description, activity_date)
+            lead_payload, action_id, note_body, task_description, activity_date
+        )
 
     def create_organization_lead_with_audit_bundle(
-            self, lead_payload: dict[str, object], action_id: str, note_body: str,
-            task_description: str, activity_date: str) -> LeadAuditResult:
+        self,
+        lead_payload: dict[str, object],
+        action_id: str,
+        note_body: str,
+        task_description: str,
+        activity_date: str,
+    ) -> LeadAuditResult:
         """Atomically create one organization-only Lead with blank person fields."""
         forbidden_person = {"FirstName", "Email", "Title", "MobilePhone"}
         if forbidden_person & set(lead_payload):
             raise ValueError("organization Lead cannot contain person fields")
         return self._create_lead_with_audit_bundle(
-            lead_payload, action_id, note_body, task_description, activity_date)
+            lead_payload, action_id, note_body, task_description, activity_date
+        )
 
     def _create_lead_with_audit_bundle(
-            self, lead_payload: dict[str, object], action_id: str, note_body: str,
-            task_description: str, activity_date: str) -> LeadAuditResult:
+        self,
+        lead_payload: dict[str, object],
+        action_id: str,
+        note_body: str,
+        task_description: str,
+        activity_date: str,
+    ) -> LeadAuditResult:
         """Submit one allowlisted Lead and its audit artifacts as one transaction."""
-        if (not lead_payload or not set(lead_payload) <= _PERSON_LEAD_CREATE_FIELDS
-                or not all(lead_payload.get(key) for key in ("Company", "LastName"))):
+        if (
+            not lead_payload
+            or not set(lead_payload) <= _PERSON_LEAD_CREATE_FIELDS
+            or not all(lead_payload.get(key) for key in ("Company", "LastName"))
+        ):
             raise ValueError("Lead payload contains forbidden or missing fields")
-        requests_body: list[dict[str, object]] = [{
-            "method": "POST",
-            "url": f"/services/data/{API_VERSION}/sobjects/Lead",
-            "referenceId": "grantPersonLead",
-            "body": lead_payload,
-        }]
+        requests_body: list[dict[str, object]] = [
+            {
+                "method": "POST",
+                "url": f"/services/data/{API_VERSION}/sobjects/Lead",
+                "referenceId": "grantPersonLead",
+                "body": lead_payload,
+            }
+        ]
         lead_reference = "@{grantPersonLead.id}"
-        requests_body.extend(self._audit_subrequests(
-            lead_reference, action_id, note_body, task_description, activity_date))
-        by_ref, error = self._post_fixed_composite(requests_body, {
-            "grantPersonLead": {200, 201},
-            "grantResearchNote": {200, 201},
-            "grantResearchLink": {200, 201},
-            "grantAuditTask": {200, 201},
-        })
+        requests_body.extend(
+            self._audit_subrequests(
+                lead_reference, action_id, note_body, task_description, activity_date
+            )
+        )
+        by_ref, error = self._post_fixed_composite(
+            requests_body,
+            {
+                "grantPersonLead": {200, 201},
+                "grantResearchNote": {200, 201},
+                "grantResearchLink": {200, 201},
+                "grantAuditTask": {200, 201},
+            },
+        )
         if error:
             return LeadAuditResult(False, error=error)
         lead_id = str((by_ref["grantPersonLead"].get("body") or {}).get("id") or "")
@@ -717,30 +975,38 @@ class SalesforceCampaignGateway:
         return LeadAuditResult(True, note_id, link_id, task_id, lead_id=lead_id)
 
     def verify_lead_audit_bundle(
-            self, lead_id: str, action_id: str, note_body: str,
-            task_description: str, result: LeadAuditResult) -> bool:
+        self,
+        lead_id: str,
+        action_id: str,
+        note_body: str,
+        task_description: str,
+        result: LeadAuditResult,
+    ) -> bool:
         """Read back every exact audit artifact and compare its immutable contents."""
         validate_record_id(lead_id, "Lead")
         note_id = validate_record_id(result.note_id, "ContentNote")
         link_id = validate_record_id(result.link_id, "ContentDocumentLink")
         task_id = validate_record_id(result.task_id, "Task")
         note = self._get(
-            f"sobjects/ContentNote/{note_id}", {"fields": "Id,Title,Content"})
+            f"sobjects/ContentNote/{note_id}", {"fields": "Id,Title,Content"}
+        )
         link = self._get(
             f"sobjects/ContentDocumentLink/{link_id}",
-            {"fields": "Id,ContentDocumentId,LinkedEntityId,ShareType,Visibility"})
+            {"fields": "Id,ContentDocumentId,LinkedEntityId,ShareType,Visibility"},
+        )
         task = self._get(
             f"sobjects/Task/{task_id}",
-            {"fields": "Id,WhoId,Subject,Status,Description"})
+            {"fields": "Id,WhoId,Subject,Status,Description"},
+        )
         decoded = self._content_note_text(note.get("Content"))
         return (
-            str(note.get("Title") or "") == f"Grant research — {action_id}"
+            str(note.get("Title") or "") == _research_note_title(note_body, action_id)
             and decoded == note_body.strip()
             and str(link.get("ContentDocumentId") or "") == note_id
             and str(link.get("LinkedEntityId") or "") == lead_id
             and str(link.get("ShareType") or "") == "V"
-            and str(link.get("Visibility") or "") in {
-                "AllUsers", "InternalUsers", "SharedUsers"}
+            and str(link.get("Visibility") or "")
+            in {"AllUsers", "InternalUsers", "SharedUsers"}
             and str(task.get("WhoId") or "") == lead_id
             and str(task.get("Subject") or "") == "Grant system: CRM research updated"
             and str(task.get("Status") or "") == "Completed"
@@ -763,20 +1029,28 @@ class SalesforceCampaignGateway:
             f"WHERE Account.Name='{literal}'{contact_state} LIMIT 20"
         )
         records: list[tuple[str, dict[str, Any]]] = []
-        records.extend(("Lead", item) for item in self._get(
-            "query", {"q": lead_soql}).get("records") or [])
-        records.extend(("Contact", item) for item in self._get(
-            "query", {"q": contact_soql}).get("records") or [])
+        records.extend(
+            ("Lead", item)
+            for item in self._get("query", {"q": lead_soql}).get("records") or []
+        )
+        records.extend(
+            ("Contact", item)
+            for item in self._get("query", {"q": contact_soql}).get("records") or []
+        )
         refs: list[SalesforceRecordRef] = []
         for sobject, record in records:
             account = record.get("Account") or {}
             record_id = str(record["Id"])
-            refs.append(SalesforceRecordRef(
-                sobject, record_id, str(record.get("Name") or ""),
-                self.lightning_link(sobject, record_id),
-                company=str(record.get("Company") or account.get("Name") or ""),
-                state=str(record.get("State") or record.get("MailingState") or ""),
-            ))
+            refs.append(
+                SalesforceRecordRef(
+                    sobject,
+                    record_id,
+                    str(record.get("Name") or ""),
+                    self.lightning_link(sobject, record_id),
+                    company=str(record.get("Company") or account.get("Name") or ""),
+                    state=str(record.get("State") or record.get("MailingState") or ""),
+                )
+            )
         return refs
 
     def member_status_exists(self, campaign_id: str) -> bool:
@@ -790,11 +1064,12 @@ class SalesforceCampaignGateway:
         if not records:
             return False
         if any(bool(record.get("HasResponded")) for record in records):
-            raise ValueError(f"Campaign status '{MEMBER_STATUS}' incorrectly marks responded")
+            raise ValueError(
+                f"Campaign status '{MEMBER_STATUS}' incorrectly marks responded"
+            )
         return True
 
-    def existing_members(self, campaign_id: str,
-                         record_ids: list[str]) -> set[str]:
+    def existing_members(self, campaign_id: str, record_ids: list[str]) -> set[str]:
         """Return Lead/Contact IDs already present in the selected Campaign."""
         if not record_ids:
             return set()
@@ -805,7 +1080,9 @@ class SalesforceCampaignGateway:
             f"OR ContactId IN ({quoted}))"
         )
         records = self._get("query", {"q": soql}).get("records") or []
-        return {str(record.get("LeadId") or record.get("ContactId")) for record in records}
+        return {
+            str(record.get("LeadId") or record.get("ContactId")) for record in records
+        }
 
     def create_campaign(self, payload: dict[str, object]) -> CreateResult:
         """Create one Campaign."""
@@ -813,11 +1090,14 @@ class SalesforceCampaignGateway:
 
     def create_member_status(self, campaign_id: str) -> CreateResult:
         """Create the disclosed non-response status without changing existing defaults."""
-        return self._create_one("CampaignMemberStatus", {
-            "CampaignId": campaign_id,
-            "Label": MEMBER_STATUS,
-            "HasResponded": False,
-        })
+        return self._create_one(
+            "CampaignMemberStatus",
+            {
+                "CampaignId": campaign_id,
+                "Label": MEMBER_STATUS,
+                "HasResponded": False,
+            },
+        )
 
     def create_leads(self, payloads: list[dict[str, object]]) -> list[CreateResult]:
         """Create approved Lead records through the collection endpoint."""
