@@ -125,6 +125,9 @@ class PlaceholderGateway:
     "Yes can we add this guy to Salesforce?",
     "Use that exact person. Prepare the Salesforce Lead preview with Email blank "
     "and every verified organization field and source.",
+    "Use that exact Vartan result. Show the complete Salesforce Lead preview with "
+    "Email blank, every verified field, exact funding source, research notes, and "
+    "completed activity.",
 ])
 def test_this_guy_routes_to_exact_candidate_not_organization(
         monkeypatch: pytest.MonkeyPatch, tmp_path: Path, user_text: str) -> None:
@@ -147,6 +150,27 @@ def test_this_guy_routes_to_exact_candidate_not_organization(
     assert calls == [candidate.candidate_id]
     assert "Vartan" in result["reply"] and "email is still unverified" in result["reply"]
     assert len(result["pending_crm_actions"]) == 1
+
+
+def test_expired_exact_person_never_falls_back_to_organization_lead(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Without an active exact candidate, Grant asks to reselect instead of substituting."""
+    conn, row = _grant_lead(tmp_path)
+    monkeypatch.setattr(conversation.db, "connect", lambda: conn)
+    monkeypatch.setattr(
+        conversation.tools, "salesforce_linkedin_person_preview",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("no active candidate")))
+    monkeypatch.setattr(
+        conversation.tools, "salesforce_organization_lead_create_preview",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("person was discarded")))
+    result = conversation.respond(
+        "Show the complete Salesforce Lead preview for that exact Vartan result with "
+        "Email blank, verified fields, research notes, and completed activity.",
+        row, requester_slack="UCHASE", workspace="TWORK",
+        channel="CGRANTS", thread_ts="1.1")
+    assert "won’t discard the person" in result["reply"]
+    assert "full name" in result["reply"]
+    assert result["pending_crm_actions"] == []
 
 
 def test_existing_placeholder_is_updated_once_without_email_or_duplicate(

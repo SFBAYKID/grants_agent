@@ -45,6 +45,7 @@ def _explicit_lead_creation_request(
     if re.search(r"\bcreate\s+it\s+anyway\b", normalized):
         return any("lead" in item.lower() for item in (thread_context or [])[-3:])
     action = bool(re.search(r"\b(create|add|put|make|prepare)\b", normalized))
+    action = action or ("show" in normalized.split() and "preview" in normalized.split())
     target = bool(re.search(r"\b(?:salesforce|lead)\b", normalized))
     return action and target
 
@@ -85,6 +86,8 @@ def _load_referenced_lead(
 def _is_organization_enrichment_request(text: str) -> bool:
     """Recognize filling blank organization fields on an existing Lead."""
     normalized = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower()).split())
+    if _is_person_target_request(text):
+        return False
     action = any(word in normalized.split() for word in (
         "update", "fill", "enrich", "complete", "populate", "repair"))
     fields = any(word in normalized for word in (
@@ -99,7 +102,18 @@ def _requests_person_without_verified_email(text: str) -> bool:
         "the person is", "identified person", "this person", "linkedin person"))
     missing_email = any(phrase in normalized for phrase in (
         "no verified email", "without an email", "no email", "email is unavailable"))
-    return person and missing_email
+    missing_email = missing_email or ("email" in normalized and "blank" in normalized)
+    return (person or _is_person_target_request(text)) and missing_email
+
+
+def _is_person_target_request(text: str) -> bool:
+    """Return whether the rep explicitly selected a person rather than an organization."""
+    normalized = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower()).split())
+    return (
+        "linkedin" in normalized
+        or "exact person" in normalized
+        or ("email" in normalized and "blank" in normalized)
+    )
 
 
 def _requested_person_name(text: str) -> str:
