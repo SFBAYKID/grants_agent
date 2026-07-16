@@ -653,12 +653,15 @@ def salesforce_organization_lead_create_preview(
     """Prepare one verified, duplicate-checked organization-only Lead preview."""
     from ..enrich import salesforce_campaigns as crm
 
+    conn = db.connect()
     try:
         action = crm.prepare_organization_lead_creation(
-            db.connect(), workspace, channel, thread_ts, requester_slack, grant_lead_id)
+            conn, workspace, channel, thread_ts, requester_slack, grant_lead_id)
     except (ValueError, PermissionError, KeyError, ConnectionError,
             requests.RequestException) as exc:
         return f"ERROR: Lead preview failed ({type(exc).__name__}): {str(exc)[:180]}"
+    finally:
+        conn.close()
     return _crm_action_result(action.action_id, action.nonce,
                               action.preview, action.expires_at)
 
