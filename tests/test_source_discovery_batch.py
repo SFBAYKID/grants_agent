@@ -488,6 +488,44 @@ def test_dry_run_reads_no_key_makes_no_call_and_writes_nothing(
     )
 
 
+def test_main_resumes_existing_batch_from_immutable_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit existing batch ID loads stored state instead of re-planning it."""
+    manifest, checkpoints = _plan([_target()])
+    from grant_watch.source_discovery_store import initialize_batch
+
+    initialize_batch(tmp_path, manifest, checkpoints)
+    client = FakeClient([_success()])
+
+    def skip_dotenv() -> None:
+        """Avoid reading the developer's real environment file in this unit test."""
+
+    def client_factory(key: str) -> FakeClient:
+        """Return the injected client while proving the configured key was read."""
+        assert key == "test-key"
+        return client
+
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    monkeypatch.setattr(batch, "load_dotenv", skip_dotenv)
+    monkeypatch.setattr(batch, "FirecrawlClient", client_factory)
+    assert (
+        main(
+            [
+                "--batch-id",
+                manifest.batch_id,
+                "--root",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
+    assert len(client.calls) == 1
+    stored = load_checkpoints(tmp_path / manifest.batch_id)
+    assert stored[0].terminal_status == "success"
+
+
 def test_summary_distinguishes_pending_zero_and_success() -> None:
     """Derived reports never imply all planned tasks completed when one is pending."""
     manifest, checkpoints = _plan(

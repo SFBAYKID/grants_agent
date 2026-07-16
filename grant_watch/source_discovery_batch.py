@@ -479,6 +479,35 @@ def _csv_set(value: str, label: str) -> frozenset[str]:
     return items
 
 
+def _execute_from_cli(
+    root: Path,
+    manifest: BatchManifest,
+    checkpoints: list[DiscoveryCheckpoint],
+    *,
+    retry_indeterminate: bool,
+) -> int:
+    """Load the configured credential, execute one immutable plan, and report it."""
+    load_dotenv()
+    key = os.environ.get("FIRECRAWL_API_KEY", "")
+    if not key:
+        raise RuntimeError("FIRECRAWL_API_KEY not configured")
+    summary = execute_batch(
+        root,
+        manifest,
+        checkpoints,
+        FirecrawlClient(key),
+        retry_indeterminate=retry_indeterminate,
+    )
+    statuses = ", ".join(
+        f"{status}={count}" for status, count in sorted(summary.statuses.items())
+    )
+    print(
+        f"verified: Firecrawl batch {summary.batch_id}; tasks={summary.task_count}, "
+        f"attempts={summary.attempt_count}, results={summary.result_count}; {statuses}"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Plan, run/resume, or validate bounded raw Firecrawl discovery batches."""
     parser = argparse.ArgumentParser(description="Run raw entity source discovery")
@@ -506,6 +535,27 @@ def main(argv: list[str] | None = None) -> int:
             f"results={sum(summary.result_count for summary in summaries)}"
         )
         return 0
+
+    existing_dir = args.root / args.batch_id if args.batch_id else None
+    if existing_dir is not None and existing_dir.is_dir():
+        manifest = load_manifest(existing_dir)
+        checkpoints = load_checkpoints(existing_dir)
+        validate_batch(manifest, checkpoints)
+        if args.dry_run:
+            summary = summarize_batch(manifest, checkpoints)
+            print(
+                f"verified: existing batch {summary.batch_id}; "
+                f"tasks={summary.task_count}, attempts={summary.attempt_count}, "
+                f"results={summary.result_count}; no key read, no network call made, "
+                "no file written"
+            )
+            return 0
+        return _execute_from_cli(
+            args.root,
+            manifest,
+            checkpoints,
+            retry_indeterminate=args.retry_indeterminate,
+        )
 
     states = _csv_set(args.states, "states")
     namespaces = frozenset(
@@ -548,25 +598,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    load_dotenv()
-    key = os.environ.get("FIRECRAWL_API_KEY", "")
-    if not key:
-        raise RuntimeError("FIRECRAWL_API_KEY not configured")
-    summary = execute_batch(
+    return _execute_from_cli(
         args.root,
         manifest,
         checkpoints,
-        FirecrawlClient(key),
         retry_indeterminate=args.retry_indeterminate,
     )
-    statuses = ", ".join(
-        f"{status}={count}" for status, count in sorted(summary.statuses.items())
-    )
-    print(
-        f"verified: Firecrawl batch {summary.batch_id}; tasks={summary.task_count}, "
-        f"attempts={summary.attempt_count}, results={summary.result_count}; {statuses}"
-    )
-    return 0
 
 
 if __name__ == "__main__":

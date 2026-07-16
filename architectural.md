@@ -151,6 +151,7 @@ Source discovery and source integration are deliberately separate:
   complete target snapshot (namespace, GEOID, state, name, kind, universe vintage) as well as the
   query contract. An `in_flight` attempt is durably written before HTTP; after a crash, retry requires
   the explicit `--retry-indeterminate` choice and preserves the uncertain attempt in the fixed budget.
+  Supplying an existing `--batch-id` loads its immutable stored state instead of re-planning it.
 - `grant_watch/source_discovery_batch.py` builds deterministic, bounded research batches from
   `not_researched` county, school-district, and incorporated-place tasks. Dry-run performs no network
   or file writes; live runs are rate-limited and stop on systemic authentication or billing errors.

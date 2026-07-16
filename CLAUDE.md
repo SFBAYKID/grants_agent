@@ -114,7 +114,7 @@ affect Chase's other projects.
 
 ## Current status (2026-07-15)
 
-- `verified` offline: the canonical `python -m pytest tests -q` target passes 326 tests. The package
+- `verified` offline: the canonical `python -m pytest tests -q` target passes 327 tests. The package
   uses seven ordered SQLite migrations, typed evidence/funding models, deduplication, scoring, search,
   export, Slack receipt/reconciliation state, outreach retry state, and Salesforce snapshots.
 - `verified` live through 2026-07-14: USAspending prime awards and NSGP subawards, Grants.gov,
