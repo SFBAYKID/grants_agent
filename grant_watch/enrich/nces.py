@@ -17,6 +17,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import cast
 
+from ..school_scope import school_entity_clause
 from ..sources.base import polite_get
 
 SCHOOL_QUERY_URL = (
@@ -182,16 +183,11 @@ def enrich_state_leads(conn: sqlite3.Connection, state: str,
     """Attach NCES facts to uniquely matching school-like leads in one state."""
     state_code = state.strip().upper()
     reference = districts if districts is not None else fetch_state(state_code)
+    school_scope, school_params = school_entity_clause()
     rows = list(conn.execute(
-        """SELECT id,entity_name FROM leads
-           WHERE UPPER(state)=? AND nces_id IS NULL
-             AND (LOWER(COALESCE(entity_type,'')) IN
-                    ('school','district','school_district','nonpublic_school')
-                  OR UPPER(entity_name) LIKE '%SCHOOL%'
-                  OR UPPER(entity_name) LIKE '%DISTRICT%'
-                  OR UPPER(entity_name) LIKE '% USD'
-                  OR UPPER(entity_name) LIKE '% ISD')""",
-        (state_code,),
+        f"""SELECT id,entity_name FROM leads
+              WHERE UPPER(state)=? AND nces_id IS NULL AND {school_scope}""",
+        (state_code, *school_params),
     ))
     matched = 0
     with conn:

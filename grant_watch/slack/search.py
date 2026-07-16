@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .. import db
 from ..presentation import display_entity_name
+from ..school_scope import SCHOOL_ENTITY_TYPES, school_name_clause
 from ..spreadsheets import GeneratedArtifact, make_spreadsheet
 
 Progress = Callable[[str], None]
@@ -98,6 +99,10 @@ class ResultScope(str, Enum):
     ALL = "all"
 
 
+class _NoSearchResults(Exception):
+    """Leave the read transaction before persisting an exact empty snapshot."""
+
+
 def _enum_value(enum_type: type[Enum], raw: str, label: str) -> str:
     """Validate an optional string against an enum and return its normalized value."""
     value = raw.strip().lower()
@@ -128,10 +133,7 @@ def _like_literal(raw: str) -> str:
 
 def _school_name_clause() -> tuple[str, list[object]]:
     """Conservatively recognize school-specific names; generic DISTRICT is insufficient."""
-    patterns = ("%SCHOOL%", "%ACADEMY%", "%CHARTER%", "% ISD", "% ISD %",
-                "% USD", "% USD %", "%SCHOOL DISTRICT%")
-    clause = "(" + " OR ".join("UPPER(entity_name) LIKE ?" for _ in patterns) + ")"
-    return clause, list(patterns)
+    return school_name_clause()
 
 
 def _org_clause(org_type: str) -> tuple[str, list[object]]:
@@ -140,7 +142,7 @@ def _org_clause(org_type: str) -> tuple[str, list[object]]:
         return "", []
 
     stored: dict[str, tuple[str, ...]] = {
-        "school": ("school", "district", "school_district", "nonpublic_school"),
+        "school": SCHOOL_ENTITY_TYPES,
         "city": ("city", "town", "township", "borough", "village", "municipality"),
         "county": ("county",),
         "hospital": ("hospital", "health_system", "clinic"),
@@ -373,6 +375,24 @@ def _enrich_contacts(rows: list[sqlite3.Row], db_target: Path | str,
     return cells, note
 
 
+def _save_scoped_search(
+        db_target: Path | str, requester_slack: str, workspace: str,
+        channel: str, thread_ts: str, filters: dict[str, object], scope: str,
+        limit: int, export: str, lead_ids: list[int], total: int) -> str:
+    """Persist even an empty exact result set inside one requester-bound Slack thread."""
+    if not all((requester_slack, workspace, channel, thread_ts)):
+        return ""
+    session_key = f"{workspace}:{channel}:{thread_ts}:{requester_slack}"
+    writable = db.connect(db_target)
+    try:
+        return db.save_search_request(
+            writable, session_key, requester_slack, filters, scope,
+            None if scope == ResultScope.ALL.value else int(limit or 50),
+            export or "slack", lead_ids, total, len(lead_ids) == total)
+    finally:
+        writable.close()
+
+
 def search_leads(state: str = "", org_type: str = "", program: str = "",
                  grade: str = "", record_kind: str = "",
                  amount_min: float | None = None, amount_max: float | None = None,
@@ -559,6 +579,15 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
         where.append("UPPER(location_city) = ?")
         params.append(city.strip().upper())
     reference_note = ("\n" + " ".join(reference_notes)) if reference_notes else ""
+    search_filters: dict[str, object] = {
+        "state": state, "org_type": org_type, "program": program, "grade": grade,
+        "record_kind": record_kind, "amount_min": amount_min,
+        "amount_max": amount_max, "enrollment_min": enrollment_min,
+        "enrollment_max": enrollment_max, "city": city,
+        "name_contains": name_contains,
+        "date_field": date_field, "date_from": date_from, "date_to": date_to,
+        "active_only": active_only,
+    }
     try:
         connection = sqlite3.connect(f"file:{db_target}?mode=ro", uri=True, timeout=5.0)
         try:
@@ -569,7 +598,7 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                 f"{_SEARCH_CTE} SELECT COUNT(*) FROM searchable_leads WHERE {where_sql}",
                 params).fetchone()[0])
             if total == 0:
-                return "No grants matched those filters." + reference_note, None
+                raise _NoSearchResults
             if (total > 15 and int(limit or 50) > 15
                     and not export_value and not with_contacts):
                 return (f"Found {total} matches. That's a large result set — would you "
@@ -609,6 +638,11 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                 ).fetchall()]
         finally:
             connection.close()
+    except _NoSearchResults:
+        _save_scoped_search(
+            db_target, requester_slack, workspace, channel, thread_ts,
+            search_filters, scope_value, limit, export_value, [], 0)
+        return "No grants matched those filters." + reference_note, None
     except sqlite3.Error as exc:
         return f"ERROR: search failed ({exc}).", None
 
@@ -621,27 +655,9 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
         for row in rows
     ]
 
-    snapshot_id = ""
-    if requester_slack and workspace and channel and thread_ts:
-        filters = {
-            "state": state, "org_type": org_type, "program": program, "grade": grade,
-            "record_kind": record_kind, "amount_min": amount_min,
-            "amount_max": amount_max, "enrollment_min": enrollment_min,
-            "enrollment_max": enrollment_max, "city": city,
-            "name_contains": name_contains,
-            "date_field": date_field, "date_from": date_from, "date_to": date_to,
-            "active_only": active_only,
-        }
-        session_key = f"{workspace}:{channel}:{thread_ts}:{requester_slack}"
-        writable = db.connect(db_target)
-        try:
-            snapshot_id = db.save_search_request(
-                writable, session_key, requester_slack, filters, scope_value,
-                None if scope_value == ResultScope.ALL.value else int(limit or 50),
-                export_value or "slack", complete_ids, total,
-                len(complete_ids) == total)
-        finally:
-            writable.close()
+    snapshot_id = _save_scoped_search(
+        db_target, requester_slack, workspace, channel, thread_ts,
+        search_filters, scope_value, limit, export_value, complete_ids, total)
     # SECOND step: enrich contacts for the (bounded) shown orgs and append the columns to
     # BOTH the export and the inline summary, so the three output paths never disagree.
     contact_cells: list[list[object]] = []

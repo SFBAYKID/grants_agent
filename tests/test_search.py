@@ -314,6 +314,27 @@ def test_followup_export_uses_complete_frozen_result_set(tmp_path: Path) -> None
     artifact.cleanup()
 
 
+def test_zero_result_refinement_replaces_prior_export_snapshot(tmp_path: Path) -> None:
+    """An empty refinement cannot leave an older broad result set exportable."""
+    path = _bulk_db(tmp_path, 3)
+    search_leads(
+        limit=2, requester_slack="U1", workspace="T1", channel="C1",
+        thread_ts="100.1", db_path=path)
+    text, artifact = search_leads(
+        name_contains="definitely absent", limit=2, requester_slack="U1",
+        workspace="T1", channel="C1", thread_ts="100.1", db_path=path)
+    assert artifact is None and text.startswith("No grants matched")
+    conn = db.connect(path)
+    snapshot = db.latest_search_request(conn, "T1:C1:100.1:U1", "U1")
+    assert snapshot is not None
+    assert snapshot["total_count"] == 0
+    assert snapshot["result_lead_ids_json"] == "[]"
+    conn.close()
+    exported, artifact = export_search_snapshot(
+        "U1", "T1", "C1", "100.1", "excel", db_path=path)
+    assert artifact is None and "contains no results" in exported
+
+
 def test_followup_export_cleans_artifact_when_job_finish_fails(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A DB failure after workbook creation cannot leak its temporary directory."""

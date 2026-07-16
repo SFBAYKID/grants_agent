@@ -315,7 +315,7 @@ def latest_search_request(conn: sqlite3.Connection, session_key: str,
     return conn.execute(
         """SELECT * FROM search_requests
            WHERE session_key=? AND requested_by=? AND state='complete'
-           ORDER BY created_at DESC, id DESC LIMIT 1""",
+           ORDER BY created_at DESC, rowid DESC LIMIT 1""",
         (session_key, requested_by),
     ).fetchone()
 

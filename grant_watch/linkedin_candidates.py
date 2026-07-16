@@ -92,12 +92,8 @@ def save_candidate(
 def active_candidate(
         conn: sqlite3.Connection, lead_id: int, workspace: str, channel: str,
         thread_ts: str, requested_by: str) -> LinkedInCandidate | None:
-    """Return exactly one unexpired candidate from the same tenant/thread/user."""
+    """Read exactly one unexpired candidate from the same tenant/thread/user."""
     now = _iso(_now())
-    with conn:
-        conn.execute(
-            """UPDATE linkedin_person_candidates SET status='expired'
-                 WHERE status='active' AND expires_at<=?""", (now,))
     rows = conn.execute(
         """SELECT * FROM linkedin_person_candidates
              WHERE lead_id=? AND workspace=? AND channel=? AND thread_ts=?

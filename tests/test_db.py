@@ -252,3 +252,22 @@ def test_oversized_raw_payload_remains_valid_json(tmp_path: Path) -> None:
     assert parsed["_truncated"] is True
     assert parsed["original_length"] > 5_000
     assert len(parsed["sha256"]) == 64
+
+
+def test_latest_search_request_uses_insertion_order_for_same_second(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A fast refinement must supersede a broad search despite UUID sort order."""
+    conn = db.connect(tmp_path / "search-order.db")
+    monkeypatch.setattr(db, "_now", lambda: "2026-07-16T08:00:00+00:00")
+    ids = iter(("ffffffff-old", "00000000-new"))
+    monkeypatch.setattr(db.uuid, "uuid4", lambda: next(ids))
+    db.save_search_request(
+        conn, "T:C:1:U", "U", {"state": "CA"}, "top_n", 5, "slack",
+        [1, 2], 2, True)
+    newest_id = db.save_search_request(
+        conn, "T:C:1:U", "U", {"state": "CA", "city": "Los Angeles"},
+        "top_n", 5, "slack", [], 0, True)
+    latest = db.latest_search_request(conn, "T:C:1:U", "U")
+    assert latest is not None
+    assert latest["id"] == newest_id
+    assert latest["total_count"] == 0

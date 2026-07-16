@@ -54,6 +54,34 @@ def test_enrich_state_leads_updates_only_unique_matches(tmp_path: Path) -> None:
     assert orange["nces_id"] is None and orange["enrollment"] is None
 
 
+def test_enrich_state_leads_uses_same_academy_and_charter_scope_as_search(
+        tmp_path: Path) -> None:
+    """Blank-type Academy/Charter search matches remain eligible for NCES write-back."""
+    conn = db.connect(tmp_path / "nces-school-scope.db")
+    entities = (
+        ("1", "Los Angeles Leadership Academy"),
+        ("2", "San Jose Charter Academy"),
+    )
+    for item_id, entity in entities:
+        db.upsert_lead(conn, Lead(
+            RawItem("test", item_id, "award", entity, "CA", "SVPP", 1.0,
+                    "2026-01-01", "2027-01-01", "", {}),
+            LeadGrade.GOLD,
+        ))
+    districts = [
+        nces.NCESDistrict("0601494", entities[0][1], "CA", "Los Angeles", 700),
+        nces.NCESDistrict("0699999", entities[1][1], "CA", "San Jose", 500),
+    ]
+    summary = nces.enrich_state_leads(conn, "CA", districts)
+    rows = conn.execute(
+        "SELECT entity_name,location_city FROM leads ORDER BY entity_name").fetchall()
+    assert summary == nces.EnrichmentSummary(2, 2, 0)
+    assert {tuple(row) for row in rows} == {
+        ("Los Angeles Leadership Academy", "Los Angeles"),
+        ("San Jose Charter Academy", "San Jose"),
+    }
+
+
 class _Response:
     """Small requests-compatible JSON response for ArcGIS pagination tests."""
 

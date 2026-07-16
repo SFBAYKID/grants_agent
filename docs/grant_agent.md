@@ -26,7 +26,8 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
    database (state, org type, program, grade, amount, record kind, explicit date meaning). Ordering is
    total (an id tiebreak) so a repeated search returns the same rows. Inline results report the true
    match count; complete Excel/Google exports are all-or-nothing under a declared 5,000-row safety cap.
-   City refinements reuse the latest exact requester-and-thread search snapshot. NCES district-office
+   City refinements reuse the latest exact requester-and-thread search snapshot, including an empty
+   result set so a later export can never fall back to older broader results. NCES district-office
    city filters page official school rows and aggregate enrollment locally; if reference data cannot
    be applied, Grant says so and does not pretend the returned statewide set is city-filtered.
    A bare "@Grant" with no ask gets a friendly greeting.

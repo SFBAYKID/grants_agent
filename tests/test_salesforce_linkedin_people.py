@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -369,3 +370,23 @@ def test_candidate_is_isolated_by_thread_user_and_tenant(tmp_path: Path) -> None
         conn, 1, "TWORK", "CGRANTS", "2.2", "UCHASE") is None
     assert linkedin_candidates.active_candidate(
         conn, 1, "TWORK", "CGRANTS", "1.1", "UOTHER") is None
+
+
+def test_expired_candidate_lookup_is_read_only(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Checking stale person evidence cannot mutate a production-backed test database."""
+    conn, _row = _grant_lead(tmp_path)
+    candidate = _candidate(conn)
+    monkeypatch.setattr(
+        linkedin_candidates, "_now",
+        lambda: datetime(2100, 1, 1, tzinfo=timezone.utc),
+    )
+    changes_before = conn.total_changes
+    assert linkedin_candidates.active_candidate(
+        conn, 1, "TWORK", "CGRANTS", "1.1", "UCHASE") is None
+    assert conn.total_changes == changes_before
+    status = conn.execute(
+        "SELECT status FROM linkedin_person_candidates WHERE id=?",
+        (candidate.candidate_id,),
+    ).fetchone()[0]
+    assert status == "active"
