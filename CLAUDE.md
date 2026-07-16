@@ -114,8 +114,9 @@ affect Chase's other projects.
 
 ## Current status (2026-07-15)
 
-- `verified` offline: the canonical `python -m pytest tests -q` target passes 327 tests. The package
-  uses seven ordered SQLite migrations, typed evidence/funding models, deduplication, scoring, search,
+- `verified` offline in the shared working tree: the canonical `python -m pytest tests -q` target
+  passes 348 tests, including pending unrelated working increments not included in every commit. The
+  package uses seven ordered SQLite migrations, typed evidence/funding models, deduplication, scoring, search,
   export, Slack receipt/reconciliation state, outreach retry state, and Salesforce snapshots.
 - `verified` live through 2026-07-14: USAspending prime awards and NSGP subawards, Grants.gov,
   keyed SAM.gov opportunities, WEBS fetch/parser, California Grants Portal, OregonBuys recent-bids,
@@ -141,6 +142,10 @@ affect Chase's other projects.
   Grant threads, sends paced individual alerts, and has no digest, DM, slash-command, or ownership
   workflow. Run the bot with `python -m grant_watch.slack.grant`; the dry-run-aware drip entrypoint is
   `python -m grant_watch.cli drip --dry-run`.
+- `verified` offline Slack discovery UI: natural-language source-inventory, state/layer coverage,
+  reviewed-source, and recent-batch questions return validated read-only evidence without Anthropic,
+  web search, raw payloads, or paid Firecrawl execution. Live configured-channel interaction is
+  `needs-testing`.
 - `verified` safeguards in code and tests: seed/live reconciliation, freshness and program-fit
   ranking, immutable source observations, incomplete-run tracking, Slack delivery reconciliation,
   contact evidence gates, idempotent Persequor retry state, read-only Salesforce lookup, and

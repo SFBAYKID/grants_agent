@@ -219,6 +219,16 @@ and Salesforce sync expose tested dry-run boundaries. The long-lived Socket Mode
 posts replies and has no dry-run flag, so exercise it through offline tests unless a real channel
 interaction is explicitly intended. Grant never fabricates a lead, contact, or award figure.
 
+Source-discovery inventory is available through the same natural-language Slack surface. The
+`grant_watch/slack/source_status.py` boundary reads validated repository evidence and renders only
+aggregates or reviewed catalog fields. Deterministic routing runs before the Anthropic conversation
+path, so supported inventory questions cannot fall through to `web_search` or another network tool.
+It preserves the distinctions between raw search completion, human review, catalog promotion,
+runtime integration, and leads. Raw queries, snippets, hashes, notes, credential metadata, and
+payloads never enter the Slack response. The Slack tool is read-only and has no paid-execution
+operation; a request to start Firecrawl returns a disabled message until a separately designed admin
+approval workflow exists.
+
 ---
 
 ## 5.1 Salesforce integration (CRM cross-reference)

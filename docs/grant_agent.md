@@ -31,6 +31,15 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
    the summary and the export. A contact is stored only if its email appears verbatim on a fetched page;
    a genuine miss is `not_found`; a source outage records **nothing** (retryable) — never a false
    `not_found`.
+7. **Source-discovery status.** A rep can ask Grant for the nationwide or state-specific source
+   inventory, Census research coverage, manually reviewed candidates, or recent validated batch
+   summaries. Supported examples include `@Grant show source discovery status`, `@Grant show
+   school-district research coverage in California`, `@Grant list reviewed sources in New Hampshire`,
+   and `@Grant show recent discovery batches`. These read-only answers bypass the language model and
+   all network-capable tools. They expose validated aggregates and reviewed catalog fields only—not
+   raw queries, snippets, hashes, notes, credential metadata, or Firecrawl payloads. A candidate is
+   not a lead or working poller. Paid discovery cannot be started from Slack; Grant says it is
+   disabled until a separate admin approval workflow exists.
 
 ## Honesty rules Grant follows
 
@@ -87,3 +96,7 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
   greeting, event-dedup, tool dispatch). Live conversational behavior is `needs-testing` in Slack. The
   design was stress-tested by architectural-critic; enrichment runs inline with a wall-clock budget and
   an idempotency guard — moving it to a background worker is the recommended scaling follow-up.
+- Read-only source-discovery status: `verified` offline on 2026-07-15 for natural-language routing,
+  exact aggregate boundaries, state/layer filters, adversarial Slack-markup escaping, secret-field
+  exclusion, and truthful success/zero/failure/in-flight batch states. Live configured-channel
+  interaction remains `needs-testing`; paid discovery is intentionally unavailable in Slack.

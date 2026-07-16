@@ -26,6 +26,7 @@ import requests
 from .. import db
 from ..spreadsheets import GeneratedArtifact, make_spreadsheet
 from .search import search_leads
+from .source_status import SOURCE_STATUS_TOOL_SCHEMA, source_inventory_status
 
 Progress = Callable[[str], None]
 _NOOP: Progress = lambda _msg: None
@@ -76,6 +77,7 @@ def enrich_lead_contact(conn: sqlite3.Connection, lead_id: int, entity: str,
 
 # Tool schemas passed to the Anthropic API (the model picks; we execute).
 TOOL_SCHEMAS: list[dict[str, Any]] = [
+    SOURCE_STATUS_TOOL_SCHEMA,
     {
         "name": "web_search",
         "description": "Search the public web. Returns real titles, URLs and "
@@ -323,6 +325,14 @@ def run_tool(name: str, args: dict[str, Any],
     on_progress emits short status phrases for Grant's live spinner; requester_slack
     is the rep asking (needed for a Google Sheet in their own Google account)."""
     p = on_progress or _NOOP
+    if name == "source_inventory_status":
+        p("Checking source discovery evidence")
+        return source_inventory_status(
+            view=str(args.get("view", "summary")),
+            state=str(args.get("state", "")),
+            namespace=str(args.get("namespace", "all")),
+            limit=int(args.get("limit", 10) or 10),
+        ), None
     if name == "web_search":
         return web_search(str(args.get("query", "")), p), None
     if name == "salesforce_lookup":

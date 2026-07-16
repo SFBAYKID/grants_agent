@@ -23,6 +23,7 @@ from anthropic import Anthropic
 
 from ..spreadsheets import GeneratedArtifact
 from . import tools
+from .source_status import slack_source_status_reply
 
 DEFAULT_MODEL = "claude-sonnet-5"
 MAX_TOOL_TURNS = 6  # runaway guard for the agent loop
@@ -126,6 +127,11 @@ who owns it before they reach out. Never invent a link, number, contact, or fact
 tool errored or found nothing, say so cheerfully and plainly. Present 'possible' CRM
 matches as possible, never asserted.
 
+SOURCE DISCOVERY UI: use source_inventory_status for internal inventory, research
+coverage, reviewed source candidates, and raw batch status. These are not leads. Never
+use web_search for an inventory-status request. Paid discovery runs are disabled in
+Slack; say so plainly and do not imply that a typed confirmation can start one.
+
 THE OUTREACH HANDOFF (important): you do NOT write or send the outreach email —
 that's Persequor, a separate email agent. Persequor is CALL-ONLY: it only acts when
 summoned. You are the guide who directs the rep there. So:
@@ -208,6 +214,14 @@ def respond(user_text: str, row: sqlite3.Row | None,
     cleans it before re-raising. The dict remains dynamic because Anthropic message
     blocks are third-party runtime objects rather than a stable local model.
     """
+    source_reply = slack_source_status_reply(user_text, thread_context)
+    if source_reply is not None:
+        return {
+            "intent": "question",
+            "reply": source_reply,
+            "files": [],
+            "pending_crm_actions": [],
+        }
     client = Anthropic()  # ANTHROPIC_API_KEY from env
     say = on_progress or (lambda _msg: None)
     # Keep a wider window so the confirmed filters (STEP 1) survive a few interleaved

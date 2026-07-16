@@ -70,6 +70,10 @@ The batch collector stores every raw result and attempt under
 they must never update the catalog, entity links, discovery checks, or runtime pollers automatically.
 Promotion requires a human to review the official page, verify the access boundary, and record the
 selected-result and scrape evidence separately.
+Slack may expose only validated discovery aggregates and reviewed catalog fields through the
+read-only `source_inventory_status` surface. It must not expose raw queries, snippets, hashes, notes,
+credential metadata, or payloads, and it must not start paid discovery. Paid Slack execution requires
+a separately reviewed admin approval design before any execution operation is added.
 Every possibly paid call must have a durable `in_flight` marker before HTTP begins. A restart never
 retries that indeterminate call silently; an operator must explicitly choose
 `--retry-indeterminate`, which records the interrupted attempt before retrying within the fixed
