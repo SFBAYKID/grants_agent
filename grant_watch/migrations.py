@@ -513,6 +513,36 @@ def _migration_10_user_preferences(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_11_linkedin_person_candidates(conn: sqlite3.Connection) -> None:
+    """Persist thread-bound LinkedIn identities separately from verified contacts."""
+    _execute_script(conn,
+        """
+        CREATE TABLE IF NOT EXISTS linkedin_person_candidates (
+          id TEXT PRIMARY KEY,
+          lead_id INTEGER NOT NULL REFERENCES leads(id),
+          workspace TEXT NOT NULL,
+          channel TEXT NOT NULL,
+          thread_ts TEXT NOT NULL,
+          requested_by TEXT NOT NULL,
+          person_name TEXT NOT NULL,
+          title TEXT,
+          profile_url TEXT NOT NULL,
+          organization TEXT NOT NULL,
+          evidence_excerpt TEXT NOT NULL,
+          evidence_hash TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('active','consumed','expired','rejected')),
+          created_at TIMESTAMP NOT NULL,
+          expires_at TIMESTAMP NOT NULL,
+          consumed_action_id TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_linkedin_candidate_context
+          ON linkedin_person_candidates(
+            workspace,channel,thread_ts,requested_by,lead_id,status,expires_at
+          );
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "legacy-compatible base", _migration_1_base),
     Migration(2, "truth observations and events", _migration_2_truth_events),
@@ -525,6 +555,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(8, "complete search snapshots", _migration_8_complete_search_snapshots),
     Migration(9, "Salesforce follow-up reminder state", _migration_9_salesforce_followup_state),
     Migration(10, "tenant-scoped user preferences", _migration_10_user_preferences),
+    Migration(11, "thread-bound LinkedIn person candidates",
+              _migration_11_linkedin_person_candidates),
 )
 
 

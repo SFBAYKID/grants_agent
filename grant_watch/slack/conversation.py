@@ -22,7 +22,7 @@ from typing import Any  # Anthropic tool-use response payloads are runtime-shape
 
 from anthropic import Anthropic
 
-from .. import db
+from .. import db, linkedin_candidates
 from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact
 from . import tools
@@ -566,14 +566,42 @@ def respond(user_text: str, row: sqlite3.Row | None,
                 "reply": _award_application_reply(row)}
     if row is not None and _is_linkedin_request(user_text):
         say("Checking LinkedIn")
+        conn = db.connect()
         try:
             reply = tools.find_person_linkedin(
-                str(row["entity_name"] or ""), str(row["state"] or ""), say)
+                str(row["entity_name"] or ""), str(row["state"] or ""), say,
+                conn=conn, lead_id=int(row["id"]), workspace=workspace,
+                channel=channel, thread_ts=thread_ts, requested_by=requester_slack)
         except Exception:  # external research must always resolve the Slack spinner
             reply = ("I couldn’t complete the LinkedIn search right now. "
                      "I didn’t verify a contact, so I won’t guess.")
+        finally:
+            conn.close()
         return {"intent": "question", "files": [], "pending_crm_actions": [],
                 "reply": reply}
+    if row is not None and _explicit_lead_creation_request(user_text, thread_context):
+        conn = db.connect()
+        try:
+            candidate = linkedin_candidates.active_candidate(
+                conn, int(row["id"]), workspace, channel, thread_ts, requester_slack)
+        finally:
+            conn.close()
+        if candidate is not None:
+            say("Preparing Salesforce Lead")
+            tool_text = tools.salesforce_linkedin_person_preview(
+                candidate.candidate_id, requester_slack, workspace, channel, thread_ts)
+            _clean, action = _extract_pending_action(tool_text)
+            if action is None:
+                return {
+                    "intent": "question", "files": [], "pending_crm_actions": [],
+                    "reply": ("I couldn’t safely prepare that person’s Salesforce Lead. "
+                              "Nothing was changed."),
+                }
+            return {
+                "intent": "question", "files": [], "pending_crm_actions": [action],
+                "reply": (f"I prepared the Salesforce preview for {candidate.person_name}. "
+                          "Their email is still unverified, so it will stay blank."),
+            }
     if (row is not None and _explicit_lead_creation_request(user_text, thread_context)
             and not _has_verified_person(int(row["id"]))):
         say("Preparing Salesforce Lead")

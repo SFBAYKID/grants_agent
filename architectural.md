@@ -134,6 +134,13 @@ or *"No record found — this is net-new."* This turns a raw lead into an action
   administrative Activity. There is no delete/merge/convert action. Every execution requires an
   immutable Slack preview, one-time nonce, same requester/channel, short expiry, and a final button
   confirmation. Each write category has a default-off feature flag.
+- **LinkedIn-only people remain a separate evidence class.** A search-result identity is persisted
+  only against the exact tenant, channel, thread, user and Grant lead for 30 minutes; it never becomes
+  a verified-email contact. A follow-up such as "add this guy" can select that exact candidate and
+  leaves Email blank. If Grant previously created an audited organization-only placeholder, the user
+  may approve one exact-ID person/enrichment update after the prior action is fully reconciled;
+  otherwise Grant creates at most one duplicate-checked Lead. Both paths use one all-or-none
+  Lead/Note/Activity transaction and never create a Campaign, Opportunity, or second Lead implicitly.
 - **Sandbox for all development.** `test.salesforce.com`, sandbox `monarchdev`
   (`...--monarchdev.sandbox.my.salesforce.com`). Production Salesforce is never touched during dev.
 - **Production uses SEPARATE credentials from sandbox** — different org, different Connected App.

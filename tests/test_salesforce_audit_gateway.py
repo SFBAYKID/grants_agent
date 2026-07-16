@@ -246,6 +246,40 @@ def test_audit_readback_compares_note_link_task_and_truthful_copy(
         LEAD_ID, ACTION_ID, note_body, task_body, result)
 
 
+def test_audit_readback_follows_salesforce_content_note_url(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Salesforce may return Content as a URL instead of inline base64 data."""
+    gateway = gateway_mod.SalesforceCampaignGateway()
+    note_body = "Verified sources"
+    task_body = "No customer outreach. Action " + ACTION_ID
+
+    def fake_get(path: str, _params: dict[str, str]) -> dict[str, object]:
+        if path.startswith("sobjects/ContentNote/"):
+            return {"Title": f"Grant research — {ACTION_ID}",
+                    "Content": "/services/data/v60.0/sobjects/ContentNote/069x/Content"}
+        if path.startswith("sobjects/ContentDocumentLink/"):
+            return {"ContentDocumentId": "069000000000001", "LinkedEntityId": LEAD_ID,
+                    "ShareType": "V", "Visibility": "AllUsers"}
+        return {"WhoId": LEAD_ID, "Subject": "Grant system: CRM research updated",
+                "Status": "Completed", "Description": task_body}
+
+    class RawResponse:
+        """Minimal raw ContentNote response used by the verifier test."""
+
+        content = note_body.encode("utf-8")
+
+        def raise_for_status(self) -> None:
+            """Accept the fake raw response."""
+
+    monkeypatch.setattr(gateway, "_get", fake_get)
+    monkeypatch.setattr(gateway, "_auth", lambda: ("token", "https://sf.test"))
+    monkeypatch.setattr(gateway_mod.requests, "get", lambda *_args, **_kwargs: RawResponse())
+    result = gateway_mod.LeadAuditResult(
+        True, "069000000000001", "06A000000000001", "00T000000000001")
+    assert gateway.verify_lead_audit_bundle(
+        LEAD_ID, ACTION_ID, note_body, task_body, result)
+
+
 def test_partial_audit_never_blindly_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     """A partial prior result fails closed before any Salesforce POST."""
     gateway = gateway_mod.SalesforceCampaignGateway()

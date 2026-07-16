@@ -76,6 +76,7 @@ class LinkedInPerson:
     name: str
     title: str
     url: str
+    evidence_excerpt: str
 
 
 def verify_on_page(page_text: str, email: str, name: str) -> bool:
@@ -362,5 +363,9 @@ def linkedin_person(entity: str, state: str,
         role = parts[1] if len(parts) > 1 else ""
         if name:
             say(f"Found {name} on LinkedIn")
-            return LinkedInPerson(name, role, str(url))
+            evidence = " | ".join(filter(None, (
+                str(r.get("title") or "").strip(),
+                str(r.get("description") or "").strip(),
+            )))[:1000]
+            return LinkedInPerson(name, role, str(url), evidence)
     return None

@@ -76,6 +76,9 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 - **Desired configuration (`needs-testing` externally):** interactivity remains ON for explicit
   Salesforce safety confirmations; events are `app_mention`, `message.channels`, and
   `reaction_added`; no slash command or DM subscription remains.
+- A LinkedIn result with no verified email can be carried into a same-thread Salesforce preview for
+  that exact person. Grant states that Email will remain blank and never substitutes an
+  organization-only Lead when the user selected a person.
 - **Required bot scopes after reinstall:** `app_mentions:read`, `chat:write`, `channels:history`,
   `channels:read`, `groups:history`, `groups:read`, `reactions:read`, `reactions:write`, `users:read`,
   `users:read.email`, and `files:write`. DM and command scopes are unnecessary.

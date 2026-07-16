@@ -27,6 +27,9 @@ _LEAD_ENRICHMENT_FIELDS = {
     "Website", "Phone", "Street", "City", "State", "PostalCode", "Country",
     "Industry", "Description", "LinkedIn__c", "Number_of_Students__c",
 }
+_LINKEDIN_PERSON_UPDATE_FIELDS = _LEAD_ENRICHMENT_FIELDS | {
+    "FirstName", "LastName", "Title",
+}
 _PERSON_LEAD_CREATE_FIELDS = {
     "Company", "FirstName", "LastName", "Email", "Status", "LeadSource",
     "Description", "State", "Title", "Phone", "Website", "Street", "City",
@@ -91,6 +94,23 @@ class LeadEnrichmentSnapshot:
     email: str
     system_modstamp: str
     values: dict[str, str | float | None]
+    link: str
+
+
+@dataclass(frozen=True)
+class LinkedInPersonLeadSnapshot:
+    """Exact person and placeholder fields used for a singular Lead identity update."""
+
+    record_id: str
+    company: str
+    first_name: str
+    last_name: str
+    email: str
+    title: str
+    linkedin_url: str
+    description: str
+    state: str
+    system_modstamp: str
     link: str
 
 
@@ -220,6 +240,22 @@ class SalesforceCampaignGateway:
         )
         response.raise_for_status()
         return response.json()  # type: ignore[no-any-return]  # third-party JSON
+
+    def _content_note_text(self, value: object) -> str:
+        """Decode inline ContentNote data or fetch Salesforce's returned Content URL."""
+        encoded_or_path = str(value or "")
+        if encoded_or_path.startswith("/services/"):
+            token, instance = self._auth()
+            response = requests.get(
+                f"{instance}{encoded_or_path}",
+                headers={"Authorization": f"Bearer {token}"}, timeout=20,
+            )
+            response.raise_for_status()
+            return response.content.decode("utf-8")
+        try:
+            return base64.b64decode(encoded_or_path, validate=True).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return ""
 
     def _create_one(self, sobject: str, payload: dict[str, object]) -> CreateResult:
         """Create one record on the explicit object allowlist."""
@@ -367,6 +403,40 @@ class SalesforceCampaignGateway:
             lead_id, str(body.get("Company") or ""), str(body.get("Email") or ""),
             str(body.get("SystemModstamp") or ""), values,
             self.lightning_link("Lead", lead_id))
+
+    def linkedin_person_lead_snapshot(self, lead_id: str) -> LinkedInPersonLeadSnapshot:
+        """Read one exact Lead before attaching a LinkedIn-only person identity."""
+        validate_record_id(lead_id, "Lead")
+        fields = (
+            "Id,Company,FirstName,LastName,Email,Title,LinkedIn__c,Description,"
+            "State,SystemModstamp"
+        )
+        body = self._get(f"sobjects/Lead/{lead_id}", {"fields": fields})
+        return LinkedInPersonLeadSnapshot(
+            lead_id, str(body.get("Company") or ""), str(body.get("FirstName") or ""),
+            str(body.get("LastName") or ""), str(body.get("Email") or ""),
+            str(body.get("Title") or ""), str(body.get("LinkedIn__c") or ""),
+            str(body.get("Description") or ""), str(body.get("State") or ""),
+            str(body.get("SystemModstamp") or ""), self.lightning_link("Lead", lead_id),
+        )
+
+    def exact_linkedin_person_leads(
+            self, profile_url: str, company: str, last_name: str) -> list[SalesforceRecordRef]:
+        """Find exact profile or person/company Lead duplicates without fuzzy matching."""
+        profile = _soql_literal(profile_url.strip())
+        company_literal = _soql_literal(company.strip())
+        last = _soql_literal(last_name.strip())
+        soql = (
+            "SELECT Id,Name,Company,State FROM Lead WHERE "
+            f"LinkedIn__c='{profile}' OR (Company='{company_literal}' AND LastName='{last}') "
+            "LIMIT 20"
+        )
+        records = self._get("query", {"q": soql}).get("records") or []
+        return [SalesforceRecordRef(
+            "Lead", str(item["Id"]), str(item.get("Name") or ""),
+            self.lightning_link("Lead", str(item["Id"])),
+            str(item.get("Company") or ""), str(item.get("State") or ""),
+        ) for item in records]
 
     def lead_audit_snapshot(self, lead_id: str, action_id: str) -> LeadAuditSnapshot:
         """Read the exact Enhanced Note/link and system Task for one Grant action."""
@@ -541,12 +611,64 @@ class SalesforceCampaignGateway:
         validate_record_id(task_id, "Task")
         return LeadAuditResult(True, note_id, link_id, task_id, lead_id=lead_id)
 
+    def attach_linkedin_person_with_audit_bundle(
+            self, lead_id: str, delta: dict[str, object],
+            expected_system_modstamp: str, action_id: str, note_body: str,
+            task_description: str, activity_date: str) -> LeadAuditResult:
+        """Atomically attach one LinkedIn person to one exact placeholder Lead."""
+        validate_record_id(lead_id, "Lead")
+        if (not delta or not set(delta) <= _LINKEDIN_PERSON_UPDATE_FIELDS
+                or not all(delta.get(key) for key in ("LastName", "LinkedIn__c"))
+                or "Email" in delta):
+            raise ValueError("LinkedIn person update contains forbidden or missing fields")
+        current = self.linkedin_person_lead_snapshot(lead_id)
+        if current.system_modstamp != expected_system_modstamp:
+            raise ValueError("Salesforce Lead changed after the preview")
+        existing = self.lead_audit_snapshot(lead_id, action_id)
+        if existing.complete:
+            return LeadAuditResult(
+                True, existing.note_id, existing.link_id, existing.task_id,
+                lead_id=lead_id)
+        if existing.partial:
+            raise ValueError("Salesforce audit trail is partial and requires reconciliation")
+        requests_body: list[dict[str, object]] = [{
+            "method": "PATCH",
+            "url": f"/services/data/{API_VERSION}/sobjects/Lead/{lead_id}",
+            "referenceId": "grantLeadUpdate",
+            "body": delta,
+        }]
+        requests_body.extend(self._audit_subrequests(
+            lead_id, action_id, note_body, task_description, activity_date))
+        by_ref, error = self._post_fixed_composite(requests_body, {
+            "grantLeadUpdate": {200, 204}, "grantResearchNote": {200, 201},
+            "grantResearchLink": {200, 201}, "grantAuditTask": {200, 201},
+        })
+        if error:
+            return LeadAuditResult(False, lead_id=lead_id, error=error)
+        note_id = str((by_ref["grantResearchNote"].get("body") or {}).get("id") or "")
+        link_id = str((by_ref["grantResearchLink"].get("body") or {}).get("id") or "")
+        task_id = str((by_ref["grantAuditTask"].get("body") or {}).get("id") or "")
+        validate_record_id(note_id, "ContentNote")
+        validate_record_id(link_id, "ContentDocumentLink")
+        validate_record_id(task_id, "Task")
+        return LeadAuditResult(True, note_id, link_id, task_id, lead_id=lead_id)
+
     def create_person_lead_with_audit_bundle(
             self, lead_payload: dict[str, object], action_id: str, note_body: str,
             task_description: str, activity_date: str) -> LeadAuditResult:
         """Atomically create one person Lead and its three exact audit artifacts."""
         if not lead_payload.get("Email"):
             raise ValueError("person Lead payload contains forbidden or missing fields")
+        return self._create_lead_with_audit_bundle(
+            lead_payload, action_id, note_body, task_description, activity_date)
+
+    def create_linkedin_person_lead_with_audit_bundle(
+            self, lead_payload: dict[str, object], action_id: str, note_body: str,
+            task_description: str, activity_date: str) -> LeadAuditResult:
+        """Atomically create one no-email LinkedIn person Lead and audit artifacts."""
+        if (lead_payload.get("Email") or not lead_payload.get("LinkedIn__c")
+                or not lead_payload.get("LastName")):
+            raise ValueError("LinkedIn person Lead requires a profile and no email")
         return self._create_lead_with_audit_bundle(
             lead_payload, action_id, note_body, task_description, activity_date)
 
@@ -610,11 +732,7 @@ class SalesforceCampaignGateway:
         task = self._get(
             f"sobjects/Task/{task_id}",
             {"fields": "Id,WhoId,Subject,Status,Description"})
-        encoded = str(note.get("Content") or "")
-        try:
-            decoded = base64.b64decode(encoded).decode("utf-8")
-        except (ValueError, UnicodeDecodeError):
-            return False
+        decoded = self._content_note_text(note.get("Content"))
         return (
             str(note.get("Title") or "") == f"Grant research — {action_id}"
             and decoded == note_body.strip()

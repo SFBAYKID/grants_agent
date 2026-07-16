@@ -22,6 +22,7 @@ from ..models import VerificationStatus
 from . import salesforce
 from . import salesforce_campaigns as workflow
 from .salesforce_campaign_gateway import (
+    LeadAuditResult,
     SalesforceCompositeRolledBack,
     SalesforceCampaignGateway,
     parse_record_link,
@@ -570,6 +571,59 @@ def confirm_organization_lead(
         workflow.CampaignActionState.COMPLETE,
         f"Created an organization-only Salesforce Lead for {company}: {created.link}",
         added=1)
+
+
+def reconcile_unknown_organization_lead(
+        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
+        action_id: str) -> workflow.ActionExecution:
+    """Read back one unknown org-Lead action and repair only its local audit ledger."""
+    row = conn.execute(
+        """SELECT * FROM crm_actions
+             WHERE id=? AND action_type='create_organization_lead' AND state='unknown'""",
+        (action_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError("no unknown organization Lead action has that ID")
+    payload = dict(json.loads(str(row["payload_json"]))["lead"])
+    company = str(payload["Company"])
+    state = str(payload.get("State") or "")
+    matches = duplicate_organization(company, state)
+    lead_matches = [item for item in matches
+                    if item.sobject == "Lead"
+                    and item.company.casefold() == company.casefold()
+                    and (not state or not item.state or item.state.upper() == state.upper())]
+    if len(lead_matches) != 1:
+        raise ValueError("reconciliation did not find exactly one matching Salesforce Lead")
+    lead_id = validate_record_id(lead_matches[0].record_id, "Lead")
+    exact = gateway.linkedin_person_lead_snapshot(lead_id)
+    if (exact.company.casefold() != company.casefold()
+            or exact.last_name.casefold() != company.casefold()
+            or any((exact.first_name, exact.email, exact.title, exact.linkedin_url))
+            or f"Action {action_id}" not in exact.description):
+        raise ValueError("matching Salesforce Lead is not the exact Grant placeholder")
+    audit = gateway.lead_audit_snapshot(lead_id, action_id)
+    if not audit.complete:
+        raise ValueError("Salesforce Lead audit trail is incomplete")
+    note_body = str(payload.get("Description") or "")
+    task_body = (
+        _audit_task_description(action_id, "created and populated", list(payload))
+        + " No individual contact or email was verified. Salesforce-required LastName "
+        "contains the organization name and does not represent a person."
+    )
+    result = LeadAuditResult(
+        True, audit.note_id, audit.link_id, audit.task_id, lead_id=lead_id)
+    if not gateway.verify_lead_audit_bundle(
+            lead_id, action_id, note_body, task_body, result):
+        raise ValueError("Salesforce Lead audit contents do not match the approved action")
+    with conn:
+        conn.execute(
+            """UPDATE crm_action_items SET state='lead_created',salesforce_id=?,error=NULL
+                 WHERE action_id=?""", (lead_id, action_id))
+    workflow._finish_action(
+        conn, action_id, workflow.CampaignActionState.COMPLETE)
+    return workflow.ActionExecution(
+        workflow.CampaignActionState.COMPLETE,
+        f"Reconciled the existing Salesforce Lead: {exact.link}", already_present=1)
 
 
 def confirm_opportunity(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,

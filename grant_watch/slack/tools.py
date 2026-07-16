@@ -21,7 +21,7 @@ import requests
 
 from .. import db
 from ..spreadsheets import GeneratedArtifact
-from .linkedin import find_person_linkedin
+from .linkedin import find_person_linkedin, salesforce_linkedin_person_preview
 from .search import export_search_snapshot, search_leads
 
 Progress = Callable[[str], None]

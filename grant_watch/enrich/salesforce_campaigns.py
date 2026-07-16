@@ -629,7 +629,10 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
                            error="campaign writes feature flag disabled")
             return ActionExecution(CampaignActionState.FAILED,
                                    "Salesforce campaign writes are disabled; nothing was created.")
-    if row["action_type"] == "create_person_lead" and not person_lead_writer_enabled():
+    if (row["action_type"] in {
+            "create_person_lead", "create_linkedin_person_lead",
+            "attach_linkedin_person_to_lead"}
+            and not person_lead_writer_enabled()):
         _finish_action(conn, action_id, CampaignActionState.FAILED,
                        error="person Lead writes feature flag disabled")
         return ActionExecution(CampaignActionState.FAILED,
@@ -650,9 +653,16 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
         _finish_action(conn, action_id, CampaignActionState.FAILED,
                        error="Lead enrichment updates feature flag disabled")
         return ActionExecution(CampaignActionState.FAILED,
-                               "Salesforce Lead enrichment is disabled; nothing changed.")
+                                   "Salesforce Lead enrichment is disabled; nothing changed.")
+    if (row["action_type"] == "attach_linkedin_person_to_lead"
+            and not lead_enrichment_writer_enabled()):
+        _finish_action(conn, action_id, CampaignActionState.FAILED,
+                       error="Lead identity update feature flag disabled")
+        return ActionExecution(CampaignActionState.FAILED,
+                               "Salesforce Lead updates are disabled; nothing changed.")
     if (row["action_type"] in {
             "create_person_lead", "create_organization_lead",
+            "create_linkedin_person_lead", "attach_linkedin_person_to_lead",
             "enrich_existing_lead", "repair_lead_audit"}
             and not lead_audit_writer_enabled()):
         _finish_action(conn, action_id, CampaignActionState.FAILED,
@@ -671,6 +681,10 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
         if row["action_type"] == "create_organization_lead":
             from . import salesforce_record_actions as records
             return records.confirm_organization_lead(conn, gateway, row)
+        if row["action_type"] in {
+                "create_linkedin_person_lead", "attach_linkedin_person_to_lead"}:
+            from . import salesforce_linkedin_actions as linkedin_actions
+            return linkedin_actions.confirm_linkedin_person(conn, gateway, row)
         if row["action_type"] == "create_opportunity":
             from . import salesforce_record_actions as records
             return records.confirm_opportunity(conn, gateway, row)

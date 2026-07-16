@@ -277,7 +277,9 @@ def create_app() -> App:
             outcome_kind = ("salesforce_lead_created"
                             if action_type_row is not None
                             and action_type_row["action_type"] in {
-                                "create_person_lead", "create_organization_lead"}
+                                "create_person_lead", "create_organization_lead",
+                                "create_linkedin_person_lead",
+                                "attach_linkedin_person_to_lead"}
                             else "campaign_added")
             added_rows = conn.execute(
                 """SELECT lead_id FROM crm_action_items

@@ -143,7 +143,8 @@ def test_linkedin_result_returns_typed_organization_match(
     person = finder.linkedin_person(
         "Birmingham Community Charter High School", "CA")
     assert person == finder.LinkedInPerson(
-        "Pat Person", "Technology Director", "https://www.linkedin.com/in/pat-person")
+        "Pat Person", "Technology Director", "https://www.linkedin.com/in/pat-person",
+        "Pat Person - Technology Director | LinkedIn | Birmingham Community Charter High School")
 
 
 def test_linkedin_timeout_returns_no_result_instead_of_hanging(

@@ -64,7 +64,7 @@ def test_explicit_linkedin_request_bypasses_model_and_returns_final_reply(
     monkeypatch.setattr(conversation, "Anthropic", _forbid_model)
     calls: list[tuple[str, str]] = []
 
-    def lookup(entity: str, state: str, _progress: object) -> str:
+    def lookup(entity: str, state: str, _progress: object, **_context: object) -> str:
         """Return one possible search-result match."""
         calls.append((entity, state))
         return "I found a possible LinkedIn contact:\n\n• *Name:* Pat Person"
@@ -72,7 +72,8 @@ def test_explicit_linkedin_request_bypasses_model_and_returns_final_reply(
     monkeypatch.setattr(conversation.tools, "find_person_linkedin", lookup)
     result = conversation.respond(
         "Sure yes look at linkedin", _award(tmp_path),
-        on_progress=lambda _message: None)
+        on_progress=lambda _message: None, requester_slack="UCHASE",
+        workspace="TWORK", channel="CGRANTS", thread_ts="1.1")
     assert calls == [("BIRMINGHAM COMMUNITY CHARTER HIGH SCHOOL", "CA")]
     assert result["reply"].startswith("I found a possible LinkedIn contact")
     assert result["pending_crm_actions"] == []
