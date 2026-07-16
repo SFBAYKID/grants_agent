@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any  # LLM tool arguments and JSON schemas are runtime-shaped.
@@ -674,6 +676,15 @@ def find_person_linkedin(
     )
 
 
+def _log_tool_failure(tool: str) -> None:
+    """Print the active exception to stderr so bot.log preserves the traceback.
+
+    The model only ever sees the exception's class name; without this the real
+    error text exists nowhere once the tool call returns."""
+    print(f"[tool-error] {tool}: unhandled exception follows", file=sys.stderr)
+    traceback.print_exc()
+
+
 def run_tool(
     name: str,
     args: dict[str, Any],
@@ -708,6 +719,7 @@ def run_tool(
                 p,
             ), None
         except Exception as exc:
+            _log_tool_failure("salesforce_lookup")
             return f"ERROR: Salesforce lookup failed ({type(exc).__name__}).", None
     if name == "salesforce_campaign_search":
         p("Searching Salesforce Campaigns")
@@ -774,11 +786,13 @@ def run_tool(
                 thread_ts=thread_ts,
             )
         except Exception as exc:
+            _log_tool_failure("search_leads")
             return f"ERROR: search failed ({type(exc).__name__}).", None
     if name == "find_contact":
         try:
             return find_contact(int(args.get("lead_id", 0)), p), None
         except Exception as exc:  # enrichment API hiccup -> honest tool error
+            _log_tool_failure("find_contact")
             return f"ERROR: enrichment failed ({type(exc).__name__}) — say so.", None
     if name == "find_person_linkedin":
         try:
@@ -786,5 +800,6 @@ def run_tool(
                 str(args.get("entity", "")), str(args.get("state", "")), p
             ), None
         except Exception as exc:
+            _log_tool_failure("find_person_linkedin")
             return f"ERROR: LinkedIn search failed ({type(exc).__name__}).", None
     return f"ERROR: unknown tool {name}", None
