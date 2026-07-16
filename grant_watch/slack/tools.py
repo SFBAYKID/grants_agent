@@ -21,6 +21,7 @@ import requests
 
 from .. import db
 from ..spreadsheets import GeneratedArtifact
+from .linkedin import find_person_linkedin
 from .search import export_search_snapshot, search_leads
 
 Progress = Callable[[str], None]
@@ -764,19 +765,6 @@ def salesforce_campaign_members_preview(
         return f"ERROR: Campaign member preview failed ({type(exc).__name__}): {str(exc)[:180]}"
     return _crm_action_result(action.action_id, action.nonce,
                               action.preview, action.expires_at)
-
-
-def find_person_linkedin(entity: str, state: str,
-                         on_progress: Progress | None = None) -> str:
-    """LinkedIn profile of the likely decision-maker (name/title/link, no email)."""
-    from ..enrich import finder
-
-    person = finder.linkedin_person(entity, state, on_progress=on_progress)
-    if person is None:
-        return "No clear LinkedIn profile found for their decision-maker."
-    role = f", {person['title']}" if person["title"] else ""
-    return (f"LinkedIn: {person['name']}{role} — {person['url']} "
-            f"(reach out via LinkedIn; no email verified)")
 
 
 def run_tool(name: str, args: dict[str, Any],

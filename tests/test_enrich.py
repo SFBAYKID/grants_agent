@@ -116,6 +116,47 @@ def test_search_result_must_bind_to_named_entity() -> None:
     ) is False
 
 
+def test_linkedin_result_must_name_requested_organization(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A LinkedIn profile for a same-name person at another school is rejected."""
+    monkeypatch.setattr(finder, "_search", lambda *_args, **_kwargs: [
+        {
+            "url": "https://www.linkedin.com/in/pat-person",
+            "title": "Pat Person - Principal | LinkedIn",
+            "description": "Principal at Birmingham City Schools in Alabama",
+        },
+    ])
+    assert finder.linkedin_person(
+        "Birmingham Community Charter High School", "CA") is None
+
+
+def test_linkedin_result_returns_typed_organization_match(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A matching search listing returns only its copied name, role, and URL."""
+    monkeypatch.setattr(finder, "_search", lambda *_args, **_kwargs: [
+        {
+            "url": "https://www.linkedin.com/in/pat-person",
+            "title": "Pat Person - Technology Director | LinkedIn",
+            "description": "Birmingham Community Charter High School",
+        },
+    ])
+    person = finder.linkedin_person(
+        "Birmingham Community Charter High School", "CA")
+    assert person == finder.LinkedInPerson(
+        "Pat Person", "Technology Director", "https://www.linkedin.com/in/pat-person")
+
+
+def test_linkedin_timeout_returns_no_result_instead_of_hanging(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bounded Firecrawl timeout becomes an honest non-result for the Slack turn."""
+    def timeout(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+        raise requests.Timeout("slow")
+
+    monkeypatch.setattr(finder, "_search", timeout)
+    assert finder.linkedin_person(
+        "Birmingham Community Charter High School", "CA") is None
+
+
 # ------------------------------------------------------------ enrich_lead_contact honesty
 def test_enrich_unreachable_records_nothing(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

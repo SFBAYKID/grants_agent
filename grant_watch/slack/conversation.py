@@ -170,6 +170,11 @@ record as a clickable Slack link using both source_record and source_url from FA
 Never reduce it to a generic website or bare domain. If the URL is a parent-award link
 or published dataset rather than a direct record, say that explicitly.
 
+APPLICATION TRUTH: an award recipient is not automatically proven to be the applicant
+or the person who submitted an application. Never infer an applicant, submitter,
+application portal, parent district, or submission method from an award record. If the
+source does not publish those fields, say they are not available and show the award link.
+
 LEAD OWNERSHIP: Grant has no claim/dibs workflow. Never say claimed, unclaimed, mine,
 locked, assigned, or "claim the lead," and never ask who owns a Grant lead. If a rep
 shows interest, check Salesforce. If a complete lookup finds a record, provide its
@@ -428,6 +433,38 @@ def _organization_preview_failure(tool_text: str) -> str:
             "did not complete. Nothing was changed.")
 
 
+def _is_application_provenance_question(text: str) -> bool:
+    """Recognize questions about who or how an application was submitted."""
+    normalized = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower()).split())
+    application_word = any(
+        word in normalized for word in ("applied", "applicant", "application", "submitted"))
+    return application_word and any(word in normalized for word in ("who", "how", "where"))
+
+
+def _award_application_reply(row: sqlite3.Row) -> str:
+    """Answer an award-application question using only persisted event evidence."""
+    entity = display_entity_name(str(row["entity_name"] or "the organization"))
+    source_url = str(row["current_event_source_url"] or "").strip()
+    source_label = _source_record_label(row)
+    source = (f"<{source_url}|{source_label}>" if source_url
+              else "the indexed award record")
+    return (
+        "The award record doesn’t show who prepared or submitted the application.\n\n"
+        f"• *Confirmed award recipient:* {entity}\n"
+        "• *Applicant or submitter:* not published in this record\n"
+        "• *Application portal or submission method:* not published in this record\n"
+        f"• *Source:* {source}\n\n"
+        "I won’t infer those details from the recipient name."
+    )
+
+
+def _is_linkedin_request(text: str) -> bool:
+    """Recognize an explicit request to search LinkedIn for the attached organization."""
+    normalized = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower()).split())
+    return "linkedin" in normalized and any(
+        word in normalized for word in ("look", "find", "check", "search", "try", "yes"))
+
+
 _STATE_CODES = (
     "AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS "
     "MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV "
@@ -523,6 +560,20 @@ def respond(user_text: str, row: sqlite3.Row | None,
     if _is_source_coverage_request(user_text, thread_context):
         return {"intent": "question", "files": [], "pending_crm_actions": [],
                 "reply": _source_coverage_reply(user_text)}
+    if (row is not None and _is_application_provenance_question(user_text)
+            and str(row["current_event_type"] or "").startswith("award_")):
+        return {"intent": "question", "files": [], "pending_crm_actions": [],
+                "reply": _award_application_reply(row)}
+    if row is not None and _is_linkedin_request(user_text):
+        say("Checking LinkedIn")
+        try:
+            reply = tools.find_person_linkedin(
+                str(row["entity_name"] or ""), str(row["state"] or ""), say)
+        except Exception:  # external research must always resolve the Slack spinner
+            reply = ("I couldn’t complete the LinkedIn search right now. "
+                     "I didn’t verify a contact, so I won’t guess.")
+        return {"intent": "question", "files": [], "pending_crm_actions": [],
+                "reply": reply}
     if (row is not None and _explicit_lead_creation_request(user_text, thread_context)
             and not _has_verified_person(int(row["id"]))):
         say("Preparing Salesforce Lead")
@@ -537,7 +588,7 @@ def respond(user_text: str, row: sqlite3.Row | None,
             "reply": ("I couldn’t verify a person or email, so I prepared one "
                       "organization-only Salesforce Lead. Review it below and confirm."),
         }
-    client = Anthropic()  # ANTHROPIC_API_KEY from env
+    client = Anthropic(timeout=40.0, max_retries=0)  # bounded Slack response time
     # Keep a wider window so the confirmed filters (STEP 1) survive a few interleaved
     # messages before the rep replies "yes, top 5" (architectural-critic H1).
     context = ("\n\nRecent thread:\n" + "\n".join(thread_context[-10:])

@@ -69,6 +69,15 @@ class ContactCandidate:
     field_evidence: dict[str, bool] | None = None
 
 
+@dataclass(frozen=True)
+class LinkedInPerson:
+    """One possible person copied from a LinkedIn search-result listing."""
+
+    name: str
+    title: str
+    url: str
+
+
 def verify_on_page(page_text: str, email: str, name: str) -> bool:
     """THE anti-hallucination gate (pure, unit-tested): the email must appear
     VERBATIM in the fetched page, and the first two name tokens must appear too.
@@ -173,7 +182,7 @@ def _scrape(url: str) -> str:
 
 def _extract(page_text: str, entity: str, source_url: str) -> ContactCandidate | None:
     """Claude reads ONE page; code verifies every claim against the same page."""
-    client = Anthropic()
+    client = Anthropic(timeout=40.0, max_retries=0)
     prompt = (
         f"Below is a page from the website of (or about) \"{entity}\". Find the best "
         f"contact for technology / security-funding decisions. Priority titles: "
@@ -314,8 +323,23 @@ def find_contact(entity: str, state: str, max_pages: int = 6,
     return contacts[0] if contacts else None
 
 
+def _linkedin_result_matches(entity: str, result: dict[str, Any]) -> bool:
+    """Require the LinkedIn search listing to name the requested organization."""
+    haystack = " ".join(str(result.get(key) or "")
+                        for key in ("title", "description")).lower()
+    normalized_entity = re.sub(r"[^a-z0-9]+", " ", entity.lower()).strip()
+    normalized_haystack = re.sub(r"[^a-z0-9]+", " ", haystack).strip()
+    if normalized_entity and normalized_entity in normalized_haystack:
+        return True
+    tokens = {
+        token for token in normalized_entity.split()
+        if token not in _GENERIC_ENTITY_WORDS and len(token) > 2
+    }
+    return len(tokens) >= 2 and tokens.issubset(set(normalized_haystack.split()))
+
+
 def linkedin_person(entity: str, state: str,
-                    on_progress: Progress | None = None) -> dict | None:
+                    on_progress: Progress | None = None) -> LinkedInPerson | None:
     """Find the likely decision-maker's LinkedIn profile (name, title, url). No email
     — LinkedIn is login-walled — so this returns a PERSON + profile link to reach out
     through or verify, never a fabricated address. Parsed from the search result, which
@@ -329,8 +353,8 @@ def linkedin_person(entity: str, state: str,
     except (requests.RequestException, RuntimeError):
         return None
     for r in results:
-        url = r.get("url") or ""
-        if "linkedin.com/in/" not in url:
+        url = str(r.get("url") or "")
+        if "linkedin.com/in/" not in url or not _linkedin_result_matches(entity, r):
             continue
         title = (r.get("title") or "").split("|")[0].strip()  # "Name - Title - Org"
         parts = [p.strip() for p in title.split(" - ")]
@@ -338,5 +362,5 @@ def linkedin_person(entity: str, state: str,
         role = parts[1] if len(parts) > 1 else ""
         if name:
             say(f"Found {name} on LinkedIn")
-            return {"name": name, "title": role, "url": url}
+            return LinkedInPerson(name, role, str(url))
     return None
