@@ -17,3 +17,7 @@ model_reasoning_effort = "high"
 # Reuse the repository's existing Claude instructions until/unless an
 # AGENTS.md file is added. AGENTS.md always takes precedence when present.
 project_doc_fallback_filenames = ["CLAUDE.md"]
+
+[sandbox_workspace_write]
+network_access = true
+

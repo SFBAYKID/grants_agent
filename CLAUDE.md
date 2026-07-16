@@ -146,12 +146,32 @@ affect Chase's other projects.
   reviewed-source, and recent-batch questions return validated read-only evidence without Anthropic,
   web search, raw payloads, or paid Firecrawl execution. Live configured-channel interaction is
   `needs-testing`.
+- `verified` live on 2026-07-16: the opt-in read-only core verifier matched Birmingham Community
+  Charter High School's exact $500,000 USAspending award and Vic Chalabian's IT Systems Manager role
+  within one official staff-directory record. This does not verify a personal email, LinkedIn profile
+  ownership, Salesforce state, or outreach. Run it only with the documented double opt-in.
+- `verified` real-model acceptance on 2026-07-16: 70 realistic human scenarios spanning 15 documented
+  question families passed with external tools replaced by write-free canned outcomes. Server-side
+  gates independently prevent pre-confirmation or materially changed searches, date-filter loss,
+  pronoun-only contextual tool calls, outreach refusals becoming approvals, accidental
+  bad-lead/snooze actions, false outreach success, repeated paid/slow tool execution, and typed
+  confirmation from silently executing Salesforce writes.
+- `verified` offline Slack ingress acceptance: human-shaped mention and plain threaded follow-up
+  envelopes traverse Grant's registered Bolt handlers, produce correct source answers, persist
+  delivered receipts, deduplicate redelivery, and reject bot self-mentions. Remote Socket Mode receipt
+  from a genuine Slack user remains separate live evidence.
 - `verified` safeguards in code and tests: seed/live reconciliation, freshness and program-fit
   ranking, immutable source observations, incomplete-run tracking, Slack delivery reconciliation,
   contact evidence gates, idempotent Persequor retry state, read-only Salesforce lookup, and
-  create-only Campaign approval state are implemented.
+  create-only Campaign approval state are implemented. Organization-only Salesforce Leads freeze the
+  requesting rep's exact active-user `OwnerId` in the preview and fail closed instead of falling back
+  to the integration user.
+- `verified` live in the `monarchdev` Salesforce sandbox on 2026-07-16: one synthetic
+  organization-only Lead was created and read back with Chase's exact active `OwnerId` and roster
+  email, blank person/contact fields, exact organization fields, and a unique provenance marker. The
+  record remains in the sandbox; this does not verify Campaign or production writes.
 - `needs-testing`: live contact enrichment, a positive OregonBuys/WEBS security row, Persequor live
-  round trips, Salesforce sandbox Campaign creation, production scheduling, Postgres parity, and
+  round trips, Salesforce sandbox Campaign creation/membership, production scheduling, Postgres parity, and
   tenant-scoped deployment remain unverified. Salesforce Campaign writes stay disabled until explicit
   sandbox approval.
 - `assumed` next sequence: characterize high-value catalog candidates, implement them one source per

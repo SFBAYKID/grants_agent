@@ -244,6 +244,12 @@ or *"No record found — this is net-new."* This turns a raw lead into an action
   CampaignMemberStatus, organization-only Lead, and CampaignMember records. It cannot update/delete
   existing CRM records. Every execution requires an immutable Slack preview, one-time nonce, same
   requester/channel, short expiry, and a final button confirmation. The feature flag defaults off.
+  An organization-only Lead is owned by the requesting rep: Grant maps Slack ID to the approved roster
+  email, requires exactly one active Salesforce User with that email, and freezes its `OwnerId` in the
+  preview. Missing or ambiguous ownership fails before an action is stored; the integration user is
+  never an implicit fallback owner.
+  Every create request also requires the OAuth instance host to equal the configured HTTPS writer
+  host and Salesforce's live Organization ID/sandbox flag to match explicit environment allowlists.
 - **Sandbox for all development.** `test.salesforce.com`, sandbox `monarchdev`
   (`...--monarchdev.sandbox.my.salesforce.com`). Production Salesforce is never touched during dev.
 - **Production uses SEPARATE credentials from sandbox** — different org, different Connected App.
@@ -256,7 +262,8 @@ or *"No record found — this is net-new."* This turns a raw lead into an action
   determine confidence. Ambiguous matches remain possible matches and are not used as priority proof.
 - Env keys: `SALESFORCE_LOGIN_URL`, `SALESFORCE_SANDBOX_NAME`, `SALESFORCE_MY_DOMAIN_URL`,
   `SALESFORCE_CLIENT_ID`, `SALESFORCE_CLIENT_SECRET` plus separate `SALESFORCE_WRITE_*` values for
-  the disabled Campaign gateway (see `.env.example`).
+  the disabled Campaign gateway, including `SALESFORCE_WRITE_ORG_ID` and
+  `SALESFORCE_WRITE_EXPECT_SANDBOX` write-scope attestations (see `.env.example`).
 
 ---
 
@@ -306,6 +313,20 @@ names only.
 - **Recorded fixtures** for source parsers (capture one real response per source, commit the fixture,
   test the parser against it) so we can test without hammering live government servers.
 - **Live smoke tests** gated behind an explicit flag/env — run manually, never in the default suite.
+- **Permanent core live verification:** `grant_watch.live_verification` checks one exact Birmingham
+  USAspending award and one same-record role contact on the awardee's exact allowlisted official
+  directory. It requires both `GRANT_LIVE_VERIFICATION=1` and `--execute-live`, refuses CI, persists
+  no page content, and performs no Slack, CRM, LinkedIn, database, email, or outreach action.
+- **Real-model human acceptance:** `tests/test_human_question_acceptance.py` covers the documented
+  conversational surface with realistic paraphrases and multi-turn follow-ups. It requires
+  `GRANT_LLM_ACCEPTANCE=1`; every tool result is canned, no external action is possible, and the
+  server still enforces search confirmation and action-intent gates independently of model wording.
+  Deterministic search-plan parsing lives separately in `grant_watch/slack/search_planning.py` so
+  explicit date meanings and material filter corrections survive incomplete model tool arguments.
+- **Slack human-envelope acceptance:** `tests/test_slack_human_event_path.py` drives human-shaped
+  `app_mention` and threaded `message` envelopes through the actual registered Bolt callbacks. It
+  verifies channel checks, mention stripping, conversation-thread persistence, progress replacement,
+  reply delivery, durable receipt deduplication, and rejection of bot-authored self-mentions.
 - **`--dry-run`** exercised in tests for anything that posts to Slack or drafts/sends email.
 - Tests never fabricate results; a skipped/blocked test is reported as skipped, not passed.
 

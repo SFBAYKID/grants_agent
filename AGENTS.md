@@ -56,6 +56,16 @@ python -m grant_watch.incorporated_place_universe
 Also check module/function documentation and annotations when adding code, review file sizes, and run
 `git diff --check`. Report each result as `verified`, `assumed`, or `needs-testing`.
 
+The permanent core live check is intentionally outside the default health gate. Run it manually with
+`GRANT_LIVE_VERIFICATION=1 python -m grant_watch.live_verification --execute-live`. It is read-only,
+rejects CI, and is restricted to exact allowlisted official award and awardee-directory hosts. Never
+weaken those gates or turn this check into a Slack, Salesforce, LinkedIn, database, or outreach write.
+
+The real-model human-question acceptance matrix is also opt-in: run
+`GRANT_LLM_ACCEPTANCE=1 python -m pytest tests/test_human_question_acceptance.py -q`. Its tool layer is
+canned and write-free; it tests language understanding, tool selection, confirmation, truth, and
+safety without treating model wording as proof that an external action occurred.
+
 ## Source-discovery discipline
 
 `data/source_catalog/sources.csv` is the canonical discovery catalog. Generated access and coverage
@@ -101,6 +111,8 @@ claims. Never store a credential value in the catalog; record only its environme
   honor dry-run. The Socket Mode listener has no dry-run mode; verify it with offline tests unless an
   explicit real-channel interaction is intended.
 - Salesforce reads and create-only Campaign actions use separate credentials. Campaign writes remain
-  disabled until explicitly approved and sandbox-verified.
+  disabled until explicitly approved and sandbox-verified. Organization-only Lead creation must
+  resolve exactly one active Salesforce owner from the requesting Slack rep's roster email; never
+  default ownership to the integration user or another rep.
 - A contact remains `not_found` when public evidence is absent. Never construct or guess an email.
 - The production droplet is multi-tenant. Never use admin access, another tenant, `sudo`, or root.
