@@ -174,6 +174,19 @@ def _configured_host() -> str:
     return (urlparse(raw).hostname or "").lower()
 
 
+def _research_note_title(note_body: str, action_id: str) -> str:
+    """Give a Salesforce Note a useful subject while retaining its unique audit marker."""
+    first = next((line.strip() for line in note_body.splitlines() if line.strip()), "Research")
+    for prefix in ("Grant research summary for ", "Grant contact research for "):
+        if first.startswith(prefix):
+            first = first.removeprefix(prefix)
+            break
+    suffix = f" — {action_id}"
+    available = 255 - len("Grant research — ") - len(suffix)
+    subject = first[:max(1, available)].rstrip(" —")
+    return f"Grant research — {subject}{suffix}"
+
+
 def validate_record_id(record_id: str, expected_sobject: str) -> str:
     """Validate a 15/18-character Salesforce ID and its object prefix."""
     clean = record_id.strip()
@@ -444,11 +457,12 @@ class SalesforceCampaignGateway:
         marker = action_id.strip()
         if not re.fullmatch(r"[0-9a-f-]{36}", marker):
             raise ValueError("Grant audit action ID is invalid")
-        title = _soql_literal(f"Grant research — {marker}")
+        title_marker = _soql_literal(marker)
         links = self._get("query", {"q": (
             "SELECT Id,ContentDocumentId,LinkedEntityId,ContentDocument.Title "
             "FROM ContentDocumentLink "
-            f"WHERE LinkedEntityId='{lead_id}' AND ContentDocument.Title='{title}' LIMIT 2"
+            f"WHERE LinkedEntityId='{lead_id}' AND "
+            f"ContentDocument.Title LIKE '%{title_marker}%' LIMIT 2"
         )}).get("records") or []
         if len(links) > 1:
             raise ValueError("multiple Salesforce research Notes share one action marker")
@@ -472,11 +486,11 @@ class SalesforceCampaignGateway:
             task_description: str, activity_date: str) -> list[dict[str, object]]:
         """Build the fixed Enhanced Note/link/Task subrequests for one Lead reference."""
         marker = action_id.strip()
-        title = f"Grant research — {marker}"
         clean_note = note_body.strip()
         clean_task = task_description.strip()
         if not re.fullmatch(r"[0-9a-f-]{36}", marker):
             raise ValueError("Grant audit action ID is invalid")
+        title = _research_note_title(clean_note, marker)
         if len(title) > 255 or not clean_note or len(clean_note) > 32_000:
             raise ValueError("Salesforce research Note is empty or too long")
         if not clean_task or len(clean_task) > 32_000:
@@ -734,7 +748,7 @@ class SalesforceCampaignGateway:
             {"fields": "Id,WhoId,Subject,Status,Description"})
         decoded = self._content_note_text(note.get("Content"))
         return (
-            str(note.get("Title") or "") == f"Grant research — {action_id}"
+            str(note.get("Title") or "") == _research_note_title(note_body, action_id)
             and decoded == note_body.strip()
             and str(link.get("ContentDocumentId") or "") == note_id
             and str(link.get("LinkedEntityId") or "") == lead_id

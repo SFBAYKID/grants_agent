@@ -21,7 +21,11 @@ import requests
 
 from .. import db
 from ..spreadsheets import GeneratedArtifact
-from .linkedin import find_person_linkedin, salesforce_linkedin_person_preview
+from .linkedin import (
+    find_person_linkedin,
+    salesforce_linkedin_person_preview,  # noqa: F401 - conversation uses tool facade.
+)
+from .salesforce_org import salesforce_organization_lead_enrichment_preview
 from .search import export_search_snapshot, search_leads
 
 Progress = Callable[[str], None]
@@ -290,6 +294,17 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "salesforce_organization_lead_enrichment_preview",
+        "description": "Prepare, but do not execute, a fill-blank-only preview for "
+                       "one exact existing organization Lead. It uses verified official "
+                       "organization and funding data and does not require a contact or email.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"grant_lead_id": {"type": "integer"}},
+            "required": ["grant_lead_id"],
+        },
+    },
+    {
         "name": "salesforce_lead_audit_preview",
         "description": "Prepare, but do not execute, a repair preview that adds the "
                        "missing visible Salesforce Note and administrative Activity "
@@ -375,7 +390,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                        "Returns a PERSON to reach via LinkedIn, never an invented email.",
         "input_schema": {
             "type": "object",
-            "properties": {"entity": {"type": "string"}, "state": {"type": "string"}},
+            "properties": {"entity": {"type": "string"}, "state": {"type": "string"},
+                           "person_name": {"type": "string"}},
             "required": ["entity", "state"],
         },
     },
@@ -804,6 +820,11 @@ def run_tool(name: str, args: dict[str, Any],
         return salesforce_lead_enrichment_preview(
             int(args.get("contact_id", 0)), str(args.get("lead_link", "")),
             requester_slack, workspace, channel, thread_ts), None
+    if name == "salesforce_organization_lead_enrichment_preview":
+        p("Checking verified organization details")
+        return salesforce_organization_lead_enrichment_preview(
+            int(args.get("grant_lead_id", 0)), requester_slack, workspace,
+            channel, thread_ts), None
     if name == "salesforce_lead_audit_preview":
         p("Preparing Salesforce audit trail")
         return salesforce_lead_audit_preview(
@@ -930,7 +951,8 @@ def run_tool(name: str, args: dict[str, Any],
     if name == "find_person_linkedin":
         try:
             return find_person_linkedin(str(args.get("entity", "")),
-                                        str(args.get("state", "")), p), None
+                                        str(args.get("state", "")), p,
+                                        person_name=str(args.get("person_name", ""))), None
         except Exception as exc:
             return f"ERROR: LinkedIn search failed ({type(exc).__name__}).", None
     return f"ERROR: unknown tool {name}", None

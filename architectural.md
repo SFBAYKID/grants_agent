@@ -134,6 +134,10 @@ or *"No record found — this is net-new."* This turns a raw lead into an action
   administrative Activity. There is no delete/merge/convert action. Every execution requires an
   immutable Slack preview, one-time nonce, same requester/channel, short expiry, and a final button
   confirmation. Each write category has a default-off feature flag.
+- **Organization details do not depend on a person.** One exact existing Lead may receive a
+  fill-blank-only preview from verified official-site and funding evidence even when no contact or
+  email exists. The preview fails closed unless Salesforce returns one exact organization Lead; it
+  cannot alter identity, ownership, status, routing, or any second record.
 - **LinkedIn-only people remain a separate evidence class.** A search-result identity is persisted
   only against the exact tenant, channel, thread, user and Grant lead for 30 minutes; it never becomes
   a verified-email contact. A follow-up such as "add this guy" can select that exact candidate and

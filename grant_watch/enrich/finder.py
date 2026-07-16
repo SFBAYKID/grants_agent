@@ -348,6 +348,13 @@ def _linkedin_result_matches(entity: str, result: dict[str, Any]) -> bool:
     return len(tokens) >= 2 and tokens.issubset(set(normalized_haystack.split()))
 
 
+def _linkedin_name_matches(expected: str, actual: str) -> bool:
+    """Require the named person's tokens in the result; nickname extras are allowed."""
+    expected_tokens = re.sub(r"[^a-z0-9]+", " ", expected.lower()).split()
+    actual_tokens = set(re.sub(r"[^a-z0-9]+", " ", actual.lower()).split())
+    return bool(expected_tokens) and set(expected_tokens).issubset(actual_tokens)
+
+
 def find_official_site(entity: str, state: str,
                        on_progress: Progress | None = None) -> OfficialSite | None:
     """Find one bounded, organization-matched official site for CRM enrichment."""
@@ -373,7 +380,7 @@ def find_official_site(entity: str, state: str,
     return None
 
 
-def linkedin_person(entity: str, state: str,
+def linkedin_person(entity: str, state: str, person_name: str = "",
                     on_progress: Progress | None = None) -> LinkedInPerson | None:
     """Find the likely decision-maker's LinkedIn profile (name, title, url). No email
     — LinkedIn is login-walled — so this returns a PERSON + profile link to reach out
@@ -381,7 +388,7 @@ def linkedin_person(entity: str, state: str,
     for LinkedIn reads like 'Name - Title - Org | LinkedIn'."""
     say = on_progress or _NOOP
     say("Checking LinkedIn")
-    query = (f"site:linkedin.com/in {entity} {state} "
+    query = (f"site:linkedin.com/in {person_name} {entity} {state} "
              f"technology director OR superintendent OR principal")
     try:
         results = _search(query, limit=5)
@@ -395,6 +402,9 @@ def linkedin_person(entity: str, state: str,
         parts = [p.strip() for p in title.split(" - ")]
         name = parts[0] if parts else ""
         role = parts[1] if len(parts) > 1 else ""
+        if person_name and not _linkedin_name_matches(person_name, name):
+            continue
+        role = re.sub(r"\s+at\s+\.\.\.$", "", role, flags=re.IGNORECASE).strip()
         if name:
             say(f"Found {name} on LinkedIn")
             evidence = " | ".join(filter(None, (

@@ -19,6 +19,7 @@ import requests
 
 from .. import db
 from ..models import VerificationStatus
+from ..presentation import display_entity_name
 from . import salesforce
 from . import salesforce_campaigns as workflow
 from .salesforce_campaign_gateway import (
@@ -29,6 +30,42 @@ from .salesforce_campaign_gateway import (
     validate_record_id,
 )
 from .organization_profile import OrganizationProfile, fetch_profile
+
+
+def _verified_industry(entity_type: object) -> str:
+    """Map only an explicit reviewed K-12 entity classification to Salesforce."""
+    normalized = " ".join(
+        str(entity_type or "").casefold().replace("-", " ").replace("_", " ").split())
+    return "K-12 Schools" if normalized in {
+        "school", "school district", "k 12 school", "k 12 schools",
+    } else ""
+
+
+def _profile_address(profile: OrganizationProfile) -> str:
+    """Format one verified organization address for salesperson-readable notes."""
+    return ", ".join(filter(None, (
+        profile.street, profile.city, profile.state, profile.postal_code,
+        profile.country,
+    )))
+
+
+def _organization_research_summary(
+        company: str, funding_url: str, profile: OrganizationProfile,
+        contact_status: str) -> str:
+    """Return useful salesperson-facing facts without internal identifiers."""
+    lines = [f"Grant research summary for {company}", "", f"Funding record: {funding_url}"]
+    for label, value in (
+        ("Official website", profile.website),
+        ("Main phone", profile.main_phone),
+        ("Address", _profile_address(profile)),
+    ):
+        if value:
+            lines.append(f"{label}: {value}")
+    lines.extend((
+        f"Contact status: {contact_status}",
+        "No customer outreach was performed.",
+    ))
+    return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -48,29 +85,31 @@ class PersonLeadDraft:
     enrollment: int | None
     industry: str
 
-    def payload(self, action_id: str, requester: str) -> dict[str, object]:
+    def payload(self, _action_id: str, _requester: str) -> dict[str, object]:
         """Return exact Salesforce fields; split only an unambiguous two-token name."""
         name_parts = self.person_name.split()
         simple_name = (len(name_parts) == 2 and all(
             re.fullmatch(r"[A-Za-z][A-Za-z'’-]*", part) for part in name_parts))
-        research = [
-            f"Grant research source: {self.organization.source_url or self.source_url}",
-            f"Verified contact source: {self.source_url}",
-        ]
+        research = [f"Grant contact research for {self.person_name} at {self.company}",
+                    "", f"Verified contact source: {self.source_url}"]
+        if self.organization.website:
+            research.append(f"Official website: {self.organization.website}")
         if self.organization.main_phone:
             research.append(
                 f"Official organization main phone: {self.organization.main_phone}")
         if self.enrollment is not None:
             research.append(f"NCES district enrollment: {self.enrollment}")
+        address = _profile_address(self.organization)
+        if address:
+            research.append(f"Address: {address}")
+        research.extend((
+            "No customer outreach was performed.",
+        ))
         result: dict[str, object] = {
             "Company": self.company,
             "LastName": name_parts[1] if simple_name else self.person_name,
             "Email": self.email, "Status": "New", "LeadSource": "Other",
-            "Description": (
-                f"Created by Grant from verified public contact {self.contact_id} for "
-                f"Grant lead {self.grant_lead_id}. Evidence: {self.source_url}. "
-                f"Action {action_id}. Requested by Slack user {requester}.\n"
-                + "\n".join(research)),
+            "Description": "\n".join(research),
         }
         if simple_name:
             result["FirstName"] = name_parts[0]
@@ -89,7 +128,6 @@ class PersonLeadDraft:
             ("State", self.organization.state or self.state),
             ("PostalCode", self.organization.postal_code),
             ("Country", self.organization.country),
-            ("LinkedIn__c", self.organization.linkedin_url),
             ("Industry", self.industry),
         ):
             if value:
@@ -111,21 +149,19 @@ class OrganizationLeadDraft:
     enrollment: int | None
     industry: str
 
-    def payload(self, action_id: str, requester: str) -> dict[str, object]:
+    def payload(self, _action_id: str, _requester: str) -> dict[str, object]:
         """Return organization facts only; Salesforce requires Company and LastName."""
         result: dict[str, object] = {
             "Company": self.company,
             "LastName": self.company,
             "Status": "New",
             "LeadSource": "Other",
-            "Description": (
-                "Created by Grant as an organization-only Lead. No individual contact "
-                "or email was verified. Salesforce requires LastName, so it contains "
-                "the organization name and does not represent a person; FirstName, "
-                "Email, and Title are blank. "
-                f"Grant lead {self.grant_lead_id}. Funding evidence: {self.source_url}. "
-                f"Action {action_id}. Requested by Slack user {requester}."
-            ),
+            "Description": _organization_research_summary(
+                self.company, self.source_url, self.organization,
+                "No individual contact or verified email was found. This is an "
+                "organization-only Lead; the Salesforce-required LastName contains "
+                "the organization name and does not represent a person. Created by "
+                "Grant as an organization-only Lead."),
         }
         for key, value in (
             ("Phone", self.organization.main_phone),
@@ -194,7 +230,18 @@ def duplicate_organization(company: str, state: str) -> list[salesforce.SFMatch]
 def _audit_task_description(action: str, verb: str, fields: list[str],
                             original_time: str = "") -> str:
     """Describe one CRM API action honestly without implying customer outreach."""
-    field_text = ", ".join(sorted(fields)) or "audit records only"
+    labels = {
+        "Company": "organization", "FirstName": "first name",
+        "LastName": "last name", "Email": "email", "Title": "title",
+        "Phone": "phone", "Website": "website", "Street": "street",
+        "City": "city", "State": "state", "PostalCode": "postal code",
+        "Country": "country", "Industry": "industry",
+        "Description": "research notes", "LinkedIn__c": "LinkedIn profile",
+        "Number_of_Students__c": "student enrollment", "Status": "status",
+        "LeadSource": "lead source",
+    }
+    field_text = ", ".join(sorted(labels.get(field, field) for field in fields))
+    field_text = field_text or "audit records only"
     timing = f" Original Lead update completed at {original_time}." if original_time else ""
     return (
         f"Grant {verb} these Salesforce Lead fields: {field_text}.{timing} "
@@ -240,12 +287,10 @@ def prepare_person_lead_creation(
         organization = OrganizationProfile(
             website=(f"https://{str(row['official_domain']).strip()}/"
                      if row["official_domain"] else ""), source_url=source)
-    entity_text = f"{row['entity_type'] or ''} {company}".lower()
-    industry = "K-12 Schools" if any(
-        word in entity_text for word in ("school", "district", "k-12")) else ""
+    industry = _verified_industry(row["entity_type"])
     enrollment = int(row["enrollment"]) if row["enrollment"] is not None else None
     draft = PersonLeadDraft(
-        contact_id, int(row["lead_id"]), name, company, email, state,
+        contact_id, int(row["lead_id"]), name, display_entity_name(company), email, state,
         str(row["title"] or "").strip() if evidence.get("title") else "",
         str(row["phone"] or "").strip() if evidence.get("phone") else "", source,
         organization, enrollment, industry)
@@ -260,7 +305,7 @@ def prepare_person_lead_creation(
         plans=[plan], action_id=action_id)
     optional = "".join((f"\n• Title: {draft.title}" if draft.title else "",
                         f"\n• Phone: {draft.phone}" if draft.phone else ""))
-    preview = (f"Create this Salesforce Lead?\n• Name: {name}\n• Organization: {company}"
+    preview = (f"Create this Salesforce Lead?\n• Name: {name}\n• Organization: {draft.company}"
                f"\n• Email: {email}{optional}\n• Source: {source}"
                "\nNo Campaign membership will be created.")
     enriched = [
@@ -270,7 +315,6 @@ def prepare_person_lead_creation(
                                             organization.postal_code)))),
         ("Industry", industry),
         ("Students", f"{enrollment:,}" if enrollment is not None else ""),
-        ("LinkedIn", organization.linkedin_url),
     ]
     preview += "".join(f"\n• {label}: {value}" for label, value in enriched if value)
     preview += "\n• Add a visible Salesforce Note with Grant’s verified research sources"
@@ -327,12 +371,11 @@ def prepare_organization_lead_creation(
             except (KeyError, ValueError, RuntimeError, requests.RequestException):
                 organization = OrganizationProfile(
                     website=f"https://{official.domain}/", source_url=official.url)
-    entity_text = f"{row['entity_type'] or ''} {company}".lower()
-    industry = "K-12 Schools" if any(
-        word in entity_text for word in ("school", "district", "k-12")) else ""
+    industry = _verified_industry(row["entity_type"])
     enrollment = int(row["enrollment"]) if row["enrollment"] is not None else None
     draft = OrganizationLeadDraft(
-        grant_lead_id, company, state, source_url, organization, enrollment, industry)
+        grant_lead_id, display_entity_name(company), state, source_url,
+        organization, enrollment, industry)
     action_id = str(uuid.uuid4())
     payload = draft.payload(action_id, requester)
     plan = workflow.MemberPlan(
@@ -345,7 +388,7 @@ def prepare_organization_lead_creation(
          "source_url": source_url}, plans=[plan], action_id=action_id)
     lines = [
         "Create this organization-only Salesforce Lead?",
-        f"• Organization: {company}",
+        f"• Organization: {draft.company}",
         "• Contact: no verified person or email",
         "• Salesforce Lead name: uses the organization name because Salesforce requires it",
         f"• Funding source: {source_url}",
@@ -353,7 +396,8 @@ def prepare_organization_lead_creation(
     for label, key in (
         ("Website", "Website"), ("Phone", "Phone"), ("Street", "Street"),
         ("City", "City"), ("State", "State"), ("Postal Code", "PostalCode"),
-        ("Industry", "Industry"), ("Students", "Number_of_Students__c"),
+        ("Country", "Country"), ("Industry", "Industry"),
+        ("Students", "Number_of_Students__c"),
     ):
         if payload.get(key):
             lines.append(f"• {label}: {payload[key]}")
@@ -418,8 +462,9 @@ def prepare_lead_enrichment(
     _sobject, salesforce_id = parse_record_link(lead_link, {"Lead"})
     row = conn.execute(
         """SELECT c.*,l.entity_name,l.state AS lead_state,l.entity_type,l.enrollment,
-                  l.canonical_entity_key
-             FROM contacts c JOIN leads l ON l.id=c.lead_id WHERE c.id=?""",
+                  l.canonical_entity_key,e.source_url AS funding_source_url
+             FROM contacts c JOIN leads l ON l.id=c.lead_id
+             LEFT JOIN funding_events e ON e.id=l.current_event_id WHERE c.id=?""",
         (contact_id,)).fetchone()
     if row is None or str(row["contact_status"] or "") != "verified":
         raise ValueError("contact is not verified")
@@ -437,25 +482,24 @@ def prepare_lead_enrichment(
         organization = OrganizationProfile(
             website=f"https://{str(row['official_domain']).strip()}/",
             source_url=str(row["source_url"]))
-    entity_text = f"{row['entity_type'] or ''} {company}".lower()
-    industry = "K-12 Schools" if any(
-        word in entity_text for word in ("school", "district", "k-12")) else ""
+    industry = _verified_industry(row["entity_type"])
     desired: dict[str, object] = {
         "Website": organization.website, "Phone": organization.main_phone,
         "Street": organization.street, "City": organization.city,
         "State": organization.state or str(row["lead_state"] or ""),
         "PostalCode": organization.postal_code, "Country": organization.country,
-        "Industry": industry, "LinkedIn__c": organization.linkedin_url,
+        "Industry": industry,
     }
     if row["enrollment"] is not None:
         desired["Number_of_Students__c"] = int(row["enrollment"])
     delta = {key: value for key, value in desired.items()
              if value not in (None, "") and snapshot.values.get(key) in (None, "")}
     action_id = str(uuid.uuid4())
-    research = (
-        f"Grant research — action {action_id}\n"
-        f"Official organization source: {organization.source_url}\n"
-        f"Verified contact source: {row['source_url']}")
+    research = _organization_research_summary(
+        display_entity_name(company),
+        str(row["funding_source_url"] or row["source_url"]), organization,
+        f"Verified contact: {row['name']} ({row['title'] or 'title not published'}), "
+        f"{row['email']}. Source: {row['source_url']}")
     existing_description = str(snapshot.values.get("Description") or "").strip()
     delta["Description"] = f"{existing_description}\n\n{research}".strip()
     if set(delta) == {"Description"} and research in existing_description:
@@ -681,12 +725,16 @@ def confirm_lead_enrichment(
     if (before.company.casefold() != str(payload["company"]).casefold()
             or before.email.casefold() != str(payload["email"]).casefold()):
         raise ValueError("Salesforce Lead identity changed after preview")
+    identity_state = str(payload.get("identity_state") or "").upper()
+    if identity_state and str(before.values.get("State") or "").upper() != identity_state:
+        raise ValueError("Salesforce Lead state changed after preview")
     if before.system_modstamp != str(payload["system_modstamp"]):
         raise ValueError("Salesforce Lead changed after preview")
     workflow._mark_external_write_started(conn, str(row["id"]))
     action_id = str(row["id"])
-    note_body = str(delta.get("Description") or "")
-    task_body = _audit_task_description(action_id, "updated", list(delta))
+    note_body = str(payload.get("note_body") or delta.get("Description") or "")
+    task_body = str(payload.get("task_description")
+                    or _audit_task_description(action_id, "updated", list(delta)))
     audit = gateway.enrich_lead_with_audit_bundle(
         lead_id, delta, str(payload["system_modstamp"]), action_id,
         note_body, task_body, _activity_date())

@@ -27,11 +27,13 @@ def _crm_action_result(action_id: str, nonce: str, preview: str,
 
 def find_person_linkedin(
         entity: str, state: str, on_progress: Progress | None = None, *,
+        person_name: str = "",
         conn: sqlite3.Connection | None = None, lead_id: int = 0,
         workspace: str = "", channel: str = "", thread_ts: str = "",
         requested_by: str = "") -> str:
     """Return and optionally persist one context-bound LinkedIn result without email."""
-    person = finder.linkedin_person(entity, state, on_progress=on_progress)
+    person = finder.linkedin_person(
+        entity, state, person_name=person_name, on_progress=on_progress)
     if person is None:
         return ("I couldn’t find a clear LinkedIn match tied to this organization. "
                 "I won’t guess at a person.")

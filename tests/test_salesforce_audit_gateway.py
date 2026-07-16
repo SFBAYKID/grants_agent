@@ -229,7 +229,7 @@ def test_audit_readback_compares_note_link_task_and_truthful_copy(
 
     def fake_get(path: str, _params: dict[str, str]) -> dict[str, object]:
         if path.startswith("sobjects/ContentNote/"):
-            return {"Title": f"Grant research — {ACTION_ID}",
+            return {"Title": gateway_mod._research_note_title(note_body, ACTION_ID),
                     "Content": base64.b64encode(note_body.encode()).decode()}
         if path.startswith("sobjects/ContentDocumentLink/"):
             return {"ContentDocumentId": "069000000000001", "LinkedEntityId": LEAD_ID,
@@ -255,7 +255,7 @@ def test_audit_readback_follows_salesforce_content_note_url(
 
     def fake_get(path: str, _params: dict[str, str]) -> dict[str, object]:
         if path.startswith("sobjects/ContentNote/"):
-            return {"Title": f"Grant research — {ACTION_ID}",
+            return {"Title": gateway_mod._research_note_title(note_body, ACTION_ID),
                     "Content": "/services/data/v60.0/sobjects/ContentNote/069x/Content"}
         if path.startswith("sobjects/ContentDocumentLink/"):
             return {"ContentDocumentId": "069000000000001", "LinkedEntityId": LEAD_ID,

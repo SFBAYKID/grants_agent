@@ -237,6 +237,18 @@ def prepare_lead_enrichment(
         conn, gateway, workspace, channel, thread_ts, requester, contact_id, lead_link)
 
 
+def prepare_organization_lead_enrichment(
+        conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
+        workspace: str, channel: str, thread_ts: str, requester: str,
+        grant_lead_id: int, lead_link: str) -> PreparedAction:
+    """Delegate blank-only organization enrichment that needs no contact or email."""
+    from .salesforce_org_enrichment import prepare_organization_lead_enrichment as prepare
+
+    return prepare(
+        conn, gateway, workspace, channel, thread_ts, requester,
+        grant_lead_id, lead_link)
+
+
 def prepare_lead_audit_repair(
         conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
         workspace: str, channel: str, thread_ts: str, requester: str,
@@ -729,7 +741,7 @@ def confirm_action(conn: sqlite3.Connection, gateway: SalesforceCampaignGateway,
                        error=f"{type(exc).__name__}: {str(exc)[:300]}")
         return ActionExecution(
             CampaignActionState.FAILED,
-            f"Salesforce rejected the action ({type(exc).__name__}); nothing was submitted.",
+            "Salesforce could not safely complete the action; nothing was submitted.",
         )
 
 

@@ -17,6 +17,11 @@ import requests
 from anthropic import Anthropic
 
 FIRECRAWL_SCRAPE = "https://api.firecrawl.dev/v1/scrape"
+_US_POSTAL_CODES = frozenset(
+    "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN "
+    "MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA "
+    "WV WI WY".split()
+)
 
 
 @dataclass(frozen=True)
@@ -84,6 +89,21 @@ def extract_profile(page: str, official_domain: str, source_url: str,
                     candidate: dict[str, object]) -> OrganizationProfile:
     """Build a profile only from candidates independently verified on the page."""
     website = _official_url(official_domain)
+    street = _verified_text(page, candidate.get("street"))
+    city = _verified_text(page, candidate.get("city"))
+    state = _verified_text(page, candidate.get("state"))
+    postal_code = _verified_text(page, candidate.get("postal_code"))
+    country = _verified_text(page, candidate.get("country"))
+    if state.upper() in _US_POSTAL_CODES:
+        state = state.upper()
+    if country.casefold() in {
+            "us", "usa", "united states", "united states of america"}:
+        country = "United States"
+    # Derive the country only from a complete, internally consistent U.S. address.
+    if (not country and street and city
+            and re.fullmatch(r"\d{5}(?:-\d{4})?", postal_code)
+            and state in _US_POSTAL_CODES):
+        country = "United States"
     linkedin = str(candidate.get("linkedin_url") or "").strip()
     if (_host(linkedin) != "linkedin.com" and not _host(linkedin).endswith(".linkedin.com")):
         linkedin = ""
@@ -91,11 +111,11 @@ def extract_profile(page: str, official_domain: str, source_url: str,
         linkedin = ""
     return OrganizationProfile(
         website=website,
-        street=_verified_text(page, candidate.get("street")),
-        city=_verified_text(page, candidate.get("city")),
-        state=_verified_text(page, candidate.get("state")),
-        postal_code=_verified_text(page, candidate.get("postal_code")),
-        country=_verified_text(page, candidate.get("country")),
+        street=street,
+        city=city,
+        state=state,
+        postal_code=postal_code,
+        country=country,
         main_phone=_verified_phone(page, candidate.get("main_phone")),
         source_url=source_url,
         linkedin_url=linkedin)

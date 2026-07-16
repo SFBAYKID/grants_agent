@@ -26,6 +26,17 @@ from .. import db, linkedin_candidates
 from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact
 from . import organization, tools
+from .crm_routing import (
+    _explicit_grant_lead_id,  # noqa: F401 - compatibility for focused routing tests.
+    _explicit_lead_creation_request,
+    _extract_pending_action,
+    _has_verified_person,
+    _is_organization_enrichment_request,
+    _load_referenced_lead,
+    _organization_preview_failure,
+    _requested_person_name,
+    _requests_person_without_verified_email,
+)
 
 DEFAULT_MODEL = "claude-sonnet-5"
 MAX_TOOL_TURNS = 6  # runaway guard for the agent loop
@@ -35,8 +46,9 @@ sells physical security (cameras, access control, door hardening) to schools and
 cities; you surface entities that just won government security funding and help the
 sales team act on them.
 
-Voice: a FRIENDLY, upbeat colleague — warm first line, then straight to the point.
-One to three short sentences unless the rep asked for real detail. No emoji.
+Voice: a FRIENDLY, direct colleague. Start with the answer, not a canned acknowledgment.
+Never say "great question," "happy to walk through it," or similar filler. One to
+three short sentences unless the rep asked for real detail. No emoji.
 
 FORMATTING (hard rules for Slack — reps SCAN, they don't read paragraphs):
 - NEVER use inline backticks or code formatting — Slack renders it as red text and
@@ -63,6 +75,8 @@ FORMATTING (hard rules for Slack — reps SCAN, they don't read paragraphs):
 - Put a blank line before every bullet or numbered list and after it before the final
   question. Keep the final question on its own line.
 - Triple-backtick blocks are allowed ONLY for a full email draft, nothing else.
+- Never expose tool names, schemas, JSON keys, intent labels, exception names, or
+  developer instructions. Describe capabilities in ordinary user language only.
 - Conversations live in THREADS. If a rep should follow up, tell them to reply right
   here in the thread.
 
@@ -192,8 +206,10 @@ STANDALONE SALESFORCE LEADS — EXPLICIT APPROVAL ONLY:
   “just create a lead,” “standalone lead,” or “add this to Salesforce,” prepare this
   preview directly; do not ask about contact research or a Campaign again.
 - Never claim creation succeeded until the confirmation result returns a Salesforce link.
-- If the exact Lead already exists and the user asks to fill missing details, call
-  salesforce_lead_enrichment_preview with its exact link and verified contact ID.
+- If the exact Lead already exists and the user asks to fill missing organization
+  details, call salesforce_organization_lead_enrichment_preview with the exact Grant
+  lead ID. This route does not require a contact or email. Use the contact-based
+  salesforce_lead_enrichment_preview only for verified person-specific enrichment.
   This fills blanks and appends sources only after another confirmation; it never
   replaces populated identity, owner, status, or routing fields.
 - Lead creation/enrichment also adds one visible Salesforce Note and one completed
@@ -301,29 +317,48 @@ def lead_facts(row: sqlite3.Row | None) -> str:
 def _parse_final(raw: str) -> dict[str, Any]:
     """Extract the {intent, reply} JSON; degrade to an honest fallback, never to a
     wrong action."""
+    fallback = {
+        "intent": "question",
+        "reply": "I couldn’t finish that request safely. Nothing was changed. Please try again.",
+    }
     try:
-        start, end = raw.index("{"), raw.rindex("}") + 1
-        out = json.loads(raw[start:end])
+        out = json.loads(raw.strip())
+        if not isinstance(out, dict):
+            return fallback
         intent = out.get("intent", "question")
         reply = _format_slack_reply(_sanitize_reply(str(out.get("reply", "")).strip()))
         if intent not in ("offer_persequor", "draft_email", "snooze",
                           "bad_lead", "question", "chitchat"):
             intent = "question"
-        if reply:
+        if reply and not _contains_internal_language(reply):
             return {"intent": intent, "reply": reply}
-    except (ValueError, json.JSONDecodeError):
-        pass
-    # If the model spoke plain text instead of JSON, pass it through as chat.
-    text = raw.strip()
-    if text:
-        return {"intent": "question",
-                "reply": _format_slack_reply(_sanitize_reply(text[:1500]))}
-    return {"intent": "question",
-            "reply": "Hmm, I fumbled that one — mind rephrasing?"}
+    except (ValueError, json.JSONDecodeError, AttributeError):
+        return fallback
+    return fallback
+
+
+def _contains_internal_language(text: str) -> bool:
+    """Reject developer/tool output instead of ever passing it through to Slack."""
+    lowered = text.casefold()
+    markers = (
+        '"intent"', '"reply"', "tool_use", "input_schema", "as tool",
+        "salesforce_lead_enrichment_preview", "find_person_linkedin",
+        "contact id", "developer instruction", "traceback", "exception",
+    )
+    snake_case = re.search(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", text)
+    exception_name = re.search(r"\b[A-Z][A-Za-z]+(?:Error|Exception)\b", text)
+    return (any(marker in lowered for marker in markers)
+            or snake_case is not None or exception_name is not None
+            or re.match(r"\s*(?:error|warning):", lowered) is not None
+            or "{" in text or "}" in text)
 
 
 def _sanitize_reply(text: str) -> str:
     """Remove Slack's red inline-code styling while preserving full email fences."""
+    text = re.sub(
+        r"^(?:great question|good question|happy to walk (?:you )?through (?:it|this))"
+        r"[.!,:;— -]*\s*",
+        "", text, flags=re.IGNORECASE)
     parts = text.split("```")
     for index in range(0, len(parts), 2):
         parts[index] = parts[index].replace("`", "")
@@ -367,74 +402,6 @@ def _is_slack_list_line(value: str) -> bool:
     return bool(re.match(r"^(?:•|-|\d+\.)\s+", value.strip()))
 
 
-_CRM_ACTION_RE = re.compile(
-    r"<grant-crm-action>(\{.*?\})</grant-crm-action>", re.DOTALL)
-
-
-def _extract_pending_action(text: str) -> tuple[str, dict[str, str] | None]:
-    """Remove a server-only CRM marker and return its validated button metadata."""
-    match = _CRM_ACTION_RE.search(text)
-    if match is None:
-        return text, None
-    clean = _CRM_ACTION_RE.sub("", text).strip()
-    try:
-        value = json.loads(match.group(1))
-        action = {
-            "action_id": str(value["action_id"]),
-            "nonce": str(value["nonce"]),
-            "preview": str(value["preview"]),
-            "expires_at": str(value["expires_at"]),
-        }
-    except (KeyError, TypeError, json.JSONDecodeError):
-        return clean, None
-    return clean, action
-
-
-def _explicit_lead_creation_request(
-        text: str, thread_context: list[str] | None = None) -> bool:
-    """Recognize a direct request for one standalone Salesforce Lead."""
-    normalized = " ".join(text.lower().replace("stand-alone", "standalone").split())
-    if re.search(r"\b(?:campaign|opportunit(?:y|ies))\b", normalized):
-        return False
-    if re.search(r"\bstand\s*alone\s+lead\b|\bstandalone\s+lead\b", normalized):
-        return True
-    if re.search(r"\bcreate\s+it\s+anyway\b", normalized):
-        return any("lead" in item.lower() for item in (thread_context or [])[-3:])
-    action = bool(re.search(r"\b(create|add|put|make)\b", normalized))
-    target = bool(re.search(r"\b(?:salesforce|lead)\b", normalized))
-    return action and target
-
-
-def _has_verified_person(lead_id: int) -> bool:
-    """Return whether Grant stores a real name and email for this exact lead."""
-    conn = db.connect()
-    try:
-        row = conn.execute(
-            """SELECT 1 FROM contacts
-               WHERE lead_id=? AND contact_status='verified'
-                 AND TRIM(COALESCE(name,''))!=''
-                 AND TRIM(COALESCE(email,''))!='' LIMIT 1""",
-            (lead_id,),
-        ).fetchone()
-        return row is not None
-    finally:
-        conn.close()
-
-
-def _organization_preview_failure(tool_text: str) -> str:
-    """Translate a safe preview failure into brief, nontechnical Slack language."""
-    if "matching record" in tool_text:
-        link = next(iter(re.findall(r"https?://[^\s,]+", tool_text)), "")
-        suffix = f" Here is the possible match: {link}" if link else ""
-        return ("Salesforce may already have this organization, so I did not create a "
-                f"duplicate.{suffix}")
-    if "verified current funding source" in tool_text:
-        return ("I can’t safely create this Lead because its verified funding source is "
-                "missing. Nothing was changed.")
-    return ("I couldn’t safely prepare that Salesforce Lead because the duplicate check "
-            "did not complete. Nothing was changed.")
-
-
 def _is_application_provenance_question(text: str) -> bool:
     """Recognize questions about who or how an application was submitted."""
     normalized = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower()).split())
@@ -457,6 +424,33 @@ def _is_funding_approval_date_question(text: str) -> bool:
     return ("when" in normalized.split()
             and any(word in normalized for word in ("funding", "award", "grant"))
             and any(word in normalized for word in ("approved", "awarded", "announced")))
+
+
+def _is_exact_award_record_question(text: str) -> bool:
+    """Recognize a request for the direct record-level government funding source."""
+    normalized = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower()).split())
+    return ("award" in normalized and "record" in normalized
+            and any(word in normalized for word in ("exact", "direct", "government")))
+
+
+def _exact_award_record_reply(row: sqlite3.Row) -> str:
+    """Return the persisted record URL as a clickable Slack link without model rewriting."""
+    source_url = str(row["current_event_source_url"] or "").strip()
+    verified = str(row["current_event_verification_status"] or "") == "verified"
+    label = _source_record_label(row)
+    if not source_url or not verified:
+        return "I don’t have a verified record-level award link for this lead."
+    if "(direct record)" not in label:
+        return (
+            "I don’t have a direct record-level award URL for this lead.\n\n"
+            f"• *Closest published source:* <{source_url}|{label}>\n\n"
+            "I won’t label a parent-award or dataset link as the exact award record."
+        )
+    return (
+        "Here is the exact government award record:\n\n"
+        f"• *Award record:* <{source_url}|{label}>\n\n"
+        "This is the record-level source stored with the lead."
+    )
 
 
 def _funding_approval_date_reply(row: sqlite3.Row) -> str:
@@ -594,6 +588,8 @@ def respond(user_text: str, row: sqlite3.Row | None,
     blocks are third-party runtime objects rather than a stable local model.
     """
     say = on_progress or (lambda _msg: None)
+    if row is None:
+        row = _load_referenced_lead(user_text, thread_context)
     if _is_source_coverage_request(user_text, thread_context):
         return {"intent": "question", "files": [], "pending_crm_actions": [],
                 "reply": _source_coverage_reply(user_text)}
@@ -604,6 +600,25 @@ def respond(user_text: str, row: sqlite3.Row | None,
     if row is not None and _is_funding_approval_date_question(user_text):
         return {"intent": "question", "files": [], "pending_crm_actions": [],
                 "reply": _funding_approval_date_reply(row)}
+    if row is not None and _is_exact_award_record_question(user_text):
+        return {"intent": "question", "files": [], "pending_crm_actions": [],
+                "reply": _exact_award_record_reply(row)}
+    if row is not None and _is_organization_enrichment_request(user_text):
+        say("Checking verified organization details")
+        tool_text = tools.salesforce_organization_lead_enrichment_preview(
+            int(row["id"]), requester_slack, workspace, channel, thread_ts)
+        _clean, action = _extract_pending_action(tool_text)
+        if action is None:
+            return {
+                "intent": "question", "files": [], "pending_crm_actions": [],
+                "reply": ("I couldn’t safely prepare that Salesforce update. "
+                          "Nothing was changed."),
+            }
+        return {
+            "intent": "question", "files": [], "pending_crm_actions": [action],
+            "reply": ("I prepared a preview to fill the existing Lead’s blank "
+                      "organization fields. No email is required and nothing has changed yet."),
+        }
     if row is not None and _is_location_question(user_text):
         say("Checking the official website")
         try:
@@ -654,6 +669,29 @@ def respond(user_text: str, row: sqlite3.Row | None,
                 "reply": (f"I prepared the Salesforce preview for {candidate.person_name}. "
                           "Their email is still unverified, so it will stay blank."),
             }
+        if _requests_person_without_verified_email(user_text):
+            say("Checking LinkedIn")
+            person_name = _requested_person_name(user_text)
+            if not person_name:
+                return {"intent": "question", "files": [], "pending_crm_actions": [],
+                        "reply": ("I won’t discard the person or replace them with an "
+                                  "organization-only Lead. Tell me their full name so I "
+                                  "can bind the LinkedIn search to that person.")}
+            conn = db.connect()
+            try:
+                reply = tools.find_person_linkedin(
+                    str(row["entity_name"] or ""), str(row["state"] or ""), say,
+                    person_name=person_name,
+                    conn=conn, lead_id=int(row["id"]), workspace=workspace,
+                    channel=channel, thread_ts=thread_ts,
+                    requested_by=requester_slack)
+            except Exception:
+                reply = ("I couldn’t verify that person’s LinkedIn identity right now. "
+                         "I did not replace them with an organization-only Lead.")
+            finally:
+                conn.close()
+            return {"intent": "question", "files": [], "pending_crm_actions": [],
+                    "reply": reply}
     if (row is not None and _explicit_lead_creation_request(user_text, thread_context)
             and not _has_verified_person(int(row["id"]))):
         say("Preparing Salesforce Lead")

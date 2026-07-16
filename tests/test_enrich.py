@@ -147,6 +147,34 @@ def test_linkedin_result_returns_typed_organization_match(
         "Pat Person - Technology Director | LinkedIn | Birmingham Community Charter High School")
 
 
+def test_named_linkedin_search_skips_another_person(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A selected person's preview cannot be built from a different person's result."""
+    monkeypatch.setattr(finder, "_search", lambda *_args, **_kwargs: [
+        {"url": "https://www.linkedin.com/in/pat-person",
+         "title": "Pat Person - Principal | LinkedIn",
+         "description": "Birmingham Community Charter High School"},
+        {"url": "https://www.linkedin.com/in/vartan-chalabian",
+         "title": "Vartan Chalabian - IT Systems Manager | LinkedIn",
+         "description": "Birmingham Community Charter High School"},
+    ])
+    person = finder.linkedin_person(
+        "Birmingham Community Charter High School", "CA", "Vartan Chalabian")
+    assert person is not None and person.name == "Vartan Chalabian"
+
+
+def test_named_linkedin_search_returns_none_for_only_wrong_person(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """No candidate is better than substituting another person with the same employer."""
+    monkeypatch.setattr(finder, "_search", lambda *_args, **_kwargs: [{
+        "url": "https://www.linkedin.com/in/pat-person",
+        "title": "Pat Person - Principal | LinkedIn",
+        "description": "Birmingham Community Charter High School",
+    }])
+    assert finder.linkedin_person(
+        "Birmingham Community Charter High School", "CA", "Vartan Chalabian") is None
+
+
 def test_official_site_discovery_rejects_unrelated_result_and_binds_org(
         monkeypatch: pytest.MonkeyPatch) -> None:
     """A bounded official-site lookup skips directories and binds the named school."""

@@ -127,8 +127,10 @@ for days. Grant records draft submission separately from any later verified send
   Every action has an exact preview, same-user Slack confirmation, fixed field allowlist,
   and durable outcome. Standalone organization-only Leads are allowed when no person is
   verified; their person/email fields remain blank. Opportunity creation requires an exact
-  existing Account. Existing Lead enrichment fills blanks only. No delete, merge, convert,
-  Account write, or Contact write action exists.
+  existing Account. Existing Lead enrichment fills blanks only. Verified organization fields may
+  be previewed without a contact or email when one exact matching Lead is found; person and identity
+  fields remain outside that allowlist. No delete, merge, convert, Account write, or Contact write
+  action exists.
 
 ## 7. Deployment order
 

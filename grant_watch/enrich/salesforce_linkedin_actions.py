@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import requests
 
 from .. import db, linkedin_candidates
+from ..presentation import display_entity_name
 from . import finder
 from . import salesforce_campaigns as workflow
 from .organization_profile import OrganizationProfile, fetch_profile
@@ -28,6 +29,7 @@ from .salesforce_campaign_gateway import (
 from .salesforce_record_actions import (
     _activity_date,
     _audit_task_description,
+    _verified_industry,
     duplicate_organization,
 )
 
@@ -62,18 +64,33 @@ class LinkedInPersonDraft:
             result["FirstName"] = " ".join(parts[:-1])
         return result
 
-    def research_note(self, action_id: str, requester: str) -> str:
+    def research_note(self, _action_id: str, _requester: str) -> str:
         """Describe exact evidence and explicitly preserve the missing-email truth."""
         lines = [
-            f"Grant LinkedIn candidate evidence: {self.profile_url}",
+            f"Grant contact research for {self.name} at {self.company}",
+            "",
+            f"Role: {self.title or 'not published'}",
+            f"LinkedIn: {self.profile_url}",
             f"Search-result excerpt: {self.evidence_excerpt}",
             "No email was found or verified; Email remains blank.",
-            f"Funding evidence: {self.funding_url}",
-            f"Grant lead {self.grant_lead_id}. Candidate {self.candidate_id}.",
-            f"Action {action_id}. Requested by Slack user {requester}.",
+            f"Funding record: {self.funding_url}",
         ]
+        address = ", ".join(filter(None, (
+            self.organization.street, self.organization.city,
+            self.organization.state, self.organization.postal_code,
+            self.organization.country,
+        )))
+        if self.organization.website:
+            lines.append(f"Official website: {self.organization.website}")
+        if self.organization.main_phone:
+            lines.append(f"Main phone: {self.organization.main_phone}")
+        if address:
+            lines.append(f"Address: {address}")
         if self.organization.source_url:
             lines.append(f"Official organization source: {self.organization.source_url}")
+        lines.extend((
+            "No customer outreach was performed.",
+        ))
         return "\n".join(lines)
 
     def desired_fields(self, action_id: str, requester: str) -> dict[str, object]:
@@ -139,13 +156,12 @@ def _draft(conn: sqlite3.Connection, candidate: linkedin_candidates.LinkedInCand
             except (KeyError, ValueError, RuntimeError, requests.RequestException):
                 organization = OrganizationProfile(
                     website=f"https://{official.domain}/", source_url=official.url)
-    entity_text = f"{row['entity_type'] or ''} {candidate.organization}".lower()
-    industry = "K-12 Schools" if any(
-        word in entity_text for word in ("school", "district", "k-12")) else ""
+    industry = _verified_industry(row["entity_type"])
     enrollment = int(row["enrollment"]) if row["enrollment"] is not None else None
     return LinkedInPersonDraft(
         candidate.candidate_id, candidate.lead_id, candidate.person_name,
-        candidate.title, candidate.profile_url, candidate.organization,
+        candidate.title, candidate.profile_url,
+        display_entity_name(candidate.organization),
         str(row["state"] or "").upper(), funding_url, candidate.evidence_excerpt,
         organization, enrollment, industry,
     )

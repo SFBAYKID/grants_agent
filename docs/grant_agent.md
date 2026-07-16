@@ -79,6 +79,11 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 - A LinkedIn result with no verified email can be carried into a same-thread Salesforce preview for
   that exact person. Grant states that Email will remain blank and never substitutes an
   organization-only Lead when the user selected a person.
+- A fresh chat may name an exact `Grant lead N` and preview blank-only organization enrichment on one
+  exact existing Salesforce Lead. This path does not require a contact or email, and its Note starts
+  with the organization and useful sales facts rather than internal tool or action terminology.
+- Malformed model envelopes and replies containing tool/schema language fail closed to a short,
+  nontechnical message; raw JSON or developer instructions are never passed through to Slack.
 - **Required bot scopes after reinstall:** `app_mentions:read`, `chat:write`, `channels:history`,
   `channels:read`, `groups:history`, `groups:read`, `reactions:read`, `reactions:write`, `users:read`,
   `users:read.email`, and `files:write`. DM and command scopes are unnecessary.
