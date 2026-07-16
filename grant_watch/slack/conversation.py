@@ -531,8 +531,17 @@ def _is_source_coverage_request(
         text: str, thread_context: list[str] | None = None) -> bool:
     """Keep state follow-ups attached to a preceding data-source discussion."""
     normalized = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower()).split())
-    if "source" in normalized and any(
-            word in normalized for word in ("data", "feed", "monitor", "use")):
+    if (any(term in normalized for term in ("salesforce", "crm"))
+            and any(term in normalized for term in (
+                "lead", "preview", "create", "update", "confirm"))):
+        return False
+    direct = (
+        re.search(r"\bdata sources?\b", normalized) is not None
+        or re.search(r"\b(?:what|which) (?:data )?sources?\b", normalized) is not None
+        or re.search(r"\bsources? (?:do|does|can) (?:you|grant) (?:use|monitor)\b",
+                     normalized) is not None
+    )
+    if direct:
         return True
     prior = " ".join((thread_context or [])[-3:]).lower()
     return _mentioned_state(text) is not None and any(

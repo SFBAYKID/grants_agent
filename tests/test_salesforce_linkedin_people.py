@@ -121,8 +121,13 @@ class PlaceholderGateway:
             "069000000000001", "06A000000000001", "00T000000000001")
 
 
+@pytest.mark.parametrize("user_text", [
+    "Yes can we add this guy to Salesforce?",
+    "Use that exact person. Prepare the Salesforce Lead preview with Email blank "
+    "and every verified organization field and source.",
+])
 def test_this_guy_routes_to_exact_candidate_not_organization(
-        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path, user_text: str) -> None:
     """The selected LinkedIn identity wins over the organization-only fallback."""
     conn, row = _grant_lead(tmp_path)
     candidate = _candidate(conn)
@@ -137,7 +142,7 @@ def test_this_guy_routes_to_exact_candidate_not_organization(
         conversation.tools, "salesforce_organization_lead_create_preview",
         lambda *_args: (_ for _ in ()).throw(AssertionError("organization fallback")))
     result = conversation.respond(
-        "Yes can we add this guy to Salesforce?", row, requester_slack="UCHASE",
+        user_text, row, requester_slack="UCHASE",
         workspace="TWORK", channel="CGRANTS", thread_ts="1.1")
     assert calls == [candidate.candidate_id]
     assert "Vartan" in result["reply"] and "email is still unverified" in result["reply"]

@@ -46,6 +46,15 @@ def test_explicit_florida_lead_request_is_not_misclassified() -> None:
         "Show me Florida school funding leads", [])
 
 
+def test_salesforce_preview_with_verified_sources_is_not_source_coverage() -> None:
+    """A CRM action cannot be diverted merely because it asks to include sources."""
+    assert not conversation._is_source_coverage_request(
+        "Use that exact person. Prepare the Salesforce Lead preview with every "
+        "verified organization field and source.",
+        ["Grant: I found that exact person on LinkedIn."],
+    )
+
+
 def test_california_reports_only_its_integrated_state_feed() -> None:
     """State-specific copy names a dedicated feed only where one is registered."""
     reply = conversation._source_coverage_reply("What sources cover California?")
