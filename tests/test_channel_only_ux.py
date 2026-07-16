@@ -124,6 +124,88 @@ def test_parse_final_removes_red_inline_code_but_preserves_email_fence() -> None
     assert "```\nEmail body\n```" in parsed["reply"]
 
 
+def test_dense_contact_reply_is_spaced_into_scannable_sections() -> None:
+    """Long model paragraphs become an intro, bullets, and a separate question."""
+    from grant_watch.slack import conversation
+
+    dense = (
+        "I found Mona Miller, Director of Curriculum and Instructional Services, "
+        "on the district's public LinkedIn page. No verified email appeared on the "
+        "official website, so I left email blank. Her role is curriculum-focused, "
+        "not facilities or technology. Would you like me to search for a facilities "
+        "or technology contact next?"
+    )
+    formatted = conversation._format_slack_reply(dense)
+    assert "\n\n• No verified email" in formatted
+    assert "\n• Her role is curriculum-focused" in formatted
+    assert "\n\nWould you like me" in formatted
+
+
+def test_existing_lists_get_blank_lines_without_rewriting_content() -> None:
+    """Already structured facts keep their exact wording with Slack-safe spacing."""
+    from grant_watch.slack import conversation
+
+    formatted = conversation._format_slack_reply(
+        "Here is what I found:\n• Name: Mona Miller\n• Email: Not found\nWhat next?")
+    assert formatted == (
+        "Here is what I found:\n\n• Name: Mona Miller\n• Email: Not found\n\nWhat next?")
+
+
+def test_salesforce_preview_uses_numbered_steps_and_spaced_fields() -> None:
+    """CRM previews never repeat model prose or run their field list into the header."""
+    actions = [{"action_id": "a", "nonce": "n", "expires_at": "later",
+                "preview": "Create this Lead?\n• Name: Mona\n• Company: Corning\nNo Campaign."}]
+    intro = grant._reply_with_action_steps("Dense model summary", actions)
+    blocks = grant._crm_action_blocks(actions)
+    assert intro == (
+        "I prepared the Salesforce preview.\n\n"
+        "1. Review the verified fields below.\n"
+        "2. Click *Confirm in Salesforce* only if everything looks right.")
+    assert blocks[0]["text"]["text"] == (
+        "Create this Lead?\n\n• Name: Mona\n• Company: Corning\n\nNo Campaign.")
+
+
+def test_formatter_is_idempotent_and_preserves_urls_and_email() -> None:
+    """Repeated delivery guards cannot corrupt links, addresses, or spacing."""
+    from grant_watch.slack import conversation
+
+    text = (
+        "I found Mona Miller at https://www.linkedin.com/in/mona-miller-1. "
+        "The district page lists office@district.k12.ca.us for general questions. "
+        "I did not find a verified direct email for Mona. Would you like me to keep looking?"
+    )
+    once = conversation._format_slack_reply(text)
+    assert conversation._format_slack_reply(once) == once
+    assert "https://www.linkedin.com/in/mona-miller-1" in once
+    assert "office@district.k12.ca.us" in once
+
+
+def test_status_final_delivery_applies_same_spacing_guard() -> None:
+    """Replies that bypass model parsing still receive the final Slack formatting guard."""
+    class FakeClient:
+        """Capture the final spinner edit without contacting Slack."""
+
+        def __init__(self) -> None:
+            self.text = ""
+
+        def chat_update(self, **kwargs: object) -> None:
+            """Record final formatted text."""
+            self.text = str(kwargs["text"])
+
+    client = FakeClient()
+    status = grant._Status(client, "C", "1.1")  # type: ignore[arg-type]
+    status.ts = "2.2"
+    dense = (
+        "I found a verified contact on the official district website. "
+        "Salesforce has no matching Lead, Contact, or Account for the organization. "
+        "The contact's role is curriculum-focused rather than facilities-focused. "
+        "Would you like me to keep searching for a technology contact?"
+    )
+    assert status.finalize(dense)
+    assert "\n\n• Salesforce" in client.text
+    assert "\n\nWould you like me" in client.text
+
+
 def test_digest_poster_module_remains_absent() -> None:
     """The earlier multi-lead poster cannot return through this UX correction."""
     assert not Path(grant.__file__).with_name("digest.py").exists()

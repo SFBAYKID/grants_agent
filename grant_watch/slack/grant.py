@@ -91,7 +91,7 @@ def _crm_action_blocks(actions: list[dict[str, str]]) -> list[dict[str, Any]]:
         }, separators=(",", ":"))
         preview_blocks = [
             {"type": "section", "text": {"type": "mrkdwn", "text": chunk}}
-            for chunk in _split_slack_text(action["preview"])
+            for chunk in _split_slack_text(_space_preview_lists(action["preview"]))
         ]
         blocks.extend([*preview_blocks, {"type": "context", "elements": [{
                 "type": "mrkdwn", "text": f"Approval expires {action['expires_at']}."
@@ -114,19 +114,47 @@ def _crm_action_blocks(actions: list[dict[str, str]]) -> list[dict[str, Any]]:
     return blocks
 
 
+def _space_preview_lists(value: str) -> str:
+    """Put blank lines around preview list blocks so Slack never smashes fields together."""
+    lines = value.strip().splitlines()
+    result: list[str] = []
+    for line in lines:
+        current_list = bool(re.match(r"^(?:•|-|\d+\.)\s+", line.strip()))
+        previous_list = bool(result and re.match(
+            r"^(?:•|-|\d+\.)\s+", result[-1].strip()))
+        if (result and line.strip() and result[-1].strip()
+                and current_list != previous_list):
+            result.append("")
+        result.append(line.rstrip())
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(result)).strip()
+
+
+def _reply_with_action_steps(reply: str,
+                             actions: list[dict[str, str]]) -> str:
+    """Replace model preview repetition with two short numbered confirmation steps."""
+    if not actions:
+        return reply
+    noun = "preview" if len(actions) == 1 else "previews"
+    return (
+        f"I prepared the Salesforce {noun}.\n\n"
+        "1. Review the verified fields below.\n"
+        "2. Click *Confirm in Salesforce* only if everything looks right."
+    )
+
+
 def _split_slack_text(value: str, cap: int = 2_800) -> list[str]:
     """Split long frozen previews at line boundaries under Slack's section limit."""
     chunks: list[str] = []
     current = ""
     for line in value.splitlines() or [value]:
-        candidate = f"{current}\n{line}".strip() if current else line
+        candidate = f"{current}\n{line}" if current else line
         if current and len(candidate) > cap:
-            chunks.append(current)
+            chunks.append(current.rstrip())
             current = line
         else:
             current = candidate
     if current:
-        chunks.append(current)
+        chunks.append(current.rstrip())
     return chunks or [""]
 
 
@@ -438,6 +466,9 @@ class _Status:
     def finalize(self, text: str,
                  extra_blocks: list[dict[str, Any]] | None = None) -> bool:
         """Replace the spinner with the final answer (or post it if the spinner died)."""
+        from .conversation import _format_slack_reply
+
+        text = _format_slack_reply(text)
         blocks = None
         if extra_blocks:
             blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": text}}]
@@ -512,6 +543,7 @@ def _handle_drip_thread(conn: sqlite3.Connection, post: sqlite3.Row,
     elif intent == "question":
         db.record_engagement(conn, int(post["id"]), user, "question")
 
+    reply = _reply_with_action_steps(reply, pending_actions)
     failures = _deliver_artifacts(client, event["channel"], post["ts"], files)
     return status.finalize(_with_upload_warning(reply, failures),
                            _crm_action_blocks(pending_actions))
@@ -627,10 +659,12 @@ def _converse_general(text: str, client: WebClient, channel: str,
                                    channel=channel, thread_ts=thread_ts or "",
                                    user_preferences=preferences)
         artifacts = out.get("files", [])
+        pending_actions = out.get("pending_crm_actions", [])
         failures = _deliver_artifacts(client, channel, thread_ts, artifacts)
         return status.finalize(
-            _with_upload_warning(out["reply"], failures),
-            _crm_action_blocks(out.get("pending_crm_actions", [])))
+            _with_upload_warning(
+                _reply_with_action_steps(out["reply"], pending_actions), failures),
+            _crm_action_blocks(pending_actions))
     except Exception:
         return status.finalize(_fallback_answer(text))
 
@@ -673,6 +707,9 @@ def _fallback_answer(query: str) -> str:
 def _thread_reply(client: WebClient, body: dict[str, Any], text: str,
                   extra_blocks: list[dict[str, Any]] | None = None) -> None:
     """Reply in the thread under the message containing an interactive button."""
+    from .conversation import _format_slack_reply
+
+    text = _format_slack_reply(text)
     msg = body["message"]
     blocks = ([{"type": "section", "text": {"type": "mrkdwn", "text": text}}]
               + (extra_blocks or []))

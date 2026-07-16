@@ -54,6 +54,13 @@ FORMATTING (hard rules for Slack — reps SCAN, they don't read paragraphs):
   actions); use bullets for parallel facts.
 - Write clean, proofread English — correct grammar and spelling, no typos.
 - Casual one-off replies stay to a sentence or two — don't bulletize everything.
+- Any answer containing two or more distinct facts, caveats, or next steps MUST use a
+  short opening line, a blank line, and one fact per bullet. Never combine a contact,
+  Salesforce result, caveat, and recommendation into one paragraph.
+- When offering two or more choices or sequential actions, use a numbered list with
+  one option per line. Never hide choices inside an "X or Y" sentence.
+- Put a blank line before every bullet or numbered list and after it before the final
+  question. Keep the final question on its own line.
 - Triple-backtick blocks are allowed ONLY for a full email draft, nothing else.
 - Conversations live in THREADS. If a rep should follow up, tell them to reply right
   here in the thread.
@@ -278,7 +285,7 @@ def _parse_final(raw: str) -> dict[str, Any]:
         start, end = raw.index("{"), raw.rindex("}") + 1
         out = json.loads(raw[start:end])
         intent = out.get("intent", "question")
-        reply = _sanitize_reply(str(out.get("reply", "")).strip())
+        reply = _format_slack_reply(_sanitize_reply(str(out.get("reply", "")).strip()))
         if intent not in ("offer_persequor", "draft_email", "snooze",
                           "bad_lead", "question", "chitchat"):
             intent = "question"
@@ -289,7 +296,8 @@ def _parse_final(raw: str) -> dict[str, Any]:
     # If the model spoke plain text instead of JSON, pass it through as chat.
     text = raw.strip()
     if text:
-        return {"intent": "question", "reply": _sanitize_reply(text[:1500])}
+        return {"intent": "question",
+                "reply": _format_slack_reply(_sanitize_reply(text[:1500]))}
     return {"intent": "question",
             "reply": "Hmm, I fumbled that one — mind rephrasing?"}
 
@@ -300,6 +308,43 @@ def _sanitize_reply(text: str) -> str:
     for index in range(0, len(parts), 2):
         parts[index] = parts[index].replace("`", "")
     return "```".join(parts)
+
+
+def _format_slack_reply(text: str) -> str:
+    """Add readable Slack spacing when a model returns one dense multi-part paragraph."""
+    clean = re.sub(r"[ \t]+\n", "\n", text.strip())
+    clean = re.sub(r"\n{3,}", "\n\n", clean)
+    if "```" in clean:
+        return clean
+    if "\n" not in clean and len(clean) >= 220:
+        sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z])", clean)
+        if len(sentences) >= 2:
+            first, rest = sentences[0], sentences[1:]
+            question = rest.pop() if rest and rest[-1].rstrip().endswith("?") else ""
+            sections = [first]
+            if rest:
+                sections.append("\n".join(f"• {sentence}" for sentence in rest))
+            if question:
+                sections.append(question)
+            clean = "\n\n".join(sections)
+    return _space_slack_lists(clean)
+
+
+def _space_slack_lists(text: str) -> str:
+    """Put blank lines around adjacent bullet/numbered list blocks."""
+    lines = text.splitlines()
+    result: list[str] = []
+    for line in lines:
+        if (result and line.strip() and result[-1].strip()
+                and _is_slack_list_line(line) != _is_slack_list_line(result[-1])):
+            result.append("")
+        result.append(line.rstrip())
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(result)).strip()
+
+
+def _is_slack_list_line(value: str) -> bool:
+    """Return whether a line begins a bullet or numbered Slack list item."""
+    return bool(re.match(r"^(?:•|-|\d+\.)\s+", value.strip()))
 
 
 _CRM_ACTION_RE = re.compile(
