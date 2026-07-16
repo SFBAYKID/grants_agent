@@ -45,6 +45,28 @@ def test_usaspending_field_mapping(usaspending_16710_wa) -> None:
     assert item.url.startswith("https://www.usaspending.gov/award/")
 
 
+def test_usaspending_uses_recipient_location_instead_of_query_state() -> None:
+    """A same-name district cannot inherit the wrong state from a query loop."""
+    payload = {"results": [{
+        "Award ID": "2020SVWX0155",
+        "Recipient Name": "WASHINGTON COUNTY SCHOOL DISTRICT",
+        "Recipient UEI": "MBTAF3NWEMB5",
+        "Recipient Location": {
+            "state_code": "FL", "city_name": "CHIPLEY",
+            "address_line1": "652 THIRD STREET", "zip5": "32428",
+        },
+        "Award Amount": 500000.0,
+        "Start Date": "2020-09-01", "End Date": "2023-08-31",
+        "Description": "SVPP",
+        "generated_internal_id": "ASST_NON_2020SVWX0155_015",
+    }]}
+    item = usaspending.parse_awards(payload, "16.710", "UT")[0]
+    assert item.state == "FL"
+    assert item.raw["Recipient UEI"] == "MBTAF3NWEMB5"
+    location = item.raw["Recipient Location"]
+    assert isinstance(location, dict) and location["city_name"] == "CHIPLEY"
+
+
 def test_nsgp_subawards_map_end_recipients_and_explicit_dates(
         usaspending_nsgp_wa) -> None:
     """NSGP subawards expose named end recipients without inventing spend deadlines."""

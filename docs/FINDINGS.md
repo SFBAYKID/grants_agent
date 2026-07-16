@@ -32,6 +32,9 @@ Everything discovered, verified, and still open. Companion to `grant_lead_source
   `page_metadata.hasNext`. `time_period` floor 2007-10-01.
   `subawards:true` swaps the result shape to Sub-Awardee fields — this exposes NSGP (97.008)
   end recipients (verified: named WA synagogues/churches/schools, $120–300K, Nov 2024 round).
+  Prime-award requests include Recipient UEI and Recipient Location; the parser uses the row's
+  state instead of blindly trusting the query state. Verified 2026-07-15 against award
+  `2020SVWX0155`: Washington County School District, Chipley, Florida (`MBTAF3NWEMB5`).
 - **SVPP CFDA split**: 16.071 (FY25+) AND 16.710 (FY21–FY24; filter description for
   "school violence|SVPP" — 16.710 alone contains 450 CA COPS awards, only 71 are SVPP).
 - **WEBS**: `https://pr-webs-vendor.des.wa.gov/BidCalendar.aspx` public, no login, ~189 rows

@@ -14,6 +14,8 @@ Lead definitions: **GOLD** = entity just received security funding. **SILVER** =
   assessment than cameras, still relevant)
 - Verified output: 75 active SVPP awards CA/MI/PA/WA, ~$28M
 - Limits found: 100 rows/page (paginate), time_period floor 2007-10-01
+- Location guard: request each row's Recipient Location and use its state rather than
+  blindly inheriting the poll query state (verified with Florida award `2020SVWX0155`)
 
 ### 2. USASpending API — SUBAWARDS (`subawards: true`)
 - Same endpoint, unlocks pass-through recipients

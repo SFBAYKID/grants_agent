@@ -73,6 +73,13 @@ YOU HAVE TWO JOBS:
 
 ON-DEMAND SEARCH — how a rep asks you to find grants, and how you MUST handle it:
 
+SOURCE-COVERAGE CONTEXT:
+- A question about data sources asks what Grant monitors, not for lead results.
+- A short follow-up such as “Any on Florida?” after a data-source answer means “Which
+  sources cover Florida?” Do not start a lead search or ask for result count/format.
+- Federal sources cover states nationwide, but never imply Grant has a dedicated state
+  portal or complete local-RFP coverage where it does not.
+
 STEP 1 — CONFIRM FIRST, ALWAYS. Before running any search, restate the FULL set of
 filters you'll use — location (and any city caveat), org type, program, the date meaning,
 and grade — in one clear line so the plan is captured in the thread, and in the SAME
@@ -121,6 +128,8 @@ DATE TRUTH RULES (non-negotiable):
 - spend_start/spend_end = GOLD award spending-window dates.
 - When the user asks for current, actionable, open, or upcoming funding, pass
   active_only=true. Never present an expired spend/application/response window as open.
+- A generic request for leads defaults to active_only=true unless the user explicitly
+  asks for historical, expired, or all records.
 - An unknown award-event date can never support "just," "recently," "landed," or
   "just received." Describe only the verified award record and its spend window.
 - The database does NOT store a verified award announcement/received date. If asked who
@@ -419,6 +428,84 @@ def _organization_preview_failure(tool_text: str) -> str:
             "did not complete. Nothing was changed.")
 
 
+_STATE_CODES = (
+    "AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS "
+    "MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV "
+    "WI WY DC"
+).split()
+_STATE_NAMES = (
+    "Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|"
+    "Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|"
+    "Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|"
+    "Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|"
+    "North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|"
+    "South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|"
+    "Wisconsin|Wyoming|District of Columbia"
+).split("|")
+_STATE_BY_CODE = dict(zip(_STATE_CODES, _STATE_NAMES))
+_STATE_BY_NAME = dict(zip((name.lower() for name in _STATE_NAMES), _STATE_CODES))
+
+
+def _mentioned_state(text: str) -> tuple[str, str] | None:
+    """Extract one explicit US state name or uppercase postal abbreviation."""
+    lowered = text.lower()
+    for name, code in _STATE_BY_NAME.items():
+        if re.search(rf"\b{re.escape(name)}\b", lowered):
+            return code, _STATE_BY_CODE[code]
+    for token in re.findall(r"\b[A-Z]{2}\b", text):
+        if token in _STATE_CODES:
+            return token, _STATE_BY_CODE[token]
+    return None
+
+
+def _is_source_coverage_request(
+        text: str, thread_context: list[str] | None = None) -> bool:
+    """Keep state follow-ups attached to a preceding data-source discussion."""
+    normalized = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower()).split())
+    if "source" in normalized and any(
+            word in normalized for word in ("data", "feed", "monitor", "use")):
+        return True
+    prior = " ".join((thread_context or [])[-3:]).lower()
+    return _mentioned_state(text) is not None and any(
+        phrase in prior for phrase in ("data source", "feeds my leads", "sources cover"))
+
+
+def _source_coverage_reply(text: str) -> str:
+    """Describe only integrations present in the running source registry."""
+    mentioned = _mentioned_state(text)
+    if mentioned is None:
+        return (
+            "Here’s what I currently monitor:\n\n"
+            "• *Federal awards:* USAspending prime awards and NSGP subawards\n"
+            "• *Open federal funding:* Grants.gov\n"
+            "• *Federal solicitations:* SAM.gov when configured\n"
+            "• *State and local feeds:* California Grants Portal, OregonBuys recent bids, "
+            "and Washington WEBS\n"
+            "• *School details:* NCES district location and enrollment\n"
+            "• *On-demand research:* public websites through Firecrawl when configured\n\n"
+            "Salesforce is my CRM cross-check, not a funding source.")
+    code, name = mentioned
+    dedicated = {
+        "CA": "California Grants Portal",
+        "OR": "OregonBuys recent bids",
+        "WA": "Washington WEBS",
+    }.get(code, "")
+    local_line = (f"• *Dedicated {name} feed:* {dedicated}"
+                  if dedicated else
+                  f"• *Dedicated {name} feed:* none integrated yet")
+    return (
+        f"Here’s my current coverage for *{name}*:\n\n"
+        "• *Awards:* USAspending federal awards and NSGP subawards\n"
+        "• *Open funding:* Grants.gov nationwide opportunities\n"
+        "• *RFPs:* SAM.gov federal solicitations when configured; local coverage is "
+        "not comprehensive\n"
+        "• *School details:* NCES district location and enrollment\n"
+        f"{local_line}\n"
+        "• *On-demand research:* Firecrawl can check public organization pages when configured\n\n"
+        f"So I cover federal activity in {name}, but I don’t yet have complete "
+        f"{name} state and local RFP coverage.")
+
+
 def respond(user_text: str, row: sqlite3.Row | None,
             thread_context: list[str] | None = None,
             on_progress: tools.Progress | None = None,
@@ -433,6 +520,9 @@ def respond(user_text: str, row: sqlite3.Row | None,
     blocks are third-party runtime objects rather than a stable local model.
     """
     say = on_progress or (lambda _msg: None)
+    if _is_source_coverage_request(user_text, thread_context):
+        return {"intent": "question", "files": [], "pending_crm_actions": [],
+                "reply": _source_coverage_reply(user_text)}
     if (row is not None and _explicit_lead_creation_request(user_text, thread_context)
             and not _has_verified_person(int(row["id"]))):
         say("Preparing Salesforce Lead")

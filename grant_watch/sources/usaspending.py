@@ -77,7 +77,8 @@ def _query_page(cfda: str, state: str, page: int,
                     "Sub-Award Date", "Sub-Award Description",
                     "prime_award_generated_internal_id"]
                    if subawards else
-                   ["Award ID", "Recipient Name", "Award Amount",
+                   ["Award ID", "Recipient Name", "Recipient UEI",
+                    "Recipient Location", "Award Amount",
                     "Start Date", "End Date", "Description", "generated_internal_id"]),
         "limit": PAGE_LIMIT,
         "page": page,
@@ -95,19 +96,25 @@ def parse_awards(payload: dict[str, Any], cfda: str, state: str) -> list[RawItem
         if cfda == "16.710" and not _SVPP_RE.search(desc):
             continue  # COPS umbrella noise (CHP hiring, TRGP, ...) — not school security
         gid: str = a.get("generated_internal_id") or ""
+        location = a.get("Recipient Location")
+        recipient_location = location if isinstance(location, dict) else {}
+        recipient_state = str(recipient_location.get("state_code") or "").upper()
         out.append(RawItem(
             source=f"usaspending:{cfda}",
             item_id=str(a.get("Award ID") or gid),
             title=desc[:160],
             entity=a.get("Recipient Name") or "",
-            state=state,
+            # Prefer the row's recipient location over the query parameter. This
+            # independently prevents a cross-state API result from being mislabeled.
+            state=recipient_state or state.upper(),
             program="SVPP",
             amount=a.get("Award Amount"),
             start=a.get("Start Date") or "",
             end=a.get("End Date") or "",
             url=f"https://www.usaspending.gov/award/{gid}" if gid else "",
-            raw={k: a.get(k) for k in ("Award ID", "Award Amount", "Start Date",
-                                       "End Date", "generated_internal_id")},
+            raw={k: a.get(k) for k in (
+                "Award ID", "Recipient UEI", "Recipient Location", "Award Amount",
+                "Start Date", "End Date", "generated_internal_id")},
             event_type=FundingEventType.AWARD_OBLIGATED,
             # This endpoint does not return an obligation-action date. Spend start is
             # retained separately and must never be described as the award date.
