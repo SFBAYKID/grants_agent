@@ -1,0 +1,15 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,3330180,NH,Gorham CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3331860,NH,Greenville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3332260,NH,Groveton CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3332980,NH,Hampton CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3333140,NH,Hampton Beach CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3333620,NH,Hancock CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3333780,NH,Hanover CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3335460,NH,Henniker CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3336020,NH,Hillsborough CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3336580,NH,Hinsdale CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3337220,NH,Hooksett CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3337860,NH,Hudson CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3338420,NH,Jaffrey CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3339300,NH,Keene city,incorporated_place,2025,researchable,not_researched,,

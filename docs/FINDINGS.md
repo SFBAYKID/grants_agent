@@ -17,24 +17,35 @@ the canonical discovery catalog.
 
 ## Nationwide discovery snapshot
 
-- **verified (catalog validation):** 252 candidate and integrated source records validate across
+- **verified (catalog validation):** 270 candidate and integrated source records validate across
   federal, state, county, city, school-district, specialized-jurisdiction, multi-jurisdiction, and
   portal-family levels.
-- **verified (access evidence):** 17 no-auth sources have verified access, 11 additional no-auth
-  classifications remain candidates, 2 public APIs require keys, 14 sources require free accounts,
+- **verified (access evidence):** 34 no-auth sources have verified access, 11 additional no-auth
+  classifications remain candidates, 2 public APIs require keys, 15 sources require free accounts,
   4 require supplier accounts, and 204 candidates still have unknown access.
 - **verified (gap pass):** exact official endpoints were added for Ada County, Troy School District,
   Houston ISD, and Seattle Public Schools. Connecticut is an evidenced `not_applicable` county layer
   because its official FAQ states that county government was dissolved in 1960.
-- **verified (new evidence):** twelve Firecrawl selected-result checks now persist queries, result
+- **verified (new evidence):** thirty Firecrawl selected-result checks now persist queries, result
   metadata, deterministic evidence hashes, and scraped-content hashes.
+- **verified (raw discovery batch):** batch `20260716T004633Z` persisted 27 tasks, 27 attempts, and
+  126 returned results across CA, NH, and TX without storing credentials. All 27 searches succeeded.
+  Eight official sources were promoted only after manual page review and successful selected-page
+  scraping; two timed-out page scrapes and irrelevant or third-party results were not promoted.
 - **verified (county universe):** the pinned 2025 Census Gazetteer produces 3,144 county-equivalent
-  tasks across 50 states plus DC: 53 linked source candidates, 15 structural exceptions, and 3,076
+  tasks across 50 states plus DC: 56 linked source candidates, 15 structural exceptions, and 3,073
   entities explicitly marked `not_researched`.
 - **verified (county batch):** Firecrawl search and scrape checks added official procurement pages for
   Los Angeles, Orange, Oakland, Allegheny, and King counties. Their portal/account boundaries are
   recorded separately from runtime integration status.
-- **needs-testing:** county, city, and school-district coverage remains incomplete. The earlier
+- **verified (district/place batch):** reviewed Firecrawl batches added large-entity and sampled
+  district/place sources. The school queue now has 66 linked candidates among 13,363 Census entities;
+  the incorporated-place queue has 14 linked candidates among 32,058 Census places.
+- **verified (access nuance):** Philadelphia's Public Purchase portal states that registration is
+  free but requires login to view bids. The other nine new pages exposed opportunity metadata without
+  authentication; this does not imply anonymous bid submission.
+- **needs-testing:** county, city, and school-district coverage remains incomplete. The place queue is
+  not a unique-government registry and does not include every county subdivision/MCD. The earlier
   185 Firecrawl-discovered rows predate immutable check storage and are not independently replayable.
 
 ## What remains

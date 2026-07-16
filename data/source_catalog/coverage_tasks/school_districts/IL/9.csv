@@ -1,0 +1,12 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+school_district,1799001,IL,Bluford Unit School District 318 (9-12) in Farrington,secondary_school_district,2025,researchable,not_researched,,
+school_district,1799002,IL,Bluford Unit School District 318 (KG-8) in Mount Vernon,elementary_school_district,2025,researchable,not_researched,,
+school_district,1799003,IL,Woodlawn Unit District 209 (KG-8) in Mount Vernon,elementary_school_district,2025,researchable,not_researched,,
+school_district,1799004,IL,Bluford Unit School District 318 (9-12) in Opdyke-Belle Rive,secondary_school_district,2025,researchable,not_researched,,
+school_district,1799005,IL,Woodlawn Unit District 209 (9-12) in Grand Prairie,secondary_school_district,2025,researchable,not_researched,,
+school_district,1799006,IL,Woodlawn Unit District 209 (9-12) in Rome,secondary_school_district,2025,researchable,not_researched,,
+school_district,1799007,IL,Woodlawn Unit District 209 (KG-8) in Nashville,elementary_school_district,2025,researchable,not_researched,,
+school_district,1799008,IL,Woodlawn Unit District 209 (9-12) in Ashley,secondary_school_district,2025,researchable,not_researched,,
+school_district,1799009,IL,St. Anne Unit District 24 (9-12) in Pembroke,secondary_school_district,2025,researchable,not_researched,,
+school_district,1799501,IL,St. Anne Unit District 24,unified_school_district,2025,researchable,not_researched,,
+school_district,1799997,IL,School District Not Defined,unified_school_district,2025,statistical_placeholder,not_applicable,2026-07-15,Census Gazetteer row is School District Not Defined

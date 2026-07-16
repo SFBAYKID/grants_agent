@@ -147,8 +147,8 @@ def test_canonical_county_universe_is_complete_and_linked() -> None:
     assert len(tasks) == COUNTY_ENTITY_COUNT
     assert {task.state for task in tasks} == US_JURISDICTIONS
     assert Counter(task.research_status for task in tasks) == {
-        "candidate_found": 53,
+        "candidate_found": 56,
         "not_applicable": 15,
-        "not_researched": 3_076,
+        "not_researched": 3_073,
     }
-    assert len(links) == 53
+    assert len(links) == 56

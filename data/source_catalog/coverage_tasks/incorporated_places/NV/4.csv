@@ -1,0 +1,20 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,3240000,NV,Las Vegas city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3241000,NV,Laughlin CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3241800,NV,Lemmon Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3242350,NV,Logan Creek CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3243000,NV,Lovelock city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3243400,NV,Lund CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3244000,NV,McDermitt CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3244200,NV,McGill CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3246000,NV,Mesquite city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3246400,NV,Midas CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3246800,NV,Mina CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3247000,NV,Minden CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3247840,NV,Moapa Town CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3247880,NV,Moapa Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3248000,NV,Mogul CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3248400,NV,Montello CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3249200,NV,Mountain City CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3249310,NV,Mount Charleston CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3249425,NV,Mount Wilson CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

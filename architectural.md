@@ -140,8 +140,25 @@ Source discovery and source integration are deliberately separate:
 - `data/source_catalog/coverage_exceptions.csv` records researched gaps and structurally inapplicable
   layers without inventing an endpoint.
 - `data/source_catalog/discovery_checks.csv` stores selected Firecrawl query/result evidence and
-  content fingerprints linked to a catalog row or coverage exception. Twelve checks from the
-  2026-07-15 gap-closing pass are currently persisted and validator-backed.
+  content fingerprints linked to a catalog row or coverage exception. Thirty checks from the
+  2026-07-15/16 gap-closing passes are currently persisted and validator-backed.
+- `grant_watch/firecrawl_client.py` is the typed Firecrawl v1 search transport. It redacts secret-like
+  keys, exact credential values in arbitrary response text/keys, and URL query values; it streams into
+  a bounded response buffer, classifies retryable and systemic failures, and retains response hashes
+  without writing credentials.
+- `grant_watch/source_discovery_models.py` owns immutable manifests/checkpoints, deterministic task
+  and request identities, and pure paid-attempt state transitions. Schema v2 task identities bind the
+  complete target snapshot (namespace, GEOID, state, name, kind, universe vintage) as well as the
+  query contract. An `in_flight` attempt is durably written before HTTP; after a crash, retry requires
+  the explicit `--retry-indeterminate` choice and preserves the uncertain attempt in the fixed budget.
+- `grant_watch/source_discovery_batch.py` builds deterministic, bounded research batches from
+  `not_researched` county, school-district, and incorporated-place tasks. Dry-run performs no network
+  or file writes; live runs are rate-limited and stop on systemic authentication or billing errors.
+- `grant_watch/source_discovery_store.py` persists immutable manifests and atomically replaced JSONL
+  checkpoints under `data/source_catalog/firecrawl_batches/<batch_id>/`. Strict JSON types,
+  timestamp/outcome/state validation, request/response hashes, root-wide plus per-batch advisory
+  locking, and explicit zero/failure outcomes make batches restartable and auditable. The worker uses
+  persisted completion times to enforce its rate window across different batch IDs.
 - `grant_watch/coverage_universe.py` pins the official 2025 Census national county Gazetteer by URL,
   byte hash, vintage, and filtered entity count. Explicit GEOID-to-source links live in
   `data/source_catalog/county_source_links.csv`; generated state shards retain a status for every one
@@ -150,6 +167,19 @@ Source discovery and source integration are deliberately separate:
 - County task status is evidence-preserving: a reviewed link becomes `candidate_found`, statewide
   structural evidence may become `not_applicable`, and everything else remains `not_researched`.
   A state-level source or one county example never implies coverage of the other counties.
+- `grant_watch/entity_coverage.py` supplies the shared namespaced entity key, many-to-many
+  source-link model, deterministic sharding, drift checks, and atomic task replacement used by the
+  district and place queues. A source-to-entity relation retains its evidence URL, check date, and
+  link method; a scalar source field would lose valid shared-portal and multi-source relationships.
+- `grant_watch/school_district_universe.py` pins and validates all four official 2025 Census school
+  district layers (elementary, secondary, unified, and administrative-area). Its 13,363 task rows are
+  sharded by state and first local GEOID digit; 19 Census "School District Not Defined" rows remain
+  structural placeholders rather than research targets.
+- `grant_watch/incorporated_place_universe.py` pins the official 2025 place Gazetteer and preserves
+  Census functional-status dispositions. Its 32,058 rows are a geographic coverage queue, not a
+  deduplicated registry of governments. Statistical and nonfunctioning places are structural; active
+  county subdivisions/MCDs are outside this universe. The explicit Brewster, Massachusetts gap
+  prevents an active town source from being falsely linked to the statistical Brewster CDP.
 - `grant_watch/source_catalog.py` validates those typed records and regenerates the access partitions
   and 50-state-plus-DC matrix in `docs/source_inventory/`.
 - `grant_watch/sources/` contains the much smaller set of executable pollers. A candidate reaches this
@@ -159,13 +189,20 @@ Source discovery and source integration are deliberately separate:
 The discovery catalog is durable research memory, not an automatic crawler and not a lead table. It
 must never promote `discovered` into `verified` merely because a URL was found.
 
-The current catalog is a manually reviewed snapshot. New checks now persist a query, retrieval date,
-selected rank/title/snippet, deterministic evidence hash, and scraped-content fingerprint. Historical
-Firecrawl rows from before this evidence schema remain `needs-testing`. A future discovery worker must
-record every returned result and status transition, require human promotion, and never auto-enable a
-poller. It also needs an explicit mapping from catalog IDs to runtime source namespaces such as
-`usaspending:16.071`; runtime namespaces remain CFDA/feed-specific because they are part of the dedup
-key. Automated discovery and runtime namespace mapping are not implemented today.
+The current catalog is a manually reviewed snapshot. New selected checks persist a query, retrieval
+date, selected rank/title/snippet, deterministic evidence hash, and scraped-content fingerprint.
+Historical Firecrawl rows from before this evidence schema remain `needs-testing`. The raw discovery
+worker records every result and terminal outcome but has no code path that writes catalog rows,
+entity-source links, selected discovery checks, or runtime pollers. A human must review an official
+page, verify its access boundary, scrape the selected page, and explicitly promote it. Runtime source
+namespace mapping such as `usaspending:16.071` remains deliberately separate and is not automated;
+those CFDA/feed-specific namespaces are part of the lead deduplication key.
+
+Raw batch `20260716T004633Z` predates the schema-v2 full-target fingerprint and remains immutable
+schema-v1 evidence; its task IDs bind namespace, GEOID, query template, query, result limit, and batch
+ID, while its target fields are retained but not independently hash-bound. Schema v1 is accepted only
+by read-only loading/validation; checkpoint creation, batch initialization, checkpoint replacement,
+and execution require v2.
 
 ---
 

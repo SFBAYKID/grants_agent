@@ -48,7 +48,7 @@ entity_id,state,entity_name,entity_kind,universe_vintage,research_status,source_
 06093,CA,Siskiyou County,county_equivalent,2025,not_researched,,,
 06095,CA,Solano County,county_equivalent,2025,not_researched,,,
 06097,CA,Sonoma County,county_equivalent,2025,not_researched,,,
-06099,CA,Stanislaus County,county_equivalent,2025,not_researched,,,
+06099,CA,Stanislaus County,county_equivalent,2025,candidate_found,ca.stanislaus_county.bids,2026-07-16,Stanislaus County
 06101,CA,Sutter County,county_equivalent,2025,not_researched,,,
 06103,CA,Tehama County,county_equivalent,2025,not_researched,,,
 06105,CA,Trinity County,county_equivalent,2025,not_researched,,,

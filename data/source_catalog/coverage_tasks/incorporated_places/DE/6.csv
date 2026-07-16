@@ -1,0 +1,11 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,1060290,DE,Rehoboth Beach city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1061265,DE,Rising Sun-Lebanon CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,1061480,DE,Riverview CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,1061720,DE,Rodney Village CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,1063800,DE,St. Georges CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,1064320,DE,Seaford city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1064840,DE,Selbyville town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1067050,DE,Slaughter Beach town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1067310,DE,Smyrna town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1067700,DE,South Bethany town,incorporated_place,2025,researchable,not_researched,,

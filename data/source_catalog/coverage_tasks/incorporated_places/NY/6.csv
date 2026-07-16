@@ -1,0 +1,160 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,3660103,NY,Putnam Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3660408,NY,Quiogue CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3660422,NY,Quogue village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3660455,NY,Radisson CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3660576,NY,Randolph CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3660598,NY,Ransomville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3660609,NY,Rapids CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3660675,NY,Ravena village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3660829,NY,Red Creek village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3660884,NY,Redford CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3660895,NY,Red Hook village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3660983,NY,Red Oaks Mill CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3661016,NY,Redwood CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3661115,NY,Remsen village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3661142,NY,Remsenburg-Speonk CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3661148,NY,Rensselaer city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3661159,NY,Rensselaer Falls village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3661236,NY,Retsof CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3661346,NY,Rhinebeck village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3661368,NY,Rhinecliff CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3661434,NY,Richburg village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3661489,NY,Richfield Springs village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3661588,NY,Richmondville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3661621,NY,Richville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3661665,NY,Ridge CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3661797,NY,Rifton CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3661874,NY,Ripley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3661973,NY,Riverhead CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3662061,NY,Riverside village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3662066,NY,Riverside CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663000,NY,Rochester city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3663014,NY,Rochester Institute of Technology CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663132,NY,Rock Hill CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663264,NY,Rockville Centre village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3663319,NY,Rocky Point CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663330,NY,Rodman CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663363,NY,Roessleville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663418,NY,Rome city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3663429,NY,Romulus CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663473,NY,Ronkonkoma CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663506,NY,Roosevelt CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663583,NY,Roscoe CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663725,NY,Rosendale CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663770,NY,Roslyn village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3663792,NY,Roslyn Estates village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3663803,NY,Roslyn Harbor village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3663814,NY,Roslyn Heights CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663924,NY,Rotterdam CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663957,NY,Round Lake village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3663968,NY,Round Top CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3663979,NY,Rouses Point village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3664056,NY,Ruby CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3664155,NY,Rushford CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3664199,NY,Rushville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3664232,NY,Russell Gardens village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3664309,NY,Rye city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3664325,NY,Rye Brook village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3664408,NY,Sackets Harbor village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3664430,NY,Saddle Rock village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3664441,NY,Saddle Rock Estates CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3664452,NY,Sagaponack village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3664485,NY,Sag Harbor village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3664551,NY,St. Bonaventure CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3664584,NY,St. James CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3664606,NY,St. John Fisher College CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3664639,NY,St. Johnsville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3664716,NY,St. Regis Falls CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3664749,NY,Salamanca city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3664771,NY,Salem CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3664842,NY,Salisbury CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3664848,NY,Salisbury Center CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3664859,NY,Salisbury Mills CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3664881,NY,Saltaire village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3664892,NY,Salt Point CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3664958,NY,Sanborn CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3665024,NY,Sand Ridge CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3665035,NY,Sands Point village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3665068,NY,Sandy Creek village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3665233,NY,Saranac Lake village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3665255,NY,Saratoga Springs city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3665288,NY,Saugerties village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3665310,NY,Saugerties South CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3665332,NY,Savannah CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3665354,NY,Savona village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3665409,NY,Sayville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3665431,NY,Scarsdale village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3665475,NY,Schaghticoke village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3665508,NY,Schenectady city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3665519,NY,Schenevus CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3665585,NY,Schoharie village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3665640,NY,Schroon Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3665739,NY,Schuyler Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3665750,NY,Schuylerville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3665761,NY,Scio CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3665882,NY,Scotchtown CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3665893,NY,Scotia village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3665926,NY,Scottsburg CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3665948,NY,Scotts Corners CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3665959,NY,Scottsville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3666047,NY,Sea Cliff village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3666058,NY,Seaford CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3666102,NY,Searingtown CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3666212,NY,Selden CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3666322,NY,Seneca Falls CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3666366,NY,Seneca Knolls CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3666465,NY,Setauket CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3666663,NY,Sharon Springs village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3666828,NY,Shelter Island CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3666850,NY,Shelter Island Heights CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3666872,NY,Shenorock CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3666883,NY,Sherburne village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3666949,NY,Sherman village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3666993,NY,Sherrill city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3667048,NY,Shinnecock Hills CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3667070,NY,Shirley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3667081,NY,Shokan CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3667191,NY,Shoreham village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3667207,NY,Shorehaven CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3667257,NY,Shortsville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3667279,NY,Shrub Oak CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3667334,NY,Sidney village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3667367,NY,Siena College CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3667411,NY,Silver Creek village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3667466,NY,Silver Springs village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3667488,NY,Sinclairville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3667510,NY,Skaneateles village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3667631,NY,Slaterville Springs CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3667638,NY,Sleepy Hollow village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3667640,NY,Sleepy Hollow Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3667686,NY,Sloan village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3667708,NY,Sloatsburg village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3667730,NY,Smallwood CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3667851,NY,Smithtown CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3668088,NY,Smithville Flats CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3668099,NY,Smyrna village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3668209,NY,Sodus village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3668242,NY,Sodus Point village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3668286,NY,Solvay village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3668374,NY,Sound Beach CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3668462,NY,Southampton village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3668610,NY,South Blooming Grove village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3668737,NY,South Cairo CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3668847,NY,South Corning village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3668891,NY,South Dayton village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3668946,NY,South Edmeston CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3668968,NY,South Fallsburg CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3669001,NY,South Farmingdale CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3669023,NY,South Floral Park village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3669078,NY,South Glens Falls village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3669188,NY,South Hempstead CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3669199,NY,South Hill CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3669254,NY,South Huntington CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3669265,NY,South Ilion CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3669342,NY,South Lansing CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3669364,NY,South Lima CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3669386,NY,South Lockport CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3669452,NY,Southold CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3669606,NY,Southport CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3669892,NY,South Valley Stream CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

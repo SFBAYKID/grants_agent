@@ -1,0 +1,69 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,3530000,NM,Golden CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3530035,NM,Golden Acres CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3530210,NM,Grady village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3530490,NM,Grants city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3530770,NM,Grenville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3531190,NM,Hachita CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3531330,NM,Hagerman town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3531540,NM,Hanover CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3531680,NM,Happy Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3531820,NM,Hatch village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3531925,NM,Haystack CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3532100,NM,Hernandez CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3532148,NM,Highland Meadows CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3532160,NM,High Rolls CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3532380,NM,Hillsboro CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3532520,NM,Hobbs city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3532940,NM,Holloman AFB CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3533122,NM,Homer C Jones CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3533130,NM,Homestead CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3533290,NM,Hope village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3533640,NM,Hot Springs Landing CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3533710,NM,House village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3533850,NM,Hurley town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3533920,NM,Hyde Park CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3534430,NM,Indian Hills CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3534620,NM,Isleta CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3534830,NM,Iyanbito CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3534900,NM,Jacona CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3534925,NM,Jaconita CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3535040,NM,Jal city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3535070,NM,Jamestown CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3535110,NM,Jarales CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3535250,NM,Jemez Pueblo CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3535320,NM,Jemez Springs village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3535595,NM,Keeler Farm CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3536090,NM,Kingston CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3536230,NM,Kirtland town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3536300,NM,Kirtland AFB CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3536555,NM,La Bajada CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3536567,NM,La Boca CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3536720,NM,La Cienega CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3536880,NM,La Cueva CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3536930,NM,La Cueva CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3537070,NM,Laguna CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3537407,NM,La Hacienda CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3537420,NM,La Huerta CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3537490,NM,La Jara CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3537700,NM,La Joya CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3537840,NM,Lake Arthur town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3537860,NM,Lake Roberts CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3537862,NM,Lake Roberts Heights CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3537875,NM,Lake Sumner CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3537910,NM,Lake Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3538330,NM,La Luz CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3538470,NM,La Madera CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3538540,NM,La Madera CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3538680,NM,La Mesa CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3538820,NM,La Mesilla CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3538890,NM,Lamy CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3539030,NM,La Plata CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3539170,NM,La Puebla CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3539332,NM,Las Campanas CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3539380,NM,Las Cruces city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3539430,NM,Las Maravillas CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3539450,NM,Las Nutrias CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3539520,NM,Las Palomas CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3539792,NM,Las Tusas CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3539940,NM,Las Vegas city,incorporated_place,2025,researchable,not_researched,,

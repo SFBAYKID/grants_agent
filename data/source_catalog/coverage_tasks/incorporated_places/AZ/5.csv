@@ -1,0 +1,52 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,0450000,AZ,North Fork CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0450340,AZ,Nutrioso CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0450362,AZ,Oak Creek Canyon CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0450480,AZ,Oak Springs CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0450620,AZ,Oatman CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0451142,AZ,Oljato-Monument Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0451180,AZ,Oracle CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0451465,AZ,Orange Grove Mobile Manor CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0451600,AZ,Oro Valley town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0451775,AZ,Oxbow Estates CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0451800,AZ,Padre Ranchitos CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0451810,AZ,Page city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0452230,AZ,Palominas CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0452930,AZ,Paradise Valley town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0453070,AZ,Parker town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0453210,AZ,Parker Strip CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0453350,AZ,Parks CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0453490,AZ,Patagonia town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0453560,AZ,Paulden CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0453700,AZ,Payson town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0453770,AZ,Peach Springs CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0453910,AZ,Peeples Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0454050,AZ,Peoria city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0454190,AZ,Peridot CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0455000,AZ,Phoenix city,incorporated_place,2025,researchable,candidate_found,2026-07-15,1 reviewed source link(s)
+incorporated_place,0455210,AZ,Picacho CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0455300,AZ,Picture Rocks CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0455560,AZ,Pima town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0455630,AZ,Pinal CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0455700,AZ,Pine CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0455840,AZ,Pinedale CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0455845,AZ,Pine Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0455880,AZ,Pinetop Country Club CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0455980,AZ,Pinetop-Lakeside town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0455983,AZ,Pinion Pines CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0456120,AZ,Pinon CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0456400,AZ,Pirtleville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0456470,AZ,Pisinemo CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0457170,AZ,Poston CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0457380,AZ,Prescott city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0457450,AZ,Prescott Valley town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0458010,AZ,Quartzsite town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0458150,AZ,Queen Creek town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0458290,AZ,Queen Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0458620,AZ,Rainbow City CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0458870,AZ,Rancho Mesa Verde CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0459372,AZ,Red Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0459550,AZ,Red Mesa CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0459690,AZ,Red Rock CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0459760,AZ,Red Rock CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0459900,AZ,Rillito CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

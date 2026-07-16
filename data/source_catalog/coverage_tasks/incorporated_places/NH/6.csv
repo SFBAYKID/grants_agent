@@ -1,0 +1,12 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,3360500,NH,Peterborough CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3361220,NH,Pinardville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3361860,NH,Pittsfield CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3362260,NH,Plainfield CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3362580,NH,Plymouth CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3362900,NH,Portsmouth city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3363940,NH,Raymond CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3365140,NH,Rochester city,incorporated_place,2025,researchable,candidate_found,2026-07-16,1 reviewed source link(s)
+incorporated_place,3367460,NH,Sanbornville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3368340,NH,Seabrook Beach CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3369940,NH,Somersworth city,incorporated_place,2025,researchable,not_researched,,

@@ -1,0 +1,15 @@
+entity_namespace,geoid,source_id,relation,evidence_url,evidence_checked_on,link_method,notes
+incorporated_place,0203000,ak.anchorage.bids,direct_publisher,https://www.muni.org/Departments/purchasing/pages/bidding.aspx,2026-07-15,publisher_name_and_scope,Municipality of Anchorage covers Anchorage municipality
+incorporated_place,0820000,co.denver.bids,direct_publisher,https://www.denvergov.org/Government/Agencies-Departments-Offices/Agencies-Departments-Offices-Directory/General-Services/Divisions/Purchasing/Current-Bidding-Opportunities,2026-07-15,publisher_name_and_scope,City and County of Denver covers Denver city
+incorporated_place,0952000,ct.new_haven.bids,direct_publisher,https://www.newhavenct.gov/government/departments-divisions/procurement/bids-rfps,2026-07-15,publisher_name_and_scope,City of New Haven covers New Haven city
+incorporated_place,3209700,nv.carson_city.bids,direct_publisher,https://www.carson.org/government/departments-g-z/purchasing-contracts/bid-opportunities,2026-07-15,publisher_name_and_scope,Carson City covers active Census place Carson City
+incorporated_place,4459000,ri.providence.bids,direct_publisher,https://www.providenceri.gov/purchasing/active-bid-solicitations/,2026-07-15,publisher_name_and_scope,City of Providence covers Providence city
+incorporated_place,5010675,vt.burlington.bids,direct_publisher,https://www.burlingtonvt.gov/Bids.aspx,2026-07-15,publisher_name_and_scope,City of Burlington covers Burlington city
+incorporated_place,0644000,ca.los_angeles_city.ramp,direct_publisher,https://data.lacity.org/City-Infrastructure-Service-Requests/RAMP-Open-Bid-Opportunities/hf3r-utnq,2026-07-15,publisher_name_and_scope,City of Los Angeles covers Los Angeles city
+incorporated_place,3651000,ny.new_york_city.record,direct_publisher,https://a856-cityrecord.nyc.gov/,2026-07-15,publisher_name_and_scope,City of New York covers New York city
+incorporated_place,1714000,il.chicago.bids,direct_publisher,https://www.chicago.gov/city/en/depts/dps/provdrs/contract/svcs/current_bid_opportunities.html,2026-07-15,publisher_name_and_scope,City of Chicago covers Chicago city
+incorporated_place,4835000,tx.houston.contracting,direct_publisher,https://www.houstontx.gov/obo/current_contracting_opportunities.html,2026-07-15,publisher_name_and_scope,City of Houston covers Houston city
+incorporated_place,0455000,az.phoenix.procurement,direct_publisher,https://www.phoenix.gov/administration/departments/finance/procurement.html,2026-07-15,publisher_name_and_scope,City of Phoenix covers Phoenix city
+incorporated_place,0602462,ca.arcadia.bids,direct_publisher,https://www.arcadiaca.gov/government/administrative_services/bids_rfps.php?rz=bidDetails&id=70,2026-07-16,publisher_name_and_scope,City of Arcadia covers Arcadia city
+incorporated_place,3327380,nh.franklin.bids,direct_publisher,https://www.franklinnh.gov/city-manager/pages/bids-rfps-and-rfqs,2026-07-16,publisher_name_and_scope,City of Franklin covers Franklin city
+incorporated_place,3365140,nh.rochester.bids,direct_publisher,https://www.rochesternh.gov/bids,2026-07-16,publisher_name_and_scope,City of Rochester covers Rochester city

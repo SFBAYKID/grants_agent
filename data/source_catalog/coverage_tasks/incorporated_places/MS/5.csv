@@ -1,0 +1,53 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,2850280,MS,Myrtle town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2850440,MS,Natchez city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2850720,MS,Nellieburg CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2850880,MS,Nettleton city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2851000,MS,New Albany city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2851040,MS,New Augusta town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2851240,MS,New Hamilton CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2851360,MS,New Hebron town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2851400,MS,New Hope CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2851420,MS,New Houlka town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2851680,MS,New Site CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2851720,MS,Newton city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2851840,MS,Nicholson CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2851960,MS,Nitta Yuma CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2852400,MS,North Carrollton town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2852680,MS,North Tunica CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2852880,MS,Noxapater town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2853080,MS,Oak Grove CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2853200,MS,Oakland town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2853520,MS,Ocean Springs city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2853680,MS,Okolona city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2854040,MS,Olive Branch city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2854640,MS,Osyka town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2854680,MS,Ovett CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2854840,MS,Oxford city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2854920,MS,Pace town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2854960,MS,Pachuta town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2855000,MS,Paden village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2855160,MS,Panther Burn CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2855280,MS,Paris CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2855360,MS,Pascagoula city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2855400,MS,Pass Christian city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2855560,MS,Pattison CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2855760,MS,Pearl city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2855920,MS,Pearlington CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2855930,MS,Pearl River CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2856200,MS,Pelahatchie town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2856800,MS,Petal city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2856920,MS,Pheba CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2856960,MS,Philadelphia city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2857160,MS,Picayune city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2857200,MS,Pickens town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2858360,MS,Pittsboro village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2858440,MS,Plantersville town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2858960,MS,Polkville town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2859160,MS,Pontotoc city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2859240,MS,Pope village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2859480,MS,Poplarville city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2859520,MS,Porterville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2859560,MS,Port Gibson city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2859720,MS,Potts Camp town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2859920,MS,Prentiss town,incorporated_place,2025,researchable,not_researched,,

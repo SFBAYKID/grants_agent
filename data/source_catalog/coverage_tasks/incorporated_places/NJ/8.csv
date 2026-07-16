@@ -1,0 +1,29 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,3480120,NJ,Westville borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3480210,NJ,West Wildwood borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3480270,NJ,Westwood borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3480390,NJ,Wharton borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3480540,NJ,Whippany CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3480630,NJ,White Horse CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3480720,NJ,White House Station CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3480750,NJ,White Meadow Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3480840,NJ,Whitesboro CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3481042,NJ,Whittingham CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3481170,NJ,Wildwood city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3481200,NJ,Wildwood Crest borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3481365,NJ,William Paterson University of New Jersey CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3481380,NJ,Williamstown CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3481620,NJ,Windsor CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3481890,NJ,Woodbine borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3481950,NJ,Woodbridge CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3482120,NJ,Woodbury city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3482180,NJ,Woodbury Heights borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3482300,NJ,Woodcliff Lake borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3482423,NJ,Woodland Park borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3482450,NJ,Woodlynne borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3482570,NJ,Wood-Ridge borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3482720,NJ,Woodstown borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3482960,NJ,Wrightstown borough,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3483170,NJ,Yardville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3483245,NJ,Yorketown CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3483290,NJ,Zarephath CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

@@ -39,7 +39,7 @@ def test_canonical_discovery_checks_link_to_sources_or_exceptions() -> None:
             for exception in exceptions
         },
     )
-    assert len(checks) == 12
+    assert len(checks) == 30
     assert all(check.transport == "firecrawl_search" for check in checks)
 
 

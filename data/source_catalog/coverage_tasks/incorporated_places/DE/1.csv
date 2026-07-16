@@ -1,0 +1,7 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,1010760,DE,Camden town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1014660,DE,Cheswold town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1015310,DE,Claymont CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,1015440,DE,Clayton town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1018950,DE,Dagsboro town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1019730,DE,Delaware City city,incorporated_place,2025,researchable,not_researched,,

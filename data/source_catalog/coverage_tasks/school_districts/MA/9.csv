@@ -1,0 +1,3 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+school_district,2599001,MA,Pioneer Valley School District in Warwick (7-12),secondary_school_district,2025,researchable,not_researched,,
+school_district,2599997,MA,School District Not Defined,unified_school_district,2025,statistical_placeholder,not_applicable,2026-07-15,Census Gazetteer row is School District Not Defined

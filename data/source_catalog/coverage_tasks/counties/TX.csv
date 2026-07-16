@@ -59,7 +59,7 @@ entity_id,state,entity_name,entity_kind,universe_vintage,research_status,source_
 48115,TX,Dawson County,county_equivalent,2025,not_researched,,,
 48117,TX,Deaf Smith County,county_equivalent,2025,not_researched,,,
 48119,TX,Delta County,county_equivalent,2025,not_researched,,,
-48121,TX,Denton County,county_equivalent,2025,not_researched,,,
+48121,TX,Denton County,county_equivalent,2025,candidate_found,tx.denton_county.bids,2026-07-16,Denton County
 48123,TX,DeWitt County,county_equivalent,2025,not_researched,,,
 48125,TX,Dickens County,county_equivalent,2025,not_researched,,,
 48127,TX,Dimmit County,county_equivalent,2025,not_researched,,,

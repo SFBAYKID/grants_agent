@@ -1,0 +1,74 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,2670040,MI,Royal Oak city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2670160,MI,Ruby CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2670520,MI,Saginaw city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2670640,MI,St. Charles village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2670680,MI,St. Clair city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2670760,MI,St. Clair Shores city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2670800,MI,St. Helen CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2670840,MI,St. Ignace city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2670900,MI,St. James CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2670940,MI,St. Johns city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2670960,MI,St. Joseph city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2671000,MI,St. Louis city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2671140,MI,Saline city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2671340,MI,Sand Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2671360,MI,Sand Lake village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2671540,MI,Sandusky city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2671560,MI,Sanford village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2671660,MI,Saranac village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2671700,MI,Saugatuck city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2671740,MI,Sault Ste. Marie city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2671860,MI,Schoolcraft village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2672060,MI,Scotts CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2672080,MI,Scottville city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2672180,MI,Sebewaing village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2672700,MI,Shaftsburg CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2672840,MI,Shelby village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2672960,MI,Shepherd village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2673100,MI,Sheridan village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2673420,MI,Sherwood village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2673560,MI,Shields CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2673660,MI,Shoreham village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2673730,MI,Shorewood-Tower Hills-Harbert CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2674120,MI,Skanee CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2674200,MI,Skidway Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2674380,MI,Snover CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2674740,MI,South Boardman CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2674900,MI,Southfield city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2674960,MI,Southgate city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2674975,MI,South Gull Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2674980,MI,South Haven city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2675100,MI,South Lyon city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2675140,MI,South Monroe CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2675220,MI,South Range village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2675280,MI,South Rockwood village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2675420,MI,Sparta village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2675620,MI,Spring Arbor CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2675700,MI,Springfield city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2675820,MI,Spring Lake village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2675860,MI,Springport village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2676120,MI,Standish city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2676220,MI,Stanton city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2676240,MI,Stanwood village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2676380,MI,Stephenson city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2676420,MI,Sterling village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2676460,MI,Sterling Heights city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2676500,MI,Stevensville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2676560,MI,Stockbridge village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2676720,MI,Stony Point CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2676820,MI,Stronach CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2676960,MI,Sturgis city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2677420,MI,Sunfield village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2677600,MI,Suttons Bay village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2677700,MI,Swartz Creek city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2677860,MI,Sylvan Lake city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2678140,MI,Tawas City city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2679000,MI,Taylor city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2679120,MI,Tecumseh city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2679160,MI,Tekonsha village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2679240,MI,Temperance CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2679600,MI,Thompsonville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2679680,MI,Three Lakes CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2679720,MI,Three Oaks village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2679760,MI,Three Rivers city,incorporated_place,2025,researchable,not_researched,,

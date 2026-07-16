@@ -1,0 +1,8 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,2880160,MS,Wiggins city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2880760,MS,Winona city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2880800,MS,Winstonville town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2880840,MS,Winterville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2881000,MS,Woodland village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2881120,MS,Woodville town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2881520,MS,Yazoo City city,incorporated_place,2025,researchable,not_researched,,

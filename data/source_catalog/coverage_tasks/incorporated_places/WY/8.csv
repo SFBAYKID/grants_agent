@@ -1,0 +1,15 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,5680285,WY,Veteran CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5680575,WY,Vista West CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5681300,WY,Wamsutter town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5681640,WY,Warren AFB CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5681703,WY,Washam CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5682967,WY,Westview Circle CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5683040,WY,Wheatland town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5683100,WY,Whiting CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5683765,WY,Wilson CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5684852,WY,Woods Landing-Jelm CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5684925,WY,Worland city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5685015,WY,Wright town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5686665,WY,Yoder town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5686737,WY,Y-O Ranch CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

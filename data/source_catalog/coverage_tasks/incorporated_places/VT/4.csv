@@ -1,0 +1,24 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,5040000,VT,Lincoln CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5040150,VT,Londonderry CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5040450,VT,Lowell CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5041200,VT,Ludlow village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5041350,VT,Lunenburg CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5041650,VT,Lyndon CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5041800,VT,Lyndon Center CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5041950,VT,Lyndonville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5042700,VT,Manchester village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5042925,VT,Manchester Center CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5043525,VT,Marshfield village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5044275,VT,Middlebury CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5044725,VT,Middletown Springs CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5045175,VT,Milton CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5046000,VT,Montpelier city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5046825,VT,Morrisville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5048100,VT,Newbury village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5048325,VT,Newfane village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5048550,VT,New Haven CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5048850,VT,Newport city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5049000,VT,Newport Center CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5049075,VT,North Bennington village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5049450,VT,North Clarendon CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

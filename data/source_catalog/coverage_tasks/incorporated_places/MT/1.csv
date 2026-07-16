@@ -1,0 +1,53 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,3010000,MT,Brockton CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3010075,MT,Brockway CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3010150,MT,Brooks CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3010375,MT,Browning CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3010935,MT,Bull Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3011200,MT,Busby CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3011397,MT,Butte-Silver Bow (balance),fictitious_place,2025,structural_F,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_F
+incorporated_place,3011500,MT,Bynum CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3011800,MT,Camas CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3011995,MT,Camp Three CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3011999,MT,Camrose Colony CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3012025,MT,Canyon Creek CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3012400,MT,Cardwell CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3012435,MT,Carlton CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3012625,MT,Carter CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3012775,MT,Cascade town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3012783,MT,Cascade Colony CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3013375,MT,Centerville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3013900,MT,Charlo CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3013975,MT,Charlos Heights CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3014200,MT,Chester town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3014575,MT,Chinook city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3014650,MT,Choteau city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3014875,MT,Churchill CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3014950,MT,Circle town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3015100,MT,Clancy CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3015475,MT,Clinton CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3015550,MT,Clyde Park town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3016000,MT,Coffee Creek CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3016525,MT,Colstrip city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3016600,MT,Columbia Falls city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3016825,MT,Columbus town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3017050,MT,Condon CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3017200,MT,Conner CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3017275,MT,Conrad city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3017350,MT,Cooke City CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3017500,MT,Coram CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3017725,MT,Corvallis CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3017800,MT,Corwin Springs CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3018025,MT,Craig CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3018100,MT,Crane CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3018250,MT,Crow Agency CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3018475,MT,Culbertson town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3018700,MT,Custer CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3018775,MT,Cut Bank city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3018850,MT,Cyr CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3019225,MT,Danvers CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3019300,MT,Darby town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3019525,MT,Dayton CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3019675,MT,De Borgia CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3019800,MT,Deerfield Colony CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3019825,MT,Deer Lodge city,incorporated_place,2025,researchable,not_researched,,

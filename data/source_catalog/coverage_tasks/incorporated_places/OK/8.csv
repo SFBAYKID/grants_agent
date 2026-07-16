@@ -1,0 +1,34 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,4080000,OK,Welty CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4080230,OK,West Peavine CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4080250,OK,Westport town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4080350,OK,West Siloam Springs town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4080450,OK,Westville town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4080500,OK,Wetumka city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4080550,OK,Wewoka city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4080675,OK,Whippoorwill CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4080750,OK,White Eagle CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4080800,OK,Whitefield town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4080813,OK,Whitehorn Cove CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4080850,OK,White Oak CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4080900,OK,Whitesboro CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4080912,OK,White Water CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4080975,OK,Wickliffe CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4081000,OK,Wilburton city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4081300,OK,Willow town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4081500,OK,Wilson city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4081575,OK,Winchester town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4081750,OK,Wister town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4081912,OK,Woodall CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4082000,OK,Woodlawn Park town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4082150,OK,Woodward city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4082200,OK,Wright City town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4082250,OK,Wyandotte town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4082400,OK,Wynnewood city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4082450,OK,Wynona town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4082500,OK,Yale city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4082650,OK,Yeager town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4082950,OK,Yukon city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4083030,OK,Zeb CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4083050,OK,Zena CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4083125,OK,Zion CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

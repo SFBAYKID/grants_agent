@@ -1,0 +1,16 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,3200500,NV,Alamo CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3201000,NV,Amargosa Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3203700,NV,Austin CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3204100,NV,Baker CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3204900,NV,Battle Mountain CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3205100,NV,Beatty CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3205125,NV,Beaverdam CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3205275,NV,Bennett Springs CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3205700,NV,Blue Diamond CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3206500,NV,Boulder City city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3208100,NV,Bunkerville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3208500,NV,Caliente city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3208600,NV,Cal-Nev-Ari CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3208900,NV,Carlin city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3209700,NV,Carson City,incorporated_place,2025,researchable,candidate_found,2026-07-15,1 reviewed source link(s)

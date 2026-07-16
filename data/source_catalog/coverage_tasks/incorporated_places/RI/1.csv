@@ -1,0 +1,7 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,4412340,RI,Carolina CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4414140,RI,Central Falls city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4414320,RI,Charlestown CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4414860,RI,Chepachet CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4415940,RI,Clayville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4419180,RI,Cranston city,incorporated_place,2025,researchable,not_researched,,

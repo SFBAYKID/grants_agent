@@ -114,7 +114,7 @@ affect Chase's other projects.
 
 ## Current status (2026-07-15)
 
-- `verified` offline: the canonical `python -m pytest tests -q` target passes 251 tests. The package
+- `verified` offline: the canonical `python -m pytest tests -q` target passes 326 tests. The package
   uses seven ordered SQLite migrations, typed evidence/funding models, deduplication, scoring, search,
   export, Slack receipt/reconciliation state, outreach retry state, and Salesforce snapshots.
 - `verified` live through 2026-07-14: USAspending prime awards and NSGP subawards, Grants.gov,
@@ -122,13 +122,21 @@ affect Chase's other projects.
   NCES district enrichment, and Grant Socket Mode have been exercised. OregonBuys and WEBS returned
   truthful zero security matches during their checks; positive-row entity extraction remains
   `needs-testing`.
-- `verified` catalog validation: `data/source_catalog/sources.csv` contains 252 federal, state,
+- `verified` catalog validation: `data/source_catalog/sources.csv` contains 270 federal, state,
   county, city, school-district, multi-jurisdiction, and portal-family research records. Generated
   public/keyed/account/unknown-access lists and the 50-state-plus-DC coverage matrix live in
-  `docs/source_inventory/`. Twelve Firecrawl checks have immutable selected-result evidence in
+  `docs/source_inventory/`. Thirty Firecrawl checks have immutable selected-result evidence in
   `data/source_catalog/discovery_checks.csv`. The pinned 2025 Census county universe tracks 3,144
-  county-equivalents in state shards: 53 linked candidates, 15 structural exceptions, and 3,076
+  county-equivalents in state shards: 56 linked candidates, 15 structural exceptions, and 3,073
   explicitly `not_researched`; most catalog rows remain candidates, not pollers.
+- `verified` geography queues: four pinned 2025 Census school-district layers track 13,363 entities
+  with 66 linked candidates, 19 structural placeholders, and 13,278 `not_researched`. The pinned
+  incorporated-place layer tracks 32,058 Census places with 14 linked candidates, 12,587 structural
+  non-government rows, and 19,457 `not_researched`. These are geography queues rather than counts of
+  unique governments; active county subdivisions/MCDs remain a separate `needs-testing` universe.
+- `verified` raw discovery evidence: Firecrawl batch `20260716T004633Z` stores 27 completed search
+  tasks, 27 attempts, and 126 returned results without credentials. Eight manually reviewed official
+  pages were promoted; raw batch results never promote catalog rows or runtime pollers automatically.
 - `verified` product behavior: Grant accepts configured-channel mentions and replies in registered
   Grant threads, sends paced individual alerts, and has no digest, DM, slash-command, or ownership
   workflow. Run the bot with `python -m grant_watch.slack.grant`; the dry-run-aware drip entrypoint is

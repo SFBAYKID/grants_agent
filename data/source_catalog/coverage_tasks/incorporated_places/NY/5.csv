@@ -1,0 +1,178 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,3650034,NY,Newburgh city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3650067,NY,New Cassel CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3650100,NY,New City CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3650221,NY,Newfane CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3650243,NY,Newfield CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3650265,NY,New Hackensack CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3650276,NY,New Hamburg CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3650298,NY,New Hartford village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3650353,NY,New Hempstead village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3650397,NY,New Hyde Park village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3650551,NY,New Paltz village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3650573,NY,Newport village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3650617,NY,New Rochelle city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3650705,NY,New Square village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3650727,NY,New Suffolk CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3650837,NY,New Windsor CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651000,NY,New York city,incorporated_place,2025,researchable,candidate_found,2026-07-15,1 reviewed source link(s)
+incorporated_place,3651011,NY,New York Mills village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3651055,NY,Niagara Falls city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3651088,NY,Niagara University CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651110,NY,Nichols village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3651262,NY,Niskayuna CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651286,NY,Nissequogue village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3651297,NY,Niverville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651319,NY,Norfolk CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651396,NY,North Amityville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651418,NY,Northampton CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651440,NY,North Babylon CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651467,NY,North Ballston Spa CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651484,NY,North Bay CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651495,NY,North Bay Shore CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651517,NY,North Bellmore CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651528,NY,North Bellport CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651561,NY,North Blenheim CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651583,NY,North Boston CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651792,NY,North Collins village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3651847,NY,North Creek CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3651915,NY,Northeast Ithaca CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3652040,NY,North Gates CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3652067,NY,North Granville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3652078,NY,North Great River CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3652188,NY,North Haven village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3653022,NY,North Hills village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3653055,NY,North Hornell village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3653198,NY,North Lindenhurst CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653231,NY,North Lynbrook CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653253,NY,North Massapequa CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653264,NY,North Merrick CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653275,NY,North New Hyde Park CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653319,NY,North Patchogue CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653396,NY,Northport village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3653462,NY,North Rose CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653561,NY,North Sea CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653660,NY,North Syracuse village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3653682,NY,North Tonawanda city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3653748,NY,North Valley Stream CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653770,NY,Northville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3653775,NY,Northville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653792,NY,North Wantagh CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653852,NY,Northwest Harbor CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653853,NY,Northwest Ithaca CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3653979,NY,Norwich city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654012,NY,Norwood village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654056,NY,Noyack CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3654078,NY,Nunda village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654100,NY,Nyack village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654111,NY,Oak Beach CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3654144,NY,Oakdale CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3654155,NY,Oakfield village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654430,NY,Ocean Beach village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654441,NY,Oceanside CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3654452,NY,Odessa village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654485,NY,Ogdensburg city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654540,NY,Olcott CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3654551,NY,Old Bethpage CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3654562,NY,Old Brookville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654617,NY,Old Field village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654639,NY,Old Forge CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3654705,NY,Old Westbury village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654716,NY,Olean city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654837,NY,Oneida city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654848,NY,Oneida Castle village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3654881,NY,Oneonta city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3655002,NY,Ontario CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3655167,NY,Orangeburg CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3655189,NY,Orange Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3655266,NY,Orchard Park village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3655321,NY,Orient CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3655365,NY,Oriskany village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3655376,NY,Oriskany Falls village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3655530,NY,Ossining village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3655574,NY,Oswego city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3655618,NY,Otego village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3655673,NY,Otisville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3655750,NY,Otter Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3655816,NY,Ovid village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3655882,NY,Owego village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3655937,NY,Oxbow CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3655948,NY,Oxford village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3655992,NY,Oyster Bay CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3656011,NY,Oyster Bay Cove village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3656088,NY,Painted Post village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3656110,NY,Palatine Bridge village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3656132,NY,Palenville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3656187,NY,Palmyra village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3656212,NY,Pamelia Center CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3656231,NY,Panama village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3656291,NY,Parc CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3656341,NY,Parish village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3656363,NY,Parishville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3656660,NY,Patchogue village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3656770,NY,Paul Smiths CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3656781,NY,Pavilion CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3656814,NY,Pawling village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3656869,NY,Peach Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3656902,NY,Pearl River CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3656968,NY,Peconic CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3656979,NY,Peekskill city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3657001,NY,Pelham village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3657023,NY,Pelham Manor village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3657177,NY,Penn Yan village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3657243,NY,Perry village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3657287,NY,Perrysburg CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3657364,NY,Peru CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3657518,NY,Phelps village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3657551,NY,Philadelphia village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3657639,NY,Philmont village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3657650,NY,Phoenicia CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3657661,NY,Phoenix village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3657749,NY,Piermont village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3657782,NY,Pierrepont Manor CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3657804,NY,Piffard CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3657815,NY,Pike CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3657980,NY,Pine Bush CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3658057,NY,Pine Hill CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3658145,NY,Pine Plains CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3658189,NY,Pine Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3658354,NY,Pittsford village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3658409,NY,Plainedge CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3658442,NY,Plainview CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3658475,NY,Plandome village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3658486,NY,Plandome Heights village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3658497,NY,Plandome Manor village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3658541,NY,Plattekill CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3658574,NY,Plattsburgh city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3658601,NY,Plattsburgh West CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3658684,NY,Pleasant Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3658728,NY,Pleasantville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3658739,NY,Plessis CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3658794,NY,Poestenkill CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3658849,NY,Point Lookout CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3658937,NY,Poland village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3658992,NY,Pomona village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659157,NY,Poquott village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659212,NY,Port Byron village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659223,NY,Port Chester village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659245,NY,Port Dickinson village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659311,NY,Port Ewen CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3659322,NY,Port Gibson CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3659333,NY,Port Henry CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3659355,NY,Port Jefferson village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659377,NY,Port Jefferson Station CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3659388,NY,Port Jervis city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659443,NY,Portlandville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3659454,NY,Port Leyden village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659498,NY,Portville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659520,NY,Port Washington CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3659531,NY,Port Washington North village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659564,NY,Potsdam village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659619,NY,Pottersville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3659641,NY,Poughkeepsie city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659708,NY,Prattsburgh CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3659740,NY,Prattsville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3659831,NY,Preston-Potter Hollow CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3659883,NY,Prospect CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3659960,NY,Pulaski village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3659993,NY,Pultneyville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

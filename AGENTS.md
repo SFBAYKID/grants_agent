@@ -46,8 +46,11 @@ vulture grant_watch --min-confidence 80
 python -m grant_watch.health
 python -m pytest tests -q
 python -m grant_watch.source_discovery
+python -m grant_watch.source_discovery_batch --validate
 python -m grant_watch.source_catalog --check
 python -m grant_watch.coverage_universe
+python -m grant_watch.school_district_universe
+python -m grant_watch.incorporated_place_universe
 ```
 
 Also check module/function documentation and annotations when adding code, review file sizes, and run
@@ -61,10 +64,28 @@ A catalog row marked `discovered` is a research candidate, not a working poller.
 one per module in `grant_watch/sources/` and require fixtures, failure tests, and a separate live check.
 New Firecrawl research must also append a secret-free immutable row to
 `data/source_catalog/discovery_checks.csv` and pass `python -m grant_watch.source_discovery`.
+The batch collector stores every raw result and attempt under
+`data/source_catalog/firecrawl_batches/<batch_id>/`; validate that evidence with
+`python -m grant_watch.source_discovery_batch --validate`. Raw batches are research evidence only:
+they must never update the catalog, entity links, discovery checks, or runtime pollers automatically.
+Promotion requires a human to review the official page, verify the access boundary, and record the
+selected-result and scrape evidence separately.
+Every possibly paid call must have a durable `in_flight` marker before HTTP begins. A restart never
+retries that indeterminate call silently; an operator must explicitly choose
+`--retry-indeterminate`, which records the interrupted attempt before retrying within the fixed
+budget. Root-wide execution locking and the persisted completion window enforce one Firecrawl rate
+limit across batch IDs.
 County research must update the matching Census GEOID link in
 `data/source_catalog/county_source_links.csv`, regenerate the state shards with
 `python -m grant_watch.coverage_universe --refresh`, and leave every untouched entity explicitly
 `not_researched`.
+
+School-district and incorporated-place research follows the same evidence rule. Update the matching
+namespaced GEOID link CSV, then regenerate with `python -m grant_watch.school_district_universe
+--refresh` or `python -m grant_watch.incorporated_place_universe --refresh`. One source may link to
+multiple GEOIDs and one GEOID may link to multiple sources; never collapse that relationship into a
+single source field. Census incorporated places are a geography queue, not a unique-government
+registry, and do not replace a future county-subdivision/MCD queue.
 
 Never infer that a portal is anonymous, free, statewide, current, or security-relevant from its name.
 Keep official ownership, access behavior, integration maturity, and live-result evidence as separate

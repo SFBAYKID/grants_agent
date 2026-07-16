@@ -1,0 +1,11 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,1031430,DE,Greenville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,1031560,DE,Greenwood town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1033120,DE,Harrington city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1033250,DE,Hartly town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1033900,DE,Henlopen Acres town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1034810,DE,Highland Acres CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,1035850,DE,Hockessin CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,1036760,DE,Houston town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1038710,DE,Kent Acres CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,1039100,DE,Kenton town,incorporated_place,2025,researchable,not_researched,,

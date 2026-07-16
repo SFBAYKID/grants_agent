@@ -1,0 +1,12 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,2080075,KS,Winona city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2080350,KS,Woodbine city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2080400,KS,Woodruff CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2080450,KS,Woodston city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2080500,KS,Wright CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2080650,KS,Yale CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2080700,KS,Yates Center city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2080750,KS,Yoder CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2080875,KS,Zeandale CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2080925,KS,Zenda city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2081025,KS,Zurich city,incorporated_place,2025,researchable,not_researched,,

@@ -1,0 +1,97 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,2650000,MI,McBride village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2650280,MI,Mackinac Island city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2650320,MI,Mackinaw City village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2650560,MI,Madison Heights city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2650620,MI,Mancelona village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2650660,MI,Manchester village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2650720,MI,Manistee city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2650755,MI,Manistee Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2650760,MI,Manistique city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2650830,MI,Manitou Beach-Devils Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2650880,MI,Manton city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2650920,MI,Maple City CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2650970,MI,Maple Grove CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2651200,MI,Maple Rapids village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2651460,MI,Marcellus village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2651540,MI,Marenisco CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2651600,MI,Marine City city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2651660,MI,Marion village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2651820,MI,Marlette city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2651900,MI,Marquette city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2651940,MI,Marshall city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2651980,MI,Martin village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2652080,MI,Marysville city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2652180,MI,Mason city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2652280,MI,Mass City CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2652380,MI,Mattawan village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2652440,MI,Maybee village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2652540,MI,Mayville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2652720,MI,Mears CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2652760,MI,Mecosta village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2652920,MI,Melvin village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2652940,MI,Melvindale city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2652960,MI,Memphis city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2652980,MI,Mendon village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2653020,MI,Menominee city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2653180,MI,Merrill village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2653320,MI,Mesick village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2653340,MI,Metamora village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2653500,MI,Michiana village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2653520,MI,Michigamme CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2653580,MI,Michigan Center CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2653730,MI,Middletown CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2653760,MI,Middleville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2653780,MI,Midland city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2653920,MI,Milan city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2653960,MI,Milford village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2654025,MI,Millburg CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2654120,MI,Millersburg village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2654132,MI,Millers Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2654220,MI,Millington village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2654560,MI,Minden City village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2654660,MI,Mio CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2654820,MI,Mohawk CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2655020,MI,Monroe city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2655100,MI,Montague city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2655220,MI,Montgomery village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2655280,MI,Montrose city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2655500,MI,Morenci city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2655540,MI,Morley village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2655560,MI,Morrice village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2655820,MI,Mount Clemens city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2655960,MI,Mount Morris city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2656020,MI,Mount Pleasant city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2656080,MI,Muir village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2656140,MI,Mulliken village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2656200,MI,Munising city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2656320,MI,Muskegon city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2656360,MI,Muskegon Heights city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2656620,MI,Napoleon CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2656680,MI,Nashville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2656760,MI,Naubinway CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2656860,MI,Negaunee city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2656960,MI,Nessen City CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2657080,MI,Newaygo city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2657100,MI,New Baltimore city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2657140,MI,Newberry village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2657220,MI,New Buffalo city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2657280,MI,New Era village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2657380,MI,New Haven village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2657520,MI,New Lothrop village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2657660,MI,New Troy CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2657760,MI,Niles city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2657920,MI,North Adams village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2658080,MI,North Branch village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2658640,MI,North Muskegon city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2658740,MI,Northport village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2658945,MI,Northview CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2658980,MI,Northville city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2659140,MI,Norton Shores city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2659220,MI,Norway city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2659320,MI,Norwood CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2659440,MI,Novi city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2659520,MI,Nunica CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2659740,MI,Oak Hill CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2659860,MI,Oakley village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2659920,MI,Oak Park city,incorporated_place,2025,researchable,not_researched,,

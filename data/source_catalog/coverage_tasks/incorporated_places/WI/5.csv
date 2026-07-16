@@ -1,0 +1,96 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,5550000,WI,Mattoon village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5550025,WI,Mauston city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5550200,WI,Mayville city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5550225,WI,Mazomanie village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5550425,WI,Medford city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5550700,WI,Mellen city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5550750,WI,Melrose village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5550800,WI,Melvina village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5550825,WI,Menasha city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5551000,WI,Menomonee Falls village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5551025,WI,Menomonie city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5551150,WI,Mequon city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5551175,WI,Mercer CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5551250,WI,Merrill city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5551300,WI,Merrillan village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5551325,WI,Merrimac village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5551375,WI,Merton village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5551575,WI,Middleton city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5551617,WI,Middle Village CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5551875,WI,Milladore village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5552025,WI,Millston CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5552075,WI,Milltown village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5552200,WI,Milton city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5553000,WI,Milwaukee city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5553050,WI,Mindoro CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5553100,WI,Mineral Point city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5553200,WI,Minocqua CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5553250,WI,Minong village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5553325,WI,Mishicot village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5553358,WI,Mission CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5553500,WI,Mole Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5553600,WI,Mondovi city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5553675,WI,Monona city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5553750,WI,Monroe city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5553875,WI,Montello city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5553950,WI,Montfort village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5554000,WI,Monticello village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5554075,WI,Montreal city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5554500,WI,Mosinee city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5554625,WI,Mountain CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5554650,WI,Mount Calvary village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5554675,WI,Mount Hope village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5554725,WI,Mount Horeb village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5554875,WI,Mount Pleasant village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5554900,WI,Mount Sterling village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5555050,WI,Mukwonago village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5555200,WI,Muscoda village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5555275,WI,Muskego city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5555550,WI,Nashotah village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5555650,WI,Navarino CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5555700,WI,Necedah village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5555750,WI,Neenah city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5555800,WI,Neillsville city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5555875,WI,Nekoosa city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5555950,WI,Nelson village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5556000,WI,Nelsonville village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5556050,WI,Neopit CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5556075,WI,Neosho village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5556125,WI,Neshkoro village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5556250,WI,Newald CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5556350,WI,New Auburn village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5556375,WI,New Berlin city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5556450,WI,Newburg village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5556700,WI,New Glarus village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5556800,WI,New Holstein city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5556900,WI,New Lisbon city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5556925,WI,New London city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5557000,WI,New Munster CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5557008,WI,New Odanah CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5557050,WI,New Post CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5557100,WI,New Richmond city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5557325,WI,Niagara city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5557375,WI,Nichols village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5557700,WI,North Bay village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5558000,WI,North Fond du Lac village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5558025,WI,North Freedom village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5558050,WI,North Hudson village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5558100,WI,North Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5558375,WI,Northport CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5558400,WI,North Prairie village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5558575,WI,Norwalk village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5558800,WI,Oak Creek city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5558850,WI,Oakdale village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5558900,WI,Oakfield village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5559250,WI,Oconomowoc city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5559300,WI,Oconomowoc Lake village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5559350,WI,Oconto city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5559400,WI,Oconto Falls city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5559450,WI,Odanah CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5559475,WI,Ogdensburg village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5559500,WI,Ogema CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5559650,WI,Okauchee Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,5559800,WI,Oliver village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5559875,WI,Omro city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,5559925,WI,Onalaska city,incorporated_place,2025,researchable,not_researched,,

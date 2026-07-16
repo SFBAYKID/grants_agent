@@ -1,0 +1,9 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,2580195,MA,Wilmington CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2580370,MA,Winchendon CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2580545,MA,Winchester CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2581005,MA,Winthrop Town city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2581035,MA,Woburn city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2581245,MA,Woods Hole CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2582000,MA,Worcester city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2582595,MA,Yarmouth Port CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

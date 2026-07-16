@@ -125,7 +125,7 @@ Lead definitions: **GOLD** = entity just received security funding. **SILVER** =
 
 ### 16. County procurement coverage queue (discovery, not runtime pollers)
 - Verified 2026-07-15: the pinned Census Gazetteer tracks all 3,144 county-equivalents in the 50 states
-  plus DC. Current state is 53 exact source candidates, 15 structural exceptions, and 3,076
+  plus DC. Current state is 56 exact source candidates, 15 structural exceptions, and 3,073
   `not_researched` tasks.
 - Verified 2026-07-15: official procurement pages for Los Angeles, Orange, Oakland, Allegheny, and
   King counties were selected from Firecrawl search and scraped successfully; immutable search and
@@ -133,11 +133,29 @@ Lead definitions: **GOLD** = entity just received security funding. **SILVER** =
 - Needs-testing: these five additions are catalog candidates, not executable pollers. Pagination,
   robots/terms, stable record schemas, failure behavior, and positive security matches remain open.
 
-### 17. Bond measures (Ballotpedia school bond elections, CA especially)
+### 17. School-district and incorporated-place coverage queues
+- Verified 2026-07-15: all four official 2025 Census school-district layers are pinned and generate
+  13,363 namespaced tasks. Current state is 66 linked candidates, 19 structural placeholders, and
+  13,278 `not_researched` tasks.
+- Verified 2026-07-15: the official Census place Gazetteer generates 32,058 namespaced tasks. Current
+  state is 14 linked candidates, 12,587 structural rows, and 19,457 `not_researched` tasks.
+- Verified 2026-07-15: live Firecrawl checks added LAUSD, Miami-Dade, Dallas, Philadelphia, Broward,
+  Los Angeles, New York City, Chicago, Houston, and Phoenix. Los Angeles RAMP also returned a live
+  anonymous Socrata API row.
+- Needs-testing: these ten sources are catalog candidates rather than runtime pollers. The place
+  Gazetteer does not cover every active county subdivision/MCD; Brewster, Massachusetts is retained
+  as an explicit gap instead of being falsely mapped to the statistical Brewster CDP.
+- Verified 2026-07-16: raw batch `20260716T004633Z` recorded 27 successful Firecrawl searches and
+  126 results for deterministic CA/NH/TX county, district, and place samples. Manual review promoted
+  official recurring pages for Stanislaus County, Arcadia, Burbank USD, Strafford County, Franklin,
+  Rochester, Denton County, and Crystal City ISD. Timed-out selected-page scrapes for Artesia and Hill
+  County were not promoted; raw search hits alone are not treated as verified sources.
+
+### 18. Bond measures (Ballotpedia school bond elections, CA especially)
 - Passed facilities bond = large multi-year budget that typically includes security scope
 - Lead type: GOLD-adjacent, big dollars, slow cycle. Unverified.
 
-### 18. State single-audit / grant transparency portals
+### 19. State single-audit / grant transparency portals
 - e.g., PA has Egrants records; states publish grant transparency data. Unverified.
 
 ## Dead ends / honest notes

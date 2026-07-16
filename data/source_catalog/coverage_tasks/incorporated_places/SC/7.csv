@@ -1,0 +1,67 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,4570045,SC,Stuckey town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4570090,SC,Sullivan's Island town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4570225,SC,Summerton town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4570270,SC,Summerville town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4570315,SC,Summit town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4570405,SC,Sumter city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4570585,SC,Surfside Beach town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4570675,SC,Swansea town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4570900,SC,Sycamore town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4571170,SC,Tamassee CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4571305,SC,Tatum town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4571395,SC,Taylors CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4571417,SC,Tega Cay city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4571658,SC,The Cliffs Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4571890,SC,Tigerville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4571980,SC,Timmonsville town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4572295,SC,Tradesville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4572430,SC,Travelers Rest city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4572520,SC,Trenton town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4572655,SC,Troy town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4572745,SC,Turbeville town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4572880,SC,Ulmer town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4573105,SC,Union city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4573240,SC,Unity CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4573330,SC,Utica CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4573465,SC,Valley Falls CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4573510,SC,Vance town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4573555,SC,Van Wyck town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4573600,SC,Varnville town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4573870,SC,Wade Hampton CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4574050,SC,Wagener town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4574095,SC,Walhalla city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4574140,SC,Wallace CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4574275,SC,Walterboro city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4574590,SC,Ward town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4574635,SC,Ware Place CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4574680,SC,Ware Shoals town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4574725,SC,Warrenville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4574995,SC,Waterloo town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4575220,SC,Watts Mills CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4575445,SC,Wedgefield CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4575535,SC,Welcome CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4575580,SC,Wellford city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4575850,SC,West Columbia city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4576165,SC,Westminster city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4576345,SC,West Pelzer town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4576435,SC,West Union town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4577042,SC,White Knoll CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4577380,SC,Whitmire town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4577425,SC,Whitney CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4577672,SC,Wilkinson Heights CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4577785,SC,Williams town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4577875,SC,Williamston town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4577920,SC,Willington CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4577965,SC,Williston town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4578190,SC,Windsor town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4578460,SC,Winnsboro town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4578505,SC,Winnsboro Mills CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4578640,SC,Wisacky CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4578820,SC,Woodfield CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4578910,SC,Woodford town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4579090,SC,Woodruff city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4579341,SC,Wyboo CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,4579450,SC,Yemassee town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4579630,SC,York city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,4579720,SC,Zion CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

@@ -1,0 +1,8 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+school_district,2791445,MN,Lake Crystal-Wellcome Memorial,unified_school_district,2025,researchable,not_researched,,
+school_district,2791446,MN,Tri-County School District,unified_school_district,2025,researchable,not_researched,,
+school_district,2791447,MN,Kittson Central School District,unified_school_district,2025,researchable,not_researched,,
+school_district,2791449,MN,Win-E-Mac School District,unified_school_district,2025,researchable,not_researched,,
+school_district,2791450,MN,Mesabi East School District,unified_school_district,2025,researchable,not_researched,,
+school_district,2791451,MN,Janesville-Waldorf-Pemberton,unified_school_district,2025,researchable,not_researched,,
+school_district,2799997,MN,School District Not Defined,unified_school_district,2025,statistical_placeholder,not_applicable,2026-07-15,Census Gazetteer row is School District Not Defined

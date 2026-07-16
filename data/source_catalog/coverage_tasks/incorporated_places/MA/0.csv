@@ -1,0 +1,31 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,2500135,MA,Abington CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2500530,MA,Acushnet Center CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2500590,MA,Adams CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2500840,MA,Agawam Town city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2501185,MA,Amesbury city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2501370,MA,Amherst Town city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2501430,MA,Andover CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2501640,MA,Arlington CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2502515,MA,Athol CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2502690,MA,Attleboro city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2503040,MA,Ayer CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2503355,MA,Baldwinville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2503690,MA,Barnstable Town city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2503705,MA,Barre CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2504790,MA,Belchertown CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2504965,MA,Bellingham CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2505105,MA,Belmont CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2505595,MA,Beverly city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2506050,MA,Blandford CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2506170,MA,Bliss Corner CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2507000,MA,Boston city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2507140,MA,Bourne CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2507385,MA,Boxford CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2507740,MA,Braintree Town city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2507945,MA,Brewster CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2508130,MA,Bridgewater Town city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2509000,MA,Brockton city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2509070,MA,Brookfield CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2509210,MA,Brookline CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2509875,MA,Burlington CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

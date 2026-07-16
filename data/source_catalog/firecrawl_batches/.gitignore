@@ -1,0 +1,2 @@
+# Stable advisory lock inodes are local runtime state, not research evidence.
+.*.lock

@@ -1,0 +1,58 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,2140114,KY,Jamestown city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2140204,KY,Jeff CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2140222,KY,Jeffersontown city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2140240,KY,Jeffersonville city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2140312,KY,Jenkins city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2141338,KY,Junction City city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2141716,KY,Keene city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2142094,KY,Kenton Vale city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2142112,KY,Kenvir CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2142292,KY,Kevil city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2142598,KY,Kingsley city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2143030,KY,Knottsville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2143264,KY,Kuttawa city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2143336,KY,La Center city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2143444,KY,LaFayette city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2143480,KY,La Grange city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2143606,KY,Lakeside Park city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2143668,KY,Lakeview Heights city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2143840,KY,Lancaster city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2143900,KY,Langdon Place city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2144146,KY,Lawrenceburg city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2144344,KY,Lebanon city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2144362,KY,Lebanon Junction city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2144434,KY,Ledbetter CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2144686,KY,Leitchfield city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2145064,KY,Lewisburg city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2145136,KY,Lewisport city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2146027,KY,Lexington-Fayette urban county,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2146072,KY,Liberty city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2146540,KY,Lincolnshire city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2147062,KY,Livermore city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2147098,KY,Livingston city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2147476,KY,London city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2147710,KY,Loretto city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2147854,KY,Louisa city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2148000,KY,Louisville city,nonfunctioning_incorporated_place,2025,structural_N,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_N
+incorporated_place,2148006,KY,Louisville/Jefferson County metro government (balance),fictitious_place,2025,structural_F,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_F
+incorporated_place,2148072,KY,Lovelaceville CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2148234,KY,Lowes CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2148288,KY,Loyall city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2148378,KY,Ludlow city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2148540,KY,Lynch city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2148558,KY,Lyndon city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2148648,KY,Lynnview city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2148810,KY,McCarr CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2148954,KY,McDowell CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2149026,KY,Maceo CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2149098,KY,McHenry city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2149116,KY,McKee city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2149134,KY,McKinney CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2149206,KY,Mackville city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2149278,KY,McRoberts CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2149368,KY,Madisonville city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2149476,KY,Magnolia CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2149656,KY,Manchester city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2149746,KY,Manitou CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2149800,KY,Manor Creek city,incorporated_place,2025,researchable,not_researched,,

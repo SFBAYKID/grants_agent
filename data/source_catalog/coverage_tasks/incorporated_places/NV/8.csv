@@ -1,0 +1,13 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,3280000,NV,Virginia City CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3281000,NV,Wadsworth CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3281100,NV,Walker Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3282250,NV,Washoe Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3283000,NV,Wells city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3283730,NV,West Wendover city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3283800,NV,Whitney CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3283900,NV,Wildhorse CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3284600,NV,Winchester CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,3284800,NV,Winnemucca city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3285400,NV,Yerington city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,3286200,NV,Zephyr Cove CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

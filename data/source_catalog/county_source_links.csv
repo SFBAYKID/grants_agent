@@ -52,3 +52,6 @@ entity_id,source_id,linked_on,link_method,notes
 42003,pa.allegheny_county.solicitations,2026-07-15,publisher_exact_name,Allegheny County
 53033,wa.king_county.procurement,2026-07-15,publisher_exact_name,King County
 06059,ca.orange_county.procurement,2026-07-15,publisher_exact_name,Orange County
+06099,ca.stanislaus_county.bids,2026-07-16,publisher_exact_name,Stanislaus County
+33017,nh.strafford_county.bids,2026-07-16,publisher_exact_name,Strafford County
+48121,tx.denton_county.bids,2026-07-16,publisher_exact_name,Denton County

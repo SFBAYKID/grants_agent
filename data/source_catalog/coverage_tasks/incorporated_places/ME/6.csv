@@ -1,0 +1,14 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,2360545,ME,Portland city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2360825,ME,Presque Isle city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2361735,ME,Randolph CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2361805,ME,Rangeley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2362610,ME,Richmond CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2363590,ME,Rockland city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2364255,ME,Rumford CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2364535,ME,Sabattus CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2364675,ME,Saco city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2365725,ME,Sanford city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2366600,ME,Searsport CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2368875,ME,Skowhegan CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2369995,ME,South Berwick CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

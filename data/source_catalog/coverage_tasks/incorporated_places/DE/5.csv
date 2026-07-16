@@ -1,0 +1,10 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,1050670,DE,Newark city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1050800,DE,New Castle city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1051190,DE,Newport town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1052490,DE,North Star CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,1053920,DE,Ocean View town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1054050,DE,Odessa town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,1056490,DE,Pike Creek CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,1056500,DE,Pike Creek Valley CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,1058600,DE,Port Penn CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S

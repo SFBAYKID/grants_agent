@@ -77,14 +77,14 @@ def test_canonical_counts_and_exact_coverage_match_published_inventory() -> None
     """Published counts and honest exact-layer gaps are pinned to canonical data."""
     entries = load_catalog()
     assert Counter(entry.jurisdiction_level for entry in entries) == {
-        JurisdictionLevel.CITY: 7,
-        JurisdictionLevel.COUNTY: 53,
+        JurisdictionLevel.CITY: 15,
+        JurisdictionLevel.COUNTY: 56,
         JurisdictionLevel.EDUCATION_SERVICE_AGENCY: 3,
         JurisdictionLevel.FEDERAL: 19,
         JurisdictionLevel.MULTI_JURISDICTION: 1,
         JurisdictionLevel.PORTAL_FAMILY: 10,
         JurisdictionLevel.REGIONAL_GOVERNMENT: 1,
-        JurisdictionLevel.SCHOOL_DISTRICT: 52,
+        JurisdictionLevel.SCHOOL_DISTRICT: 59,
         JurisdictionLevel.SPECIAL_DISTRICT: 1,
         JurisdictionLevel.STATE: 105,
     }
@@ -99,9 +99,9 @@ def test_canonical_counts_and_exact_coverage_match_published_inventory() -> None
     assert all(row.district_sources > 0 for row in rows)
     access_counts = Counter(entry.access_mode for entry in entries)
     assert access_counts == {
-        AccessMode.FREE_ACCOUNT: 14,
+        AccessMode.FREE_ACCOUNT: 15,
         AccessMode.PUBLIC_API_KEY: 2,
-        AccessMode.PUBLIC_NO_AUTH: 28,
+        AccessMode.PUBLIC_NO_AUTH: 45,
         AccessMode.SUPPLIER_ACCOUNT: 4,
         AccessMode.UNKNOWN: 204,
     }
@@ -111,7 +111,7 @@ def test_canonical_counts_and_exact_coverage_match_published_inventory() -> None
             and entry.access_status == VerificationLabel.VERIFIED
             for entry in entries
         )
-        == 17
+        == 34
     )
 
 

@@ -1,0 +1,17 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,2280010,LA,Watson CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2280360,LA,Welcome CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2280430,LA,Welsh town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2280815,LA,Westlake city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2280955,LA,West Monroe city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2281165,LA,Westwego city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2281375,LA,White Castle town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2282215,LA,Wilson village,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2282460,LA,Winnfield city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2282495,LA,Winnsboro city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2282565,LA,Wisner town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2283002,LA,Woodmere CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,2283125,LA,Woodworth town,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2283335,LA,Youngsville city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2283405,LA,Zachary city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,2283685,LA,Zwolle town,incorporated_place,2025,researchable,not_researched,,

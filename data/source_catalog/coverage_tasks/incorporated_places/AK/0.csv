@@ -1,0 +1,38 @@
+entity_namespace,geoid,state,entity_name,entity_kind,universe_vintage,entity_disposition,research_status,last_checked_on,notes
+incorporated_place,0200065,AK,Adak city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0200650,AK,Akhiok city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0200760,AK,Akiachak CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0200870,AK,Akiak city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0201090,AK,Akutan city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0201200,AK,Alakanuk city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0201305,AK,Alatna CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0201390,AK,Alcan Border CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0201420,AK,Aleknagik city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0201560,AK,Aleneva CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0201860,AK,Allakaket city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0201970,AK,Ambler city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0202080,AK,Anaktuvuk Pass city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0203000,AK,Anchorage municipality,incorporated_place,2025,researchable,candidate_found,2026-07-15,1 reviewed source link(s)
+incorporated_place,0203110,AK,Anchor Point CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0203220,AK,Anderson city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0203440,AK,Angoon city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0203550,AK,Aniak city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0203880,AK,Anvik city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0203990,AK,Arctic Village CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0204210,AK,Atka city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0204430,AK,Atmautluak CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0204500,AK,Atqasuk city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0204670,AK,Attu Station CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0205000,AK,Badger CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0205585,AK,Bear Creek CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0205750,AK,Beaver CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0206245,AK,Beluga CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0206520,AK,Bethel city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0206630,AK,Bettles city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0206850,AK,Big Delta CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0207070,AK,Big Lake CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0207620,AK,Birch Creek CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0208740,AK,Brevig Mission city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0209600,AK,Buckland city,incorporated_place,2025,researchable,not_researched,,
+incorporated_place,0209657,AK,Buffalo Soapstone CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
+incorporated_place,0209710,AK,Butte CDP,census_designated_place,2025,structural_S,not_applicable,2026-07-15,Census FUNCSTAT disposition is structural_S
