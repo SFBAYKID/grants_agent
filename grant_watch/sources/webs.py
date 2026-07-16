@@ -17,14 +17,16 @@ import re
 
 from bs4 import BeautifulSoup
 
-from ..models import RawItem
+from ..models import DatePrecision, FundingEventType, RawItem, VerificationStatus
 from .base import polite_get
 
 URL = "https://pr-webs-vendor.des.wa.gov/BidCalendar.aspx"
 
 _KEYWORD_RE = re.compile(
     r"camera|surveillance|access control|security|cctv|video|intrusion|alarm"
-    r"|door hardware", re.IGNORECASE)
+    r"|door hardware",
+    re.IGNORECASE,
+)
 _REF_RE = re.compile(r"Ref\s*#?:\s*(\S+)")
 
 
@@ -43,19 +45,28 @@ def parse_bid_calendar(html: str) -> list[RawItem]:
         if not match:
             continue
         ref = _REF_RE.search(text)
-        out.append(RawItem(
-            source="webs",
-            item_id=ref.group(1) if ref else text[:80],
-            title=text[:200],
-            entity="",  # lives in a group-header row; refine with a real fixture
-            state="WA",
-            program="RFP:webs",
-            amount=None,
-            start="",
-            end="",
-            url=URL,
-            raw={"matched_keyword": match.group(0), "row_text": text[:500]},
-        ))
+        out.append(
+            RawItem(
+                source="webs",
+                item_id=ref.group(1) if ref else text[:80],
+                title=text[:200],
+                entity="",  # lives in a group-header row; refine with a real fixture
+                state="WA",
+                program="RFP:webs",
+                amount=None,
+                start="",
+                end="",
+                url=URL,
+                raw={"matched_keyword": match.group(0), "row_text": text[:500]},
+                event_type=FundingEventType.RFP_POSTED,
+                event_date="",
+                date_precision=DatePrecision.UNKNOWN,
+                application_portal="WEBS",
+                source_locator=ref.group(1) if ref else text[:80],
+                evidence_excerpt=text[:500],
+                verification_status=VerificationStatus.NEEDS_TESTING,
+            )
+        )
     return out
 
 
