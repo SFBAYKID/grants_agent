@@ -84,24 +84,30 @@ def _features(payload: dict[str, object]) -> list[dict[str, object]]:
 
 def parse_districts(enrollment_payload: dict[str, object],
                     location_payload: dict[str, object]) -> list[NCESDistrict]:
-    """Merge school enrollment aggregates with LEA office cities by NCES ID."""
+    """Aggregate school membership and merge LEA office cities by NCES ID."""
     cities = {
         str(item.get("LEAID") or "").strip(): str(item.get("CITY") or "").strip()
         for item in _features(location_payload)
         if str(item.get("LEAID") or "").strip()
     }
-    districts: list[NCESDistrict] = []
+    aggregates: dict[tuple[str, str, str], int] = {}
     for item in _features(enrollment_payload):
         nces_id = str(item.get("LEAID") or "").strip()
         name = str(item.get("LEA_NAME") or "").strip()
         state = str(item.get("LSTATE") or "").strip().upper()
         try:
-            enrollment = int(round(float(item.get("ENROLLMENT") or 0)))
+            enrollment = int(round(float(
+                item.get("ENROLLMENT")
+                if item.get("ENROLLMENT") is not None else item.get("MEMBER") or 0)))
         except (TypeError, ValueError):
             continue
         if nces_id and name and state and enrollment >= 0:
-            districts.append(NCESDistrict(
-                nces_id, name, state, cities.get(nces_id, ""), enrollment))
+            key = (nces_id, name, state)
+            aggregates[key] = aggregates.get(key, 0) + enrollment
+    districts: list[NCESDistrict] = []
+    for (nces_id, name, state), enrollment in aggregates.items():
+        districts.append(NCESDistrict(
+            nces_id, name, state, cities.get(nces_id, ""), enrollment))
     return districts
 
 
@@ -152,20 +158,17 @@ def fetch_state(state: str) -> list[NCESDistrict]:
     enrollment_params = {
         # NCES negative MEMBER values are missing/not-applicable sentinels, not pupils.
         "where": f"LSTATE='{state_code}' AND MEMBER>=0",
-        "outStatistics": json.dumps([{
-            "statisticType": "sum", "onStatisticField": "MEMBER",
-            "outStatisticFieldName": "ENROLLMENT",
-        }]),
-        "groupByFieldsForStatistics": "LEAID,LEA_NAME,LSTATE",
-        "outFields": "LEAID,LEA_NAME,LSTATE",
-        "orderByFields": "LEAID",
+        # ArcGIS repeats the first page for this service when a grouped-statistics
+        # query uses resultOffset. Page stable school rows and aggregate by LEA here.
+        "outFields": "LEAID,LEA_NAME,LSTATE,MEMBER",
+        "orderByFields": "OBJECTID",
         "returnGeometry": "false",
         "f": "json",
     }
     location_params = {
         "where": f"STATE='{state_code}'",
         "outFields": "LEAID,NAME,STATE,CITY",
-        "orderByFields": "LEAID",
+        "orderByFields": "OBJECTID",
         "returnGeometry": "false",
         "f": "json",
     }

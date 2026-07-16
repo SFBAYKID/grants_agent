@@ -96,9 +96,10 @@ workflow state. Postgres support is not implemented; test parity rather than ass
 
 ## 4. Data sources (summary — full map in `docs/grant_lead_source_inventory.md`)
 
-Verified live through 2026-07-14: USAspending prime awards and NSGP subawards, Grants.gov, SAM.gov,
+Verified live through 2026-07-16: USAspending prime awards and NSGP subawards, Grants.gov, SAM.gov,
 WEBS fetch/parser, California Grants Portal feeds, and the OregonBuys recent-bids feed. NCES district
-enrollment/location enrichment was also verified live. OregonBuys returned no security matches during
+enrollment/location enrichment was also verified live using paged school rows aggregated by LEA,
+because the grouped-statistics query does not page reliably. OregonBuys returned no security matches during
 the live check, so positive-row entity extraction remains needs-testing. See the source inventory for
 the per-source evidence and limitations.
 

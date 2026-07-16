@@ -541,9 +541,9 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                     reference_notes.append(
                         "NCES did not provide a matched district-office city for these "
                         "leads; the city filter was not applied.")
-            except Exception as exc:  # noqa: BLE001 — disclose unavailable reference data
+            except Exception:  # noqa: BLE001 — report unavailable reference data plainly
                 reference_notes.append(
-                    f"NCES reference data was unavailable ({type(exc).__name__}); city/"
+                    "NCES reference data was unavailable; city/"
                     "enrollment filters were not applied, but the other filters were.")
             finally:
                 writable.close()
@@ -642,9 +642,6 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                 len(complete_ids) == total)
         finally:
             writable.close()
-    snapshot_note = (f"\nInternal search snapshot: {snapshot_id}."
-                     if snapshot_id else "")
-
     # SECOND step: enrich contacts for the (bounded) shown orgs and append the columns to
     # BOTH the export and the inline summary, so the three output paths never disagree.
     contact_cells: list[list[object]] = []
@@ -686,7 +683,7 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                 finally:
                     writable.close()
             return (f"Found {total} matches and exported {exported_label}: "
-                    f"{message}{enrich_note}{reference_note}{snapshot_note}"), None
+                    f"{message}{enrich_note}{reference_note}"), None
         text, artifact = make_spreadsheet("grant_search.xlsx", [columns] + data_rows)
         if export_job_id:
             writable = db.connect(db_target)
@@ -697,7 +694,7 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                 writable.close()
         return (f"Found {total} matches and exported {exported_label}. {message}; "
                 f"I created a complete Excel file instead. "
-                f"{text}{enrich_note}{reference_note}{snapshot_note}", artifact)
+                f"{text}{enrich_note}{reference_note}", artifact)
     if export_value == ExportFormat.EXCEL.value:
         text, artifact = make_spreadsheet("grant_search.xlsx", [columns] + data_rows)
         if export_job_id:
@@ -707,7 +704,7 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
             finally:
                 writable.close()
         return (f"Found {total} matching grants and exported {exported_label}. "
-                f"{text}{enrich_note}{reference_note}{snapshot_note}", artifact)
+                f"{text}{enrich_note}{reference_note}", artifact)
 
     lines: list[str] = []
     for index, row in enumerate(rows[:15]):
@@ -728,7 +725,7 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                       "when the source does not provide a structured type."
                       if org_value and org_value != "any" else "")
     return (f"Found {total} matching grants:\n" + "\n".join(lines) + more
-            + inference_note + reference_note + snapshot_note), None
+            + inference_note + reference_note), None
 
 
 def export_search_snapshot(requested_by: str, workspace: str, channel: str,
@@ -753,6 +750,7 @@ def export_search_snapshot(requested_by: str, workspace: str, channel: str,
     db_target = db_path or db.DEFAULT_DB_PATH
     session_key = f"{workspace}:{channel}:{thread_ts}:{requested_by}"
     writable = db.connect(db_target)
+    pending_artifact: GeneratedArtifact | None = None
     try:
         snapshot = (db.get_search_request(writable, request_id, requested_by)
                     if request_id else
@@ -805,17 +803,26 @@ def export_search_snapshot(requested_by: str, workspace: str, channel: str,
                 external_id = message.split("/d/", 1)[-1].split("/", 1)[0]
                 db.finish_export_job(writable, job_id, "created", message, external_id)
                 return f"Exported the same {len(rows)} results: {message}", None
-            text, artifact = make_spreadsheet(
+            text, pending_artifact = make_spreadsheet(
                 "grant_search.xlsx", [columns] + data_rows)
             db.finish_export_job(writable, job_id, "fallback_excel", error=message)
+            artifact, pending_artifact = pending_artifact, None
             return (f"Google Sheets was unavailable ({message}); I created an Excel "
                     f"file with the same {len(rows)} results. {text}"), artifact
 
-        text, artifact = make_spreadsheet("grant_search.xlsx", [columns] + data_rows)
+        text, pending_artifact = make_spreadsheet(
+            "grant_search.xlsx", [columns] + data_rows)
         db.finish_export_job(writable, job_id, "created")
+        artifact, pending_artifact = pending_artifact, None
         return f"Exported the same {len(rows)} results to Excel. {text}", artifact
     except sqlite3.IntegrityError:
+        if pending_artifact is not None:
+            pending_artifact.cleanup()
         return ("ERROR: that exact export was already created. Use its existing file "
                 "or run a new search."), None
+    except Exception:
+        if pending_artifact is not None:
+            pending_artifact.cleanup()
+        raise
     finally:
         writable.close()

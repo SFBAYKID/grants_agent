@@ -363,8 +363,6 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "campaign_link": {"type": "string"},
-                "search_request_id": {"type": "string",
-                                      "description": "persisted Grant search snapshot, preferred"},
                 "lead_ids": {"type": "array", "items": {"type": "integer"},
                              "minItems": 1, "maxItems": 200},
                 "member_links": {
@@ -380,7 +378,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 },
                 "allow_org_leads": {"type": "boolean", "default": False},
             },
-            "required": ["campaign_link"],
+            "required": ["campaign_link", "lead_ids"],
         },
     },
     {

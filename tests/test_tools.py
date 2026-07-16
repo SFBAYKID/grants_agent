@@ -38,6 +38,15 @@ def test_raw_sql_tool_is_not_exposed() -> None:
     assert {"city", "enrollment_min", "enrollment_max"} <= set(properties)
 
 
+def test_campaign_member_schema_requires_an_explicit_frozen_lead_list() -> None:
+    """The model cannot preview Campaign membership without exact shown lead IDs."""
+    schema = next(item for item in tools.TOOL_SCHEMAS
+                  if item["name"] == "salesforce_campaign_members_preview")
+    input_schema = schema["input_schema"]
+    assert "search_request_id" not in input_schema["properties"]
+    assert set(input_schema["required"]) == {"campaign_link", "lead_ids"}
+
+
 # ------------------------------------------------------------------ spreadsheet
 def test_make_spreadsheet_builds_real_xlsx() -> None:
     """The spreadsheet helper creates a readable workbook with numeric cells intact."""

@@ -17,13 +17,14 @@ from grant_watch.models import (
     RawItem,
     VerificationStatus,
 )
-from grant_watch.slack import tools
+from grant_watch.slack import search, tools
 from grant_watch.slack.search import (
     MAX_ENRICH_ROWS,
     MAX_EXPORT_ROWS,
     export_search_snapshot,
     search_leads,
 )
+from grant_watch.spreadsheets import GeneratedArtifact
 
 
 def _insert(conn: sqlite3.Connection, source: str, item_id: str, entity: str,
@@ -313,6 +314,62 @@ def test_followup_export_uses_complete_frozen_result_set(tmp_path: Path) -> None
     artifact.cleanup()
 
 
+def test_followup_export_cleans_artifact_when_job_finish_fails(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A DB failure after workbook creation cannot leak its temporary directory."""
+    path = _bulk_db(tmp_path, 2)
+    search_leads(
+        limit=2, requester_slack="U1", workspace="T1", channel="C1",
+        thread_ts="100.1", db_path=path)
+    artifacts: list[GeneratedArtifact] = []
+    original_make = search.make_spreadsheet
+
+    def recording_make(*args: object, **kwargs: object
+                       ) -> tuple[str, GeneratedArtifact]:
+        """Record the real generated workbook before the simulated DB failure."""
+        text, artifact = original_make(*args, **kwargs)
+        artifacts.append(artifact)
+        return text, artifact
+
+    monkeypatch.setattr(search, "make_spreadsheet", recording_make)
+    monkeypatch.setattr(
+        db, "finish_export_job",
+        lambda *_a, **_k: (_ for _ in ()).throw(sqlite3.OperationalError("failed")),
+    )
+    with pytest.raises(sqlite3.OperationalError, match="failed"):
+        export_search_snapshot(
+            "U1", "T1", "C1", "100.1", "excel", db_path=path)
+    assert artifacts and not artifacts[0].path.exists()
+
+
+def test_followup_export_cleans_artifact_on_integrity_error_after_creation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An IntegrityError after workbook creation also releases the owned artifact."""
+    path = _bulk_db(tmp_path, 2)
+    search_leads(
+        limit=2, requester_slack="U1", workspace="T1", channel="C1",
+        thread_ts="100.1", db_path=path)
+    artifacts: list[GeneratedArtifact] = []
+    original_make = search.make_spreadsheet
+
+    def recording_make(*args: object, **kwargs: object
+                       ) -> tuple[str, GeneratedArtifact]:
+        """Record the workbook so the test can verify cleanup."""
+        text, artifact = original_make(*args, **kwargs)
+        artifacts.append(artifact)
+        return text, artifact
+
+    monkeypatch.setattr(search, "make_spreadsheet", recording_make)
+    monkeypatch.setattr(
+        db, "finish_export_job",
+        lambda *_a, **_k: (_ for _ in ()).throw(sqlite3.IntegrityError("failed")),
+    )
+    text, artifact = export_search_snapshot(
+        "U1", "T1", "C1", "100.1", "excel", db_path=path)
+    assert artifact is None and text.startswith("ERROR:")
+    assert artifacts and not artifacts[0].path.exists()
+
+
 def test_followup_export_cannot_cross_user_or_thread(tmp_path: Path) -> None:
     """Frozen results remain scoped to their initiating Slack user and thread."""
     path = _bulk_db(tmp_path, 2)
@@ -339,6 +396,7 @@ def test_refinement_preserves_prior_filters(tmp_path: Path,
     assert artifact is None
     assert "Tustin Unified School District" in text
     assert "City of Austin" not in text
+    assert "Internal search snapshot" not in text
 
 
 def test_active_only_excludes_expired_awards(tmp_path: Path) -> None:

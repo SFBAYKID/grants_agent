@@ -184,6 +184,128 @@ def test_model_failure_after_artifact_creation_cleans_file(
     assert not artifact.path.exists()
 
 
+def test_city_refinement_uses_thread_scoped_snapshot_without_model(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A proper-name city follow-up directly refines the existing scoped search."""
+    captured: dict[str, object] = {}
+
+    def forbid_model(**_kwargs: object) -> object:
+        """Prove the narrow refinement route does not depend on model rewriting."""
+        raise AssertionError("city refinement must not call the model")
+
+    def fake_run_tool(name: str, args: dict[str, object], *_a: object,
+                      **kwargs: object) -> tuple[str, None]:
+        """Return a public search result while recording the isolation scope."""
+        captured.update(name=name, args=args, **kwargs)
+        return ("Found 1 matching grants:\n"
+                "- Lead #9 — Los Angeles Unified School District (CA, Los Angeles, "
+                "award recipient) — SVPP · $1,000 · spend window unknown", None)
+
+    monkeypatch.setattr(conversation, "Anthropic", forbid_model)
+    monkeypatch.setattr(tools, "run_tool", fake_run_tool)
+    result = conversation.respond(
+        "Only show me Los Angeles.", None, requester_slack="U1",
+        workspace="T1", channel="C1", thread_ts="100.1")
+    assert captured["name"] == "refine_search"
+    assert captured["args"] == {"city": "Los Angeles"}
+    assert captured["requester_slack"] == "U1"
+    assert captured["workspace"] == "T1"
+    assert captured["channel"] == "C1"
+    assert captured["thread_ts"] == "100.1"
+    assert "• Lead #9" in result["reply"]
+    assert "Internal search snapshot" not in result["reply"]
+
+
+def test_city_refinement_works_inside_proactive_lead_thread(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A proactive row cannot prevent a thread-scoped saved search refinement."""
+    monkeypatch.setattr(
+        tools, "run_tool",
+        lambda *_a, **_k: ("No grants matched those filters.", None),
+    )
+    proactive_row = SimpleNamespace()
+    result = conversation.respond(
+        "Only show me Los Angeles.", proactive_row, requester_slack="U1",
+        workspace="T1", channel="C1", thread_ts="100.1")
+    assert result["reply"] == "No grants matched those filters."
+
+
+def test_city_refinement_missing_snapshot_has_plain_english_failure(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing scoped search state never exposes the tool's technical error."""
+    monkeypatch.setattr(
+        tools, "run_tool",
+        lambda *_a, **_k: ("ERROR: no earlier search from you in this thread was found.",
+                           None),
+    )
+    result = conversation.respond(
+        "Only show me Los Angeles.", None, requester_slack="U1",
+        workspace="T1", channel="C1", thread_ts="100.1")
+    assert result["reply"].startswith("I couldn’t find an earlier completed search")
+    assert "ERROR" not in result["reply"]
+
+
+def test_city_refinement_other_error_has_honest_generic_failure(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A technical refinement failure is not falsely described as missing history."""
+    monkeypatch.setattr(
+        tools, "run_tool",
+        lambda *_a, **_k: ("ERROR: search failed (OperationalError).", None),
+    )
+    result = conversation.respond(
+        "Only show me Los Angeles.", None, requester_slack="U1",
+        workspace="T1", channel="C1", thread_ts="100.1")
+    assert result["reply"].startswith("I couldn’t safely apply that city refinement")
+    assert "OperationalError" not in result["reply"]
+
+
+@pytest.mark.parametrize(
+    "text", ["Only show me five.", "Only show me gold.", "Only show me awards."],
+)
+def test_city_refinement_does_not_capture_non_city_filters(text: str) -> None:
+    """Generic counts, grades, and record types remain available to normal routing."""
+    assert conversation._requested_city_refinement(text) == ""
+
+
+def test_excel_followup_exports_exact_thread_snapshot_without_model(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A plain Excel follow-up uploads the saved set without reconstructing filters."""
+    artifact = _artifact()
+    captured: dict[str, object] = {}
+
+    def fake_run_tool(name: str, args: dict[str, object], *_a: object,
+                      **kwargs: object) -> tuple[str, GeneratedArtifact]:
+        """Return the saved-result workbook and record the exact scoped request."""
+        captured.update(name=name, args=args, **kwargs)
+        return "Exported the same 5 results to Excel.", artifact
+
+    monkeypatch.setattr(tools, "run_tool", fake_run_tool)
+    result = conversation.respond(
+        "Put these in Excel.", None, requester_slack="U1",
+        workspace="T1", channel="C1", thread_ts="100.1")
+    assert captured["name"] == "export_search_snapshot"
+    assert captured["args"] == {"export": "excel"}
+    assert captured["requester_slack"] == "U1"
+    assert captured["thread_ts"] == "100.1"
+    assert result["files"] == [artifact]
+    artifact.cleanup()
+
+
+def test_excel_followup_works_inside_proactive_lead_thread(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A proactive row cannot prevent export of the exact scoped search snapshot."""
+    artifact = _artifact()
+    monkeypatch.setattr(
+        tools, "run_tool",
+        lambda *_a, **_k: ("Exported the same 1 result to Excel.", artifact),
+    )
+    result = conversation.respond(
+        "Put these in Excel.", SimpleNamespace(), requester_slack="U1",
+        workspace="T1", channel="C1", thread_ts="100.1")
+    assert result["files"] == [artifact]
+    artifact.cleanup()
+
+
 # ------------------------------------------------------------ greeting + idempotency
 def test_empty_mention_greets_without_calling_the_model(
         monkeypatch: pytest.MonkeyPatch) -> None:

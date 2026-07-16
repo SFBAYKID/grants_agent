@@ -67,7 +67,7 @@ class _Response:
 
 def test_fetch_state_pages_both_queries_and_excludes_member_sentinels(
         monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every ArcGIS page is merged and the server query excludes negative MEMBER."""
+    """Every raw-school page is aggregated and the query excludes MEMBER sentinels."""
     calls: list[tuple[str, dict[str, str]]] = []
     monkeypatch.setattr(nces, "PAGE_SIZE", 1)
 
@@ -78,9 +78,11 @@ def test_fetch_state_pages_both_queries_and_excludes_member_sentinels(
         if url == nces.SCHOOL_QUERY_URL:
             rows = [
                 {"LEAID": "1", "LEA_NAME": "Alpha District", "LSTATE": "CA",
-                 "ENROLLMENT": 100},
+                 "MEMBER": 60},
+                {"LEAID": "1", "LEA_NAME": "Alpha District", "LSTATE": "CA",
+                 "MEMBER": 40},
                 {"LEAID": "2", "LEA_NAME": "Beta District", "LSTATE": "CA",
-                 "ENROLLMENT": 200},
+                 "MEMBER": 200},
             ]
         else:
             rows = [
@@ -95,8 +97,9 @@ def test_fetch_state_pages_both_queries_and_excludes_member_sentinels(
     assert [(item.nces_id, item.enrollment) for item in districts] == [
         ("1", 100), ("2", 200)]
     school_calls = [params for url, params in calls if url == nces.SCHOOL_QUERY_URL]
-    assert [params["resultOffset"] for params in school_calls] == ["0", "1", "2"]
+    assert [params["resultOffset"] for params in school_calls] == ["0", "1", "2", "3"]
     assert all("MEMBER>=0" in params["where"] for params in school_calls)
+    assert all("outStatistics" not in params for params in school_calls)
 
 
 def test_nces_repeated_page_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:

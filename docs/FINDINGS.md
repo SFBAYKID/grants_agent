@@ -45,8 +45,10 @@ Everything discovered, verified, and still open. Companion to `grant_lead_source
 - **California Grants Portal**: official CKAN metadata and CSV feeds need no API key. A 2026-07-14
   dry run parsed 831 records and wrote nothing. The parser keeps portal publication dates as
   provenance rather than treating them as award dates.
-- **NCES EDGE**: the official 2024–25 directory/enrollment service needs no key. Tustin Unified
-  matched uniquely in the live check with NCES district id `0640150` and 21,220 students.
+- **NCES EDGE**: the official 2024–25 directory/enrollment service needs no key. The grouped
+  statistics endpoint repeats its first page when paged, so Grant pages stable school rows and
+  aggregates membership locally by LEA. A 2026-07-16 live read returned 2,038 California districts;
+  Los Angeles Unified matched id `0622710`, Los Angeles, with 406,717 students.
 - **OregonBuys**: the public recent-bids PDF fetched and its table parsed in a 2026-07-14 dry run;
   it contained zero matching physical-security bids at that moment. The authenticated full-search
   workflow is intentionally not bypassed.

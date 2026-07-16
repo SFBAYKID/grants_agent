@@ -403,6 +403,39 @@ def _is_slack_list_line(value: str) -> bool:
     return bool(re.match(r"^(?:•|-|\d+\.)\s+", value.strip()))
 
 
+def _requested_city_refinement(text: str) -> str:
+    """Return a proper-name city from a narrow search-refinement follow-up."""
+    match = re.fullmatch(
+        r"\s*(?i:only\s+(?:show\s+me\s+)?)"
+        r"([A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*){0,4})[.!?]?\s*",
+        text,
+    )
+    return match.group(1).strip().rstrip(".!?") if match else ""
+
+
+def _is_excel_snapshot_followup(text: str) -> bool:
+    """Recognize an exact request to export the current thread's saved results."""
+    return re.fullmatch(
+        r"\s*(?:please\s+)?put\s+(?:these|those|them|the\s+results)\s+"
+        r"(?:in|into)\s+(?:an?\s+)?excel(?:\s+(?:file|spreadsheet))?[.!?]?\s*",
+        text,
+        flags=re.IGNORECASE,
+    ) is not None
+
+
+def _public_search_reply(tool_text: str, missing_search_reply: str,
+                         other_error_reply: str) -> str:
+    """Convert a scoped search-tool result into safe, readable Slack copy."""
+    if re.match(r"\s*ERROR:", tool_text, flags=re.IGNORECASE):
+        lowered = tool_text.casefold()
+        if ("no earlier search" in lowered or "no completed search" in lowered
+                or "thread-bound search is required" in lowered):
+            return missing_search_reply
+        return other_error_reply
+    public = re.sub(r"(?m)^- (?=Lead #)", "• ", tool_text.strip())
+    return _format_slack_reply(public)
+
+
 def _is_application_provenance_question(text: str) -> bool:
     """Recognize questions about who or how an application was submitted."""
     normalized = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower()).split())
@@ -600,6 +633,37 @@ def respond(user_text: str, row: sqlite3.Row | None,
     say = on_progress or (lambda _msg: None)
     if row is None:
         row = _load_referenced_lead(user_text, thread_context)
+    city_refinement = _requested_city_refinement(user_text)
+    if city_refinement:
+        say("Refining your saved search")
+        tool_text, artifact = tools.run_tool(
+            "refine_search", {"city": city_refinement}, say,
+            requester_slack=requester_slack, workspace=workspace,
+            channel=channel, thread_ts=thread_ts)
+        reply = _public_search_reply(
+            tool_text,
+            "I couldn’t find an earlier completed search from you in this thread. "
+            "Run the search here first, then ask me to narrow it by city.",
+            "I couldn’t safely apply that city refinement. The earlier results are "
+            "unchanged; please run the search again.",
+        )
+        return {"intent": "question", "files": [artifact] if artifact else [],
+                "pending_crm_actions": [], "reply": reply}
+    if _is_excel_snapshot_followup(user_text):
+        say("Preparing your Excel file")
+        tool_text, artifact = tools.run_tool(
+            "export_search_snapshot", {"export": "excel"}, say,
+            requester_slack=requester_slack, workspace=workspace,
+            channel=channel, thread_ts=thread_ts)
+        reply = _public_search_reply(
+            tool_text,
+            "I couldn’t find completed results from you in this thread to export. "
+            "Run the search here first, then ask me to put those results in Excel.",
+            "I couldn’t safely create an Excel file from those saved results. "
+            "Nothing was uploaded; please run the search again.",
+        )
+        return {"intent": "question", "files": [artifact] if artifact else [],
+                "pending_crm_actions": [], "reply": reply}
     if _is_source_coverage_request(user_text, thread_context):
         return {"intent": "question", "files": [], "pending_crm_actions": [],
                 "reply": _source_coverage_reply(user_text)}
