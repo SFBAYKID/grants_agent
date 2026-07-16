@@ -25,7 +25,7 @@ from anthropic import Anthropic
 from .. import db, linkedin_candidates
 from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact
-from . import tools
+from . import organization, tools
 
 DEFAULT_MODEL = "claude-sonnet-5"
 MAX_TOOL_TURNS = 6  # runaway guard for the agent loop
@@ -394,6 +394,8 @@ def _explicit_lead_creation_request(
         text: str, thread_context: list[str] | None = None) -> bool:
     """Recognize a direct request for one standalone Salesforce Lead."""
     normalized = " ".join(text.lower().replace("stand-alone", "standalone").split())
+    if re.search(r"\b(?:campaign|opportunit(?:y|ies))\b", normalized):
+        return False
     if re.search(r"\bstand\s*alone\s+lead\b|\bstandalone\s+lead\b", normalized):
         return True
     if re.search(r"\bcreate\s+it\s+anyway\b", normalized):
@@ -439,6 +441,41 @@ def _is_application_provenance_question(text: str) -> bool:
     application_word = any(
         word in normalized for word in ("applied", "applicant", "application", "submitted"))
     return application_word and any(word in normalized for word in ("who", "how", "where"))
+
+
+def _is_location_question(text: str) -> bool:
+    """Recognize a lead-specific request for an address or exact location."""
+    normalized = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower()).split())
+    return bool(re.search(
+        r"\b(?:where\s+is|where\s+are|located|location|street\s+address|address)\b",
+        normalized))
+
+
+def _is_funding_approval_date_question(text: str) -> bool:
+    """Recognize a request for an award approval/announcement date."""
+    normalized = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower()).split())
+    return ("when" in normalized.split()
+            and any(word in normalized for word in ("funding", "award", "grant"))
+            and any(word in normalized for word in ("approved", "awarded", "announced")))
+
+
+def _funding_approval_date_reply(row: sqlite3.Row) -> str:
+    """Answer from the event record without turning a spend date into approval."""
+    entity = display_entity_name(str(row["entity_name"] or "the organization"))
+    source_url = str(row["current_event_source_url"] or "").strip()
+    source_label = _source_record_label(row)
+    source = (f"<{source_url}|{source_label}>" if source_url
+              else "the indexed award record")
+    start = str(row["funds_start"] or "not published")
+    end = str(row["funds_end"] or "not published")
+    return (
+        "The award record does not publish a verified approval or announcement date.\n\n"
+        f"• *Organization:* {entity}\n"
+        "• *Approval date:* not published in this record\n"
+        f"• *Spending window:* {start} to {end}; this is not an approval date\n"
+        f"• *Source:* {source}\n\n"
+        "I won’t substitute the spending-window start or Grant’s discovery date."
+    )
 
 
 def _award_application_reply(row: sqlite3.Row) -> str:
@@ -564,6 +601,21 @@ def respond(user_text: str, row: sqlite3.Row | None,
             and str(row["current_event_type"] or "").startswith("award_")):
         return {"intent": "question", "files": [], "pending_crm_actions": [],
                 "reply": _award_application_reply(row)}
+    if row is not None and _is_funding_approval_date_question(user_text):
+        return {"intent": "question", "files": [], "pending_crm_actions": [],
+                "reply": _funding_approval_date_reply(row)}
+    if row is not None and _is_location_question(user_text):
+        say("Checking the official website")
+        try:
+            reply = organization.find_organization_details(
+                str(row["entity_name"] or ""), str(row["state"] or ""), say)
+        except Exception:  # official-site infrastructure failure must stay honest
+            reply = (
+                "I couldn’t verify the school’s exact address right now. "
+                f"The funding record only confirms {str(row['state'] or 'the state')}."
+            )
+        return {"intent": "question", "files": [], "pending_crm_actions": [],
+                "reply": reply}
     if row is not None and _is_linkedin_request(user_text):
         say("Checking LinkedIn")
         conn = db.connect()

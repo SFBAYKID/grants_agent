@@ -89,3 +89,36 @@ def test_linkedin_failure_always_returns_honest_final_message(
     assert "couldn’t complete" in result["reply"]
     assert "won’t guess" in result["reply"]
     assert "secret detail" not in result["reply"]
+
+
+def test_location_question_uses_verified_official_site_route(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """An exact-location request does not stop at the award's state field."""
+    monkeypatch.setattr(
+        conversation.organization, "find_organization_details",
+        lambda entity, state, _progress: (
+            f"{entity} is at 17000 Haynes Street, Van Nuys, {state}."))
+    result = conversation.respond(
+        "Where is the school located?", _award(tmp_path),
+        on_progress=lambda _message: None)
+    assert "17000 Haynes Street" in result["reply"]
+    assert "Van Nuys" in result["reply"]
+
+
+def test_approval_date_never_substitutes_spend_or_discovery_date(tmp_path: Path) -> None:
+    """An unknown approval date is answered deterministically from award evidence."""
+    result = conversation.respond("When was the funding approved?", _award(tmp_path))
+    assert "Approval date:* not published" in result["reply"]
+    assert "2025-10-01 to 2028-09-30" in result["reply"]
+    assert "this is not an approval date" in result["reply"]
+    assert "15JCOPS25GG01291SSIX" in result["reply"]
+
+
+@pytest.mark.parametrize("phrase", [
+    "Can you add this lead to a Salesforce Campaign?",
+    "Yes, add this lead to that campaign.",
+    "Create an Opportunity for this lead.",
+])
+def test_campaign_and_opportunity_requests_never_become_org_leads(phrase: str) -> None:
+    """CRM collection/deal language cannot trigger standalone Lead creation."""
+    assert conversation._explicit_lead_creation_request(phrase) is False
