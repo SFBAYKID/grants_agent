@@ -543,6 +543,20 @@ def _migration_11_linkedin_person_candidates(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_12_reference_enrichment_runs(conn: sqlite3.Connection) -> None:
+    """Track completed versioned reference-data coverage without marking leads falsely."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS reference_enrichment_runs (
+               source TEXT NOT NULL,
+               state TEXT NOT NULL,
+               scope_version INTEGER NOT NULL,
+               candidate_count INTEGER NOT NULL,
+               completed_at TIMESTAMP NOT NULL,
+               PRIMARY KEY(source,state,scope_version)
+           )"""
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "legacy-compatible base", _migration_1_base),
     Migration(2, "truth observations and events", _migration_2_truth_events),
@@ -557,6 +571,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(10, "tenant-scoped user preferences", _migration_10_user_preferences),
     Migration(11, "thread-bound LinkedIn person candidates",
               _migration_11_linkedin_person_candidates),
+    Migration(12, "versioned reference enrichment coverage",
+              _migration_12_reference_enrichment_runs),
 )
 
 

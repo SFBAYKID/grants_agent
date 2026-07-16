@@ -17,6 +17,7 @@ from grant_watch.models import (
     RawItem,
     VerificationStatus,
 )
+from grant_watch.school_scope import school_entity_clause
 from grant_watch.slack import search, tools
 from grant_watch.slack.search import (
     MAX_ENRICH_ROWS,
@@ -46,6 +47,8 @@ def _insert(conn: sqlite3.Connection, source: str, item_id: str, entity: str,
 
 def _db(tmp_path: Path) -> Path:
     """Build a mixed award/opportunity/solicitation database for search tests."""
+    from grant_watch.enrich import nces
+
     path = tmp_path / "search.db"
     conn = db.connect(path)
     rows = [
@@ -73,6 +76,12 @@ def _db(tmp_path: Path) -> Path:
                   location_city='Tustin',location_confidence='high'
            WHERE source_item_id='A1'""")
     conn.commit()
+    school_scope, school_params = school_entity_clause()
+    candidate_count = conn.execute(
+        f"SELECT COUNT(*) FROM leads WHERE UPPER(state)='CA' AND {school_scope}",
+        school_params,
+    ).fetchone()[0]
+    nces.mark_scope_refreshed(conn, "CA", int(candidate_count))
     conn.close()
     return path
 

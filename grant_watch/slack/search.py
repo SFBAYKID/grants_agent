@@ -532,11 +532,15 @@ def search_leads(state: str = "", org_type: str = "", program: str = "",
                                      or enrollment_max is not None)
                                     and known_enrollment == 0)
                 needs_city = bool(city.strip() and known_city == 0)
-                if total_school and (needs_enrollment or needs_city):
-                    (on_progress or _NOOP)("Checking NCES enrollment")
-                    from ..enrich import nces
+                from ..enrich import nces
 
+                scope_refresh = nces.scope_refresh_needed(writable, state)
+                if total_school and (scope_refresh or needs_enrollment or needs_city):
+                    (on_progress or _NOOP)("Checking NCES enrollment")
                     nces.enrich_state_leads(writable, state)
+                    # Mark only the population observed before the fetch. A concurrent
+                    # new lead must keep the scope stale for the next request.
+                    nces.mark_scope_refreshed(writable, state, total_school)
                     known_enrollment = int(writable.execute(
                         f"""SELECT COUNT(*) FROM leads WHERE UPPER(state)=?
                             AND {school_scope} AND enrollment IS NOT NULL""",

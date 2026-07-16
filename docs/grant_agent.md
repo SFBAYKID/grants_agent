@@ -30,6 +30,7 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
    result set so a later export can never fall back to older broader results. NCES district-office
    city filters page official school rows and aggregate enrollment locally; if reference data cannot
    be applied, Grant says so and does not pretend the returned statewide set is city-filtered.
+   Versioned coverage metadata reopens enrichment when the eligible school-lead population changes.
    A bare "@Grant" with no ask gets a friendly greeting.
    Mention-led threads are persisted so a plain follow-up such as “85 is fine—Excel”
    continues the original search instead of being dropped.

@@ -32,6 +32,7 @@ SOURCE_URL = (
     "https://nces.ed.gov/opengis/rest/services/K12_School_Locations/"
     "EDGE_ADMINDATA_PUBLICSCH_2425/MapServer/1"
 )
+SCOPE_VERSION = 2
 PAGE_SIZE = 2_000
 MAX_PAGES = 100
 _GENERIC = {
@@ -178,11 +179,51 @@ def fetch_state(state: str) -> list[NCESDistrict]:
     return parse_districts(enrollments, locations)
 
 
+def _candidate_count(conn: sqlite3.Connection, state: str) -> int:
+    """Count leads eligible under the current shared school-classification scope."""
+    school_scope, school_params = school_entity_clause()
+    return int(conn.execute(
+        f"SELECT COUNT(*) FROM leads WHERE UPPER(state)=? AND {school_scope}",
+        (state.strip().upper(), *school_params),
+    ).fetchone()[0])
+
+
+def scope_refresh_needed(conn: sqlite3.Connection, state: str) -> bool:
+    """Return whether this NCES scope version has not covered the current lead set."""
+    candidate_count = _candidate_count(conn, state)
+    row = conn.execute(
+        """SELECT candidate_count FROM reference_enrichment_runs
+             WHERE source='nces' AND state=? AND scope_version=?""",
+        (state.strip().upper(), SCOPE_VERSION),
+    ).fetchone()
+    return row is None or int(row["candidate_count"]) != candidate_count
+
+
+def mark_scope_refreshed(
+        conn: sqlite3.Connection, state: str, candidate_count: int) -> None:
+    """Record successful coverage only after the official NCES fetch and write-back."""
+    state_code = state.strip().upper()
+    if candidate_count < 0:
+        raise ValueError("NCES candidate count cannot be negative")
+    with conn:
+        conn.execute(
+            """INSERT INTO reference_enrichment_runs
+                 (source,state,scope_version,candidate_count,completed_at)
+               VALUES ('nces',?,?,?,datetime('now'))
+               ON CONFLICT(source,state,scope_version) DO UPDATE SET
+                 candidate_count=excluded.candidate_count,
+                 completed_at=excluded.completed_at""",
+            (state_code, SCOPE_VERSION, candidate_count),
+        )
+
+
 def enrich_state_leads(conn: sqlite3.Connection, state: str,
                        districts: list[NCESDistrict] | None = None) -> EnrichmentSummary:
     """Attach NCES facts to uniquely matching school-like leads in one state."""
     state_code = state.strip().upper()
     reference = districts if districts is not None else fetch_state(state_code)
+    if not reference:
+        raise ValueError("NCES returned no district reference rows")
     school_scope, school_params = school_entity_clause()
     rows = list(conn.execute(
         f"""SELECT id,entity_name FROM leads

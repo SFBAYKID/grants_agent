@@ -82,6 +82,56 @@ def test_enrich_state_leads_uses_same_academy_and_charter_scope_as_search(
     }
 
 
+def test_scope_refresh_tracks_versioned_candidate_coverage(tmp_path: Path) -> None:
+    """Partial old coverage refreshes once and new eligible leads reopen the scope."""
+    conn = db.connect(tmp_path / "nces-scope-version.db")
+    db.upsert_lead(conn, Lead(
+        RawItem("test", "1", "award", "Los Angeles Leadership Academy", "CA",
+                "SVPP", 1.0, "2026-01-01", "2027-01-01", "", {}),
+        LeadGrade.GOLD,
+    ))
+    assert nces.scope_refresh_needed(conn, "CA") is True
+    nces.enrich_state_leads(conn, "CA", [
+        nces.NCESDistrict(
+            "0601494", "Los Angeles Leadership Academy", "CA", "Los Angeles", 700),
+    ])
+    nces.mark_scope_refreshed(conn, "CA", 1)
+    assert nces.scope_refresh_needed(conn, "CA") is False
+    db.upsert_lead(conn, Lead(
+        RawItem("test", "2", "award", "San Jose Charter Academy", "CA",
+                "SVPP", 1.0, "2026-01-01", "2027-01-01", "", {}),
+        LeadGrade.GOLD,
+    ))
+    assert nces.scope_refresh_needed(conn, "CA") is True
+
+
+def test_scope_marker_cannot_cover_a_concurrently_inserted_lead(tmp_path: Path) -> None:
+    """The pre-fetch count keeps a lead inserted during enrichment pending."""
+    conn = db.connect(tmp_path / "nces-concurrent-scope.db")
+    first = Lead(
+        RawItem("test", "1", "award", "Alpha Academy", "CA", "SVPP", 1.0,
+                "2026-01-01", "2027-01-01", "", {}),
+        LeadGrade.GOLD,
+    )
+    db.upsert_lead(conn, first)
+    captured_count = 1
+    db.upsert_lead(conn, Lead(
+        RawItem("test", "2", "award", "Beta Academy", "CA", "SVPP", 1.0,
+                "2026-01-01", "2027-01-01", "", {}),
+        LeadGrade.GOLD,
+    ))
+    nces.mark_scope_refreshed(conn, "CA", captured_count)
+    assert nces.scope_refresh_needed(conn, "CA") is True
+
+
+def test_empty_nces_reference_never_marks_or_updates_scope(tmp_path: Path) -> None:
+    """An anomalous successful-but-empty response fails closed."""
+    conn = db.connect(tmp_path / "nces-empty.db")
+    with pytest.raises(ValueError, match="no district reference"):
+        nces.enrich_state_leads(conn, "CA", [])
+    assert nces.scope_refresh_needed(conn, "CA") is True
+
+
 class _Response:
     """Small requests-compatible JSON response for ArcGIS pagination tests."""
 
