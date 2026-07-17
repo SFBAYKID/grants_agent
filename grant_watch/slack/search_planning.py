@@ -59,6 +59,19 @@ def _changes_prior_search_filters(
             r"\b(location|organization|program|grade)=([^;.]+)", prior, re.IGNORECASE
         )
     }
+    if not prior_values:
+        # Current human format: "Search plan: IL · school · SVPP · gold[ · …]".
+        marker_index = prior.lower().find(SEARCH_PLAN_MARKER.lower())
+        summary = prior[marker_index + len(SEARCH_PLAN_MARKER) :]
+        summary = summary.split(" — ", 1)[0].split(".", 1)[0]
+        fields = [field.strip().lower() for field in summary.split("·")]
+        if len(fields) >= 4:
+            prior_values = {
+                "location": fields[0],
+                "organization": fields[1],
+                "program": fields[2],
+                "grade": fields[3],
+            }
     comparisons = {
         "state": "location",
         "org_type": "organization",
@@ -72,19 +85,53 @@ def _changes_prior_search_filters(
     )
 
 
+_DATE_FIELD_PHRASES = {
+    "award_received": "announced",
+    "discovered": "discovered",
+    "opportunity_open": "application window opens",
+    "opportunity_close": "application window closes",
+    "solicitation_posted": "solicitation posted",
+    "response_due": "responses due",
+    "spend_start": "spend window starts",
+    "spend_end": "spend window ends",
+}
+
+_RECORD_KIND_PHRASES = {
+    "award": "awards only",
+    "funding_opportunity": "funding opportunities only",
+    "solicitation": "solicitations only",
+}
+
+
 def search_confirmation(arguments: dict[str, Any], user_text: str) -> str:
-    """Render the exact proposed read-only lead query before any DB search runs."""
+    """Render the proposed read-only query as one scannable human line.
+
+    Format contract (parsed by _changes_prior_search_filters): the four core
+    filters follow the marker as "location · org · program · grade"; everything
+    after " — " or the first period is presentation only."""
     state = str(arguments.get("state") or "anywhere")
-    org_type = str(arguments.get("org_type") or "any organization type")
+    org_type = str(arguments.get("org_type") or "any org type")
     program = str(arguments.get("program") or "any program")
     grade = str(arguments.get("grade") or "any grade")
-    date_field = str(arguments.get("date_field") or "no date filter")
+    fields = [state, org_type, program, grade]
+    date_field = str(arguments.get("date_field") or "")
     date_from = str(arguments.get("date_from") or "")
     date_to = str(arguments.get("date_to") or "")
-    if date_from or date_to:
-        date_filter = f"{date_field} {date_from or 'open'} to {date_to or 'open'}"
-    else:
-        date_filter = date_field
+    if date_field and (date_from or date_to):
+        phrase = _DATE_FIELD_PHRASES.get(date_field, date_field)
+        fields.append(f"{phrase} {date_from or 'any time'} to {date_to or 'any time'}")
+    for key, render in (
+        ("record_kind", lambda v: _RECORD_KIND_PHRASES.get(str(v), str(v))),
+        ("amount_min", lambda v: f"amount at least ${v}"),
+        ("amount_max", lambda v: f"amount at most ${v}"),
+        ("enrollment_min", lambda v: f"enrollment at least {v}"),
+        ("enrollment_max", lambda v: f"enrollment at most {v}"),
+        ("city", lambda v: f"city {v}"),
+        ("name_contains", lambda v: f"matching “{v}”"),
+    ):
+        value = arguments.get(key)
+        if value not in (None, ""):
+            fields.append(render(value))
     limit = arguments.get("limit")
     scope = str(arguments.get("result_scope") or "top_n")
     count_requested = bool(
@@ -93,46 +140,34 @@ def search_confirmation(arguments: dict[str, Any], user_text: str) -> str:
             user_text.lower(),
         )
     )
-    count = (
-        "all matches"
-        if scope == "all" and count_requested
-        else f"top {limit}"
-        if isinstance(limit, int) and count_requested
-        else "count not chosen"
-    )
     requested_thread = bool(
         re.search(r"\b(?:here|thread|in slack)\b", user_text.lower())
     )
     export_value = str(arguments.get("export") or "")
-    export = export_value or (
-        "listed here in the thread" if requested_thread else "format not chosen"
-    )
-    extra_filters: list[str] = []
-    for key, label in (
-        ("record_kind", "record kind"),
-        ("amount_min", "minimum amount"),
-        ("amount_max", "maximum amount"),
-        ("enrollment_min", "minimum enrollment"),
-        ("enrollment_max", "maximum enrollment"),
-        ("city", "city"),
-        ("name_contains", "name contains"),
-    ):
-        value = arguments.get(key)
-        if value not in (None, ""):
-            extra_filters.append(f"{label}={value}")
-    extras = "; " + "; ".join(extra_filters) if extra_filters else ""
-    plan = (
-        f"{SEARCH_PLAN_MARKER} location={state}; organization={org_type}; "
-        f"program={program}; date={date_filter}; grade={grade}; results={count}; "
-        f"format={export}{extras}."
-    )
-    missing: list[str] = []
+    plan = f"{SEARCH_PLAN_MARKER} " + " · ".join(fields) + "."
+    chosen: list[str] = []
+    if count_requested:
+        if scope == "all":
+            chosen.append("all matches")
+        elif isinstance(limit, int):
+            chosen.append(f"top {limit}")
+    if export_value:
+        chosen.append(
+            {"excel": "Excel file", "google_sheet": "Google Sheet"}.get(
+                export_value, export_value
+            )
+        )
+    elif requested_thread:
+        chosen.append("listed here in the thread")
+    if chosen:
+        plan += " I'll bring back the " + ", ".join(chosen) + "."
+    questions: list[str] = []
     if not count_requested:
-        missing.append("how many (top 5, top 10, or all)")
+        questions.append("How many — top 5, top 10, or all?")
     if not export_value and not requested_thread:
-        missing.append("Excel, Google Sheet, or here in the thread")
-    if missing:
-        return plan + " Please tell me " + " and ".join(missing) + "."
+        questions.append("And here in the thread, an Excel file, or a Google Sheet?")
+    if questions:
+        return plan + " " + " ".join(questions)
     return plan + " Reply yes and I’ll run it."
 
 

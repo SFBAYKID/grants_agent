@@ -50,9 +50,8 @@ def test_initial_fully_specified_search_is_confirmed_before_tool_execution(
         "Give me one GOLD California school lead, just show it here.", None
     )
     assert out["reply"].startswith("Search plan:")
-    assert "location=CA" in out["reply"]
-    assert "organization=school" in out["reply"]
-    assert "grade=gold" in out["reply"]
+    assert "CA · school" in out["reply"]
+    assert "gold" in out["reply"]
     assert "Reply yes" in out["reply"]
 
 
