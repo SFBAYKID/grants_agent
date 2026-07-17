@@ -155,3 +155,29 @@ def test_named_salesforce_call_without_lead_remains_supported() -> None:
         )
         == ""
     )
+
+
+def test_lead_bound_linkedin_call_is_not_blocked() -> None:
+    """An explicit lead_id supplies identity even when the reply text lacks the name."""
+    assert (
+        conversation._contextual_tool_error(
+            "find_person_linkedin",
+            {"entity": "Chicago Jewish Day School", "state": "IL", "lead_id": 3485},
+            None,
+            "yes — try LinkedIn for lead #3485",
+        )
+        == ""
+    )
+
+
+def test_contact_by_entity_name_is_not_blocked() -> None:
+    """find_contact with an explicit entity name passes the gate in general threads."""
+    assert (
+        conversation._contextual_tool_error(
+            "find_contact",
+            {"entity": "Chicago Jewish Day School", "state": "IL"},
+            None,
+            "get me the contact for Chicago Jewish Day School",
+        )
+        == ""
+    )

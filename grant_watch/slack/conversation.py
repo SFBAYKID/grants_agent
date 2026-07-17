@@ -426,7 +426,9 @@ def _contextual_tool_error(
         or row is not None
     ):
         return ""
-    if name == "find_contact" and int(arguments.get("lead_id", 0) or 0) > 0:
+    if int(arguments.get("lead_id", 0) or 0) > 0:
+        # An explicit lead binding supplies the identity; a wrong id fails
+        # honestly inside the tool instead of being second-guessed here.
         return ""
     entity = str(arguments.get("entity", "")).strip().lower()
     generic = {
