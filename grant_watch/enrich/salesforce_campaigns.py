@@ -584,6 +584,20 @@ def confirm_action(
 
             return confirm_contact_record(conn, gateway, row)
         raise ValueError("unknown Salesforce action type")
+    except PermissionError as exc:
+        # verify_write_scope fails closed BEFORE any create POST (bad/missing
+        # write config, org mismatch, non-sandbox), so nothing was written even
+        # though a commit was begun — resolve cleanly to FAILED, never stranded.
+        _finish_action(
+            conn,
+            action_id,
+            CampaignActionState.FAILED,
+            error=f"write scope refused: {str(exc)[:200]}",
+        )
+        return ActionExecution(
+            CampaignActionState.FAILED,
+            f"Salesforce was not changed: {str(exc)[:200]}",
+        )
     except requests.Timeout as exc:
         _finish_action(
             conn,

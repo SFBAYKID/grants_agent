@@ -574,3 +574,29 @@ def test_org_name_masquerading_as_title_is_dropped(tmp_path: Path) -> None:
     _confirm(conn, gateway, action)
     assert "Title" not in gateway.created_leads[0]
     assert "title not verified" in str(gateway.created_tasks[0]["Description"])
+
+
+class ScopeRefusedGateway(FakeGateway):
+    """Gateway whose create_lead fails the write-scope check before any POST."""
+
+    def create_lead(self, payload: dict[str, object]) -> gateway_mod.CreateResult:
+        """Reject at scope verification exactly as verify_write_scope does."""
+        self.calls.append("create_lead")
+        raise PermissionError("SALESFORCE_WRITE_ORG_ID is not configured")
+
+
+def test_write_scope_refusal_resolves_failed_not_stranded(tmp_path: Path) -> None:
+    """A pre-POST scope refusal ends FAILED so the lead is not blocked forever."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _lead_row(conn, "a20", "Alpha School District")
+    _verified_contact(conn, lead_id)
+    gateway = ScopeRefusedGateway()
+    action = _prepare(conn, gateway, lead_id)
+    result = _confirm(conn, gateway, action)
+    assert result.state == campaigns.CampaignActionState.FAILED
+    assert "was not changed" in result.message
+    state = conn.execute("SELECT state FROM crm_actions").fetchone()[0]
+    assert state == "failed"
+    # The re-run guard must now release so the rep can retry once config is fixed.
+    action2 = _prepare(conn, FakeGateway(), lead_id)
+    assert action2.action_id != action.action_id
