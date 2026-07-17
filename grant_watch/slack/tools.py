@@ -770,11 +770,19 @@ def find_person_linkedin(
             "SELECT id FROM leads WHERE id=?", (int(lead_id),)
         ).fetchone()
         if lead is not None:
+            title = str(person["title"] or "")
+            # LinkedIn snippets often put the ORG into the title slot; a title
+            # that is just the organization name is no title at all.
+            if (
+                db.canonical_entity_key(title).partition("|")[0]
+                == db.canonical_entity_key(entity).partition("|")[0]
+            ):
+                title = ""
             contact_id = db.save_linkedin_contact(
                 conn,
                 int(lead_id),
                 str(person["name"]),
-                str(person["title"] or ""),
+                title,
                 str(person["url"]),
             )
             saved = (

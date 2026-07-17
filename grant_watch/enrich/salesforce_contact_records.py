@@ -110,10 +110,17 @@ def contact_lead_payload(
             f"requested by Slack user {requester}."
         ),
     }
+    from .. import db
+
     if first:
         payload["FirstName"] = first
-    if contact["title"]:
-        payload["Title"] = str(contact["title"])
+    title = str(contact["title"] or "")
+    if title and (
+        db.canonical_entity_key(title).partition("|")[0]
+        != db.canonical_entity_key(entity).partition("|")[0]
+    ):
+        # A "title" that is just the organization name is not a person's role.
+        payload["Title"] = title
     if contact["email"]:
         payload["Email"] = str(contact["email"])
     if contact["phone"]:
@@ -136,8 +143,15 @@ def grant_task_payload(
     today: str,
 ) -> dict[str, object]:
     """Build the activity Task payload; WhoId/WhatId is attached by mode."""
+    from .. import db
+
     validate_record_id(owner.record_id, "User")
-    title = str(contact["title"] or "title not verified")
+    title = str(contact["title"] or "")
+    if not title or (
+        db.canonical_entity_key(title).partition("|")[0]
+        == db.canonical_entity_key(str(lead["entity_name"] or "")).partition("|")[0]
+    ):
+        title = "title not verified"
     return {
         "Subject": "Grant AI: record created from grant lead",
         "ActivityDate": today,

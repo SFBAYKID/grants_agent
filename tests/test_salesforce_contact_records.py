@@ -558,3 +558,19 @@ def test_find_person_linkedin_persists_with_lead(
         "SELECT name,contact_status,email FROM contacts WHERE lead_id=?", (lead_id,)
     ).fetchone()
     assert tuple(row) == ("Joshua Ihrig", "linkedin_only", None)
+
+
+def test_org_name_masquerading_as_title_is_dropped(tmp_path: Path) -> None:
+    """A LinkedIn 'title' equal to the org name never becomes a CRM Title."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _lead_row(conn, "a19", "Chicago Jewish Day School", "IL")
+    db.save_linkedin_contact(
+        conn, lead_id, "Richard Moline", "Chicago Jewish Day School",
+        "https://www.linkedin.com/in/richard-moline",
+    )
+    gateway = FakeGateway()
+    action = _prepare(conn, gateway, lead_id)
+    assert "Title: blank" in action.preview
+    _confirm(conn, gateway, action)
+    assert "Title" not in gateway.created_leads[0]
+    assert "title not verified" in str(gateway.created_tasks[0]["Description"])
