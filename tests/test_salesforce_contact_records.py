@@ -82,6 +82,7 @@ class TimeoutGateway(FakeGateway):
     """Gateway whose Lead create times out after reaching the network."""
 
     def create_lead(self, payload: dict[str, object]) -> gateway_mod.CreateResult:
+        """Simulate a network timeout after the request reached Salesforce."""
         self.calls.append("create_lead")
         raise requests.Timeout("simulated network timeout")
 
@@ -149,6 +150,7 @@ def _found(matches: list[salesforce.SFMatch]) -> object:
     """Build a lookup callable returning FOUND with the given matches."""
 
     def lookup(*_args: object, **_kwargs: object) -> salesforce.SFResult:
+        """Return a canned FOUND lookup result."""
         return salesforce.SFResult(
             status=salesforce.SFResultStatus.FOUND, matches=matches
         )
@@ -359,6 +361,7 @@ def test_unprovable_lookup_fails_closed(
     _verified_contact(conn, lead_id)
 
     def lookup(*_a: object, **_k: object) -> salesforce.SFResult:
+        """Return a canned unprovable lookup result."""
         return salesforce.SFResult(status=status)
 
     with pytest.raises(ValueError, match="refusing"):
