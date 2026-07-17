@@ -5,3 +5,5 @@
 - [macOS archive safety](macos-archive-safety.md) — avoid Bash `mapfile`; fail closed before `git archive` so an empty delta cannot expand to the full tracked tree
 - [Google Sheets export verify](google-sheets-export-verify.md) — droplet Drive export wiring verified 2026-07-14; reusable create+trash smoke-test recipe
 - [Silent LLM fallback](grant-bot-silent-llm-fallback.md) — bot.log logs NOTHING on LLM or tool failures (stderr proven to land there); mtime-vs-lstart proves it
+- [Tenant DB write safety](tenant-db-write-safety.md) — back up .db+wal+shm as a set; guarded BEGIN IMMEDIATE + rowcount==1 assert for live-DB row fixes; crm_actions/crm_action_items schema
+- [Salesforce read-only describe](salesforce-readonly-describe.md) — `_readonly_get` can hit describe/global-describe; secret-safe sandbox-confirm booleans; Lead record-type default trap (Verkada is default, not the one named DeveloperName=Default)
