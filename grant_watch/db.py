@@ -535,6 +535,27 @@ def save_contact(
     return int(cur.lastrowid)
 
 
+def save_linkedin_contact(
+    conn: sqlite3.Connection,
+    lead_id: int,
+    name: str,
+    title: str,
+    profile_url: str,
+) -> int:
+    """Store a LinkedIn-sourced person: name/title/profile only, never an email.
+
+    Distinct from save_contact because the evidence class differs — a profile's
+    ownership is not verified, so contact_status is 'linkedin_only'."""
+    cur = conn.execute(
+        """INSERT INTO contacts
+             (lead_id,name,title,email,phone,source_url,confidence,contact_status)
+           VALUES (?,?,?,NULL,NULL,?,'medium','linkedin_only')""",
+        (lead_id, name, title, profile_url),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
 def mark_contact_not_found(conn: sqlite3.Connection, lead_id: int) -> None:
     """The honest outcome when enrichment finds nothing verifiable."""
     conn.execute(

@@ -577,6 +577,12 @@ def confirm_action(
             return _confirm_campaign_create(conn, gateway, row)
         if row["action_type"] == "add_campaign_members":
             return _confirm_membership(conn, gateway, row)
+        if row["action_type"] == "create_contact_record":
+            # Function-local import: contact records reuse this module's store/
+            # authorize machinery, so a top-level import would be circular.
+            from .salesforce_contact_records import confirm_contact_record
+
+            return confirm_contact_record(conn, gateway, row)
         raise ValueError("unknown Salesforce action type")
     except requests.Timeout as exc:
         _finish_action(

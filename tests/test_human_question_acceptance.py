@@ -302,6 +302,18 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         forbidden_reply=("campaign was created", "created in salesforce"),
     ),
     HumanQuestion(
+        "contact-record-add",
+        "salesforce-write",
+        "Yes, add them to Salesforce.",
+        context=(
+            "Grant: VERIFIED contact for Lead #12: Jane Smith (Technology Director) "
+            "— jsmith@alpha.k12.ca.us. Want me to add them to Salesforce?",
+        ),
+        expected_tools=("salesforce_contact_record_preview",),
+        expected_reply=("preview",),
+        forbidden_reply=("lead was created", "created in salesforce"),
+    ),
+    HumanQuestion(
         "campaign-typed-confirm",
         "salesforce-write",
         "Yes, confirm the Salesforce write.",

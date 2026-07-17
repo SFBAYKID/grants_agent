@@ -260,11 +260,42 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "name": "find_person_linkedin",
         "description": "Find the likely decision-maker's LinkedIn profile (name, title, "
         "profile link) for an org — useful when the website has no email. "
-        "Returns a PERSON to reach via LinkedIn, never an invented email.",
+        "Returns a PERSON to reach via LinkedIn, never an invented email. "
+        "Pass lead_id when the org is a Grant lead so the person is saved as a "
+        "linkedin_only contact usable for a Salesforce record.",
         "input_schema": {
             "type": "object",
-            "properties": {"entity": {"type": "string"}, "state": {"type": "string"}},
+            "properties": {
+                "entity": {"type": "string"},
+                "state": {"type": "string"},
+                "lead_id": {
+                    "type": "integer",
+                    "description": "Grant lead to attach the found person to",
+                },
+            },
             "required": ["entity", "state"],
+        },
+    },
+    {
+        "name": "salesforce_contact_record_preview",
+        "description": "Prepare, but DO NOT execute, an immutable preview that adds a "
+        "Grant contact to Salesforce: a fully-populated person Lead plus one "
+        "activity Task — or, when the organization already exists as a single "
+        "high-confidence Salesforce match, only the Task on the existing record "
+        "with no duplicate Lead. Use ONLY after find_contact returned a verified "
+        "contact (or a LinkedIn person was saved to the lead) AND the user "
+        "explicitly asked to add them to Salesforce. A Slack confirmation button "
+        "performs the later write; fields without verified evidence stay blank.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "lead_id": {"type": "integer"},
+                "contact_id": {
+                    "type": "integer",
+                    "description": "specific contact row when a lead has several",
+                },
+            },
+            "required": ["lead_id"],
         },
     },
     {
@@ -322,8 +353,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "spend_end",
                         "award_received",
                     ],
-                    "description": "Meaning of date_from/date_to. "
-                    "award_received returns an honest unsupported error.",
+                    "description": "Meaning of date_from/date_to. award_received "
+                    "filters on the verified announced/obligated event date — "
+                    "disclose that it is not a funds-received date.",
                 },
                 "date_from": {"type": "string", "description": "inclusive YYYY-MM-DD"},
                 "date_to": {"type": "string", "description": "inclusive YYYY-MM-DD"},
@@ -661,18 +693,74 @@ def salesforce_campaign_members_preview(
 
 
 def find_person_linkedin(
-    entity: str, state: str, on_progress: Progress | None = None
+    entity: str,
+    state: str,
+    on_progress: Progress | None = None,
+    lead_id: int = 0,
 ) -> str:
-    """LinkedIn profile of the likely decision-maker (name/title/link, no email)."""
+    """LinkedIn profile of the likely decision-maker (name/title/link, no email).
+
+    When lead_id names a real Grant lead, the person is persisted as a
+    linkedin_only contact so a Salesforce record can later be built from it."""
     from ..enrich import finder
 
     person = finder.linkedin_person(entity, state, on_progress=on_progress)
     if person is None:
         return "No clear LinkedIn profile found for their decision-maker."
     role = f", {person['title']}" if person["title"] else ""
+    saved = ""
+    if lead_id > 0:
+        conn = db.connect()
+        lead = conn.execute(
+            "SELECT id FROM leads WHERE id=?", (int(lead_id),)
+        ).fetchone()
+        if lead is not None:
+            contact_id = db.save_linkedin_contact(
+                conn,
+                int(lead_id),
+                str(person["name"]),
+                str(person["title"] or ""),
+                str(person["url"]),
+            )
+            saved = (
+                f" Saved as contact #{contact_id} on lead {lead_id} "
+                "(LinkedIn-only: profile ownership not verified, no email)."
+            )
     return (
         f"LinkedIn: {person['name']}{role} — {person['url']} "
-        f"(reach out via LinkedIn; no email verified)"
+        f"(reach out via LinkedIn; no email verified).{saved}"
+    )
+
+
+def salesforce_contact_record_preview(
+    args: dict[str, Any],
+    requester_slack: str,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+) -> str:
+    """Persist a requester-bound contact-record preview and return its marker."""
+    from ..enrich import salesforce_contact_records as records
+    from ..enrich.salesforce_campaign_gateway import SalesforceCampaignGateway
+
+    try:
+        action = records.prepare_contact_record(
+            db.connect(),
+            SalesforceCampaignGateway(),
+            workspace,
+            channel,
+            thread_ts,
+            requester_slack,
+            int(args.get("lead_id", 0)),
+            int(args["contact_id"]) if args.get("contact_id") is not None else None,
+        )
+    except (ValueError, PermissionError, KeyError, requests.RequestException) as exc:
+        return (
+            "ERROR: contact record preview failed "
+            f"({type(exc).__name__}): {str(exc)[:200]}"
+        )
+    return _crm_action_result(
+        action.action_id, action.nonce, action.preview, action.expires_at
     )
 
 
@@ -797,9 +885,17 @@ def run_tool(
     if name == "find_person_linkedin":
         try:
             return find_person_linkedin(
-                str(args.get("entity", "")), str(args.get("state", "")), p
+                str(args.get("entity", "")),
+                str(args.get("state", "")),
+                p,
+                lead_id=int(args.get("lead_id", 0) or 0),
             ), None
         except Exception as exc:
             _log_tool_failure("find_person_linkedin")
             return f"ERROR: LinkedIn search failed ({type(exc).__name__}).", None
+    if name == "salesforce_contact_record_preview":
+        p("Preparing Salesforce contact record preview")
+        return salesforce_contact_record_preview(
+            args, requester_slack, workspace, channel, thread_ts
+        ), None
     return f"ERROR: unknown tool {name}", None

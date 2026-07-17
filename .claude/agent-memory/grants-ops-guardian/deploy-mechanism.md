@@ -15,7 +15,15 @@ The droplet checkout is NOT a git working tree — `~/grants_agent` has no `.git
 - **`.venv/bin/pip` is BROKEN** (wrong shebang / relocated venv → "cannot execute: required file not found"). Use `.venv/bin/python -m pip …` for all installs; that works (pip 24.0).
 - When the repo state on the droplet does not match the instructed deploy method, STOP and confirm with Chase before improvising — a full rsync would clobber the divergent prod `.env` and live SQLite db. See [[tenant-and-layout]].
 
-**Proven surgical-deploy recipe (used 2026-07-14 to go 3f35a26 → 604069d, all verified):**
+**Proven full-tree rsync recipe (used 2026-07-16 to go 3d653c6 → 25513bc, Chase-approved, all verified):**
+`rsync -av --delete -e "ssh -i ~/.ssh/grants_droplet -o IdentitiesOnly=yes" <excludes> /Users/chasengonzales/grants_agent/ "$GRANTS_DROPLET_USER@$GRANTS_DROPLET_HOST:grants_agent/"` — ALWAYS `-avn` dry-run first and review every `deleting` line. Excludes (never pass `--delete-excluded`; default rsync protects excluded receiver paths from deletion): `.git .venv .env .env.* *.db *.db-* *.sqlite* bot.log cron.log nohup.out __pycache__ *.pyc .pytest_cache .mypy_cache .ruff_cache .deployed_revision .claude .codex secrets .idea .DS_Store .*.lock /run_bot.sh`.
+- **`/run_bot.sh` (anchored) is mandatory**: the droplet's live launcher sits at repo root with NO local counterpart — without the exclude, `--delete` removes the file cron runs every 5 min. Droplet's copy (heartbeat + probe_error handling) is NEWER than repo `deploy/run_bot.sh`; never overwrite it with the repo copy.
+- **`secrets/` exclude is mandatory both ways**: laptop has a git-ignored `secrets/` that must never ship; droplet has its own `~/grants_agent/secrets/` (Salesforce JWT key) that must never be clobbered or deleted.
+- Sweep for uncovered git-ignored files before every deploy: `git status --porcelain --ignored=matching | grep '^!!'` vs the exclude list (this catch is what added secrets/.idea/.DS_Store/.*.lock).
+- Store the FULL 40-char hash in `.deployed_revision` (existing convention).
+- Verify after sync, before restart: `.env`/db/run_bot.sh mtimes unchanged, sha256 of a changed file matches local, `.venv/bin/python -c "import grant_watch.slack.grant"` OK.
+
+**Prior surgical-deploy recipe (used 2026-07-14 to go 3f35a26 → 604069d, all verified):**
 1. Backup full tree first: `cp -a ~/grants_agent ~/.grants_agent.previous.pre-<currentfullhash>` (Chase's convention = name the backup after the CURRENT/outgoing hash; NOTE the older `.previous.pre-3f35a269` backup was named after the *incoming* hash — the two conventions differ, so read a backup's own `.deployed_revision` to know what it holds). Disk is 48G/`/`, ~20G free, repo ~131M incl `.venv` — a full copy is <1% of free space.
 2. Sync ONLY the changed files, drift-proof, from the laptop: `git archive --format=tar <target> -- "${(@f)$(git diff --name-only <deployed>..<target>)}" | ssh <scoped> 'tar -xvf - -C /home/grantwatch/grants_agent'`. Touches only those paths; never `.env`/`.venv`/`.db`/`secrets/`. (zsh: MUST split the file list with `${(@f)...}` — unquoted `$FILES` does not word-split in zsh.)
 3. Deps: `.venv/bin/python -m pip install -r requirements.txt` (pip wrapper broken — use `python -m pip`).

@@ -17,6 +17,18 @@ Verified live 2026-07-14 over the scoped grants SSH (`-i ~/.ssh/grants_droplet -
     (relaunches bot if not running and records a secret-free healthy/restart heartbeat)
   - `0 7 * * 1-5 ... grant_watch.cli poll >> cron.log`
   - `*/30 5-17 * * 1-5 ... grant_watch.cli drip >> cron.log`
+  - The broken `salesforce-followups` line (subcommand absent on deployed main) was commented out
+    2026-07-17. That single edit was authorized in a specific plan Chase approved in the main
+    session; it does NOT create standing permission. Default rule unchanged: the guardian never
+    edits crontab unless the operator's prompt for that run explicitly authorizes the exact edit.
+    Backup of the pre-edit crontab: `~/crontab.backup.20260717T194112Z`. Recipe that worked:
+    backup → sed comment → fail-closed diff/cmp checks (exactly one line changed, keepers
+    byte-identical) → `crontab newfile`.
+- Persequor intake (verified 2026-07-17): deployed `persequor_client.py` POSTs to
+  `PERSEQUOR_API_URL` + `/api/v1/outreach-request` (droplet .env sets the localhost default,
+  `http://127.0.0.1:8002`); auth via `X-Persequor-Key`. Read-only liveness check: GET the exact path →
+  405 = server up and route present; `/` and `/health` are 404 (no health route). The 8002 listener is
+  NOT grantwatch-owned (other tenant's app — never inspect it).
 - Keepalive logging was verified from a real cron tick at `2026-07-16T09:15:01Z`:
   `grant_keepalive status=healthy at=2026-07-16T09:15:01Z`. Both `cron.log` and
   `bot.log` are inside `~/grants_agent`. No tenant-owned log-rotation configuration

@@ -18,7 +18,7 @@ import requests
 API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
 MAX_ACTION_ORGANIZATIONS = 200
 MEMBER_STATUS = "Identified by Grant"
-_ALLOWED_CREATE_OBJECTS = {"Campaign", "CampaignMemberStatus", "Lead", "CampaignMember"}
+_ALLOWED_CREATE_OBJECTS = {"Campaign", "CampaignMemberStatus", "Lead", "CampaignMember", "Task"}
 _ID_PREFIXES = {
     "Campaign": "701",
     "Lead": "00Q",
@@ -27,6 +27,7 @@ _ID_PREFIXES = {
     "Opportunity": "006",
     "User": "005",
     "Organization": "00D",
+    "Task": "00T",
 }
 
 
@@ -445,3 +446,11 @@ class SalesforceCampaignGateway:
     def create_members(self, payloads: list[dict[str, object]]) -> list[CreateResult]:
         """Create approved Campaign Members with per-record results."""
         return self._create_many("CampaignMember", payloads)
+
+    def create_lead(self, payload: dict[str, object]) -> CreateResult:
+        """Create one person Lead through the single-record allowlisted path."""
+        return self._create_one("Lead", payload)
+
+    def create_task(self, payload: dict[str, object]) -> CreateResult:
+        """Create one activity Task attached via WhoId (Lead/Contact) or WhatId (Account)."""
+        return self._create_one("Task", payload)
