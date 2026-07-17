@@ -38,9 +38,23 @@ class FakeGateway:
     task_result: gateway_mod.CreateResult = field(
         default_factory=lambda: gateway_mod.CreateResult(True, TASK_ID)
     )
+    note_result: gateway_mod.CreateResult = field(
+        default_factory=lambda: gateway_mod.CreateResult(True, "002000000000001")
+    )
     created_leads: list[dict[str, object]] = field(default_factory=list)
     created_tasks: list[dict[str, object]] = field(default_factory=list)
+    created_notes: list[dict[str, object]] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
+
+    def lead_record_type_id(self, developer_name: str) -> str:
+        """Resolve a deterministic fake Lead RecordType id."""
+        return "0122M000000viFyQAI" if developer_name == "Verkada" else ""
+
+    def create_note(self, payload: dict[str, object]) -> gateway_mod.CreateResult:
+        """Record one Note create."""
+        self.calls.append("create_note")
+        self.created_notes.append(payload)
+        return self.note_result
 
     def find_active_user_by_email(
         self, email: str
@@ -234,7 +248,9 @@ def test_preview_persists_without_write(tmp_path: Path) -> None:
     assert gateway.calls == []
     assert "Jane Smith" in action.preview
     assert "jsmith@alpha.k12.ca.us" in action.preview
-    assert "Street, PostalCode, Industry: blank" in action.preview
+    assert "Street: blank" in action.preview
+    assert "Record Type (Verkada): set" in action.preview
+    assert "Plus a Note on the record" in action.preview
     row = conn.execute("SELECT state,action_type FROM crm_actions").fetchone()
     assert tuple(row) == ("ready", records.ACTION_TYPE)
 
@@ -245,14 +261,17 @@ def test_preview_discloses_blanks_and_never_guesses(tmp_path: Path) -> None:
     lead_id = _lead_row(conn, "a2", "Beta School District")
     _verified_contact(conn, lead_id, phone="", official_domain="")
     action = _prepare(conn, FakeGateway(), lead_id)
-    assert "Phone: blank — not verified" in action.preview
+    assert "Phone: blank — no verified number" in action.preview
     assert "Website: blank" in action.preview
     payload = __import__("json").loads(
         str(conn.execute("SELECT payload_json FROM crm_actions").fetchone()[0])
     )
     lead_payload = payload["lead"]
-    for forbidden in ("Phone", "Website", "Street", "PostalCode", "Industry"):
+    # No verified evidence → these keys are omitted entirely, never guessed.
+    for forbidden in ("Phone", "Website", "Street", "PostalCode", "MobilePhone"):
         assert forbidden not in lead_payload
+    # Industry is a classification from the school name, not invented data.
+    assert lead_payload["Industry"] == "K-12 Schools"
 
 
 def test_preview_requires_usable_contact(tmp_path: Path) -> None:
@@ -290,7 +309,7 @@ def test_confirm_creates_lead_then_task_with_whoid(tmp_path: Path) -> None:
     action = _prepare(conn, gateway, lead_id)
     result = _confirm(conn, gateway, action)
     assert result.state == campaigns.CampaignActionState.COMPLETE
-    assert gateway.calls == ["create_lead", "get_record", "create_task"]
+    assert gateway.calls == ["create_lead", "get_record", "create_task", "create_note"]
     lead_payload = gateway.created_leads[0]
     assert lead_payload["FirstName"] == "Jane"
     assert lead_payload["LastName"] == "Smith"
@@ -298,11 +317,11 @@ def test_confirm_creates_lead_then_task_with_whoid(tmp_path: Path) -> None:
     assert lead_payload["Title"] == "Technology Director"
     assert lead_payload["Company"] == "Alpha School District"
     assert lead_payload["State"] == "CA"
-    assert lead_payload["Website"] == "alphausd.org"
+    assert lead_payload["Website"] == "https://alphausd.org"
     assert lead_payload["OwnerId"] == USER_ID
     task = gateway.created_tasks[0]
     assert task["WhoId"] == LEAD_SF_ID
-    assert task["Subject"] == "Grant AI: record created from grant lead"
+    assert task["Subject"] == "Grant AI created this lead record"
     assert "Jane Smith" in str(task["Description"])
     stored = conn.execute("SELECT campaign_id,state FROM crm_actions").fetchone()
     assert tuple(stored) == (LEAD_SF_ID, "complete")
@@ -600,3 +619,62 @@ def test_write_scope_refusal_resolves_failed_not_stranded(tmp_path: Path) -> Non
     # The re-run guard must now release so the rep can retry once config is fixed.
     action2 = _prepare(conn, FakeGateway(), lead_id)
     assert action2.action_id != action.action_id
+
+
+def test_full_field_lead_payload_from_org_profile(tmp_path: Path) -> None:
+    """A lead with an org profile + NCES enrollment maps every available field."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _lead_row(conn, "f1", "Alpha School District")
+    _verified_contact(conn, lead_id, phone="", email="")
+    from grant_watch.enrich.organization_profile import OrgProfile
+
+    db.save_org_profile(
+        conn,
+        lead_id,
+        OrgProfile(
+            website="https://alphausd.org",
+            general_email="info@alphausd.org",
+            phone="555-999-1000",
+            street="1 Alpha Way",
+            city="Sacramento",
+            state="CA",
+            postal_code="95814",
+            source_url="https://alphausd.org/contact",
+            status="found",
+        ),
+    )
+    conn.execute("UPDATE leads SET enrollment=4200 WHERE id=?", (lead_id,))
+    conn.commit()
+    gateway = FakeGateway()
+    action = _prepare(conn, gateway, lead_id)
+    payload = __import__("json").loads(
+        str(conn.execute("SELECT payload_json FROM crm_actions").fetchone()[0])
+    )["lead"]
+    assert payload["Website"] == "https://alphausd.org"
+    assert payload["Email"] == "info@alphausd.org"  # general email, no direct
+    assert payload["Phone"] == "555-999-1000"
+    assert payload["Street"] == "1 Alpha Way"
+    assert payload["City"] == "Sacramento"
+    assert payload["PostalCode"] == "95814"
+    assert payload["Number_of_Students__c"] == 4200
+    assert payload["Industry"] == "K-12 Schools"
+    assert payload["RecordTypeId"] == "0122M000000viFyQAI"
+    assert "Email (org general — not the individual's)" in action.preview
+    # The Note carries the general-vs-direct distinction.
+    note = __import__("json").loads(
+        str(conn.execute("SELECT payload_json FROM crm_actions").fetchone()[0])
+    )["note"]
+    assert "general email" in str(note["Body"]).lower()
+
+
+def test_completed_task_lands_in_activity_history(tmp_path: Path) -> None:
+    """The activity Task is created Completed so it files under Activity History."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _lead_row(conn, "f2", "Alpha School District")
+    _verified_contact(conn, lead_id)
+    gateway = FakeGateway()
+    action = _prepare(conn, gateway, lead_id)
+    _confirm(conn, gateway, action)
+    assert gateway.created_tasks[0]["Status"] == "Completed"
+    assert gateway.created_notes[0]["ParentId"] == LEAD_SF_ID
+    assert "Alpha School District" in str(gateway.created_notes[0]["Title"])

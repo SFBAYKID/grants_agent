@@ -565,6 +565,31 @@ def mark_contact_not_found(conn: sqlite3.Connection, lead_id: int) -> None:
     conn.commit()
 
 
+def save_org_profile(conn: sqlite3.Connection, lead_id: int, profile: object) -> None:
+    """Persist verbatim-verified organization details onto the lead.
+
+    ``profile`` is an OrgProfile (duck-typed to avoid an enrich import here). Only
+    values that already passed on-page verification reach this function."""
+    conn.execute(
+        """UPDATE leads SET org_website=?, org_general_email=?, org_phone=?,
+             org_street=?, org_city=?, org_state=?, org_postal_code=?,
+             org_profile_status=?, org_profile_source_url=? WHERE id=?""",
+        (
+            getattr(profile, "website", "") or None,
+            getattr(profile, "general_email", "") or None,
+            getattr(profile, "phone", "") or None,
+            getattr(profile, "street", "") or None,
+            getattr(profile, "city", "") or None,
+            getattr(profile, "state", "") or None,
+            getattr(profile, "postal_code", "") or None,
+            getattr(profile, "status", "not_found"),
+            getattr(profile, "source_url", "") or None,
+            lead_id,
+        ),
+    )
+    conn.commit()
+
+
 def contacts_for_lead(conn: sqlite3.Connection, lead_id: int) -> list[sqlite3.Row]:
     """All contact rows for a lead, verified first."""
     return list(

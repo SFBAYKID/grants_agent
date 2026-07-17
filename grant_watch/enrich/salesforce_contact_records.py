@@ -10,6 +10,7 @@ is requester-bound, TTL-limited, hash-verified, and create-only.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import uuid
 from collections.abc import Callable
@@ -83,20 +84,66 @@ def _contact_evidence(contact: sqlite3.Row) -> str:
     return f"Contact verified verbatim on {source}."
 
 
+# The Lead record type Grant's leads belong to (resolved by DeveloperName at
+# runtime; this is the org default and the correct type for these prospects).
+LEAD_RECORD_TYPE = "Verkada"
+_SCHOOL_RE = re.compile(
+    r"\b(school|schools|district|academy|isd|usd|elementary|k-?12|charter)\b",
+    re.IGNORECASE,
+)
+_CITY_RE = re.compile(r"\b(city of|town of|village of|county|municipal)\b", re.IGNORECASE)
+
+
+def _lead_value(lead: sqlite3.Row, column: str) -> str:
+    """Safely read an optional lead column that may be absent on legacy rows."""
+    try:
+        return str(lead[column] or "")
+    except (IndexError, KeyError):
+        return ""
+
+
+def choose_email(contact: sqlite3.Row, lead: sqlite3.Row) -> tuple[str, str]:
+    """Pick the best verified email and label its kind: direct | general | ''.
+
+    A person's verbatim-verified email is preferred; otherwise the organization's
+    verified general mailbox (info@/office@) is used and clearly labeled so Grant
+    never implies a general address is the individual's."""
+    if contact["email"]:
+        return str(contact["email"]), "direct"
+    general = _lead_value(lead, "org_general_email")
+    if general:
+        return general, "general"
+    return "", ""
+
+
+def _infer_industry(lead: sqlite3.Row) -> str:
+    """Infer the CRM Industry only when the org type is unambiguous, else ''."""
+    entity = str(lead["entity_name"] or "")
+    if _lead_value(lead, "nces_id") or _SCHOOL_RE.search(entity):
+        return "K-12 Schools"
+    if _CITY_RE.search(entity):
+        return "Cities"
+    return ""
+
+
 def contact_lead_payload(
     lead: sqlite3.Row,
     contact: sqlite3.Row,
     requester: str,
     action_id: str,
     owner: SalesforceRecordRef,
+    record_type_id: str = "",
 ) -> dict[str, object]:
     """Build the person Lead create payload from evidenced fields only.
 
-    Keys are omitted entirely when no evidence exists; Street, PostalCode, and
-    Industry are never set because Grant has no verified source for them."""
+    Every optional key is omitted unless it has verified evidence: the person's
+    fields come from the verbatim-verified contact, the organization's address /
+    phone / general email from the verified org profile, the student count from
+    NCES, and the record type from the org's Lead metadata."""
     validate_record_id(owner.record_id, "User")
     entity = str(lead["entity_name"] or "").strip()
     first, last = split_person_name(str(contact["name"] or ""))
+    email, email_kind = choose_email(contact, lead)
     payload: dict[str, object] = {
         "LastName": last or entity,
         "Company": entity,
@@ -112,6 +159,8 @@ def contact_lead_payload(
     }
     from .. import db
 
+    if record_type_id:
+        payload["RecordTypeId"] = record_type_id
     if first:
         payload["FirstName"] = first
     title = str(contact["title"] or "")
@@ -121,16 +170,40 @@ def contact_lead_payload(
     ):
         # A "title" that is just the organization name is not a person's role.
         payload["Title"] = title
-    if contact["email"]:
-        payload["Email"] = str(contact["email"])
-    if contact["phone"]:
-        payload["Phone"] = str(contact["phone"])
-    if lead["state"]:
-        payload["State"] = str(lead["state"])
-    if lead["location_city"]:
-        payload["City"] = str(lead["location_city"])
-    if contact["official_domain"]:
-        payload["Website"] = str(contact["official_domain"])
+    if email:
+        payload["Email"] = email
+    # Phone: the person's verified line if we have it, otherwise the org's main line.
+    person_phone = str(contact["phone"] or "")
+    org_phone = _lead_value(lead, "org_phone")
+    if person_phone:
+        payload["Phone"] = person_phone
+    elif org_phone:
+        payload["Phone"] = org_phone
+    if lead["state"] or _lead_value(lead, "org_state"):
+        payload["State"] = str(lead["state"] or "") or _lead_value(lead, "org_state")
+    # City: the org's mailing city (address) is preferred over the NCES office city.
+    org_city = _lead_value(lead, "org_city")
+    if org_city or lead["location_city"]:
+        payload["City"] = org_city or str(lead["location_city"])
+    if _lead_value(lead, "org_street"):
+        payload["Street"] = _lead_value(lead, "org_street")
+    if _lead_value(lead, "org_postal_code"):
+        payload["PostalCode"] = _lead_value(lead, "org_postal_code")
+    website = _lead_value(lead, "org_website") or (
+        f"https://{contact['official_domain']}" if contact["official_domain"] else ""
+    )
+    if website:
+        payload["Website"] = website
+    if str(contact["contact_status"]) == "linkedin_only" and "linkedin.com" in str(
+        contact["source_url"] or ""
+    ):
+        payload["LinkedIn__c"] = str(contact["source_url"])
+    enrollment = lead["enrollment"]
+    if enrollment not in (None, "", 0):
+        payload["Number_of_Students__c"] = int(enrollment)
+    industry = _infer_industry(lead)
+    if industry:
+        payload["Industry"] = industry
     return payload
 
 
@@ -153,15 +226,42 @@ def grant_task_payload(
     ):
         title = "title not verified"
     return {
-        "Subject": "Grant AI: record created from grant lead",
+        "Subject": "Grant AI created this lead record",
+        # Completed so Salesforce files it under Activity History, not Open
+        # Activities — this is a log of an action Grant already took.
+        "Status": "Completed",
         "ActivityDate": today,
         "OwnerId": owner.record_id,
         "Description": (
-            f"Grant found {contact['name']} ({title}) at "
-            f"{lead['entity_name']}. Grant identified {_grant_summary(lead)} "
-            f"{_contact_evidence(contact)} "
+            f"I'm the AI agent that created this record. I found "
+            f"{contact['name']} ({title}) at {lead['entity_name']}, identified "
+            f"{_grant_summary(lead)} {_contact_evidence(contact)} "
             f"Grant lead {lead['id']}; action {action_id}; "
             f"requested by Slack user {requester}."
+        ),
+    }
+
+
+def grant_note_payload(
+    lead: sqlite3.Row,
+    contact: sqlite3.Row,
+    email_kind: str,
+) -> dict[str, object]:
+    """Build the legacy Note (Title + Body); ParentId is set at confirm time."""
+    email_line = {
+        "direct": f"Direct email for {contact['name']}: {contact['email']}.",
+        "general": (
+            "No direct email was verified for the individual; the organization's "
+            f"general email {_lead_value(lead, 'org_general_email')} was added instead."
+        ),
+    }.get(email_kind, "No email was verified.")
+    return {
+        "Title": f"Grant lead: {lead['entity_name']}",
+        "Body": (
+            f"{_grant_summary(lead)}\n"
+            f"Contact: {contact['name']} ({contact['title'] or 'title not verified'}). "
+            f"{_contact_evidence(contact)}\n{email_line}\n"
+            "Created by Grant, the AI grant-lead agent, from public sources."
         ),
     }
 
@@ -268,15 +368,20 @@ def _blank_disclosures(payload: dict[str, object], mode: str) -> list[str]:
         labels = {
             "FirstName": "FirstName: blank — single-word name; Grant never invents one",
             "Title": "Title: blank — not verified",
-            "Email": "Email: blank — no verified email (LinkedIn-only evidence)",
-            "Phone": "Phone: blank — not verified",
+            "Email": "Email: blank — no direct or general email verified on the site",
+            "Phone": "Phone: blank — no verified number on the site",
+            "Street": "Street: blank — no verified address on the site",
+            "City": "City: blank — not on file",
             "State": "State: blank — not on file",
-            "City": "City: blank — no NCES district-office city on file",
-            "Website": "Website: blank — no verified official domain",
+            "PostalCode": "Zip: blank — no verified address on the site",
+            "Website": "Website: blank — no verified official site",
+            "LinkedIn__c": "LinkedIn: blank — no profile on file",
+            "Number_of_Students__c": "Number of Students: blank — no NCES enrollment",
+            "Industry": "Industry: blank — org type not unambiguous",
         }
         notes.extend(text for key, text in labels.items() if key not in payload)
         notes.append(
-            "Street, PostalCode, Industry: blank — Grant has no verified source "
+            "Mobile, Number of Employees: blank — Grant has no verified source "
             "for these and never guesses."
         )
     return notes
@@ -300,23 +405,36 @@ def _preview_text(
             f"Create Salesforce person Lead for *{contact['name']}* — "
             f"{entity} ({lead['state'] or 'state unknown'})"
         )
+        _email, email_kind = choose_email(contact, lead)
+        email_label = {
+            "direct": "Email (direct)",
+            "general": "Email (org general — not the individual's)",
+        }.get(email_kind, "Email")
         shown = [
             ("FirstName", "FirstName"),
             ("LastName", "LastName"),
             ("Title", "Title"),
-            ("Email", "Email"),
+            ("Email", email_label),
             ("Phone", "Phone"),
             ("Company", "Company"),
+            ("Street", "Street"),
+            ("City", "City"),
             ("State", "State"),
-            ("City", "City (NCES district office)"),
+            ("PostalCode", "Zip"),
             ("Website", "Website"),
+            ("LinkedIn__c", "LinkedIn"),
+            ("Number_of_Students__c", "Number of Students"),
+            ("Industry", "Industry"),
+            ("RecordTypeId", "Record Type (Verkada)"),
         ]
         for key, label in shown:
             if key in lead_payload:
-                lines.append(f"• {label}: {lead_payload[key]}")
+                value = "set" if key == "RecordTypeId" else lead_payload[key]
+                lines.append(f"• {label}: {value}")
         lines.append(f"• Owner: {owner.name} ({owner_email})")
         lines.append(f"• Description: {lead_payload['Description']}")
         lines.extend(f"• {note}" for note in _blank_disclosures(lead_payload, mode))
+        lines.append("Plus a Note on the record with the grant context.")
         lines.append(
             "Duplicate check: a complete Salesforce search found no existing "
             "record for this organization."
@@ -368,10 +486,15 @@ def prepare_contact_record(
     action_seed = str(uuid.uuid4())
     today = date.today().isoformat()
     mode = "attach_existing" if target is not None else "new_lead"
+    # Org address/phone/general email were gathered during find_contact and read
+    # from the lead row here; prepare performs no network scraping of its own.
+    record_type_id = gateway.lead_record_type_id(LEAD_RECORD_TYPE) if target is None else ""
     lead_payload = (
         None
         if target is not None
-        else contact_lead_payload(lead, contact, requester, action_seed, owner)
+        else contact_lead_payload(
+            lead, contact, requester, action_seed, owner, record_type_id
+        )
     )
     task_payload = grant_task_payload(
         lead, contact, requester, action_seed, owner, today
@@ -379,6 +502,11 @@ def prepare_contact_record(
     if target is not None:
         key = "WhoId" if target.sobject in ("Lead", "Contact") else "WhatId"
         task_payload[key] = target.record_id
+    note_payload = (
+        grant_note_payload(lead, contact, choose_email(contact, lead)[1])
+        if target is None
+        else {}
+    )
     payload: dict[str, object] = {
         "mode": mode,
         "lead_id": int(lead_id),
@@ -386,6 +514,7 @@ def prepare_contact_record(
         "contact_status": str(contact["contact_status"]),
         "lead": lead_payload,
         "task": task_payload,
+        "note": note_payload,
         "target": asdict(target) if target is not None else None,
         "owner": {
             "salesforce_user_id": owner.record_id,
@@ -548,6 +677,16 @@ def confirm_contact_record(
             added=1,
             failed=1,
         )
+    # Attach a Note with the grant context. A failed Note is non-fatal: the Lead
+    # and the completed activity are the record of truth; report it honestly.
+    note_note = ""
+    note_meta = payload.get("note") or {}
+    if isinstance(note_meta, dict) and note_meta:
+        note_payload = dict(note_meta)
+        note_payload["ParentId"] = lead_result.record_id
+        note_result = gateway.create_note(note_payload)
+        if not note_result.success:
+            note_note = f" (the context Note could not be added: {note_result.error})"
     _set_item_state(conn, action_id, "added", lead_result.record_id)
     finish_action(
         conn,
@@ -557,8 +696,8 @@ def confirm_contact_record(
     )
     return ActionExecution(
         CampaignActionState.COMPLETE,
-        f"Created Salesforce Lead {lead_name} (id {lead_result.record_id}) and "
-        "logged the Grant activity Task.",
+        f"Created Salesforce Lead {lead_name} (id {lead_result.record_id}), logged "
+        f"the completed Grant activity, and added a context Note{note_note}.",
         campaign_id=lead_result.record_id,
         added=1,
     )

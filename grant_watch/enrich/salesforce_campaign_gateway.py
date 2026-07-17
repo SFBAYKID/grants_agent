@@ -18,7 +18,14 @@ import requests
 API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
 MAX_ACTION_ORGANIZATIONS = 200
 MEMBER_STATUS = "Identified by Grant"
-_ALLOWED_CREATE_OBJECTS = {"Campaign", "CampaignMemberStatus", "Lead", "CampaignMember", "Task"}
+_ALLOWED_CREATE_OBJECTS = {
+    "Campaign",
+    "CampaignMemberStatus",
+    "Lead",
+    "CampaignMember",
+    "Task",
+    "Note",
+}
 _ID_PREFIXES = {
     "Campaign": "701",
     "Lead": "00Q",
@@ -28,6 +35,7 @@ _ID_PREFIXES = {
     "User": "005",
     "Organization": "00D",
     "Task": "00T",
+    "Note": "002",
 }
 
 
@@ -74,6 +82,8 @@ class _TokenCache:
 
 
 _TOKEN_CACHE = _TokenCache()
+# Lead RecordType ids resolved by DeveloperName; small and stable per org.
+_RECORD_TYPE_CACHE: dict[str, str] = {}
 
 
 def _soql_literal(value: str) -> str:
@@ -454,3 +464,28 @@ class SalesforceCampaignGateway:
     def create_task(self, payload: dict[str, object]) -> CreateResult:
         """Create one activity Task attached via WhoId (Lead/Contact) or WhatId (Account)."""
         return self._create_one("Task", payload)
+
+    def create_note(self, payload: dict[str, object]) -> CreateResult:
+        """Create one legacy Note attached to its ParentId (a Lead)."""
+        return self._create_one("Note", payload)
+
+    def lead_record_type_id(self, developer_name: str) -> str:
+        """Resolve one active Lead RecordType id by DeveloperName, or '' if absent.
+
+        Cached per gateway instance; failing closed to '' lets the caller omit
+        RecordTypeId and inherit the org default rather than send a bad id."""
+        if developer_name in _RECORD_TYPE_CACHE:
+            return _RECORD_TYPE_CACHE[developer_name]
+        soql = (
+            "SELECT Id FROM RecordType WHERE SobjectType='Lead' "
+            f"AND DeveloperName='{_soql_literal(developer_name)}' "
+            "AND IsActive=true LIMIT 1"
+        )
+        try:
+            body = self._get("query", {"q": soql})
+            records = body.get("records") or []
+            record_id = str(records[0]["Id"]) if records else ""
+        except (requests.RequestException, KeyError, IndexError):
+            record_id = ""
+        _RECORD_TYPE_CACHE[developer_name] = record_id
+        return record_id

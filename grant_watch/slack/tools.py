@@ -529,20 +529,26 @@ def find_contact(
         if isinstance(resolved, str):
             return resolved
         lead_id = resolved
+    from ..enrich.organization_profile import org_enrichment_summary
+
     outcome = enrich_lead_contact(conn, lead_id, on_progress)
+    org_line = org_enrichment_summary(conn, lead_id, on_progress)
     if outcome.status == "verified":
         phone = f" / {outcome.phone}" if outcome.phone else ""
         source = f" (found on {outcome.source_url})" if outcome.source_url else ""
-        return f"VERIFIED contact: {outcome.name} ({outcome.title}) — {outcome.email}{phone}{source}"
+        return (
+            f"VERIFIED contact: {outcome.name} ({outcome.title}) — "
+            f"{outcome.email}{phone}{source}.{org_line}"
+        )
     if outcome.status == "unreachable":
         return (
             "I couldn't reach their website or search to verify a contact right now — "
             "nothing recorded, so it's worth trying again shortly."
         )
     return (
-        "No verifiable contact found on their website (email must appear on a page we "
-        "actually fetched). Recorded as not_found — try find_person_linkedin for a "
-        "name, or a human can supply one."
+        "No verifiable direct contact found on their website (a personal email must "
+        "appear on a page we actually fetched). Recorded as not_found."
+        f"{org_line} You can also try find_person_linkedin for a name."
     )
 
 

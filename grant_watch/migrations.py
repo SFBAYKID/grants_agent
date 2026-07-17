@@ -493,6 +493,28 @@ def _migration_8_salesforce_followup_state(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_9_organization_profile(conn: sqlite3.Connection) -> None:
+    """Store verbatim-verified organization contact details for CRM records.
+
+    These are org-level facts (general email, main phone, mailing address, site,
+    student count) distinct from the person contact in ``contacts`` and the NCES
+    district-office city in ``leads.location_city``. Each is written only after
+    verbatim on-page verification; an absent value stays NULL and is disclosed."""
+    for definition in (
+        "org_website TEXT",
+        "org_general_email TEXT",
+        "org_phone TEXT",
+        "org_street TEXT",
+        "org_city TEXT",
+        "org_state TEXT",
+        "org_postal_code TEXT",
+        "org_student_count INTEGER",
+        "org_profile_status TEXT",
+        "org_profile_source_url TEXT",
+    ):
+        _add_column(conn, "leads", definition)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "legacy-compatible base", _migration_1_base),
     Migration(2, "truth observations and events", _migration_2_truth_events),
@@ -512,6 +534,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         8, "Salesforce follow-up reminder state", _migration_8_salesforce_followup_state
     ),
+    Migration(9, "organization profile columns", _migration_9_organization_profile),
 )
 
 
