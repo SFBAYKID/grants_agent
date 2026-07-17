@@ -109,8 +109,10 @@ filters, with_contacts=true and limit=<that count>. That finds each org's real c
 Never enrich contacts unless they ask.
 CONTACT-FOR-A-LISTED-ORG RULE: when the rep asks for the contact at ONE organization
 that already appears in this thread's results, do NOT plan or run another search — call
-find_contact with that result's Lead # (and salesforce_lookup with the org name). Only
-search again if the org has never appeared in this thread.
+find_contact with that result's Lead # when visible, or with entity=<the exact org
+name> and its state (the server resolves it to one lead and refuses ambiguity), plus
+salesforce_lookup with the org name. Only search again if the org has never appeared
+in this thread.
 
 CITY/ENROLLMENT TRUTH RULE: for school districts, search_leads can match official NCES
 district enrollment and district-office city when the rep supplies a two-letter state.
@@ -410,13 +412,21 @@ def _contextual_tool_error(
     user_text: str = "",
 ) -> str:
     """Reject pronoun-only tool calls when no lead supplies the missing identity."""
-    if name == "find_contact" and (
-        row is None and int(arguments.get("lead_id", 0) or 0) <= 0
+    if (
+        name == "find_contact"
+        and row is None
+        and int(arguments.get("lead_id", 0) or 0) <= 0
+        and not str(arguments.get("entity", "")).strip()
     ):
-        # An explicit positive lead_id is allowed even in general threads (search
-        # results carry "Lead #N"); a wrong id fails honestly inside the tool.
+        # An explicit lead_id or entity name is allowed even in general threads;
+        # wrong ids and ambiguous names fail honestly inside the tool.
         return "ERROR: no lead is attached — ask the user which Lead number they mean."
-    if name not in {"salesforce_lookup", "find_person_linkedin"} or row is not None:
+    if (
+        name not in {"salesforce_lookup", "find_person_linkedin", "find_contact"}
+        or row is not None
+    ):
+        return ""
+    if name == "find_contact" and int(arguments.get("lead_id", 0) or 0) > 0:
         return ""
     entity = str(arguments.get("entity", "")).strip().lower()
     generic = {

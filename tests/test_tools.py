@@ -98,3 +98,48 @@ def test_run_tool_unknown_is_honest_error() -> None:
     """Unknown tool names fail explicitly without creating an artifact."""
     text, artifact = tools.run_tool("teleport", {})
     assert text.startswith("ERROR") and artifact is None
+
+
+# ------------------------------------------------------------------ name resolution
+def _seed(conn: "db.sqlite3.Connection", item_id: str, entity: str, state: str) -> int:
+    """Insert one lead and return its id."""
+    db.upsert_lead(
+        conn,
+        Lead(
+            RawItem(
+                "test", item_id, "award", entity, state, "SVPP",
+                100_000, "2026-01-01", "2027-01-01", "", {},
+            ),
+            LeadGrade.GOLD,
+        ),
+    )
+    return int(
+        conn.execute(
+            "SELECT id FROM leads WHERE source='test' AND source_item_id=?",
+            (item_id,),
+        ).fetchone()[0]
+    )
+
+
+def test_resolve_lead_by_name_unique_match(tmp_path: Path) -> None:
+    """An exact organization name resolves to its single lead id."""
+    conn = db.connect(tmp_path / "r.db")
+    lead_id = _seed(conn, "r1", "Chicago Jewish Day School", "IL")
+    assert tools.resolve_lead_by_name(conn, "Chicago Jewish Day School") == lead_id
+
+
+def test_resolve_lead_by_name_state_disambiguates(tmp_path: Path) -> None:
+    """Two same-named orgs in different states resolve only with the state."""
+    conn = db.connect(tmp_path / "r.db")
+    il_id = _seed(conn, "r2", "Lincoln Elementary", "IL")
+    _seed(conn, "r3", "Lincoln Elementary", "CA")
+    ambiguous = tools.resolve_lead_by_name(conn, "Lincoln Elementary")
+    assert isinstance(ambiguous, str) and "several Grant leads" in ambiguous
+    assert tools.resolve_lead_by_name(conn, "Lincoln Elementary", "IL") == il_id
+
+
+def test_resolve_lead_by_name_unknown_is_honest(tmp_path: Path) -> None:
+    """A name with no lead returns an honest error, never a guess."""
+    conn = db.connect(tmp_path / "r.db")
+    out = tools.resolve_lead_by_name(conn, "Nonexistent Academy")
+    assert isinstance(out, str) and "no Grant lead is named" in out

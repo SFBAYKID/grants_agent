@@ -152,13 +152,23 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "extracts a contact, and stores it ONLY if the email appears "
         "verbatim on the fetched page. Slow (~30s) — tell the user "
         "you're digging before calling it. Returns the verified "
-        "contact or an honest not-found.",
+        "contact or an honest not-found. Pass lead_id when you know "
+        "it; otherwise pass the organization's exact name (and state) "
+        "and the server resolves it to one Grant lead, refusing "
+        "ambiguity honestly.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "lead_id": {"type": "integer"},
+                "entity": {
+                    "type": "string",
+                    "description": "exact organization name when lead_id is unknown",
+                },
+                "state": {
+                    "type": "string",
+                    "description": "two-letter state to disambiguate the entity",
+                },
             },
-            "required": ["lead_id"],
         },
     },
     {
@@ -470,10 +480,55 @@ def lead_stats(
     )
 
 
-def find_contact(lead_id: int, on_progress: Progress | None = None) -> str:
+def resolve_lead_by_name(
+    conn: sqlite3.Connection, entity: str, state: str = ""
+) -> int | str:
+    """Resolve an exact organization name to one Grant lead id, or explain why not.
+
+    Returns the id on a unique match; otherwise an honest human-readable string —
+    never a guess between candidates."""
+    name_key = db.canonical_entity_key(entity).partition("|")[0]
+    if not name_key:
+        return "ERROR: no organization name given — ask which entity the user means."
+    rows = list(
+        conn.execute(
+            "SELECT DISTINCT id, entity_name, state FROM leads "
+            "WHERE canonical_entity_key LIKE ? ORDER BY id",
+            (f"{name_key}|%",),
+        )
+    )
+    if state:
+        narrowed = [r for r in rows if str(r["state"] or "").upper() == state.upper()]
+        rows = narrowed or rows
+    ids = {int(r["id"]) for r in rows}
+    if len(ids) == 1:
+        return ids.pop()
+    if not rows:
+        return (
+            f"ERROR: no Grant lead is named {entity!r} — run a search first so the "
+            "lead exists, then ask again."
+        )
+    listing = ", ".join(f"#{r['id']} {r['entity_name']} ({r['state']})" for r in rows[:5])
+    return (
+        f"ERROR: several Grant leads match {entity!r}: {listing} — ask the user "
+        "which Lead # they mean."
+    )
+
+
+def find_contact(
+    lead_id: int,
+    on_progress: Progress | None = None,
+    entity: str = "",
+    state: str = "",
+) -> str:
     """Enrich one lead and report the outcome honestly (verified / not_found /
     unreachable). Thin string wrapper over enrich_lead_contact for the single-lead tool."""
     conn = db.connect()
+    if lead_id <= 0 and entity:
+        resolved = resolve_lead_by_name(conn, entity, state)
+        if isinstance(resolved, str):
+            return resolved
+        lead_id = resolved
     outcome = enrich_lead_contact(conn, lead_id, on_progress)
     if outcome.status == "verified":
         phone = f" / {outcome.phone}" if outcome.phone else ""
@@ -878,7 +933,12 @@ def run_tool(
             return f"ERROR: search failed ({type(exc).__name__}).", None
     if name == "find_contact":
         try:
-            return find_contact(int(args.get("lead_id", 0)), p), None
+            return find_contact(
+                int(args.get("lead_id", 0) or 0),
+                p,
+                entity=str(args.get("entity", "")),
+                state=str(args.get("state", "")),
+            ), None
         except Exception as exc:  # enrichment API hiccup -> honest tool error
             _log_tool_failure("find_contact")
             return f"ERROR: enrichment failed ({type(exc).__name__}) — say so.", None
