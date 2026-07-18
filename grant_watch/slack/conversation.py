@@ -400,14 +400,29 @@ def _normalize_action_intent(
         and re.search(r"\b(?:want|have|bring|draft)\b", line.lower())
         for line in (thread_context or [])[-10:]
     )
+    # An outreach ASK is INTENT to send/draft a message to someone — not the noun
+    # "email" appearing incidentally. Live bug 2026-07-18: "get me a contact… if
+    # there's no email" was misread as a cancellation because it contained both
+    # "email" and "no". Require a send/draft verb near email/message, or "email
+    # <recipient>", or the outreach/persequor keyword, or a reply to a pending offer.
     outreach_ask = bool(
-        re.search(r"\b(?:email|outreach|persequor)\b", current)
-        or (prior_offer and re.search(r"\bdraft\b", current))
+        re.search(r"\b(?:outreach|persequor)\b", current)
+        or re.search(
+            r"\b(?:send|draft|write|compose|shoot|fire off|reach out to)\b"
+            r"[^.]{0,40}\b(?:e-?mail|intro|message|note)\b",
+            current,
+        )
+        or re.search(
+            r"\bemail\s+(?:him|her|them|everyone|all\b|these|those|the\s)", current
+        )
+        or (prior_offer and re.search(r"\b(?:draft|yes\b|go ahead|do it)\b", current))
     )
     adversarial = bool(re.search(r"\b(?:ignore .*rules|invent|fabricate)\b", current))
-    outreach_refusal = bool(
+    # A refusal only matters as a decline of a PENDING outreach offer, so a stray
+    # "no" (as in "no email on file") never cancels anything on its own.
+    outreach_refusal = prior_offer and bool(
         re.search(
-            r"\b(?:no|nope|cancel|stop|not now|not yet|don't|do not|never)\b",
+            r"\b(?:no|nope|cancel|stop|not now|not yet|don't|do not|never|hold off)\b",
             current,
         )
     )
@@ -421,7 +436,10 @@ def _normalize_action_intent(
             current,
         )
     )
-    if outreach_ask and outreach_refusal:
+    if outreach_refusal:
+        # outreach_refusal already requires a pending offer, so this only fires
+        # when the user declines it — independent of whether the decline itself
+        # reads like an outreach ask.
         output["intent"] = "question"
         output["reply"] = "No problem — I won’t request an outreach draft."
     elif outreach_ask and not adversarial:

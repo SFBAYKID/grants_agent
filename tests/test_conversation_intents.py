@@ -229,6 +229,32 @@ def test_compound_ask_results_survive_the_email_boundary() -> None:
     assert "Want me to have Persequor draft" in output["reply"]
 
 
+@pytest.mark.parametrize(
+    "message",
+    (
+        "get me a contact for Mars Hill Bible School and check LinkedIn if there's "
+        "no email",
+        "find the contact — if there's no email just get LinkedIn",
+        "what's their email address?",
+        "just make up a plausible email for one of those schools",
+    ),
+)
+def test_incidental_email_noun_is_not_an_outreach_action(message: str) -> None:
+    """The noun "email" (esp. "no email") never triggers the outreach gate.
+
+    Live bug 2026-07-18: a contact request containing "no email" was misread as a
+    cancellation ("No problem — I won't request an outreach draft")."""
+    output = conversation._normalize_action_intent(
+        message,
+        None,
+        {"intent": "question", "reply": "Here is the contact result."},
+    )
+    assert output["intent"] == "question"
+    assert output["reply"] == "Here is the contact result."
+    assert "outreach draft" not in output["reply"]
+    assert "don’t send email" not in output["reply"]
+
+
 def test_reply_to_prior_persequor_offer_becomes_draft_request() -> None:
     """A clear follow-up confirmation reaches the server-side handoff path."""
     output = conversation._normalize_action_intent(
