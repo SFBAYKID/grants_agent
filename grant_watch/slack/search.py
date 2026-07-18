@@ -778,6 +778,16 @@ def search_leads(
                 f"WHERE {where_sql} ORDER BY {order_sql}, id LIMIT ?"
             )
             rows = connection.execute(select_sql, params + [row_limit]).fetchall()
+            # Grade split over the FULL match set, so the rep hears "29 gold,
+            # 6 silver" up front without knowing the internal grading jargon.
+            grade_counts = {
+                str(grade_row[0] or "watch"): int(grade_row[1])
+                for grade_row in connection.execute(
+                    f"{_SEARCH_CTE} SELECT lead_grade, COUNT(*) FROM "
+                    f"searchable_leads WHERE {where_sql} GROUP BY lead_grade",
+                    params,
+                )
+            }
         finally:
             connection.close()
     except sqlite3.Error as exc:
@@ -932,11 +942,18 @@ def search_leads(
             if row["enrollment"] is not None
             else ""
         )
+        # Every shown row carries its public source link — the link keeps the
+        # model (and the pipeline) honest; a row without one says so plainly.
+        source_link = (
+            f" · <{row['detail_url']}|source>"
+            if row["detail_url"]
+            else " · no source link on file"
+        )
         lines.append(
             f"- Lead #{row['id']} — {display_entity_name(row['entity_name'])} "
             f"({row['state'] or '?'}{location}, {role}) — "
             f"{row['program'] or row['lead_grade']} · {amount} · "
-            f"{_window_label(row)}{enrollment}{contact}"
+            f"{_window_label(row)}{enrollment}{contact}{source_link}"
         )
     shown = min(len(rows), 15)
     more = (
@@ -950,8 +967,21 @@ def search_leads(
         if org_value and org_value != "any"
         else ""
     )
+    # Lead with the grade split so a rep who has never heard the internal
+    # gold/silver/watch jargon still gets it explained in the same breath.
+    grade_phrases = {
+        "gold": "gold (award won, money to spend)",
+        "silver": "silver (open solicitation)",
+        "watch": "watch (worth monitoring)",
+    }
+    split = ", ".join(
+        f"{grade_counts[key]} {grade_phrases.get(key, key)}"
+        for key in ("gold", "silver", "watch")
+        if grade_counts.get(key)
+    )
+    split_note = f" — {split}" if split else ""
     return (
-        f"Found {total} matching grants:\n"
+        f"Found {total} matching grants{split_note}:\n"
         + "\n".join(lines)
         + more
         + inference_note

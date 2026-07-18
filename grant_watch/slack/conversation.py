@@ -97,6 +97,9 @@ The rep should never need to know the system's mechanics to get to a useful resu
 If the tool reports more than 15 matches and asks about Excel or Google Sheet, relay
 that choice exactly. ALWAYS render each result with its Lead #id (the tool text
 carries it) — later turns can only reference a lead by the #id visible in this thread.
+EVERY result line MUST keep the source link the tool rendered (<url|source>) — the
+link is what keeps the data honest; never drop it. When the tool leads with a grade
+split ("29 gold … 6 silver …"), open with that split in plain words before the list.
 
 ZERO RESULTS — GUIDE, NEVER DEAD-END. When search_leads returns "No grants matched"
 it also lists nearby alternatives with real counts (e.g. "without the date window:

@@ -564,8 +564,15 @@ def test_explicit_top_ten_is_shown_even_when_more_matches_exist(tmp_path: Path) 
     """A confirmed small inline limit is honored instead of prompting for export."""
     text, artifact = search_leads(limit=10, db_path=_bulk_db(tmp_path, 20))
     assert artifact is None
-    assert text.startswith("Found 20 matching grants:")
+    assert text.startswith("Found 20 matching grants")
     assert "Showing 10 of 20" in text
+
+
+def test_results_carry_grade_split_and_source_links(tmp_path: Path) -> None:
+    """Every shown row keeps its public source link; the header explains grades."""
+    text, _ = search_leads(state="CA", db_path=_db(tmp_path))
+    assert "gold (award won, money to spend)" in text
+    assert "|source>" in text  # Slack-formatted link on result rows
 
 
 def test_with_contacts_appends_columns_to_summary(
