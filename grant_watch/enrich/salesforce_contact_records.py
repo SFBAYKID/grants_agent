@@ -45,12 +45,22 @@ ACTION_TYPE = "create_contact_record"
 _USABLE_CONTACT_STATUSES = ("verified", "linkedin_only")
 
 
+# Honorifics dropped from the front of a name so they never land in FirstName
+# (e.g. a site listing "Mr. Joel Padgett" must not create FirstName "Mr. Joel").
+_HONORIFICS = {
+    "mr", "mrs", "ms", "miss", "mx", "dr", "prof", "sir", "rev", "hon", "fr", "sr",
+}
+
+
 def split_person_name(name: str) -> tuple[str, str]:
     """Split a contact's full name into (FirstName, LastName); never guess.
 
     A single token becomes the LastName with a blank FirstName — Salesforce
-    requires LastName and Grant does not invent given names."""
+    requires LastName and Grant does not invent given names. A leading honorific
+    (Mr./Mrs./Dr./…) is dropped so it never becomes part of the FirstName."""
     tokens = str(name or "").split()
+    while len(tokens) > 1 and tokens[0].rstrip(".").lower() in _HONORIFICS:
+        tokens = tokens[1:]
     if not tokens:
         return "", ""
     if len(tokens) == 1:

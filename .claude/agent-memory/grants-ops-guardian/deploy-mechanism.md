@@ -27,6 +27,22 @@ hash. Bot restarted via `./run_bot.sh` (idempotent), old PID→new single PID, "
 0 tracebacks, PID stable after 18s. `HAS_CONTENT_NOTE True` under the tenant venv. No `.env`/DB/
 migration touched this deploy.
 
+**2026-07-18 35e744e → ecb1348 (5-file, all verified):** clean forward deploy via `deploy_rsync.sh`
+(bash). Delta = exactly the 5 tracked files from `git diff --name-status` (2 salesforce_* +
+slack/conversation.py + slack/tools.py + 1 test), all modifications, zero deletions; `-cain` dry-run
+showed the 5 as `<fcst....` plus benign dir-mtime touches, ZERO deleting lines. Working tree was clean
+at HEAD (`git diff --name-only ecb1348` empty) — the start-of-session `git status` snapshot was stale;
+always re-check live before a full-tree rsync. All 5 droplet sha256 matched the `ecb1348` blobs; a
+2nd dry-run after the real run was EMPTY (idempotent = tree fully in sync). `.env`(07-17)/`run_bot.sh`
+(07-16) mtimes unchanged. `.deployed_revision` stamped to full hash. Restart via pkill + `bash
+run_bot.sh`: old 406468 → new 1856864, stable over 18s, "Bolt app is running!", 0 tracebacks.
+- **zsh word-split gotcha (bit me this session):** the outer Bash tool runs **zsh**, where an unquoted
+  string var used as a command does NOT word-split — `SCOPED="ssh -i ... user@host"; $SCOPED 'cmd'`
+  fails with "no such file or directory: ssh -i ...". Fix: run remote ops inside a `bash <<'EOF'`
+  heredoc and put the ssh invocation in an **array** (`SCOPED=(ssh -i ... "$u@$h"); "${SCOPED[@]}" 'cmd'`).
+  The rsync itself was unaffected (it runs via the bash `deploy_rsync.sh`), so a partial failure here
+  can silently skip the marker/verify steps while the deploy still lands — always re-verify.
+
 **2026-07-18 84002a2 → 5b0f401 (single-file, all verified):** delta was ONE file
 (`salesforce_campaign_gateway.py`, the ContentNote-link fix). Mid-deploy, permission blocks hit the
 rsync-script `real` run and the `git archive`→remote-`tar` pipe. Per [[coordinator-stop-is-stop]]

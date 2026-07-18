@@ -504,6 +504,22 @@ def test_disabled_writes_flag_blocks_execution(
     assert gateway.calls == []
 
 
+@pytest.mark.parametrize(
+    "name, first, last",
+    [
+        ("Mr. Joel Padgett", "Joel", "Padgett"),
+        ("Dr. Harry D. Smith", "Harry D.", "Smith"),
+        ("Mrs Jane Doe", "Jane", "Doe"),
+        ("Joel Padgett", "Joel", "Padgett"),  # no honorific, unchanged
+        ("Dr. Smith", "", "Smith"),  # honorific + single name → blank first
+        ("Padgett", "", "Padgett"),  # single token stays the last name
+    ],
+)
+def test_split_person_name_drops_honorifics(name: str, first: str, last: str) -> None:
+    """A leading honorific never leaks into FirstName (live: 'Mr. Joel' bug)."""
+    assert records.split_person_name(name) == (first, last)
+
+
 def test_gateway_forbids_task_and_allows_note() -> None:
     """Grant cannot create a Task (Chase: no tasks); ContentNote stays allowed."""
     assert "Task" not in gateway_mod._ALLOWED_CREATE_OBJECTS
