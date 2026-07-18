@@ -18,6 +18,7 @@ from grant_watch.models import (
     VerificationStatus,
 )
 from grant_watch.slack import tools
+from grant_watch.slack.contact_enrichment import ContactOutcome
 from grant_watch.slack.search import MAX_ENRICH_ROWS, MAX_EXPORT_ROWS, search_leads
 
 
@@ -541,9 +542,9 @@ def test_google_sheet_failure_falls_back_to_complete_excel(
 
 
 # ------------------------------------------------------------ with_contacts enrichment
-def _verified(entity: str) -> tools.ContactOutcome:
+def _verified(entity: str) -> ContactOutcome:
     """A deterministic verified outcome keyed to the entity name."""
-    return tools.ContactOutcome(
+    return ContactOutcome(
         "verified",
         name=f"Dir {entity[:6]}",
         title="Technology Director",
@@ -663,7 +664,7 @@ def test_with_contacts_one_failure_does_not_sink_batch(
 ) -> None:
     """A single org's enrichment blowing up degrades to 'error'; the rest still resolve."""
 
-    def flaky(_c: object, lead_id: int, _p: object = None) -> tools.ContactOutcome:
+    def flaky(_c: object, lead_id: int, _p: object = None) -> ContactOutcome:
         """Provide test-local behavior for flaky."""
         if lead_id == 1:
             raise RuntimeError("boom")
@@ -683,7 +684,7 @@ def test_with_contacts_caps_and_discloses(
     """Asking for more than the ceiling enriches only the cap and says so."""
     calls = 0
 
-    def counting(_c: object, lead_id: int, _p: object = None) -> tools.ContactOutcome:
+    def counting(_c: object, lead_id: int, _p: object = None) -> ContactOutcome:
         """Provide test-local behavior for counting."""
         nonlocal calls
         calls += 1

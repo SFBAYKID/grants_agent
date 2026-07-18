@@ -11,7 +11,6 @@ fetched, or it is dropped. It records nothing it could not read (honest
 from __future__ import annotations
 
 import json
-import os
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -30,7 +29,6 @@ from .finder import (
     _scrape,
     _search,
     _text_field_on_page,
-    verify_on_page,
 )
 
 # Contact-style pages most likely to carry an org's address, phone, and general

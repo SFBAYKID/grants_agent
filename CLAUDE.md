@@ -112,17 +112,33 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
-## Current status (2026-07-15)
+## Current status (2026-07-18)
 
-- `verified` offline in the shared working tree: the canonical `python -m pytest tests -q` target
-  passes 348 tests, including pending unrelated working increments not included in every commit. The
-  package uses seven ordered SQLite migrations, typed evidence/funding models, deduplication, scoring, search,
-  export, Slack receipt/reconciliation state, outreach retry state, and Salesforce snapshots.
-- `verified` live through 2026-07-14: USAspending prime awards and NSGP subawards, Grants.gov,
-  keyed SAM.gov opportunities, WEBS fetch/parser, California Grants Portal, OregonBuys recent-bids,
-  NCES district enrichment, and Grant Socket Mode have been exercised. OregonBuys and WEBS returned
-  truthful zero security matches during their checks; positive-row entity extraction remains
-  `needs-testing`.
+- `verified` offline: `python -m pytest tests -q` passes 517 tests (71 skipped live-marked). The
+  package uses nine ordered SQLite migrations, typed evidence/funding models, deduplication, scoring,
+  guided search with zero-result relaxation hints, per-record verification links, export, Slack
+  receipt/reconciliation state, outreach retry state, and Salesforce create-only writes.
+- `verified` live 2026-07-17→18, full-workflow campaign in Slack (runs 1–7 plus Chase's realism
+  passes): natural asks ("find me schools in Texas") search immediately and answer with a plain-words
+  grade split, names, and a per-record source link on every row; open-ended asks get ONE scoping
+  question; zero results return concrete widen/broaden counts, never a dead end. Contact lookups
+  escalate site person → LinkedIn decision-maker → verified org mailbox before an honest none-found.
+  Full person Leads (address/industry/enrollment/LinkedIn/record type) with a completed activity Task
+  and a Lightning ContentNote were created through the bot's preview→button→native-confirm flow and
+  SOQL-verified (Wally Rakestraw #7845, Jake-Rawlinson-backed Commerce ISD staged). Persequor
+  drafted and — on a tapped Send — delivered the test-mode email to chase@ (Gmail-verified). Pronoun
+  traps, duplicate-record guard, compression attacks, and outreach refusals all held server-side.
+- `verified` live drip loop 2026-07-18: the real engine posted the paced one-line nugget, refused a
+  repost on the next tick, and the contextual follow-up ("who should I talk to about that award you
+  just posted?") returned a verified contact plus Salesforce state. Bulletin relevance is now
+  precision-first (a live health-sector miss was fixed same-day). Backfilled award events are
+  deliberately suppressed from drip, so the imported gold backlog only surfaces via search/polls —
+  an open product decision, not a bug.
+- `verified` deployment: the droplet tenant `grantwatch` runs main (rsync + revision stamp + restart
+  recipe in guardian memory); cron is Pacific-time — 5-min keepalive, 30-min drip 05:00–17:30 PT
+  weekdays, daily 07:00 PT poll — six live sources, zero incomplete runs, ~9.4k new leads in the
+  week to 2026-07-18. Grant's replies follow hard formatting rules: paragraph spacing, no internal
+  identifiers, no emoji in alerts. Orphaned progress spinners are swept and finalized at bot boot.
 - `verified` catalog validation: `data/source_catalog/sources.csv` contains 270 federal, state,
   county, city, school-district, multi-jurisdiction, and portal-family research records. Generated
   public/keyed/account/unknown-access lists and the 50-state-plus-DC coverage matrix live in
@@ -150,12 +166,14 @@ affect Chase's other projects.
   Charter High School's exact $500,000 USAspending award and Vic Chalabian's IT Systems Manager role
   within one official staff-directory record. This does not verify a personal email, LinkedIn profile
   ownership, Salesforce state, or outreach. Run it only with the documented double opt-in.
-- `verified` real-model acceptance on 2026-07-16: 70 realistic human scenarios spanning 15 documented
-  question families passed with external tools replaced by write-free canned outcomes. Server-side
-  gates independently prevent pre-confirmation or materially changed searches, date-filter loss,
-  pronoun-only contextual tool calls, outreach refusals becoming approvals, accidental
-  bad-lead/snooze actions, false outreach success, repeated paid/slow tool execution, and typed
-  confirmation from silently executing Salesforce writes.
+- `verified` real-model acceptance on 2026-07-16 (updated 2026-07-18): realistic human scenarios
+  pass with write-free canned outcomes. Server-side gates prevent date-filter loss, pronoun-only
+  contextual tool calls, outreach refusals becoming approvals, accidental bad-lead/snooze actions,
+  false outreach success, repeated paid/slow tool execution, and typed confirmation from silently
+  executing Salesforce writes. NOTE (2026-07-18 redesign, Chase's UX rule): read-only searches with
+  any state/org/city/entity anchor now run IMMEDIATELY without a confirmation round-trip; only fully
+  open-ended asks get one scoping question. Approval gates remain on paid contact enrichment,
+  Salesforce writes, and email.
 - `verified` offline Slack ingress acceptance: human-shaped mention and plain threaded follow-up
   envelopes traverse Grant's registered Bolt handlers, produce correct source answers, persist
   delivered receipts, deduplicate redelivery, and reject bot self-mentions. Remote Socket Mode receipt
@@ -170,10 +188,11 @@ affect Chase's other projects.
   organization-only Lead was created and read back with Chase's exact active `OwnerId` and roster
   email, blank person/contact fields, exact organization fields, and a unique provenance marker. The
   record remains in the sandbox; this does not verify Campaign or production writes.
-- `needs-testing`: live contact enrichment, a positive OregonBuys/WEBS security row, Persequor live
-  round trips, Salesforce sandbox Campaign creation/membership, production scheduling, Postgres parity, and
-  tenant-scoped deployment remain unverified. Salesforce Campaign writes stay disabled until explicit
-  sandbox approval.
-- `assumed` next sequence: characterize high-value catalog candidates, implement them one source per
-  module with fixtures and live smoke checks, complete contact-quality testing, then deploy through
-  `grants-ops-guardian` only.
+- `needs-testing`: a positive OregonBuys/WEBS security row, Salesforce sandbox Campaign
+  creation/membership, Salesforce production writes, Postgres parity, and the drip-thread reply path
+  from a genuine phone client. Salesforce Campaign writes stay disabled until explicit sandbox
+  approval; all sandbox test records await Chase's delete/keep decision (Ben Bayle, Wally Rakestraw,
+  Richard Moline, ZZ FLS Probe).
+- `assumed` next sequence: decide the gold-backlog surfacing product question, characterize
+  high-value catalog candidates one source per module with fixtures and live smoke checks, then keep
+  operating the droplet only through `grants-ops-guardian`.

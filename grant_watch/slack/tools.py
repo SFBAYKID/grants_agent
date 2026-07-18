@@ -16,7 +16,6 @@ import sqlite3
 import sys
 import traceback
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any  # LLM tool arguments and JSON schemas are runtime-shaped.
 
 import requests
@@ -24,7 +23,6 @@ import requests
 from .. import db
 from ..spreadsheets import GeneratedArtifact
 from .contact_enrichment import (  # re-export: search.py and tests call these
-    ContactOutcome,
     enrich_lead_contact,
 )
 from .search import search_leads
