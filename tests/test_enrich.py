@@ -149,17 +149,79 @@ def test_enrich_unreachable_records_nothing(
     )  # nothing fabricated, nothing final
 
 
+def _stub_fallbacks(
+    monkeypatch: pytest.MonkeyPatch,
+    person: dict[str, str] | None,
+    general_email: str,
+) -> None:
+    """Script the fallback chain: LinkedIn person and org-profile mailbox."""
+    from grant_watch.enrich import organization_profile
+
+    monkeypatch.setattr(finder, "linkedin_person", lambda *_a, **_k: person)
+    profile = organization_profile.OrgProfile(
+        general_email=general_email,
+        source_url="https://example.org/contact" if general_email else "",
+        status="found" if general_email else "not_found",
+    )
+    monkeypatch.setattr(
+        organization_profile, "enrich_org_profile", lambda *_a, **_k: profile
+    )
+
+
 def test_enrich_genuine_miss_records_not_found(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A true miss (finder returned None) is recorded as not_found, honestly and finally."""
+    """Only after site, LinkedIn, AND org mailbox all miss is the lead not_found."""
     conn, lead_id = _lead(tmp_path)
     monkeypatch.setattr(finder, "find_contact", lambda *_a, **_k: None)
+    _stub_fallbacks(monkeypatch, person=None, general_email="")
     outcome = tools.enrich_lead_contact(conn, lead_id)
     assert outcome.status == "not_found"
     rows = db.contacts_for_lead(conn, lead_id)
     assert len(rows) == 1 and rows[0]["contact_status"] == "not_found"
     assert rows[0]["email"] is None
+
+
+def test_enrich_falls_back_to_linkedin_and_org_mailbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No on-site person -> a LinkedIn name plus the org's general mailbox.
+
+    Chase's rule: every school and city has an email somewhere — a bare
+    not_found without trying LinkedIn and the org mailbox is a failed lookup."""
+    conn, lead_id = _lead(tmp_path)
+    monkeypatch.setattr(finder, "find_contact", lambda *_a, **_k: None)
+    _stub_fallbacks(
+        monkeypatch,
+        person={
+            "name": "Dana Roe",
+            "title": "Technology Director",
+            "url": "https://www.linkedin.com/in/dana-roe",
+        },
+        general_email="info@example.org",
+    )
+    outcome = tools.enrich_lead_contact(conn, lead_id)
+    assert outcome.status == "linkedin_org_email"
+    assert outcome.name == "Dana Roe"
+    assert outcome.email == "info@example.org"
+    saved = db.contacts_for_lead(conn, lead_id)
+    assert any(c["contact_status"] == "linkedin_only" for c in saved)
+
+
+def test_enrich_falls_back_to_org_mailbox_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No person anywhere -> the org's verified general mailbox, clearly labeled."""
+    conn, lead_id = _lead(tmp_path)
+    monkeypatch.setattr(finder, "find_contact", lambda *_a, **_k: None)
+    _stub_fallbacks(monkeypatch, person=None, general_email="office@example.org")
+    outcome = tools.enrich_lead_contact(conn, lead_id)
+    assert outcome.status == "org_email"
+    assert outcome.email == "office@example.org"
+    assert outcome.name == ""
+    # Not marked not_found: a usable mailbox was honestly found.
+    rows = db.contacts_for_lead(conn, lead_id)
+    assert not any(c["contact_status"] == "not_found" for c in rows)
 
 
 def test_enrich_verified_saves_contact(

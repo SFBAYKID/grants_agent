@@ -115,3 +115,53 @@ def test_bad_lead_reason_lands_in_status_note(tmp_path: Path) -> None:
     row = db.get_lead(conn, lead_id)
     assert row["status"] == "dead"
     assert "software" in row["status_note"]
+
+
+def test_orphaned_spinner_sweep_finalizes_stale_progress_messages() -> None:
+    """A crashed turn's spinner is edited into an honest interruption notice.
+
+    Chase's rule (2026-07-18): the SYSTEM notices a stall — a rep must never
+    stare at "/ Searching for the contact…" forever after a restart."""
+    import time
+
+    from grant_watch.slack import grant as grant_mod
+
+    now = time.time()
+
+    class FakeClient:
+        """Minimal Slack client covering the sweep's four calls."""
+
+        def __init__(self) -> None:
+            """Seed one stale spinner, one fresh spinner, one human message."""
+            self.updated: list[tuple[str, str]] = []
+            self._history = {
+                "messages": [
+                    {"user": "UBOT", "ts": f"{now - 600:.6f}", "text": "/ Searching for the contact…", "reply_count": 0},
+                    {"user": "UBOT", "ts": f"{now - 10:.6f}", "text": "| Thinking…", "reply_count": 0},
+                    {"user": "UHUMAN", "ts": f"{now - 900:.6f}", "text": "/ Searching for the contact…", "reply_count": 0},
+                ]
+            }
+
+        def auth_test(self) -> dict[str, str]:
+            """Identify the bot user."""
+            return {"user_id": "UBOT"}
+
+        def conversations_history(self, **_k: object) -> dict[str, object]:
+            """Return the seeded channel history."""
+            return self._history
+
+        def conversations_replies(self, **_k: object) -> dict[str, object]:
+            """No thread replies in this scenario."""
+            return {"messages": []}
+
+        def chat_update(self, channel: str, ts: str, text: str) -> None:
+            """Record the finalization edit."""
+            self.updated.append((ts, text))
+
+    client = FakeClient()
+    fixed = grant_mod.sweep_orphaned_spinners(client, "C123")
+    assert fixed == 1
+    assert len(client.updated) == 1
+    ts, text = client.updated[0]
+    assert abs(float(ts) - (now - 600)) < 1  # only the STALE bot spinner
+    assert "interrupted" in text

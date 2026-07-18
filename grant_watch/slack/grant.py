@@ -860,6 +860,59 @@ def _thread_reply(
     )
 
 
+# A live spinner looks like "/ Thinking…" — one frame char, a short phrase, an
+# ellipsis. Anything still shaped like that minutes after posting is an orphan
+# from a crashed or restarted turn and must be finalized honestly (Chase's rule:
+# the SYSTEM notices a stall, never the user).
+_SPINNER_RE = re.compile(r"^[/\\|—] \S.{0,80}…$")
+_ORPHAN_MIN_AGE_S = 180.0
+_ORPHAN_TEXT = (
+    "This request was interrupted mid-run (bot restart) and never finished — "
+    "ask me again and I'll pick it back up."
+)
+
+
+def sweep_orphaned_spinners(client: WebClient, channel: str) -> int:
+    """Finalize spinner messages stranded by a crash/restart; return the count.
+
+    Scans the configured channel's recent history plus each recent thread and
+    edits any own-message still stuck in spinner shape into an honest
+    interruption notice. Best-effort: Slack errors skip the message rather than
+    blocking startup."""
+    import time as _time
+
+    fixed = 0
+    try:
+        bot_id = str(client.auth_test().get("user_id") or "")
+        history = client.conversations_history(channel=channel, limit=50)
+        roots = list(history.get("messages") or [])
+        candidates = list(roots)
+        for root in roots:
+            if root.get("reply_count"):
+                replies = client.conversations_replies(
+                    channel=channel, ts=str(root["ts"]), limit=50
+                )
+                candidates.extend(replies.get("messages") or [])
+        for message in candidates:
+            text = str(message.get("text") or "")
+            if str(message.get("user") or "") != bot_id:
+                continue
+            if not _SPINNER_RE.match(text):
+                continue
+            if _time.time() - float(message["ts"]) < _ORPHAN_MIN_AGE_S:
+                continue
+            try:
+                client.chat_update(
+                    channel=channel, ts=str(message["ts"]), text=_ORPHAN_TEXT
+                )
+                fixed += 1
+            except Exception:  # noqa: BLE001 — one stuck message must not block boot
+                continue
+    except Exception:  # noqa: BLE001 — sweeping is best-effort by design
+        return fixed
+    return fixed
+
+
 def main() -> None:
     """Start the Socket Mode listener (blocks forever; Ctrl-C to stop)."""
     load_dotenv()
@@ -867,7 +920,13 @@ def main() -> None:
         raise RuntimeError(
             "SLACK_CHANNEL_ID must be the Monarch Bot Playground channel"
         )
-    handler = SocketModeHandler(create_app(), os.environ["SLACK_APP_TOKEN"])
+    app = create_app()
+    swept = sweep_orphaned_spinners(
+        app.client, os.environ["SLACK_CHANNEL_ID"].strip()
+    )
+    if swept:
+        print(f"Finalized {swept} orphaned progress message(s) from a prior run.")
+    handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     print("Grant is listening (Socket Mode)…")
     handler.start()
 

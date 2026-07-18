@@ -36,7 +36,8 @@ MAX_INLINE_LIMIT = 100
 MAX_EXPORT_ROWS = 5_000
 MAX_ENRICH_ROWS = 10  # hard ceiling on per-search contact lookups (cost + latency)
 ENRICH_TIME_BUDGET_S = (
-    240.0  # stop enriching past this wall-clock; disclose the partial
+    420.0  # stop enriching past this wall-clock; disclose the partial. Raised
+    # from 240 when the per-org fallback chain (LinkedIn + org mailbox) landed.
 )
 
 _CONTACT_COLUMNS = ("contact_name", "contact_title", "contact_email", "contact_status")

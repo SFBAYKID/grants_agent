@@ -82,8 +82,16 @@ def contact_suffix(cell: list[object]) -> str:
     if status == "verified":
         who = f"{name} ({title})".strip()
         return f" · contact: {who} {email}".rstrip()
+    if status == "linkedin_org_email":
+        who = f"{name} ({title})".strip() if title else str(name)
+        return f" · contact: {who} via LinkedIn; org mailbox {email}"
+    if status == "linkedin_only":
+        who = f"{name} ({title})".strip() if title else str(name)
+        return f" · contact: {who} via LinkedIn (no email verified)"
+    if status == "org_email":
+        return f" · contact: general mailbox {email} (no named person verified)"
     if status == "not_found":
-        return " · contact: none found"
+        return " · contact: none found (site, LinkedIn, and org mailbox all checked)"
     if status == "unreachable":
         return " · contact: source unreachable — retry"
     if status == "error":

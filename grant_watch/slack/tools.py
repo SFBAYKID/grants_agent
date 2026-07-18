@@ -23,6 +23,10 @@ import requests
 
 from .. import db
 from ..spreadsheets import GeneratedArtifact
+from .contact_enrichment import (  # re-export: search.py and tests call these
+    ContactOutcome,
+    enrich_lead_contact,
+)
 from .search import search_leads
 from .source_status import SOURCE_STATUS_TOOL_SCHEMA, source_inventory_status
 
@@ -34,82 +38,6 @@ def _noop(_message: str) -> None:
 
 
 _NOOP: Progress = _noop
-
-
-@dataclass(frozen=True)
-class ContactOutcome:
-    """One lead's enrichment result — the honest, structured outcome the batch search
-    and the single-lead tool both consume. status is exactly one of:
-      verified    — a verbatim-verified contact (name/title/email populated),
-      not_found   — we read real pages and none had a verifiable contact,
-      unreachable — the source was down; NOTHING was recorded, so a retry re-attempts.
-    """
-
-    status: str
-    name: str = ""
-    title: str = ""
-    email: str = ""
-    phone: str = ""
-    source_url: str = ""
-
-
-def enrich_lead_contact(
-    conn: sqlite3.Connection, lead_id: int, on_progress: Progress | None = None
-) -> ContactOutcome:
-    """Find + persist ONE lead's best contact through finder's verbatim gate, reusing a
-    caller-supplied connection so a batch enriches on a single handle. Idempotent: an
-    existing verified contact is returned without re-scraping. A SourceUnreachable
-    outage records nothing (retryable) and is NEVER written as not_found."""
-    from ..enrich import finder  # local import: keeps poll and status paths light
-
-    lead = db.get_lead(conn, lead_id)
-    if lead is None:
-        raise ValueError(f"unknown Grant lead id {lead_id}")
-    existing = [
-        c
-        for c in db.contacts_for_lead(conn, lead_id)
-        if c["contact_status"] == "verified"
-    ]
-    if existing:
-        c = existing[0]
-        return ContactOutcome(
-            "verified",
-            c["name"] or "",
-            c["title"] or "",
-            c["email"] or "",
-            c["phone"] or "",
-            c["source_url"] or "",
-        )
-    try:
-        candidate = finder.find_contact(
-            str(lead["entity_name"]), str(lead["state"] or ""), on_progress=on_progress
-        )
-    except finder.SourceUnreachable:
-        return ContactOutcome("unreachable")  # could not look -> record nothing
-    if candidate is None:
-        db.mark_contact_not_found(conn, lead_id)
-        return ContactOutcome("not_found")
-    db.save_contact(
-        conn,
-        lead_id,
-        candidate.name,
-        candidate.title,
-        candidate.email,
-        candidate.phone,
-        candidate.source_url,
-        candidate.confidence,
-        candidate.official_domain,
-        candidate.field_evidence,
-    )
-    return ContactOutcome(
-        "verified",
-        candidate.name,
-        candidate.title,
-        candidate.email,
-        candidate.phone,
-        candidate.source_url,
-    )
-
 
 # Tool schemas passed to the Anthropic API (the model picks; we execute).
 TOOL_SCHEMAS: list[dict[str, Any]] = [
