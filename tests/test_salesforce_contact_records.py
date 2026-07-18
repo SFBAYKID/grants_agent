@@ -17,7 +17,6 @@ from grant_watch.enrich import salesforce_contact_records as records
 from grant_watch.models import Lead, LeadGrade, RawItem
 
 LEAD_SF_ID = "00Q000000000777"
-TASK_ID = "00T000000000001"
 ACCOUNT_ID = "001000000000001"
 USER_ID = "005000000000001"
 CHASE_SLACK_ID = "U01DPJVURHU"
@@ -35,14 +34,10 @@ class FakeGateway:
     lead_result: gateway_mod.CreateResult = field(
         default_factory=lambda: gateway_mod.CreateResult(True, LEAD_SF_ID)
     )
-    task_result: gateway_mod.CreateResult = field(
-        default_factory=lambda: gateway_mod.CreateResult(True, TASK_ID)
-    )
     note_result: gateway_mod.CreateResult = field(
         default_factory=lambda: gateway_mod.CreateResult(True, "002000000000001")
     )
     created_leads: list[dict[str, object]] = field(default_factory=list)
-    created_tasks: list[dict[str, object]] = field(default_factory=list)
     created_notes: list[dict[str, object]] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
 
@@ -88,13 +83,6 @@ class FakeGateway:
         if isinstance(self.lead_result, Exception):
             raise self.lead_result
         return self.lead_result
-
-    def create_task(self, payload: dict[str, object]) -> gateway_mod.CreateResult:
-        """Record one Task create."""
-        self.calls.append("create_task")
-        self.created_tasks.append(payload)
-        return self.task_result
-
 
 class TimeoutGateway(FakeGateway):
     """Gateway whose Lead create times out after reaching the network."""
@@ -304,8 +292,8 @@ def test_multiple_verified_contacts_require_contact_id(tmp_path: Path) -> None:
     assert "Jane Smith" in action.preview
 
 
-def test_confirm_creates_lead_then_task_with_whoid(tmp_path: Path) -> None:
-    """Happy path: person Lead first, then the activity Task on it."""
+def test_confirm_creates_lead_then_note(tmp_path: Path) -> None:
+    """Happy path: person Lead first, then the grant Note on it — no Task."""
     conn = db.connect(tmp_path / "t.db")
     lead_id = _lead_row(conn, "a5", "Alpha School District")
     _verified_contact(conn, lead_id)
@@ -316,9 +304,9 @@ def test_confirm_creates_lead_then_task_with_whoid(tmp_path: Path) -> None:
     assert gateway.calls == [
         "create_lead",
         "get_record",
-        "create_task",
         "create_content_note",
     ]
+    assert "create_task" not in gateway.calls
     lead_payload = gateway.created_leads[0]
     assert lead_payload["FirstName"] == "Jane"
     assert lead_payload["LastName"] == "Smith"
@@ -328,20 +316,21 @@ def test_confirm_creates_lead_then_task_with_whoid(tmp_path: Path) -> None:
     assert lead_payload["State"] == "CA"
     assert lead_payload["Website"] == "https://alphausd.org"
     assert lead_payload["OwnerId"] == USER_ID
-    task = gateway.created_tasks[0]
-    assert task["WhoId"] == LEAD_SF_ID
-    assert task["Subject"] == "Grant AI created this lead record"
-    assert "Jane Smith" in str(task["Description"])
+    note = gateway.created_notes[0]
+    assert note["ParentId"] == LEAD_SF_ID
+    assert "Jane Smith" in str(note["Content"])
     stored = conn.execute("SELECT campaign_id,state FROM crm_actions").fetchone()
     assert tuple(stored) == (LEAD_SF_ID, "complete")
     # The success message carries a clickable link to the record, not a raw id
-    # (Chase 2026-07-18).
+    # (Chase 2026-07-18), and never mentions a Task.
     assert f"<{_link('Lead', LEAD_SF_ID)}|" in result.message
     assert f"(id {LEAD_SF_ID})" not in result.message
+    assert "Task" not in result.message
+    assert "Note" in result.message
 
 
-def test_existing_single_high_match_attaches_task_only(tmp_path: Path) -> None:
-    """A single confident CRM match gets the Task; no duplicate Lead is created."""
+def test_existing_single_high_match_attaches_note_only(tmp_path: Path) -> None:
+    """A single confident CRM match gets a Note; no duplicate Lead is created."""
     conn = db.connect(tmp_path / "t.db")
     lead_id = _lead_row(conn, "a6", "Alpha School District")
     _verified_contact(conn, lead_id)
@@ -350,13 +339,14 @@ def test_existing_single_high_match_attaches_task_only(tmp_path: Path) -> None:
     assert "already in Salesforce" in action.preview
     result = _confirm(conn, gateway, action)
     assert result.state == campaigns.CampaignActionState.COMPLETE
-    assert gateway.calls == ["create_task"]
-    assert gateway.created_tasks[0]["WhatId"] == ACCOUNT_ID
-    assert "WhoId" not in gateway.created_tasks[0]
+    assert gateway.calls == ["create_content_note"]
+    assert gateway.created_notes[0]["ParentId"] == ACCOUNT_ID
+    assert "no duplicate Lead" in result.message
+    assert "Task" not in result.message
 
 
-def test_existing_lead_match_uses_whoid(tmp_path: Path) -> None:
-    """Lead/Contact matches attach via WhoId instead of WhatId."""
+def test_existing_lead_match_attaches_note_to_lead(tmp_path: Path) -> None:
+    """A Lead/Contact match gets the Note attached to that record's id."""
     conn = db.connect(tmp_path / "t.db")
     lead_id = _lead_row(conn, "a7", "Alpha School District")
     _verified_contact(conn, lead_id)
@@ -373,7 +363,7 @@ def test_existing_lead_match_uses_whoid(tmp_path: Path) -> None:
     gateway = FakeGateway()
     action = _prepare(conn, gateway, lead_id, lookup=_found([match]))
     _confirm(conn, gateway, action)
-    assert gateway.created_tasks[0]["WhoId"] == LEAD_SF_ID
+    assert gateway.created_notes[0]["ParentId"] == LEAD_SF_ID
 
 
 @pytest.mark.parametrize(
@@ -425,7 +415,7 @@ def test_multiple_or_weak_matches_fail_closed(tmp_path: Path) -> None:
 
 
 def test_mismatched_existing_record_fails_closed(tmp_path: Path) -> None:
-    """A confident match for a different org never receives the Task."""
+    """A confident match for a different org never receives the Note."""
     conn = db.connect(tmp_path / "t.db")
     lead_id = _lead_row(conn, "a10", "Alpha School District")
     _verified_contact(conn, lead_id)
@@ -434,18 +424,20 @@ def test_mismatched_existing_record_fails_closed(tmp_path: Path) -> None:
         _prepare(conn, FakeGateway(), lead_id, lookup=_found([other]))
 
 
-def test_task_failure_after_lead_create_is_partial(tmp_path: Path) -> None:
-    """A failed Task after a real Lead reports PARTIAL with the Lead id kept."""
+def test_note_failure_after_lead_create_is_partial(tmp_path: Path) -> None:
+    """A failed Note after a real Lead reports PARTIAL with the Lead id kept."""
     conn = db.connect(tmp_path / "t.db")
     lead_id = _lead_row(conn, "a11", "Alpha School District")
     _verified_contact(conn, lead_id)
     gateway = FakeGateway(
-        task_result=gateway_mod.CreateResult(False, error="FIELD_CUSTOM_VALIDATION")
+        note_result=gateway_mod.CreateResult(False, error="FIELD_CUSTOM_VALIDATION")
     )
     action = _prepare(conn, gateway, lead_id)
     result = _confirm(conn, gateway, action)
     assert result.state == campaigns.CampaignActionState.PARTIAL
     assert "Lead is real" in result.message
+    # The rep still gets a clickable link even when the Note fails.
+    assert f"<{_link('Lead', LEAD_SF_ID)}|" in result.message
     stored = conn.execute("SELECT campaign_id,state FROM crm_actions").fetchone()
     assert tuple(stored) == (LEAD_SF_ID, "partial")
 
@@ -512,10 +504,14 @@ def test_disabled_writes_flag_blocks_execution(
     assert gateway.calls == []
 
 
-def test_gateway_task_allowlist_and_prefix() -> None:
-    """Task is creatable and validated; other objects stay forbidden."""
-    gateway_mod.validate_record_id(TASK_ID, "Task")
+def test_gateway_forbids_task_and_allows_note() -> None:
+    """Grant cannot create a Task (Chase: no tasks); ContentNote stays allowed."""
+    assert "Task" not in gateway_mod._ALLOWED_CREATE_OBJECTS
+    assert "ContentNote" in gateway_mod._ALLOWED_CREATE_OBJECTS
+    assert not hasattr(gateway_mod.SalesforceCampaignGateway, "create_task")
     gateway = gateway_mod.SalesforceCampaignGateway()
+    with pytest.raises(ValueError, match="create forbidden"):
+        gateway._create_one("Task", {"Subject": "nope"})
     with pytest.raises(ValueError, match="create forbidden"):
         gateway._create_one("Account", {"Name": "nope"})
 
@@ -605,7 +601,10 @@ def test_org_name_masquerading_as_title_is_dropped(tmp_path: Path) -> None:
     assert "Title: blank" in action.preview
     _confirm(conn, gateway, action)
     assert "Title" not in gateway.created_leads[0]
-    assert "title not verified" in str(gateway.created_tasks[0]["Description"])
+    # With no verified title, the Note describes them by org, not a bogus title.
+    assert "contact at Chicago Jewish Day School" in str(
+        gateway.created_notes[0]["Content"]
+    )
 
 
 class ScopeRefusedGateway(FakeGateway):
@@ -683,15 +682,14 @@ def test_full_field_lead_payload_from_org_profile(tmp_path: Path) -> None:
     assert "was not found" in body.lower()
 
 
-def test_completed_task_lands_in_activity_history(tmp_path: Path) -> None:
-    """The activity Task is created Completed so it files under Activity History."""
+def test_note_lands_on_the_new_lead(tmp_path: Path) -> None:
+    """The grant Note is linked to the freshly-created Lead record."""
     conn = db.connect(tmp_path / "t.db")
     lead_id = _lead_row(conn, "f2", "Alpha School District")
     _verified_contact(conn, lead_id)
     gateway = FakeGateway()
     action = _prepare(conn, gateway, lead_id)
     _confirm(conn, gateway, action)
-    assert gateway.created_tasks[0]["Status"] == "Completed"
     assert gateway.created_notes[0]["ParentId"] == LEAD_SF_ID
     assert "Alpha School District" in str(gateway.created_notes[0]["Title"])
 

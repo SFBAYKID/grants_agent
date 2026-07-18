@@ -215,13 +215,14 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "salesforce_contact_record_preview",
         "description": "Prepare, but DO NOT execute, an immutable preview that adds a "
-        "Grant contact to Salesforce: a fully-populated person Lead plus one "
-        "activity Task — or, when the organization already exists as a single "
-        "high-confidence Salesforce match, only the Task on the existing record "
-        "with no duplicate Lead. Use ONLY after find_contact returned a verified "
-        "contact (or a LinkedIn person was saved to the lead) AND the user "
-        "explicitly asked to add them to Salesforce. A Slack confirmation button "
-        "performs the later write; fields without verified evidence stay blank.",
+        "Grant contact to Salesforce: a fully-populated person Lead plus a Note with "
+        "the grant context — or, when the organization already exists as a single "
+        "high-confidence Salesforce match, only the Note on the existing record "
+        "with no duplicate Lead. Grant never creates Salesforce activity Tasks. Use "
+        "ONLY after find_contact returned a verified contact (or a LinkedIn person "
+        "was saved to the lead) AND the user explicitly asked to add them to "
+        "Salesforce. A Slack confirmation button performs the later write; fields "
+        "without verified evidence stay blank.",
         "input_schema": {
             "type": "object",
             "properties": {

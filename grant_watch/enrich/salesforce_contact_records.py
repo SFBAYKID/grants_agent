@@ -1,11 +1,13 @@
 """Audited create-only workflow that turns a Grant contact into Salesforce records.
 
 Given a lead with a verified (or LinkedIn-only) contact, this module prepares an
-immutable preview of one fully-populated person Lead plus one activity Task — or,
-when the organization already exists in Salesforce as a single high-confidence
-match, only the Task attached to the existing record with no duplicate Lead.
-It reuses the campaign preview/nonce/confirm machinery unchanged, so every write
-is requester-bound, TTL-limited, hash-verified, and create-only.
+immutable preview of one fully-populated person Lead plus a Lightning Note with the
+grant context — or, when the organization already exists in Salesforce as a single
+high-confidence match, only the Note attached to the existing record with no
+duplicate Lead. Grant creates no Salesforce activity Tasks (Chase: "we don't use
+tasks — log it as a note"). It reuses the campaign preview/nonce/confirm machinery
+unchanged, so every write is requester-bound, TTL-limited, hash-verified, and
+create-only.
 """
 
 from __future__ import annotations
@@ -15,7 +17,6 @@ import sqlite3
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict
-from datetime import date
 
 from . import salesforce
 from .salesforce_campaign_gateway import (
@@ -248,41 +249,6 @@ def contact_lead_payload(
     return payload
 
 
-def grant_task_payload(
-    lead: sqlite3.Row,
-    contact: sqlite3.Row,
-    requester: str,
-    action_id: str,
-    owner: SalesforceRecordRef,
-    today: str,
-) -> dict[str, object]:
-    """Build the activity Task payload; WhoId/WhatId is attached by mode."""
-    from .. import db
-
-    validate_record_id(owner.record_id, "User")
-    title = str(contact["title"] or "")
-    if not title or (
-        db.canonical_entity_key(title).partition("|")[0]
-        == db.canonical_entity_key(str(lead["entity_name"] or "")).partition("|")[0]
-    ):
-        title = "title not verified"
-    return {
-        "Subject": "Grant AI created this lead record",
-        # Completed so Salesforce files it under Activity History, not Open
-        # Activities — this is a log of an action Grant already took.
-        "Status": "Completed",
-        "ActivityDate": today,
-        "OwnerId": owner.record_id,
-        "Description": (
-            f"I'm the AI agent that created this record. I found "
-            f"{contact['name']} ({title}) at {lead['entity_name']}, identified "
-            f"{_grant_summary(lead)} {_contact_evidence(contact)} "
-            f"Grant lead {lead['id']}; action {action_id}; "
-            f"requested by Slack user {requester}."
-        ),
-    }
-
-
 def _contact_title_phrase(lead: sqlite3.Row, contact: sqlite3.Row) -> str:
     """'Director of Technology at DeKalb CUSD #428' — omit an unverified title."""
     from .. import db
@@ -493,7 +459,7 @@ def _preview_text(
     owner: SalesforceRecordRef,
     owner_email: str,
     lead_payload: dict[str, object] | None,
-    task_payload: dict[str, object],
+    note_payload: dict[str, object],
     target: SalesforceRecordRef | None,
 ) -> str:
     """Render the exact, complete preview a rep approves."""
@@ -533,7 +499,6 @@ def _preview_text(
         lines.append(f"• Owner: {owner.name} ({owner_email})")
         lines.append(f"• Description: {lead_payload['Description']}")
         lines.extend(f"• {note}" for note in _blank_disclosures(lead_payload, mode))
-        lines.append("Plus a Note on the record with the grant context.")
         lines.append(
             "Duplicate check: a complete Salesforce search found no existing "
             "record for this organization."
@@ -548,13 +513,13 @@ def _preview_text(
             f"• Existing record: {target.sobject} \"{target.name}\" — "
             f"{target.link or 'no link'} (single high-confidence match)"
         )
-        lines.append("• One activity Task will be attached to it instead.")
-    lines.append("Plus one activity Task:")
-    lines.append(f"• Subject: {task_payload['Subject']}")
-    lines.append(
-        f"• Date: {task_payload['ActivityDate']}  • Owner: {owner.name}"
-    )
-    lines.append(f"• Notes: {task_payload['Description']}")
+        lines.append("• A Note with the grant context will be added to it instead.")
+    # One Lightning Note carries the grant + contact context for both a fresh Lead
+    # and an existing record — Grant creates no Salesforce activity Tasks.
+    lines.append("Plus a Note on the record:")
+    lines.append(f"• Title: {note_payload.get('Title', 'Grant lead')}")
+    for note_line in str(note_payload.get("Body", "")).split("\n"):
+        lines.append(f"    {note_line}" if note_line else "")
     return "\n".join(lines)
 
 
@@ -583,7 +548,6 @@ def prepare_contact_record(
     owner, owner_email = requester_owner(gateway, requester)
     target = _resolve_existing_record(lead, lookup)
     action_seed = str(uuid.uuid4())
-    today = date.today().isoformat()
     mode = "attach_existing" if target is not None else "new_lead"
     # Org address/phone/general email were gathered during find_contact and read
     # from the lead row here; prepare performs no network scraping of its own.
@@ -595,24 +559,15 @@ def prepare_contact_record(
             lead, contact, requester, action_seed, owner, record_type_id
         )
     )
-    task_payload = grant_task_payload(
-        lead, contact, requester, action_seed, owner, today
-    )
-    if target is not None:
-        key = "WhoId" if target.sobject in ("Lead", "Contact") else "WhatId"
-        task_payload[key] = target.record_id
-    note_payload = (
-        grant_note_payload(lead, contact, choose_email(contact, lead)[1])
-        if target is None
-        else {}
-    )
+    # One Note carries the grant + contact context for a fresh Lead and for an
+    # existing record alike — no Salesforce activity Tasks are created.
+    note_payload = grant_note_payload(lead, contact, choose_email(contact, lead)[1])
     payload: dict[str, object] = {
         "mode": mode,
         "lead_id": int(lead_id),
         "contact_id": int(contact["id"]),
         "contact_status": str(contact["contact_status"]),
         "lead": lead_payload,
-        "task": task_payload,
         "note": note_payload,
         "target": asdict(target) if target is not None else None,
         "owner": {
@@ -622,7 +577,7 @@ def prepare_contact_record(
         },
     }
     preview = _preview_text(
-        mode, lead, contact, owner, owner_email, lead_payload, task_payload, target
+        mode, lead, contact, owner, owner_email, lead_payload, note_payload, target
     )
     plan = MemberPlan(
         lead_id=int(lead_id),
@@ -630,7 +585,7 @@ def prepare_contact_record(
         entity_name=str(lead["entity_name"] or ""),
         state=str(lead["state"] or ""),
         operation=(
-            "attach_task_existing" if target is not None else "create_contact_lead"
+            "attach_note_existing" if target is not None else "create_contact_lead"
         ),
         salesforce_ref=target,
         proposed_lead=lead_payload,
@@ -675,25 +630,31 @@ def confirm_contact_record(
 
     payload = json.loads(str(row["payload_json"]))
     action_id = str(row["id"])
-    task_payload = dict(payload["task"])
+    note_meta = dict(payload["note"] or {})
+    note_title = str(note_meta.get("Title", "Grant lead"))
+    note_body_html = _note_html(str(note_meta.get("Body", "")))
     if payload["mode"] == "attach_existing":
+        # Existing record: attach a Lightning Note with the grant context — no
+        # duplicate Lead, and no activity Task (Chase: "we don't use tasks").
         target = payload["target"] or {}
-        who_what = task_payload.get("WhoId") or task_payload.get("WhatId") or ""
-        validate_record_id(str(who_what), str(target.get("sobject", "Lead")))
+        parent_id = str(target.get("record_id") or "")
+        validate_record_id(parent_id, str(target.get("sobject", "Lead")))
         mark_external_write_started(conn, action_id)
-        result = gateway.create_task(task_payload)
+        result = gateway.create_content_note(
+            parent_id=parent_id, title=note_title, body_html=note_body_html
+        )
         if not result.success:
             finish_action(
                 conn,
                 action_id,
                 CampaignActionState.FAILED,
-                error=f"Task create failed: {result.error}",
+                error=f"Note create failed: {result.error}",
             )
             _set_item_state(conn, action_id, "failed")
             return ActionExecution(
                 CampaignActionState.FAILED,
-                f"Salesforce rejected the activity Task ({result.error}); "
-                "nothing was created.",
+                f"Salesforce rejected the Note ({result.error}); nothing was "
+                "created.",
                 failed=1,
             )
         if not result.record_id:
@@ -701,24 +662,27 @@ def confirm_contact_record(
                 conn,
                 action_id,
                 CampaignActionState.UNKNOWN,
-                error="Task create returned no id",
+                error="Note create returned no id",
             )
             return ActionExecution(
                 CampaignActionState.UNKNOWN,
-                "Salesforce accepted the Task but returned no id; "
+                "Salesforce accepted the Note but returned no id; "
                 "reconciliation required.",
                 unknown=1,
             )
         _set_item_state(conn, action_id, "added", result.record_id)
         finish_action(conn, action_id, CampaignActionState.COMPLETE)
-        link = str(target.get("link") or "the existing record")
+        raw_link = str(target.get("link") or "")
+        where = (
+            f"<{raw_link}|Open it in Salesforce>" if raw_link else "the existing record"
+        )
         return ActionExecution(
             CampaignActionState.COMPLETE,
-            f"Logged the Grant activity Task on {link}; no duplicate Lead was "
-            "created.",
+            f"Added a Note with the grant details to {where}; no duplicate Lead "
+            "was created.",
             added=1,
         )
-    # new_lead mode: Lead first, then Task attached to it.
+    # new_lead mode: Lead first, then a Note attached to it.
     mark_external_write_started(conn, action_id)
     lead_result = gateway.create_lead(dict(payload["lead"]))
     if not lead_result.success:
@@ -757,39 +721,34 @@ def confirm_contact_record(
             (lead_result.record_id, action_id),
         )
     record = gateway.get_record("Lead", lead_result.record_id)
-    task_payload["WhoId"] = lead_result.record_id
-    task_result = gateway.create_task(task_payload)
     lead_name = record.name or str(payload["lead"].get("LastName", "Lead"))
-    if not task_result.success:
+    # Give the rep a clickable link straight to the record, not a raw id (Chase).
+    link = record.link or gateway.lightning_link("Lead", lead_result.record_id)
+    where = f"<{link}|Open it in Salesforce>" if link else f"id {lead_result.record_id}"
+    # Attach a Lightning Note with the grant context so it shows in the record's
+    # Notes related list. The Note is the activity log (Grant creates no Tasks), so
+    # a failure is reported as PARTIAL — the Lead is real, but the record is
+    # incomplete and Grant never retries automatically.
+    note_result = gateway.create_content_note(
+        parent_id=lead_result.record_id, title=note_title, body_html=note_body_html
+    )
+    if not note_result.success:
         finish_action(
             conn,
             action_id,
             CampaignActionState.PARTIAL,
             campaign_id=lead_result.record_id,
-            error=f"Task create failed: {task_result.error}",
+            error=f"Note create failed: {note_result.error}",
         )
         return ActionExecution(
             CampaignActionState.PARTIAL,
-            f"Lead {lead_name} was created (id {lead_result.record_id}) but the "
-            f"activity Task failed: {task_result.error}. The Lead is real — add "
-            "the note manually; Grant will not retry automatically.",
+            f"Created Salesforce Lead {lead_name} ({where}), but the context Note "
+            f"failed: {note_result.error}. The Lead is real — add the note "
+            "manually; Grant will not retry automatically.",
+            campaign_id=lead_result.record_id,
             added=1,
             failed=1,
         )
-    # Attach a Lightning Note with the grant context so it shows in the record's
-    # Notes related list (the legacy Note object lands only under Notes &
-    # Attachments). A failed Note is non-fatal: the Lead and completed activity are
-    # the record of truth; report the miss honestly.
-    note_note = ""
-    note_meta = payload.get("note") or {}
-    if isinstance(note_meta, dict) and note_meta:
-        note_result = gateway.create_content_note(
-            parent_id=lead_result.record_id,
-            title=str(note_meta.get("Title", "Grant lead")),
-            body_html=_note_html(str(note_meta.get("Body", ""))),
-        )
-        if not note_result.success:
-            note_note = f" (the context Note could not be added: {note_result.error})"
     _set_item_state(conn, action_id, "added", lead_result.record_id)
     finish_action(
         conn,
@@ -797,13 +756,10 @@ def confirm_contact_record(
         CampaignActionState.COMPLETE,
         campaign_id=lead_result.record_id,
     )
-    # Give the rep a clickable link straight to the record, not a raw id (Chase).
-    link = record.link or gateway.lightning_link("Lead", lead_result.record_id)
-    where = f"<{link}|Open it in Salesforce>" if link else f"id {lead_result.record_id}"
     return ActionExecution(
         CampaignActionState.COMPLETE,
-        f"Created Salesforce Lead {lead_name}. {where}. I also logged the completed "
-        f"Grant activity and added a context Note{note_note}.",
+        f"Created Salesforce Lead {lead_name}. {where}. I added a Note with the "
+        "grant details and how I found the contact.",
         campaign_id=lead_result.record_id,
         added=1,
     )

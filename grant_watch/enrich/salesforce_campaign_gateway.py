@@ -18,12 +18,14 @@ import requests
 API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
 MAX_ACTION_ORGANIZATIONS = 200
 MEMBER_STATUS = "Identified by Grant"
+# Grant never creates Salesforce activity Tasks (Chase, 2026-07-18: "we don't use
+# tasks — log it as a note"). Task is deliberately absent from the allowlist so a
+# future bug cannot create one; the grant context is logged as a ContentNote.
 _ALLOWED_CREATE_OBJECTS = {
     "Campaign",
     "CampaignMemberStatus",
     "Lead",
     "CampaignMember",
-    "Task",
     "Note",
     "ContentNote",
     "ContentDocumentLink",
@@ -36,7 +38,6 @@ _ID_PREFIXES = {
     "Opportunity": "006",
     "User": "005",
     "Organization": "00D",
-    "Task": "00T",
     "Note": "002",
 }
 
@@ -462,10 +463,6 @@ class SalesforceCampaignGateway:
     def create_lead(self, payload: dict[str, object]) -> CreateResult:
         """Create one person Lead through the single-record allowlisted path."""
         return self._create_one("Lead", payload)
-
-    def create_task(self, payload: dict[str, object]) -> CreateResult:
-        """Create one activity Task attached via WhoId (Lead/Contact) or WhatId (Account)."""
-        return self._create_one("Task", payload)
 
     def create_note(self, payload: dict[str, object]) -> CreateResult:
         """Create one legacy Note attached to its ParentId (a Lead)."""
