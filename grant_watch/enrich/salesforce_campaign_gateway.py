@@ -25,6 +25,8 @@ _ALLOWED_CREATE_OBJECTS = {
     "CampaignMember",
     "Task",
     "Note",
+    "ContentNote",
+    "ContentDocumentLink",
 }
 _ID_PREFIXES = {
     "Campaign": "701",
@@ -468,6 +470,52 @@ class SalesforceCampaignGateway:
     def create_note(self, payload: dict[str, object]) -> CreateResult:
         """Create one legacy Note attached to its ParentId (a Lead)."""
         return self._create_one("Note", payload)
+
+    def create_content_note(
+        self, parent_id: str, title: str, body_html: str
+    ) -> CreateResult:
+        """Create a Lightning 'Enhanced Note' (ContentNote) linked to a record.
+
+        This is the note that appears in Lightning's *Notes* related list (the
+        legacy Note object shows only under 'Notes & Attachments'). Two creates:
+        the ContentNote (Content is base64 HTML), then a ContentDocumentLink that
+        attaches it to the Lead. Returns the ContentNote CreateResult; a failed
+        link is reported in the error so the caller can surface it honestly."""
+        import base64
+
+        content = base64.b64encode(body_html.encode("utf-8")).decode("ascii")
+        note = self._create_one("ContentNote", {"Title": title, "Content": content})
+        if not note.success or not note.record_id:
+            return note
+        try:
+            body = self._get(
+                "query",
+                {
+                    "q": "SELECT ContentDocumentId FROM ContentNote WHERE Id="
+                    f"'{_soql_literal(note.record_id)}'"
+                },
+            )
+            document_id = str((body.get("records") or [{}])[0].get("ContentDocumentId"))
+        except (requests.RequestException, KeyError, IndexError) as exc:
+            return CreateResult(
+                False,
+                note.record_id,
+                error=f"note created but link lookup failed: {type(exc).__name__}",
+            )
+        link = self._create_one(
+            "ContentDocumentLink",
+            {
+                "ContentDocumentId": document_id,
+                "LinkedEntityId": parent_id,
+                "ShareType": "V",
+                "Visibility": "AllUsers",
+            },
+        )
+        if not link.success:
+            return CreateResult(
+                False, note.record_id, error=f"note created but not linked: {link.error}"
+            )
+        return note
 
     def lead_record_type_id(self, developer_name: str) -> str:
         """Resolve one active Lead RecordType id by DeveloperName, or '' if absent.

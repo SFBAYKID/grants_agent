@@ -50,10 +50,14 @@ class FakeGateway:
         """Resolve a deterministic fake Lead RecordType id."""
         return "0122M000000viFyQAI" if developer_name == "Verkada" else ""
 
-    def create_note(self, payload: dict[str, object]) -> gateway_mod.CreateResult:
-        """Record one Note create."""
-        self.calls.append("create_note")
-        self.created_notes.append(payload)
+    def create_content_note(
+        self, parent_id: str, title: str, body_html: str
+    ) -> gateway_mod.CreateResult:
+        """Record one Lightning ContentNote create and its link target."""
+        self.calls.append("create_content_note")
+        self.created_notes.append(
+            {"ParentId": parent_id, "Title": title, "Content": body_html}
+        )
         return self.note_result
 
     def find_active_user_by_email(
@@ -309,7 +313,12 @@ def test_confirm_creates_lead_then_task_with_whoid(tmp_path: Path) -> None:
     action = _prepare(conn, gateway, lead_id)
     result = _confirm(conn, gateway, action)
     assert result.state == campaigns.CampaignActionState.COMPLETE
-    assert gateway.calls == ["create_lead", "get_record", "create_task", "create_note"]
+    assert gateway.calls == [
+        "create_lead",
+        "get_record",
+        "create_task",
+        "create_content_note",
+    ]
     lead_payload = gateway.created_leads[0]
     assert lead_payload["FirstName"] == "Jane"
     assert lead_payload["LastName"] == "Smith"
@@ -660,11 +669,14 @@ def test_full_field_lead_payload_from_org_profile(tmp_path: Path) -> None:
     assert payload["Industry"] == "K-12 Schools"
     assert payload["RecordTypeId"] == "0122M000000viFyQAI"
     assert "Email (org general — not the individual's)" in action.preview
-    # The Note carries the general-vs-direct distinction.
+    # The Note carries the general-vs-direct distinction honestly.
     note = __import__("json").loads(
         str(conn.execute("SELECT payload_json FROM crm_actions").fetchone()[0])
     )["note"]
-    assert "general email" in str(note["Body"]).lower()
+    body = str(note["Body"])
+    assert "info@alphausd.org" in body
+    assert "organization general address" in body.lower()
+    assert "was not found" in body.lower()
 
 
 def test_completed_task_lands_in_activity_history(tmp_path: Path) -> None:
@@ -678,3 +690,46 @@ def test_completed_task_lands_in_activity_history(tmp_path: Path) -> None:
     assert gateway.created_tasks[0]["Status"] == "Completed"
     assert gateway.created_notes[0]["ParentId"] == LEAD_SF_ID
     assert "Alpha School District" in str(gateway.created_notes[0]["Title"])
+
+
+def test_note_body_reads_like_a_lead_briefing(tmp_path: Path) -> None:
+    """The Lightning Note leads with why-this-lead-is-here, then the contact facts."""
+    from grant_watch.enrich.organization_profile import OrgProfile
+
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _lead_row(conn, "f3", "Alpha School District")
+    _verified_contact(conn, lead_id)
+    db.save_org_profile(
+        conn,
+        lead_id,
+        OrgProfile(
+            website="https://alphausd.org",
+            phone="555-999-1000",
+            street="1 Alpha Way",
+            city="Sacramento",
+            state="CA",
+            postal_code="95814",
+            source_url="https://alphausd.org/contact",
+            status="found",
+        ),
+    )
+    gateway = FakeGateway()
+    action = _prepare(conn, gateway, lead_id)
+    _confirm(conn, gateway, action)
+    stored = __import__("json").loads(
+        str(conn.execute("SELECT payload_json FROM crm_actions").fetchone()[0])
+    )["note"]
+    body = str(stored["Body"])
+    # Why this lead is here — program, amount, human spend window, and the Lead #.
+    assert (
+        f"Alpha School District — Lead #{lead_id} — SVPP · $500,000 · "
+        "spend window Jan 2026 – Dec 2027" in body
+    )
+    assert "• Lead: Jane Smith, Technology Director at Alpha School District" in body
+    assert "• Email: jsmith@alpha.k12.ca.us (direct, verified)" in body
+    assert "• Phone: 555-123-4567" in body
+    assert "• Address: 1 Alpha Way, Sacramento, CA 95814" in body
+    # The confirmed ContentNote stores escaped HTML, not raw text.
+    content = str(gateway.created_notes[0]["Content"])
+    assert content.startswith("<p>") and "<br/>" in content
+    assert "Lead #" in content

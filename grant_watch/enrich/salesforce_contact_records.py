@@ -76,6 +76,47 @@ def _grant_summary(row: sqlite3.Row) -> str:
     )
 
 
+_MONTHS = (
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+)
+
+
+def _month_year(value: object) -> str:
+    """Render an ISO date as 'Oct 2025'; fall back to the raw value if unparseable."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    match = re.match(r"(\d{4})-(\d{2})", text)
+    if not match:
+        return text
+    year, month = match.group(1), int(match.group(2))
+    if 1 <= month <= 12:
+        return f"{_MONTHS[month - 1]} {year}"
+    return text
+
+
+def _spend_window(row: sqlite3.Row) -> str:
+    """Human 'spend window Oct 2025 – Sep 2028' clause, or '' when unknown."""
+    start, end = _month_year(row["funds_start"]), _month_year(row["funds_end"])
+    if start and end:
+        return f"spend window {start} – {end}"
+    if start:
+        return f"spend window opens {start}"
+    if end:
+        return f"spend window through {end}"
+    return ""
+
+
+def _grant_headline(row: sqlite3.Row) -> str:
+    """Compact 'SVPP · $500,000 · spend window Oct 2025 – Sep 2028' summary line."""
+    parts = [str(row["program"] or "grant"), _amount_text(row)]
+    window = _spend_window(row)
+    if window:
+        parts.append(window)
+    return " · ".join(parts)
+
+
 def _contact_evidence(contact: sqlite3.Row) -> str:
     """Describe where the contact came from, honestly per evidence kind."""
     source = str(contact["source_url"] or "unknown source")
@@ -242,27 +283,85 @@ def grant_task_payload(
     }
 
 
+def _contact_title_phrase(lead: sqlite3.Row, contact: sqlite3.Row) -> str:
+    """'Director of Technology at DeKalb CUSD #428' — omit an unverified title."""
+    from .. import db
+
+    entity = str(lead["entity_name"] or "")
+    title = str(contact["title"] or "")
+    if title and (
+        db.canonical_entity_key(title).partition("|")[0]
+        != db.canonical_entity_key(entity).partition("|")[0]
+    ):
+        return f"{title} at {entity}"
+    return f"contact at {entity}"
+
+
+def _address_line(lead: sqlite3.Row) -> str:
+    """Compose '901 S 4th St, DeKalb, IL 60115' from whatever the org profile has."""
+    street = _lead_value(lead, "org_street")
+    city = _lead_value(lead, "org_city") or str(lead["location_city"] or "")
+    state = str(lead["state"] or "") or _lead_value(lead, "org_state")
+    postal = _lead_value(lead, "org_postal_code")
+    locality = " ".join(part for part in (state, postal) if part)
+    return ", ".join(part for part in (street, city, locality) if part)
+
+
+def _note_html(body: str) -> str:
+    """Render a plain-text note Body as the escaped HTML a ContentNote stores.
+
+    Salesforce ContentNote.Content is HTML; blank lines become paragraph breaks
+    and every other newline a line break. All text is HTML-escaped so an address
+    or ampersand can never inject markup."""
+    import html
+
+    paragraphs = body.split("\n\n")
+    rendered = [
+        "<br/>".join(html.escape(line) for line in para.split("\n"))
+        for para in paragraphs
+    ]
+    return "".join(f"<p>{para}</p>" for para in rendered)
+
+
 def grant_note_payload(
     lead: sqlite3.Row,
     contact: sqlite3.Row,
     email_kind: str,
 ) -> dict[str, object]:
-    """Build the legacy Note (Title + Body); ParentId is set at confirm time."""
+    """Build the note (Title + readable Body); the confirm step renders the HTML.
+
+    The Body leads with a one-line explanation of *why this lead is here* (the
+    grant behind it), then the contact facts a rep needs — each line present only
+    when Grant actually has the value, so the note never implies unknown data."""
+    email = str(contact["email"] or "")
+    general = _lead_value(lead, "org_general_email")
     email_line = {
-        "direct": f"Direct email for {contact['name']}: {contact['email']}.",
+        "direct": f"• Email: {email} (direct, verified)",
         "general": (
-            "No direct email was verified for the individual; the organization's "
-            f"general email {_lead_value(lead, 'org_general_email')} was added instead."
+            f"• Email: {general} (organization general address — a direct email "
+            f"for {contact['name']} was not found)"
         ),
-    }.get(email_kind, "No email was verified.")
+    }.get(email_kind, "• Email: none verified")
+    lines = [
+        f"{lead['entity_name']} — Lead #{lead['id']} — {_grant_headline(lead)}",
+        "",
+        f"• Lead: {contact['name']}, {_contact_title_phrase(lead, contact)}",
+        email_line,
+    ]
+    phone = str(contact["phone"] or "") or _lead_value(lead, "org_phone")
+    if phone:
+        lines.append(f"• Phone: {phone}")
+    address = _address_line(lead)
+    if address:
+        lines.append(f"• Address: {address}")
+    lines.append("")
+    lines.append(_contact_evidence(contact))
+    if str(lead["detail_url"] or ""):
+        lines.append(f"Grant source: {lead['detail_url']}")
+    lines.append("Created by Grant, the AI grant-lead agent, from public sources.")
     return {
-        "Title": f"Grant lead: {lead['entity_name']}",
-        "Body": (
-            f"{_grant_summary(lead)}\n"
-            f"Contact: {contact['name']} ({contact['title'] or 'title not verified'}). "
-            f"{_contact_evidence(contact)}\n{email_line}\n"
-            "Created by Grant, the AI grant-lead agent, from public sources."
-        ),
+        "Title": f"Grant lead: {lead['entity_name']} — {contact['name']}",
+        "Body": "\n".join(lines),
     }
 
 
@@ -677,14 +776,18 @@ def confirm_contact_record(
             added=1,
             failed=1,
         )
-    # Attach a Note with the grant context. A failed Note is non-fatal: the Lead
-    # and the completed activity are the record of truth; report it honestly.
+    # Attach a Lightning Note with the grant context so it shows in the record's
+    # Notes related list (the legacy Note object lands only under Notes &
+    # Attachments). A failed Note is non-fatal: the Lead and completed activity are
+    # the record of truth; report the miss honestly.
     note_note = ""
     note_meta = payload.get("note") or {}
     if isinstance(note_meta, dict) and note_meta:
-        note_payload = dict(note_meta)
-        note_payload["ParentId"] = lead_result.record_id
-        note_result = gateway.create_note(note_payload)
+        note_result = gateway.create_content_note(
+            parent_id=lead_result.record_id,
+            title=str(note_meta.get("Title", "Grant lead")),
+            body_html=_note_html(str(note_meta.get("Body", ""))),
+        )
         if not note_result.success:
             note_note = f" (the context Note could not be added: {note_result.error})"
     _set_item_state(conn, action_id, "added", lead_result.record_id)
