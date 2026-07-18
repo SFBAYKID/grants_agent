@@ -456,7 +456,7 @@ def test_delivery_reservation_prevents_duplicate_post(tmp_path: Path) -> None:
     assert client.last_kwargs["unfurl_media"] is False
     assert client.last_kwargs["text"] == (
         "Castle Rock School District 401 in Washington has a verified "
-        "$500,000 SVPP funding award."
+        "$500,000 SVPP funding award.\nSource: https://x.gov/a"
     )
     assert (
         conn.execute("SELECT state FROM notification_outbox").fetchone()["state"]
@@ -512,3 +512,36 @@ def test_bulletin_relevance_rejects_health_sector_noise() -> None:
     assert passes("School Violence Prevention Program (SVPP)")
     assert passes("Nonprofit Security Grant Program")
     assert passes("Campus Safety and Access Control Modernization")
+
+
+def test_proactive_alert_carries_a_validated_source_line(tmp_path: Path) -> None:
+    """Every posted funding alert appends a safe Source line (Chase's rule).
+
+    The sentence itself stays inert; the URL comes only from the stored
+    per-record link, hardened through _safe_url."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn)
+    client = _SlackClient()
+    drip.run_drip(client, "C1", conn, force=True)
+    posted = client.last_kwargs["text"]
+    assert "\nSource: https://x.gov/a" in posted
+    # The claim sentence remains a single inert sentence before the source.
+    sentence = posted.split("\nSource:")[0]
+    assert sentence.count(".") == 1 and "\n" not in sentence
+
+
+def test_source_line_fails_closed_on_missing_or_unsafe_url(tmp_path: Path) -> None:
+    """No stored URL, or an unsafe one, yields no Source line rather than a bad one."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _mk_lead(conn)
+    conn.execute("UPDATE leads SET detail_url=NULL WHERE id=?", (lead_id,))
+    conn.commit()
+    row = db.get_lead(conn, lead_id)
+    assert drip.source_line(row) == ""
+    conn.execute(
+        "UPDATE leads SET detail_url='http://insecure.test/a?token=secret' WHERE id=?",
+        (lead_id,),
+    )
+    conn.commit()
+    row = db.get_lead(conn, lead_id)
+    assert drip.source_line(row) == ""  # http + credential query -> unavailable

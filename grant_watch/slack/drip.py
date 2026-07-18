@@ -26,6 +26,8 @@ from slack_sdk import WebClient
 
 from .. import db, scoring
 from ..presentation import display_entity_name, plain_fragment
+from .search_presentation import record_link
+from .source_status import _safe_url
 
 # Bulletin relevance: grants.gov phrase-search still lets through noise (live check
 # 2026-07-13 surfaced 2011-era NSF programs). A bulletin must LOOK like our business.
@@ -116,6 +118,26 @@ def build_bulletin(row: sqlite3.Row) -> tuple[str, str]:
     close = f" through {row['funds_end'][:10]}" if row["funds_end"] else ""
     text = f"{what} is listed as open{close}."
     return text, "bulletin-open"
+
+
+def source_line(row: sqlite3.Row) -> str:
+    """A separate, URL-validated 'Source: <url>' line for a proactive alert.
+
+    Chase's rule: every funding claim carries its source. The one-sentence alert
+    stays inert (no untrusted text can inject a link); the URL comes only from
+    the stored, per-record detail link and is hardened through _safe_url — a
+    missing or unsafe URL yields no line rather than a bad one. Posted with
+    mrkdwn off, a bare https URL still auto-links in Slack."""
+    try:
+        url = record_link(row)
+    except (KeyError, IndexError):
+        return ""
+    if not url:
+        return ""
+    safe = _safe_url(url)
+    if safe == "(URL unavailable)":
+        return ""
+    return f"\nSource: {safe}"
 
 
 def pacing_ok(
@@ -233,6 +255,8 @@ def run_drip(
     if not go:
         return f"skip: {reason}"
     text, style = build_nugget(row) if kind == "nugget" else build_bulletin(row)
+    # Every proactive funding claim carries its source on a separate, safe line.
+    text = text + source_line(row)
     if dry_run:
         return f"[dry-run] would post {kind} ({style}): {text}"
     event_id = int(row["current_event_id"]) if row["current_event_id"] else None
