@@ -139,6 +139,32 @@ def test_brief_test_mode_overrides_recipient(
     assert brief["request_id"].startswith(f"grant-{row['id']}-")
 
 
+def test_brief_strips_honorific_from_contact_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The honorific never reaches contact_name, so Persequor greets by first name.
+
+    Live 2026-07-18: a site listing 'Mr. Joel Padgett' produced a 'Hi Mr.,' draft."""
+    monkeypatch.setenv("OUTREACH_TEST_EMAIL", "chase@monarchconnected.com")
+    conn, row = _lead_row(tmp_path)
+    cid = db.save_contact(
+        conn,
+        row["id"],
+        "Mr. Joel Padgett",
+        "Director of Technology",
+        "joel.padgett@x.org",
+        "",
+        "https://x.org/staff",
+        "high",
+    )
+    contact = conn.execute("SELECT * FROM contacts WHERE id=?", (cid,)).fetchone()
+    brief = persequor_client.build_brief(
+        row, contact, "U01DPJVURHU", "chase@monarchconnected.com"
+    )
+    assert brief is not None
+    assert brief["contact_name"] == "Joel Padgett"
+
+
 def test_brief_uses_current_event_source_not_stale_projection(tmp_path: Path) -> None:
     """Persequor receives the exact event record URL used by Grant's detail reply."""
     conn, row = _lead_row(tmp_path)

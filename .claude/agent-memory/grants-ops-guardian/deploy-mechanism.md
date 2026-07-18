@@ -27,6 +27,24 @@ hash. Bot restarted via `./run_bot.sh` (idempotent), old PID→new single PID, "
 0 tracebacks, PID stable after 18s. `HAS_CONTENT_NOTE True` under the tenant venv. No `.env`/DB/
 migration touched this deploy.
 
+**2026-07-18 ecb1348 → baa71e3 (2-file, all verified):** clean forward deploy via `deploy_rsync.sh`
+(bash). `git diff --name-status ecb1348..baa71e3` = 3 files but one was `.claude/agent-memory/.../
+deploy-mechanism.md` (guardian memory, correctly excluded by `.claude`), so deployable delta = exactly
+2 tracked files (`grant_watch/enrich/salesforce_contact_records.py` + its test). `-cain` dry-run showed
+the 2 as `<fcst....` plus benign `.d..t....` dir touches on `grant_watch/enrich/` and `tests/`, ZERO
+deleting lines. Working tree was clean at HEAD (git status snapshot stale as usual — re-checked live).
+`find -cnewer` listed exactly the 2 files; both remote sha256 matched local (== target, tree clean).
+`.env`(07-17T15:01)/`run_bot.sh`(07-16T02:05) mtimes untouched. `.deployed_revision` stamped full hash.
+Restart per task (pkill + `nohup run_bot.sh`): old 1856864 dead → new single PID 2611958, "Bolt app is
+running!", 0 traceback, PID stable through 25s Bolt-wait + final count=1 recheck.
+- **ssh-eats-heredoc-stdin gotcha (bit me twice this session):** inside a single `bash <<'EOF'`
+  heredoc, a plain `ssh host 'cmd'` reads stdin by default and CONSUMES THE REST OF THE HEREDOC — so
+  every later ssh/echo in that heredoc silently never runs (output just "vanishes"). Fix: add `-n` to
+  every ssh that doesn't need piped input (`ssh -n ...`); reserve real stdin only for the intentional
+  cases (`printf hash | ssh 'cat > .deployed_revision'`, `ssh bash -s < remote_script.sh`). This is
+  DISTINCT from the zsh word-split gotcha and can mask a skipped verify/marker step — always re-run the
+  swallowed command on its own before trusting it.
+
 **2026-07-18 35e744e → ecb1348 (5-file, all verified):** clean forward deploy via `deploy_rsync.sh`
 (bash). Delta = exactly the 5 tracked files from `git diff --name-status` (2 salesforce_* +
 slack/conversation.py + slack/tools.py + 1 test), all modifications, zero deletions; `-cain` dry-run

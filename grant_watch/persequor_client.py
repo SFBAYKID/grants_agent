@@ -28,7 +28,7 @@ from typing import TypedDict
 
 import requests
 
-from .presentation import display_entity_name
+from .presentation import display_entity_name, strip_leading_honorifics
 
 REPS_PATH = Path(__file__).resolve().parent.parent / "config" / "reps.json"
 DEFAULT_API = "http://127.0.0.1:8002"
@@ -138,7 +138,12 @@ def build_brief(
     per the design)."""
     test_email = os.environ.get("OUTREACH_TEST_EMAIL", "").strip()
     real_email = contact["email"] if contact is not None else None
-    real_name = contact["name"] if contact is not None else None
+    # Strip an honorific so Persequor's greeting reads "Hi Joel," not "Hi Mr.,".
+    real_name = (
+        strip_leading_honorifics(contact["name"]) or None
+        if contact is not None
+        else None
+    )
     real_title = contact["title"] if contact is not None else None
 
     if not real_email and not test_email:

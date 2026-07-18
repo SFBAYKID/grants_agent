@@ -26,6 +26,24 @@ _ENTITY_ACRONYMS = {
 }
 _ENTITY_CONNECTORS = {"and", "at", "by", "for", "in", "of", "on", "the", "to"}
 
+# Honorifics stripped from the front of a person's name so they never become the
+# FirstName in Salesforce nor the greeting in an outreach draft (a site listing of
+# "Mr. Joel Padgett" must not yield FirstName "Mr. Joel" or a "Hi Mr.," email).
+_HONORIFICS = {
+    "mr", "mrs", "ms", "miss", "mx", "dr", "prof", "sir", "rev", "hon", "fr", "sr",
+}
+
+
+def strip_leading_honorifics(name: object) -> str:
+    """Drop leading honorific tokens (Mr./Mrs./Dr./…) from a person's name.
+
+    Never strips the only remaining token, so 'Dr. Smith' becomes 'Smith' and a
+    bare 'Dr.' is returned unchanged. Preserves original spacing otherwise."""
+    tokens = str(name or "").split()
+    while len(tokens) > 1 and tokens[0].rstrip(".").lower() in _HONORIFICS:
+        tokens = tokens[1:]
+    return " ".join(tokens)
+
 
 def plain_fragment(value: object, max_length: int = 120) -> str:
     """Collapse source-controlled text into short, inert conversational prose."""
