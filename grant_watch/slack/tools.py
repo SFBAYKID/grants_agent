@@ -222,17 +222,31 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "ONLY after find_contact returned a verified contact (or a LinkedIn person "
         "was saved to the lead) AND the user explicitly asked to add them to "
         "Salesforce. A Slack confirmation button performs the later write; fields "
-        "without verified evidence stay blank.",
+        "without verified evidence stay blank. Pass lead_id when you know it; "
+        "otherwise pass entity (and state) — the org whose contact you just found — "
+        "and Grant resolves the lead itself, so you never need to ask the rep for a "
+        "lead number.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "lead_id": {"type": "integer"},
+                "lead_id": {
+                    "type": "integer",
+                    "description": "Grant lead id; omit or 0 if you only know the org name",
+                },
+                "entity": {
+                    "type": "string",
+                    "description": "exact organization name, used to resolve the lead "
+                    "when lead_id is unknown",
+                },
+                "state": {
+                    "type": "string",
+                    "description": "2-letter state to disambiguate the entity",
+                },
                 "contact_id": {
                     "type": "integer",
                     "description": "specific contact row when a lead has several",
                 },
             },
-            "required": ["lead_id"],
         },
     },
     {
@@ -769,15 +783,27 @@ def salesforce_contact_record_preview(
     from ..enrich import salesforce_contact_records as records
     from ..enrich.salesforce_campaign_gateway import SalesforceCampaignGateway
 
+    conn = db.connect()
+    lead_id = int(args.get("lead_id", 0) or 0)
+    if lead_id <= 0 and args.get("entity"):
+        # A natural "add <person> to Salesforce" after finding the contact by org
+        # name carries no lead number. Resolve it here (same resolver find_contact
+        # uses) so the flow doesn't dead-end asking the rep for an id it never saw.
+        resolved = resolve_lead_by_name(
+            conn, str(args["entity"]), str(args.get("state") or "")
+        )
+        if isinstance(resolved, str):  # already an honest "ERROR: which lead?" message
+            return resolved
+        lead_id = resolved
     try:
         action = records.prepare_contact_record(
-            db.connect(),
+            conn,
             SalesforceCampaignGateway(),
             workspace,
             channel,
             thread_ts,
             requester_slack,
-            int(args.get("lead_id", 0)),
+            lead_id,
             int(args["contact_id"]) if args.get("contact_id") is not None else None,
         )
     except (ValueError, PermissionError, KeyError, requests.RequestException) as exc:

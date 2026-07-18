@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from openpyxl import load_workbook
 
 from grant_watch import db
@@ -143,3 +144,61 @@ def test_resolve_lead_by_name_unknown_is_honest(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "r.db")
     out = tools.resolve_lead_by_name(conn, "Nonexistent Academy")
     assert isinstance(out, str) and "no Grant lead is named" in out
+
+
+# ------------------------------------------------- contact-record preview binding
+def test_contact_preview_resolves_lead_by_entity_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """"add <person> to Salesforce" resolves the lead from the org name — a natural
+    request never carries a lead number (live snag 2026-07-18: City of East
+    Providence dead-ended because the preview tool demanded a lead_id)."""
+    from grant_watch.enrich import salesforce_campaign_gateway as gw
+    from grant_watch.enrich import salesforce_contact_records as records
+
+    conn = db.connect(tmp_path / "p.db")
+    lead_id = _seed(conn, "p1", "City of East Providence", "RI")
+    monkeypatch.setattr(tools.db, "connect", lambda *a, **k: conn)
+    monkeypatch.setattr(gw, "SalesforceCampaignGateway", lambda *a, **k: object())
+    captured: dict[str, int] = {}
+
+    class _Prep:
+        """Minimal PreparedAction stand-in."""
+
+        action_id = "a1"
+        nonce = "n1"
+        preview = "PREVIEW-TEXT"
+        expires_at = "2026-07-18T23:00:00+00:00"
+
+    def _fake_prepare(
+        _conn: object,
+        _gateway: object,
+        _ws: str,
+        _ch: str,
+        _ts: str,
+        _req: str,
+        lid: int,
+        cid: int | None = None,
+    ) -> _Prep:
+        """Capture the lead_id the tool resolved."""
+        captured["lead_id"] = lid
+        return _Prep()
+
+    monkeypatch.setattr(records, "prepare_contact_record", _fake_prepare)
+    out = tools.salesforce_contact_record_preview(
+        {"entity": "City of East Providence", "state": "RI"}, "U1", "W", "C", "T"
+    )
+    assert captured["lead_id"] == lead_id  # resolved by name, never asked for
+    assert not out.startswith("ERROR")
+
+
+def test_contact_preview_unresolved_entity_is_honest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An org name with no lead returns the honest resolver error, no write attempt."""
+    conn = db.connect(tmp_path / "p.db")  # empty
+    monkeypatch.setattr(tools.db, "connect", lambda *a, **k: conn)
+    out = tools.salesforce_contact_record_preview(
+        {"entity": "Nonexistent City"}, "U1", "W", "C", "T"
+    )
+    assert out.startswith("ERROR") and "no Grant lead is named" in out

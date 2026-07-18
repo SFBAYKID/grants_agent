@@ -567,14 +567,18 @@ def test_verified_contact_preferred_over_linkedin(tmp_path: Path) -> None:
 
 
 def test_contact_record_tool_schema_exposed() -> None:
-    """The Slack tool schema exists with lead_id as its only required input."""
+    """The tool schema accepts a lead_id OR an entity name (no hard-required id)."""
     from grant_watch.slack import tools
 
     schema = next(
         s for s in tools.TOOL_SCHEMAS
         if s["name"] == "salesforce_contact_record_preview"
     )
-    assert schema["input_schema"]["required"] == ["lead_id"]
+    props = schema["input_schema"]["properties"]
+    assert "lead_id" in props and "entity" in props and "state" in props
+    # lead_id is no longer hard-required — a natural "add <person> to Salesforce"
+    # resolves the lead from the org name instead of demanding a number.
+    assert "required" not in schema["input_schema"]
 
 
 def test_find_person_linkedin_persists_with_lead(

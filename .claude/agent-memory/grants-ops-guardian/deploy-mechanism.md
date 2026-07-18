@@ -17,6 +17,18 @@ The droplet checkout is NOT a git working tree — `~/grants_agent` has no `.git
 
 **Proven full-tree rsync recipe (2026-07-16: 3d653c6 → 25513bc; re-proven 2026-07-17: 25513bc → 9db96d0, 9db96d0 → 36d2470, 36d2470 → 6ea70f2, 6ea70f2 → c714b01, and c714b01 → 50acadd, and 2026-07-17 ed261ff → e6df182 = 14 files [15 delta minus `.env.example`, which the `.env.*` exclude correctly skips], zero deletions each time; Chase-approved, all verified):**
 
+**2026-07-18 d9a2a90 → 9740787 (2-file, all verified):** clean forward deploy via `deploy_rsync.sh`
+(bash, persisted scratchpad helper). `git diff --name-status d9a2a90..9740787` = 3 paths but one was
+the guardian-memory `deploy-mechanism.md` (excluded by `.claude`), so deployable delta = exactly 2
+tracked files (`grant_watch/enrich/finder.py` + `tests/test_enrich.py` — same file pair as the earlier
+c6399aa→8a14987 deploy). `-cain` dry-run showed the 2 as `<fcst....` + benign `.d..t....` dir touches on
+`grant_watch/enrich/` and `tests/`, ZERO deleting lines; 2nd dry-run after real run EMPTY (idempotent).
+Working tree clean at HEAD. `find -cnewer` listed exactly the 2; remote sha256 == local blobs
+(finder=c60c407b…, test=087bc8a2…). `.env`(07-17T15:01)/`run_bot.sh`(07-16T02:05) mtimes untouched.
+`.deployed_revision` stamped full hash via `printf|ssh 'cat >'`. Import smoke (grant + enrich.finder)
+OK under tenant venv BEFORE kill. Restart (pkill + `nohup bash run_bot.sh` via proven remote_restart.sh):
+OLDPID 97424 dead → new single PID 834360, "⚡️ Bolt app is running!", NO_TRACEBACK, count=1 stable.
+
 **2026-07-18 8a14987 → d9a2a90 (4-file, all verified):** clean forward deploy via `deploy_rsync.sh`
 (bash). `git diff --name-status 8a14987..d9a2a90` = 5 paths but one was the guardian-memory
 `deploy-mechanism.md` (excluded by `.claude`), so deployable delta = exactly 4 tracked files
