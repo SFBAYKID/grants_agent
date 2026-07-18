@@ -210,6 +210,25 @@ def test_first_email_request_can_only_offer_persequor() -> None:
     assert "Sending now" not in output["reply"]
 
 
+def test_compound_ask_results_survive_the_email_boundary() -> None:
+    """Search/contact work in the same reply is kept; only the send is gated.
+
+    Live failure 2026-07-18 (campaign Run 5): "find X, get the contact, add to
+    Salesforce, and email them" produced real search + contact output that the
+    old normalization threw away, leaving the rep with only a refusal."""
+    output = conversation._normalize_action_intent(
+        "find the newest gold school lead in Texas and email them",
+        None,
+        {
+            "intent": "question",
+            "reply": "Top lead: Alief ISD — $463,781 SVPP (Lead #7845).",
+        },
+    )
+    assert output["intent"] == "offer_persequor"
+    assert "Alief ISD" in output["reply"]  # the real work survives
+    assert "Want me to have Persequor draft" in output["reply"]
+
+
 def test_reply_to_prior_persequor_offer_becomes_draft_request() -> None:
     """A clear follow-up confirmation reaches the server-side handoff path."""
     output = conversation._normalize_action_intent(

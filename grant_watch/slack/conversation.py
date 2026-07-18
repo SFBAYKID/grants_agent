@@ -408,10 +408,27 @@ def _normalize_action_intent(
             output["intent"] = "draft_email"
         else:
             output["intent"] = "offer_persequor"
-            output["reply"] = (
+            boundary = (
                 "I don’t send email directly. Want me to have Persequor draft the "
                 "intro email for your review?"
             )
+            existing = str(output.get("reply") or "").strip()
+            claims_send = bool(
+                re.search(
+                    r"\bsend(?:ing)?\b.{0,30}\bnow\b|\bemail (?:was |has been )?sent\b|"
+                    r"\bI(?:'|’)?ve sent\b|\bI sent\b|\bjust sent\b",
+                    existing,
+                    re.IGNORECASE,
+                )
+            )
+            # Never discard real work: a compound ask ("find X, get the contact,
+            # and email them") produces search/contact results in the same reply —
+            # keep them and append the email boundary. But a false claim that a
+            # send is happening can never survive; it is replaced outright.
+            if existing and not claims_send and "persequor" not in existing.lower():
+                output["reply"] = existing + "\n\n" + boundary
+            elif not existing or claims_send:
+                output["reply"] = boundary
     elif intent == "offer_persequor":
         # A model may append a helpful outreach offer after an unrelated answer, but
         # intent drives server behavior and must reflect what the human actually asked.
