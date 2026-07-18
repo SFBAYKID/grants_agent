@@ -49,17 +49,78 @@ class SourceUnreachable(RuntimeError):
 
 
 # Titles that own security-funding decisions, in rough priority order (CLAUDE.md).
-TARGET_TITLES = (
+# A city award and a school award have DIFFERENT decision-makers — a "superintendent"
+# or "principal" is the wrong entity for a City of X award — so the target titles and
+# search angles are chosen by org kind (see _org_kind).
+_SCHOOL_TITLES = (
     "technology director",
     "director of technology",
     "it director",
+    "chief technology officer",
     "superintendent",
     "director of facilities",
     "facilities director",
     "business manager",
     "operations director",
-    "city manager",
+    "director of operations",
 )
+_CITY_TITLES = (
+    "city manager",
+    "town manager",
+    "city administrator",
+    "it director",
+    "information technology director",
+    "director of information technology",
+    "chief of police",
+    "police chief",
+    "public works director",
+    "director of public works",
+    "facilities director",
+    "director of facilities",
+    "emergency management director",
+    "city clerk",
+    "finance director",
+    "mayor",
+)
+# Kept for back-compat; the school set is the SVPP default (most awards are schools).
+TARGET_TITLES = _SCHOOL_TITLES
+
+# entity_type is frequently blank on the lead row (both City of Salmon and City of
+# East Providence had it empty), so the kind is inferred from the name instead.
+_SCHOOL_NAME_RE = re.compile(
+    r"\b(?:school|schools|district|isd|usd|cusd|unified|academy|college|"
+    r"university|elementary|high\s+school|k-?12|charter|education|regional)\b",
+    re.IGNORECASE,
+)
+_CITY_NAME_RE = re.compile(
+    r"\b(?:city|town|village|borough|township|municipal(?:ity)?|county)\b",
+    re.IGNORECASE,
+)
+# Unambiguous school signals for rejecting a school person on a CITY lead. Narrower
+# than _SCHOOL_NAME_RE on purpose (no "district"/"regional"/"education", which can
+# appear in legitimate city roles like a council district or economic development).
+_SCHOOL_ROLE_RE = re.compile(
+    r"\b(?:school|schools|superintendent|principal|isd|k-?12|elementary|academy)\b",
+    re.IGNORECASE,
+)
+
+
+def _org_kind(entity: str) -> str:
+    """'city' for a municipal government, else 'school' (the SVPP default).
+
+    School words win a tie (e.g. "X County School District" is a school), so the
+    school pattern is checked first."""
+    name = str(entity or "")
+    if _SCHOOL_NAME_RE.search(name):
+        return "school"
+    if _CITY_NAME_RE.search(name):
+        return "city"
+    return "school"
+
+
+def _titles_for(entity: str) -> tuple[str, ...]:
+    """Decision-maker titles matched to the org kind (city vs school)."""
+    return _CITY_TITLES if _org_kind(entity) == "city" else _SCHOOL_TITLES
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
@@ -225,10 +286,11 @@ def _scrape(url: str) -> str:
 def _extract(page_text: str, entity: str, source_url: str) -> ContactCandidate | None:
     """Claude reads ONE page; code verifies every claim against the same page."""
     client = Anthropic()
+    titles = _titles_for(entity)
     prompt = (
         f'Below is a page from the website of (or about) "{entity}". Find the best '
         f"contact for technology / security-funding decisions. Priority titles: "
-        f"{', '.join(TARGET_TITLES)}.\n\n"
+        f"{', '.join(titles)}.\n\n"
         f"Rules: use ONLY this page's text. The email must be copied EXACTLY as it "
         f"appears. If no suitable person+email is on this page, return null.\n\n"
         f'Respond with ONLY JSON: {{"name": "...", "title": "...", '
@@ -255,7 +317,7 @@ def _extract(page_text: str, entity: str, source_url: str) -> ContactCandidate |
     title = proposed_title if _text_field_on_page(page_text, proposed_title) else ""
     phone = proposed_phone if _phone_on_page(page_text, proposed_phone) else ""
     confidence = (
-        "high" if title and any(t in title.lower() for t in TARGET_TITLES) else "medium"
+        "high" if title and any(t in title.lower() for t in titles) else "medium"
     )
     return ContactCandidate(
         name=name,
@@ -275,13 +337,26 @@ def _extract(page_text: str, entity: str, source_url: str) -> ContactCandidate |
 
 
 # Title-targeted searches, most decision-relevant first. Multiple angles because a
-# district site may hide emails on one page but expose them on the staff directory.
-_SEARCH_ANGLES = (
+# site may hide emails on one page but expose them on the staff directory. The angle
+# set is chosen by org kind so a City award searches city-government roles, not
+# superintendents/principals.
+_SCHOOL_ANGLES = (
     "{entity} {state} technology director email",
     "{entity} {state} superintendent contact email",
     "{entity} {state} staff directory",
     "{entity} {state} principal contact",
 )
+_CITY_ANGLES = (
+    "{entity} {state} city manager email",
+    "{entity} {state} IT director email",
+    "{entity} {state} city hall staff directory",
+    "{entity} {state} police chief contact",
+)
+
+
+def _angles_for(entity: str) -> tuple[str, ...]:
+    """Search angles matched to the org kind (city vs school)."""
+    return _CITY_ANGLES if _org_kind(entity) == "city" else _SCHOOL_ANGLES
 
 
 def find_contact(
@@ -306,7 +381,7 @@ def find_contact(
     pages_read = 0  # real (>=200 char) pages we actually scraped
     clean_extractions = 0  # extractions that completed (gave a definite yes/no)
     official_domain = ""
-    for angle in _SEARCH_ANGLES:
+    for angle in _angles_for(entity):
         query = angle.format(entity=entity, state=state)
         try:
             results = _search(query, limit=4)
@@ -361,10 +436,13 @@ def linkedin_person(
     for LinkedIn reads like 'Name - Title - Org | LinkedIn'."""
     say = on_progress or _NOOP
     say("Checking LinkedIn")
-    query = (
-        f"site:linkedin.com/in {entity} {state} "
-        f"technology director OR superintendent OR principal"
+    roles = (
+        "city manager OR IT director OR chief of police OR public works director"
+        if _org_kind(entity) == "city"
+        else "technology director OR superintendent OR principal"
     )
+    query = f"site:linkedin.com/in {entity} {state} {roles}"
+    is_city = _org_kind(entity) == "city"
     try:
         results = _search(query, limit=5)
     except (requests.RequestException, RuntimeError):
@@ -377,6 +455,13 @@ def linkedin_person(
         parts = [p.strip() for p in title.split(" - ")]
         name = parts[0] if parts else ""
         role = parts[1] if len(parts) > 1 else ""
+        # For a city lead, a school person (a "Superintendent", or a role naming a
+        # "School District") is the wrong entity — skip rather than attach a
+        # mismatched contact (live 2026-07-18: East Providence surfaced the school
+        # district's IT director for a city award).
+        context = " ".join(parts[1:]).lower()
+        if is_city and _SCHOOL_ROLE_RE.search(context):
+            continue
         if name:
             say(f"Found {name} on LinkedIn")
             return {"name": name, "title": role, "url": url}

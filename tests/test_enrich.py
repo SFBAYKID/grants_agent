@@ -42,6 +42,62 @@ def _lead(tmp_path: Path) -> tuple[sqlite3.Connection, int]:
     return conn, int(conn.execute("SELECT id FROM leads").fetchone()["id"])
 
 
+@pytest.mark.parametrize(
+    "entity, kind",
+    [
+        ("City of East Providence", "city"),
+        ("City of Salmon", "city"),
+        ("Town of Kemah", "city"),
+        ("Jefferson County", "city"),
+        ("Tallapoosa Co School District", "school"),
+        ("Alief ISD", "school"),
+        ("Birmingham Community Charter High School", "school"),
+        ("Dekalb County School District", "school"),  # school words win the tie
+        ("Mars Hill Bible School", "school"),
+    ],
+)
+def test_org_kind_classifies_city_vs_school(entity: str, kind: str) -> None:
+    """City awards must not be treated as schools when picking a contact."""
+    assert finder._org_kind(entity) == kind
+    titles = finder._titles_for(entity)
+    if kind == "city":
+        assert "city manager" in titles and "superintendent" not in titles
+    else:
+        assert "superintendent" in titles
+
+
+def test_linkedin_person_targets_city_roles_and_skips_school_people(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A city lead searches city roles and never attaches a school person.
+
+    Live 2026-07-18: East Providence (a city award) surfaced the school district's
+    IT director; a city award should reach a city official instead."""
+    captured: dict[str, str] = {}
+
+    def _fake_search(query: str, limit: int = 5) -> list[dict[str, str]]:
+        """Return a school person first, then a city official."""
+        captured["query"] = query
+        return [
+            {
+                "url": "https://www.linkedin.com/in/sam-super",
+                "title": "Sam Super - Superintendent - East Providence "
+                "School District | LinkedIn",
+            },
+            {
+                "url": "https://www.linkedin.com/in/pat-citymgr",
+                "title": "Pat Manager - City Manager - City of East "
+                "Providence | LinkedIn",
+            },
+        ]
+
+    monkeypatch.setattr(finder, "_search", _fake_search)
+    out = finder.linkedin_person("City of East Providence", "RI")
+    assert "city manager" in captured["query"].lower()
+    assert out is not None
+    assert out["name"] == "Pat Manager"  # the school superintendent was skipped
+
+
 def test_find_contact_reports_org_address_for_linkedin_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

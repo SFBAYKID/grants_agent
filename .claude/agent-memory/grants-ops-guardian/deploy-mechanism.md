@@ -17,6 +17,18 @@ The droplet checkout is NOT a git working tree — `~/grants_agent` has no `.git
 
 **Proven full-tree rsync recipe (2026-07-16: 3d653c6 → 25513bc; re-proven 2026-07-17: 25513bc → 9db96d0, 9db96d0 → 36d2470, 36d2470 → 6ea70f2, 6ea70f2 → c714b01, and c714b01 → 50acadd, and 2026-07-17 ed261ff → e6df182 = 14 files [15 delta minus `.env.example`, which the `.env.*` exclude correctly skips], zero deletions each time; Chase-approved, all verified):**
 
+**2026-07-18 8a14987 → d9a2a90 (4-file, all verified):** clean forward deploy via `deploy_rsync.sh`
+(bash). `git diff --name-status 8a14987..d9a2a90` = 5 paths but one was the guardian-memory
+`deploy-mechanism.md` (excluded by `.claude`), so deployable delta = exactly 4 tracked files
+(slack/conversation.py + slack/tools.py + tests/test_conversation_intents.py + tests/test_enrich.py).
+`-cain` dry-run showed the 4 as `<fcst....` + benign `.d..t....` dir touches on slack/ and tests/,
+ZERO deleting lines; working tree clean at HEAD (start-of-session `git status` snapshot stale as
+usual). `find -cnewer` listed exactly the 4; all 4 remote sha256 == local d9a2a90 blobs; 2nd dry-run
+after real run was EMPTY (idempotent). `.env`(07-17T15:01)/`run_bot.sh`(07-16T02:05) mtimes untouched;
+`grant_watch.db` 07-18T12:00 = live tenant activity (excluded). `.deployed_revision` stamped full hash
+via printf|ssh. Restart per task (pkill + `run_bot.sh` self-nohup): OLDPID 3277487 dead in 1s → new
+single PID 97424, "⚡️ Bolt app is running!", NO_TRACEBACK, PID_COUNT=1 stable at 20s.
+
 **2026-07-18 c6399aa → 8a14987 (2-file, all verified):** clean forward deploy via `deploy_rsync.sh`
 (bash, `-cain`/`-cai --delete`). `git diff --name-status c6399aa..8a14987` = 3 paths but one was
 `.claude/agent-memory/.../deploy-mechanism.md` (guardian memory, excluded by `.claude`), so deployable
