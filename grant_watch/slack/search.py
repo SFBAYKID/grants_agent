@@ -260,8 +260,9 @@ def _date_clause(
         )
     if not date_field:
         raise ValueError("date_field is required with date_from/date_to")
-    if not date_from and not date_to:
-        raise ValueError("date_from or date_to is required with date_field")
+    # date_field with no range is a valid sort-only ask ("newest verified award
+    # announcements"): restrict to rows where that date meaning applies and order
+    # by the field's canonical direction, with no range predicate.
     if date_from and date_to and date_from > date_to:
         raise ValueError("date_from cannot be after date_to")
 

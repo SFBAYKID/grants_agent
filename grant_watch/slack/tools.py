@@ -363,9 +363,12 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "spend_end",
                         "award_received",
                     ],
-                    "description": "Meaning of date_from/date_to. award_received "
-                    "filters on the verified announced/obligated event date — "
-                    "disclose that it is not a funds-received date.",
+                    "description": "Date meaning to filter and/or sort by. With "
+                    "date_from/date_to it filters that range; alone it sorts by "
+                    "that date (e.g. newest verified awards first) — no range "
+                    "required. award_received uses the verified announced/"
+                    "obligated event date — disclose that it is not a "
+                    "funds-received date.",
                 },
                 "date_from": {"type": "string", "description": "inclusive YYYY-MM-DD"},
                 "date_to": {"type": "string", "description": "inclusive YYYY-MM-DD"},

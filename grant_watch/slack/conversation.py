@@ -17,6 +17,8 @@ import json
 import os
 import re
 import sqlite3
+import sys
+import traceback
 from datetime import date
 from typing import Any  # Anthropic tool-use response payloads are runtime-shaped.
 
@@ -568,8 +570,11 @@ def respond(
     ]
     files: list[GeneratedArtifact] = []
     pending_actions: list[dict[str, str]] = []
+    # Results (including errors) are cached by name+args only, so a repeat of the
+    # IDENTICAL call is served from cache while a corrected call re-executes. A
+    # name-keyed error cache proved fatal live: one validation error bricked every
+    # corrected retry of that tool and drained the whole turn budget.
     tool_result_cache: dict[str, str] = {}
-    tool_error_cache: dict[str, str] = {}
     single_execution_cache: dict[str, str] = {}
     model = os.environ.get("GRANT_MODEL", DEFAULT_MODEL)
     search_confirmed = _search_plan_confirmed(user_text, thread_context)
@@ -634,11 +639,16 @@ def respond(
                     }
                 tool_args = dict(block.input)
                 cache_key = f"{block.name}:{json.dumps(tool_args, sort_keys=True)}"
+                # Server-side breadcrumb (bot.log): without it a failed turn leaves
+                # no record of which tools ran — proven undiagnosable live.
+                print(
+                    f"[tool-turn {turn_index}] {cache_key[:300]}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 single_execution_key = _single_execution_tool_key(block.name, tool_args)
                 if single_execution_key in single_execution_cache:
                     text = single_execution_cache[single_execution_key]
-                elif block.name in tool_error_cache:
-                    text = tool_error_cache[block.name]
                 elif cache_key in tool_result_cache:
                     text = tool_result_cache[cache_key]
                 else:
@@ -665,8 +675,6 @@ def respond(
                     tool_result_cache[cache_key] = text
                     if single_execution_key:
                         single_execution_cache[single_execution_key] = text
-                    if text.startswith("ERROR:"):
-                        tool_error_cache[block.name] = text
                 results.append(
                     {"type": "tool_result", "tool_use_id": block.id, "content": text}
                 )
@@ -676,6 +684,44 @@ def respond(
             artifact.cleanup()
         raise
 
+    # Tool budget exhausted mid-flow. Instead of a dead-end apology, force ONE
+    # final no-tools turn so the user gets an honest summary of what the tools
+    # actually returned. The instruction rides in the last tool_result message
+    # (a user message may mix tool_result and text blocks).
+    try:
+        messages[-1]["content"].append(
+            {
+                "type": "text",
+                "text": (
+                    "Tool budget for this turn is exhausted; you cannot call more "
+                    "tools. Using ONLY the tool results above, give your best "
+                    "final answer now: report honestly what was found, say plainly "
+                    "what you could not check, and suggest one narrower follow-up. "
+                    "Never invent data. Return the required intent/reply JSON."
+                ),
+            }
+        )
+        msg = client.messages.create(
+            model=model, max_tokens=1500, system=_SYSTEM, messages=messages
+        )
+        raw = "".join(b.text for b in msg.content if b.type == "text")
+        if raw.strip():
+            out = _finalize_unconfirmed_search_plan(
+                _repair_missing_search_plan(
+                    user_text,
+                    _normalize_action_intent(
+                        user_text, thread_context, _parse_final(raw)
+                    ),
+                    search_confirmed,
+                ),
+                search_confirmed,
+            )
+            out["files"] = files
+            out["pending_crm_actions"] = pending_actions
+            return out
+    except Exception:  # noqa: BLE001 — degraded path; fall back to the honest stub
+        print("[tool-error] exhaustion finalizer failed:", file=sys.stderr)
+        traceback.print_exc()
     return {
         "intent": "question",
         "files": files,

@@ -191,3 +191,125 @@ def test_paid_web_search_executes_once_even_when_model_changes_query(
     monkeypatch.setattr(tools, "run_tool", fake_run_tool)
     conversation.respond("Find news about this school.", None)
     assert executions == ["school security news 1"]
+
+
+def test_corrected_tool_arguments_reexecute_after_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One validation error must not brick the tool for corrected retries.
+
+    Live failure 2026-07-18: search_leads errored once on bad arguments and the
+    name-keyed error cache then served that same error to every corrected call,
+    draining all tool turns. A corrected call must actually execute."""
+
+    class FakeMessages:
+        """Retry a failed tool with corrected arguments, then summarize."""
+
+        calls = 0
+
+        def create(self, **_kwargs: object) -> object:
+            """Emit a bad call, then a corrected call, then final JSON."""
+            self.calls += 1
+            if self.calls <= 2:
+                block = SimpleNamespace(
+                    type="tool_use",
+                    name="lead_stats",
+                    input=(
+                        {"state": "TX", "bogus": "x"}
+                        if self.calls == 1
+                        else {"state": "TX"}
+                    ),
+                    id=f"tool-{self.calls}",
+                )
+                return SimpleNamespace(stop_reason="tool_use", content=[block])
+            return SimpleNamespace(
+                stop_reason="end_turn",
+                content=[
+                    SimpleNamespace(
+                        type="text",
+                        text='{"intent":"question","reply":"Texas counts ready."}',
+                    )
+                ],
+            )
+
+    class FakeAnthropic:
+        """Expose the error-then-corrected model script."""
+
+        def __init__(self) -> None:
+            """Initialize its messages resource."""
+            self.messages = FakeMessages()
+
+    executions: list[dict[str, object]] = []
+
+    def fake_run_tool(
+        _name: str, args: dict[str, object], *_pos: object, **_kw: object
+    ) -> tuple[str, None]:
+        """Error on the bogus call; succeed on the corrected one."""
+        executions.append(args)
+        if "bogus" in args:
+            return "ERROR: unknown argument bogus.", None
+        return "Counts available.", None
+
+    monkeypatch.setattr(conversation, "Anthropic", FakeAnthropic)
+    monkeypatch.setattr(tools, "run_tool", fake_run_tool)
+    output = conversation.respond("How many Texas leads do we have?", None)
+    assert len(executions) == 2  # the corrected call really ran
+    assert executions[1] == {"state": "TX"}
+    assert output["reply"] == "Texas counts ready."
+
+
+def test_tool_budget_exhaustion_forces_final_no_tools_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Draining every tool turn ends in an honest model summary, not a dead end."""
+
+    class FakeMessages:
+        """Call tools forever until the loop forces a final no-tools answer."""
+
+        calls = 0
+        finalizer_seen = False
+
+        def create(self, **kwargs: object) -> object:
+            """Return tool_use whenever tools are offered; else final JSON."""
+            self.calls += 1
+            if "tools" in kwargs:
+                block = SimpleNamespace(
+                    type="tool_use",
+                    name="lead_stats",
+                    input={"state": f"S{self.calls}"},  # always novel: no cache
+                    id=f"tool-{self.calls}",
+                )
+                return SimpleNamespace(stop_reason="tool_use", content=[block])
+            FakeMessages.finalizer_seen = True
+            return SimpleNamespace(
+                stop_reason="end_turn",
+                content=[
+                    SimpleNamespace(
+                        type="text",
+                        text=(
+                            '{"intent":"question","reply":"Here is what the '
+                            'stats showed so far; one thing went unchecked."}'
+                        ),
+                    )
+                ],
+            )
+
+    class FakeAnthropic:
+        """Expose the never-finishing model script."""
+
+        def __init__(self) -> None:
+            """Initialize its messages resource."""
+            self.messages = FakeMessages()
+
+    def fake_run_tool(
+        _name: str, _args: dict[str, object], *_pos: object, **_kw: object
+    ) -> tuple[str, None]:
+        """Return a bland result that never satisfies the scripted model."""
+        return "Counts available.", None
+
+    monkeypatch.setattr(conversation, "Anthropic", FakeAnthropic)
+    monkeypatch.setattr(tools, "run_tool", fake_run_tool)
+    output = conversation.respond("Compare every state.", None)
+    assert FakeMessages.finalizer_seen  # the no-tools finalizer actually ran
+    assert "what the stats showed" in output["reply"]
+    assert "hit my limit" not in output["reply"]

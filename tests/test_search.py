@@ -309,6 +309,21 @@ def test_award_received_uses_verified_event_date_with_coverage_disclosure(
     assert artifact is None
 
 
+def test_award_received_without_range_sorts_newest_first(tmp_path: Path) -> None:
+    """A sort-only date_field is a valid ask, not an error.
+
+    Live failure 2026-07-18: "newest verified award announcements" produced
+    date_field with no range, which errored and drained the tool loop. It must
+    return verified award rows ordered by event date, newest first."""
+    text, artifact = search_leads(
+        date_field="award_received",
+        db_path=_db(tmp_path),
+    )
+    assert "ERROR" not in text
+    assert "Modesto City Schools" in text  # the verified award event row
+    assert artifact is None
+
+
 def test_record_kind_uses_event_truth_not_projection_grade(tmp_path: Path) -> None:
     """An award remains an award when a projection grade changes independently."""
     path = _db(tmp_path)
