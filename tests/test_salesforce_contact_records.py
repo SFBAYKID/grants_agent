@@ -334,6 +334,10 @@ def test_confirm_creates_lead_then_task_with_whoid(tmp_path: Path) -> None:
     assert "Jane Smith" in str(task["Description"])
     stored = conn.execute("SELECT campaign_id,state FROM crm_actions").fetchone()
     assert tuple(stored) == (LEAD_SF_ID, "complete")
+    # The success message carries a clickable link to the record, not a raw id
+    # (Chase 2026-07-18).
+    assert f"<{_link('Lead', LEAD_SF_ID)}|" in result.message
+    assert f"(id {LEAD_SF_ID})" not in result.message
 
 
 def test_existing_single_high_match_attaches_task_only(tmp_path: Path) -> None:

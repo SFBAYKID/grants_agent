@@ -797,10 +797,13 @@ def confirm_contact_record(
         CampaignActionState.COMPLETE,
         campaign_id=lead_result.record_id,
     )
+    # Give the rep a clickable link straight to the record, not a raw id (Chase).
+    link = record.link or gateway.lightning_link("Lead", lead_result.record_id)
+    where = f"<{link}|Open it in Salesforce>" if link else f"id {lead_result.record_id}"
     return ActionExecution(
         CampaignActionState.COMPLETE,
-        f"Created Salesforce Lead {lead_name} (id {lead_result.record_id}), logged "
-        f"the completed Grant activity, and added a context Note{note_note}.",
+        f"Created Salesforce Lead {lead_name}. {where}. I also logged the completed "
+        f"Grant activity and added a context Note{note_note}.",
         campaign_id=lead_result.record_id,
         added=1,
     )
