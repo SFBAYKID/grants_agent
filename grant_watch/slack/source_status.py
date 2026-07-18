@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
@@ -369,11 +370,57 @@ _COVERAGE_WORDS = (
 )
 _BATCH_STATUS_WORDS = {
     "success": "completed",
-    "zero_results": "no results",
+    "zero_results": "came back empty",
     "non_retryable_failure": "failed",
-    "retryable_failure": "failed (will retry)",
+    "retryable_failure": "failed but will retry",
     "in_flight": "still running",
 }
+# Sentence fragments for reviewed-source integration stages: each reads naturally
+# after "…, and". Unknown values fall back to the raw safe-escaped token.
+_STAGE_SENTENCES = {
+    "discovered": "we've found it but haven't checked it yet",
+    "access_checked": "we've confirmed access but haven't built a feed yet",
+    "parser_tested": "its parser has been tested",
+    "live_zero_verified": "it's live but hasn't found security matches yet",
+    "live_positive_verified": "it's live and finding matches",
+}
+_COUNT_WORDS = (
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+)
+
+
+def _count_phrase(count: int) -> str:
+    """Spell small counts in words so sentences read like a colleague wrote them."""
+    return _COUNT_WORDS[count] if 0 <= count <= 10 else f"{count:,}"
+
+
+def _plural(count: int, singular: str, plural: str) -> str:
+    """Pick the grammatical form matching one exact count."""
+    return singular if count == 1 else plural
+
+
+def _article(noun_phrase: str) -> str:
+    """Choose a/an for the following noun phrase without overthinking edge cases."""
+    return "an" if noun_phrase[:1].lower() in "aeiou" else "a"
+
+
+def _human_date(iso_date: str) -> str:
+    """Turn '2026-07-16' into 'July 16, 2026' without inventing a date on bad input."""
+    try:
+        parsed = date.fromisoformat(iso_date)
+    except ValueError:
+        return _safe_text(iso_date)
+    return f"{parsed.strftime('%B')} {parsed.day}, {parsed.year}"
 
 
 def _coverage_line(label: str, counts: Counter[str]) -> str:
@@ -423,11 +470,25 @@ def _render_reviewed_sources(
         seen.add(entry.source_id)
         reviewed.append((check, entry))
     scope = f" in {state}" if state else ""
-    lines = [
-        f"Reviewed sources{scope} "
-        f"(showing {min(limit, len(reviewed))} of {len(reviewed)}):"
-    ]
-    for index, (check, entry) in enumerate(reviewed[:limit], start=1):
+    if not reviewed:
+        return (
+            f"I haven't reviewed any sources{scope} matching those filters yet — "
+            "want to see the research coverage instead?"
+        )
+    shown = reviewed[:limit]
+    if len(reviewed) > len(shown):
+        opener = (
+            f"Here are the {_count_phrase(len(shown))} most recently reviewed "
+            f"sources{scope} — we've reviewed {_count_phrase(len(reviewed))} in all:"
+        )
+    else:
+        newest = ", newest first" if len(shown) > 1 else ""
+        opener = (
+            f"Here {_plural(len(shown), 'is', 'are')} the {_count_phrase(len(shown))} "
+            f"{_plural(len(shown), 'source', 'sources')} we've reviewed{scope}{newest}:"
+        )
+    lines = [opener]
+    for index, (check, entry) in enumerate(shown, start=1):
         level = _safe_text(entry.jurisdiction_level.value.replace("_", " "))
         mode = _ACCESS_MODE_WORDS.get(
             entry.access_mode.value, _safe_text(entry.access_mode.value)
@@ -435,20 +496,22 @@ def _render_reviewed_sources(
         access_status = _ACCESS_STATUS_WORDS.get(
             entry.access_status.value, _safe_text(entry.access_status.value)
         )
-        stage = _INTEGRATION_WORDS.get(
-            entry.integration_status.value, _safe_text(entry.integration_status.value)
+        stage = _STAGE_SENTENCES.get(
+            entry.integration_status.value,
+            _INTEGRATION_WORDS.get(
+                entry.integration_status.value,
+                _safe_text(entry.integration_status.value),
+            ),
         )
         lines.append(
-            f"{index}. {_safe_text(entry.name)} — {level} source. "
-            f"Access: {mode} ({access_status}). "
-            f"Status: {stage}. Reviewed {_safe_text(check.checked_on)}. "
+            f"{index}. {_safe_text(entry.name)} — {_article(level)} {level} source "
+            f"we reviewed on {_human_date(check.checked_on)}. "
+            f"Access is {mode} ({access_status}), and {stage}. "
             f"{_safe_url(entry.url)}"
         )
-    if not reviewed:
-        lines.append("- No reviewed sources matched those filters.")
     lines.append(
         "These are pages we've reviewed as candidates — not live feeds or leads "
-        'unless the status says "live".'
+        "unless we say a source is live."
     )
     return "\n".join(lines)
 
@@ -459,6 +522,49 @@ def _batch_date(batch_id: str) -> str:
     if match:
         return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
     return _safe_text(batch_id)
+
+
+def _batch_status_phrase(statuses: Counter[str]) -> str:
+    """Describe search outcomes in words, keeping every non-success state visible."""
+    named = (
+        "success",
+        "zero_results",
+        "retryable_failure",
+        "non_retryable_failure",
+        "in_flight",
+    )
+    parts = [
+        f"{_count_phrase(statuses[key])} {_BATCH_STATUS_WORDS[key]}"
+        for key in named
+        if statuses.get(key)
+    ]
+    parts.extend(
+        f"{_count_phrase(count)} {_safe_text(status)}"
+        for status, count in sorted(statuses.items())
+        if status not in named
+    )
+    return ", ".join(parts)
+
+
+def _batch_search_counts(task_count: int, attempt_count: int) -> str:
+    """Say how many searches ran, mentioning retries only when they happened."""
+    phrase = f"{_count_phrase(task_count)} {_plural(task_count, 'search', 'searches')}"
+    if attempt_count != task_count:
+        phrase += (
+            f" over {_count_phrase(attempt_count)} "
+            f"{_plural(attempt_count, 'attempt', 'attempts')}"
+        )
+    return phrase
+
+
+def _batch_result_counts(result_count: int) -> str:
+    """Report the exact result count in plain words, honest about zero."""
+    if result_count == 0:
+        return "found no results"
+    return (
+        f"found {_count_phrase(result_count)} potential "
+        f"{_plural(result_count, 'result', 'results')}"
+    )
 
 
 def _render_recent_batches(
@@ -499,28 +605,53 @@ def _render_recent_batches(
             )
             statuses = Counter(item.terminal_status for item in checkpoints)
         rows.append((manifest, len(checkpoints), attempt_count, result_count, statuses))
-    lines = [
-        f"Recent discovery batches (showing {min(limit, len(rows))} of {len(rows)}):"
-    ]
-    for manifest, task_count, attempt_count, result_count, status_counts in rows[
-        :limit
-    ]:
-        statuses = ", ".join(
-            f"{count} {_BATCH_STATUS_WORDS.get(status, _safe_text(status))}"
-            for status, count in sorted(status_counts.items())
-        )
-        outcome = f"; {statuses}" if statuses else ""
-        lines.append(
-            f"- Search from {_batch_date(manifest.batch_id)} — "
-            f"{task_count:,} searches, {attempt_count:,} attempts, "
-            f"{result_count:,} results{outcome}."
-        )
+    scope = f" for {state}" if state else ""
     if not rows:
-        lines.append("- No discovery batches matched those filters.")
+        return f"I haven't run any discovery searches{scope} matching those filters yet."
+    shown = rows[:limit]
+    if len(shown) == 1:
+        manifest, task_count, attempt_count, result_count, status_counts = shown[0]
+        completed = set(status_counts) == {"success"}
+        outcome = "" if completed else f" ({_batch_status_phrase(status_counts)})"
+        lines = [
+            f"I {'completed' if completed else 'ran'} one recent discovery search "
+            f"on {_human_date(_batch_date(manifest.batch_id))} and "
+            f"{_batch_result_counts(result_count)} across "
+            f"{_batch_search_counts(task_count, attempt_count)}{outcome}."
+        ]
+    else:
+        if len(rows) > len(shown):
+            lines = [
+                f"Here are my {_count_phrase(len(shown))} most recent discovery "
+                f"searches{scope} — I have {_count_phrase(len(rows))} stored in all:"
+            ]
+        else:
+            lines = [
+                f"Here are my {_count_phrase(len(shown))} most recent discovery "
+                f"searches{scope}, newest first:"
+            ]
+        for index, item in enumerate(shown, start=1):
+            manifest, task_count, attempt_count, result_count, status_counts = item
+            completed = set(status_counts) == {"success"}
+            outcome = "" if completed else f" ({_batch_status_phrase(status_counts)})"
+            lines.append(
+                f"{index}. On {_human_date(_batch_date(manifest.batch_id))} I "
+                f"{'completed' if completed else 'ran'} "
+                f"{_batch_search_counts(task_count, attempt_count)} and "
+                f"{_batch_result_counts(result_count)}{outcome}."
+            )
     lines.append(
         "These are raw search results, not reviewed sources — a completed search "
         "doesn't mean a source was reviewed or added."
     )
+    if state:
+        lines.append(
+            "Want me to show the newest leads, or list the sources we've reviewed?"
+        )
+    else:
+        lines.append(
+            "Want me to show the newest leads, or break these searches down by state?"
+        )
     return "\n".join(lines)
 
 
@@ -624,8 +755,11 @@ def slack_source_status_reply(
         return None
     if request.paid_execution_requested:
         return (
-            "I can show source discovery status, but paid discovery runs are disabled "
-            "in Slack until they have a separate admin approval workflow."
+            "I can't start a new discovery run from here — paid discovery runs are "
+            "disabled in Slack until they have a separate admin approval workflow. "
+            "What I can do right now: show the discovery status, research coverage "
+            "for any state, the sources we've reviewed, or the results of recent "
+            "searches — just ask."
         )
     return source_inventory_status(
         view=request.view,

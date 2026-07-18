@@ -65,11 +65,11 @@ def test_state_namespace_coverage_is_exact_and_does_not_claim_integration() -> N
 def test_reviewed_sources_expose_only_safe_reviewed_catalog_fields() -> None:
     """Reviewed-source UI omits raw queries, snippets, hashes, notes, and credentials."""
     text = status.source_inventory_status(view="reviewed_sources", state="NH", limit=5)
-    assert "showing 3 of 3" in text
+    assert "the three sources we've reviewed in NH" in text
     # Internal catalog slugs never surface to the human-facing answer.
     assert "nh.strafford_county.bids" not in text
-    assert "Access: open, no login (confirmed)" in text
-    assert "Status: access confirmed, no feed built yet" in text
+    assert "Access is open, no login (confirmed)" in text
+    assert "we've confirmed access but haven't built a feed yet" in text
     assert "county source" in text
     assert "https://co.strafford.nh.us/" in text
     lowered = text.lower()
@@ -89,9 +89,8 @@ def test_reviewed_sources_expose_only_safe_reviewed_catalog_fields() -> None:
 def test_recent_batch_ui_labels_legacy_and_search_success_truthfully() -> None:
     """A completed raw search never becomes a reviewed/promoted-source claim."""
     text = status.source_inventory_status(view="recent_batches")
-    assert "Search from 2026-07-16" in text
-    assert "27 searches, 27 attempts, 126 results" in text
-    assert "27 completed" in text
+    assert "I completed one recent discovery search on July 16, 2026" in text
+    assert "found 126 potential results across 27 searches" in text
     assert "raw search results, not reviewed sources" in text
     assert "doesn't mean a source was reviewed or added" in text
 
@@ -103,9 +102,8 @@ def test_recent_batch_state_and_namespace_filters_scope_the_counts() -> None:
         view="recent_batches", namespace="county"
     )
     for text in (state_text, county_text):
-        assert "9 searches, 9 attempts, 45 results" in text
-        assert "9 completed" in text
-        assert "126 results" not in text
+        assert "found 45 potential results across nine searches" in text
+        assert "126" not in text
 
 
 @pytest.mark.parametrize(
@@ -398,7 +396,8 @@ def test_batch_renderer_preserves_zero_failure_and_inflight_states(
         replace_checkpoint(batch_dir, checkpoint)
     paths = replace(status.DiscoveryStatusPaths(), batches=tmp_path)
     text = status.source_inventory_status(view="recent_batches", paths=paths)
-    assert "1 no results" in text
-    assert "1 failed" in text
-    assert "1 still running" in text
-    assert "3 searches, 3 attempts, 0 results" in text
+    assert "I ran one recent discovery search" in text
+    assert "found no results across three searches" in text
+    assert "one came back empty" in text
+    assert "one failed" in text
+    assert "one still running" in text
