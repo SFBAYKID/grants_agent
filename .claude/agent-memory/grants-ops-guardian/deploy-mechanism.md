@@ -27,6 +27,20 @@ hash. Bot restarted via `./run_bot.sh` (idempotent), old PID→new single PID, "
 0 tracebacks, PID stable after 18s. `HAS_CONTENT_NOTE True` under the tenant venv. No `.env`/DB/
 migration touched this deploy.
 
+**2026-07-18 baa71e3 → c6399aa (4-file, all verified):** clean forward deploy via `deploy_rsync.sh`
+(bash). `git diff --name-status baa71e3..c6399aa` = 5 paths but one was `.claude/agent-memory/.../
+deploy-mechanism.md` (guardian memory, excluded by `.claude`), so deployable delta = exactly 4 tracked
+files (presentation.py + persequor_client.py + enrich/salesforce_contact_records.py + test_outreach.py).
+`-cain` dry-run showed the 4 as `<fcst....` plus benign `.d..t....` touches on grant_watch/, enrich/,
+tests/; ZERO deleting lines. Working tree clean at HEAD (start-of-session git status snapshot stale as
+usual). `find -cnewer` listed exactly the 4; all 4 remote sha256 == local c6399aa blobs. Preserved-file
+mtimes unchanged: `.env`(07-17T15:01), `run_bot.sh`(07-16T02:05); `grant_watch.db` 07-18T12:00 = live
+tenant bot/cron activity, not the deploy (`*.db` excluded, zero rsync lines). Import smoke of all 3
+changed modules OK under tenant venv. `.deployed_revision` stamped full hash via ssh STDIN. Restart per
+task (pkill + `nohup bash run_bot.sh`): OLDPID 2611958 dead → new single PID 2947871, "Bolt app is
+running!", NO_TRACEBACK_OR_ERROR, PID_COUNT=1 stable on recheck. Note: BSD `ls -le` fails on the Linux
+droplet (swallowed by `2>/dev/null`) — use `stat -c` for remote mtimes.
+
 **2026-07-18 ecb1348 → baa71e3 (2-file, all verified):** clean forward deploy via `deploy_rsync.sh`
 (bash). `git diff --name-status ecb1348..baa71e3` = 3 files but one was `.claude/agent-memory/.../
 deploy-mechanism.md` (guardian memory, correctly excluded by `.claude`), so deployable delta = exactly

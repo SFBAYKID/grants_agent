@@ -202,12 +202,18 @@ def _search(query: str, limit: int = 5) -> list[dict[str, Any]]:
 
 
 def _scrape(url: str) -> str:
-    """One page -> markdown text ('' on failure — a failed scrape is not evidence)."""
+    """One page -> markdown text ('' on failure — a failed scrape is not evidence).
+
+    onlyMainContent=false so the page FOOTER is kept: an org's street address,
+    general mailbox, and phone almost always live in the footer / "Contact Us"
+    strip, which Firecrawl's default main-content mode strips out (live 2026-07-18:
+    the City of Melrose address was dropped this way, leaving the Lead with no
+    street)."""
     try:
         resp = requests.post(
             FIRECRAWL_SCRAPE,
             headers=_fc_headers(),
-            json={"url": url, "formats": ["markdown"]},
+            json={"url": url, "formats": ["markdown"], "onlyMainContent": False},
             timeout=60,
         )
         resp.raise_for_status()

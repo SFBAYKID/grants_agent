@@ -42,6 +42,39 @@ def _lead(tmp_path: Path) -> tuple[sqlite3.Connection, int]:
     return conn, int(conn.execute("SELECT id FROM leads").fetchone()["id"])
 
 
+def test_scrape_keeps_footer_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The scrape requests full-page content (onlyMainContent=false) so an org's
+    address / general email / phone in the FOOTER are not dropped (live 2026-07-18:
+    City of Melrose's street address was stripped by Firecrawl main-content mode)."""
+    captured: dict[str, object] = {}
+
+    class _Resp:
+        """Minimal Firecrawl response stub."""
+
+        def raise_for_status(self) -> None:
+            """No HTTP error."""
+
+        def json(self) -> dict[str, object]:
+            """Return markdown that includes footer text."""
+            return {"data": {"markdown": "562 Main Street, Melrose, MA 02176"}}
+
+    def _fake_post(
+        _url: str,
+        headers: object = None,
+        json: dict[str, object] | None = None,
+        timeout: int = 0,
+    ) -> _Resp:
+        """Capture the request body Firecrawl would receive."""
+        captured.update(json or {})
+        return _Resp()
+
+    monkeypatch.setattr(finder, "_fc_headers", lambda: {})
+    monkeypatch.setattr(finder.requests, "post", _fake_post)
+    out = finder._scrape("https://cityofmelrose.org/")
+    assert captured["onlyMainContent"] is False
+    assert "562 Main Street" in out
+
+
 # ------------------------------------------------------------ finder: reach vs not-found
 def test_finder_raises_unreachable_when_search_never_returns(
     monkeypatch: pytest.MonkeyPatch,
