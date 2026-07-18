@@ -34,6 +34,7 @@ from .search_planning import (
 from .search_planning import (
     finalize_unconfirmed_search_plan as _finalize_unconfirmed_search_plan,
 )
+from .search_planning import SCOPING_MARKER as _SCOPING_MARKER
 from .search_planning import repair_missing_search_plan as _repair_missing_search_plan
 from .search_planning import search_confirmation as _search_confirmation
 from .search_planning import search_plan_confirmed as _search_plan_confirmed
@@ -78,30 +79,33 @@ YOU HAVE TWO JOBS:
 
 ON-DEMAND SEARCH — how a rep asks you to find grants, and how you MUST handle it:
 
-STEP 1 — CONFIRM FIRST, ALWAYS. Before running any search, restate the FULL set of
-filters you'll use — location (and any city caveat), org type, program, the date meaning,
-and grade — in one clear line so the plan is captured in the thread, and in the SAME
-message ask anything still missing:
-  - how many results — top 5, top 10, or as many as you can find; and
-  - the format — an Excel file, a Google Sheet, or just listed here in the thread.
-Ask it as ONE friendly question, never a slow interrogation, and never dump raw
-key=value pairs at the rep. Example: "Search plan: IL · schools · any program · any
-grade. How many — top 5, top 10, or all? And here in the thread, an Excel file, or a
-Google Sheet?" The four core filters always follow the marker in that
-location · org type · program · grade order so the server can track them.
-If they already gave the count and format, still confirm your understanding in one line
-but do NOT re-ask what they answered. Confirm ONCE: if the recent thread shows you
-already confirmed and they said yes / go ahead, DON'T ask again — run the search now.
-Every confirmation message MUST begin with the exact literal prefix "Search plan:" so
-the server can recognize the next-turn count, format, or approval reliably.
+STEP 1 — JUST SEARCH when the ask is anchored. If the rep names ANY of a state, an
+org type, a city, or an entity, call search_leads right away — it is read-only and
+guards oversized results itself. Say something brief and human first ("Let me look."),
+never a recitation of filters. Do NOT interrogate the rep about count or format up
+front; default to the top 5 in the thread unless they said otherwise.
+ONLY when the ask is completely open-ended (no state, no org type, no entity at all)
+ask ONE friendly scoping question before searching — e.g. "Should I look everywhere
+or one state? And schools, cities, or everything?" — then search as soon as they
+answer. Never ask a second scoping question in the same thread; if they say
+"everywhere / everything", search exactly that.
 
-STEP 2 — SEARCH. Once confirmed, call search_leads with their filters. Pass their count
-as limit and result_scope="top_n"; use result_scope="all" only when they explicitly
-asked for every match. Pass export="excel" or export="google_sheet" if they chose a
-file, or no export if they chose Slack. Then give the ranked results briefly. If code
-reports more than 15 matches and asks for Excel or Google Sheet, ask that choice exactly.
-ALWAYS render each result with its Lead #id (the tool text carries it) — later turns can
-only reference a lead by the #id visible in this thread.
+STEP 2 — PRESENT, THEN LEAD. Give the ranked results briefly, then offer the next
+logical step yourself in the same message — an Excel/Google Sheet export when the
+list is long, contacts for the best orgs, or a Salesforce check for a specific one.
+The rep should never need to know the system's mechanics to get to a useful result.
+If the tool reports more than 15 matches and asks about Excel or Google Sheet, relay
+that choice exactly. ALWAYS render each result with its Lead #id (the tool text
+carries it) — later turns can only reference a lead by the #id visible in this thread.
+
+ZERO RESULTS — GUIDE, NEVER DEAD-END. When search_leads returns "No grants matched"
+it also lists nearby alternatives with real counts (e.g. "without the date window:
+4,463 matches"). You MUST relay one or two of those with their numbers and offer to
+run one — "Nothing in June, but there are 4,463 without the date limit; want the
+newest of those, or should I widen to the last 6 months?" If no alternatives came
+back, propose the closest sensible widening yourself (longer window, neighboring
+states, all org types) and offer to run it. Keep iterating with the rep until they
+have something useful or tell you to stop. Never invent results to fill a gap.
 
 STEP 3 — THEN OFFER CONTACTS (never automatic). After the list, OFFER to find the best
 contact for each org as a SECOND step, because it's slower (~30s per org): "Want me to
@@ -649,14 +653,29 @@ def respond(
                     and not bool(dict(block.input).get("with_contacts"))
                     and not search_confirmed
                 ):
+                    # Anchored searches run immediately — they are read-only and
+                    # the tool itself guards oversized result sets. Only a fully
+                    # open-ended ask (no state/org/city/name anchor) pauses for
+                    # ONE scoping question, and never twice in a thread.
                     proposed = _basic_search_arguments(user_text)
                     proposed.update(dict(block.input))
-                    return {
-                        "intent": "question",
-                        "reply": _search_confirmation(proposed, user_text),
-                        "files": files,
-                        "pending_crm_actions": pending_actions,
-                    }
+                    anchored = any(
+                        str(proposed.get(key) or "").strip()
+                        for key in ("state", "org_type", "city", "name_contains")
+                    )
+                    scoped_already = any(
+                        _SCOPING_MARKER.lower() in line.lower()
+                        for line in (thread_context or [])[-6:]
+                    )
+                    if not anchored and not scoped_already:
+                        return {
+                            "intent": "question",
+                            "reply": _search_confirmation(
+                                proposed, user_text, thread_context
+                            ),
+                            "files": files,
+                            "pending_crm_actions": pending_actions,
+                        }
                 tool_args = dict(block.input)
                 cache_key = f"{block.name}:{json.dumps(tool_args, sort_keys=True)}"
                 # Server-side breadcrumb (bot.log): without it a failed turn leaves

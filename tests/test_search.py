@@ -309,6 +309,29 @@ def test_award_received_uses_verified_event_date_with_coverage_disclosure(
     assert artifact is None
 
 
+def test_zero_results_offer_relaxation_hints_with_real_counts(
+    tmp_path: Path,
+) -> None:
+    """A dead search names what one dropped filter would find — never a bare no."""
+    text, artifact = search_leads(
+        state="CA", program="ZZNOPE", db_path=_db(tmp_path)
+    )
+    assert artifact is None
+    assert "No grants matched those filters." in text
+    assert "Nearby alternatives" in text
+    assert "without the program filter" in text
+    assert "do not stop at a bare no-results answer" in text
+
+
+def test_zero_results_fall_back_to_whole_pool_count(tmp_path: Path) -> None:
+    """When every single-filter drop is still zero, the total pool is offered."""
+    text, _ = search_leads(
+        state="ZZ", program="ZZNOPE", db_path=_db(tmp_path)
+    )
+    assert "Nearby alternatives" in text
+    assert "leads on file overall" in text
+
+
 def test_award_received_without_range_sorts_newest_first(tmp_path: Path) -> None:
     """A sort-only date_field is a valid ask, not an error.
 

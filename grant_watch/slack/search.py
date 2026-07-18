@@ -511,40 +511,46 @@ def search_leads(
                 f"'{record_value}'"
             )
 
-        where = ["COALESCE(status, 'new') != 'dead'"]
-        params: list[object] = []
+        # Named filter groups: the zero-result path re-counts with one group
+        # dropped at a time to offer honest widen/broaden alternatives.
+        groups: list[tuple[str, str, list[object]]] = [
+            ("base", "COALESCE(status, 'new') != 'dead'", [])
+        ]
         if state:
-            where.append("UPPER(state) = ?")
-            params.append(state.strip().upper())
+            groups.append(("the state filter", "UPPER(state) = ?", [state.strip().upper()]))
         if program:
-            where.append("UPPER(program) LIKE ? ESCAPE '\\'")
-            params.append(f"%{_like_literal(program.strip().upper())}%")
+            groups.append(
+                (
+                    "the program filter",
+                    "UPPER(program) LIKE ? ESCAPE '\\'",
+                    [f"%{_like_literal(program.strip().upper())}%"],
+                )
+            )
         if grade:
-            where.append("lead_grade = ?")
-            params.append(grade.strip().lower())
+            groups.append(("the grade filter", "lead_grade = ?", [grade.strip().lower()]))
         if amount_min is not None:
-            where.append("amount >= ?")
-            params.append(amount_min)
+            groups.append(("the minimum amount", "amount >= ?", [amount_min]))
         if amount_max is not None:
-            where.append("amount <= ?")
-            params.append(amount_max)
+            groups.append(("the maximum amount", "amount <= ?", [amount_max]))
         if name_contains:
-            where.append("UPPER(entity_name) LIKE ? ESCAPE '\\'")
-            params.append(f"%{_like_literal(name_contains.strip().upper())}%")
-
-        for clause, clause_params in (
-            _org_clause(org_value),
-            _record_clause(record_value),
+            groups.append(
+                (
+                    "the name match",
+                    "UPPER(entity_name) LIKE ? ESCAPE '\\'",
+                    [f"%{_like_literal(name_contains.strip().upper())}%"],
+                )
+            )
+        for label, (clause, clause_params) in (
+            ("the organization-type filter", _org_clause(org_value)),
+            ("the record-kind restriction", _record_clause(record_value)),
         ):
             if clause:
-                where.append(clause)
-                params.extend(clause_params)
+                groups.append((label, clause, list(clause_params)))
         date_sql, date_params, order_sql = _date_clause(
             date_value, from_value, to_value
         )
         if date_sql:
-            where.append(date_sql)
-            params.extend(date_params)
+            groups.append(("the date window", date_sql, list(date_params)))
     except ValueError as exc:
         return f"ERROR: {exc}.", None
 
@@ -652,21 +658,32 @@ def search_leads(
 
     if enrollment_filter_ready:
         if enrollment_min is not None:
-            where.append("enrollment >= ?")
-            params.append(enrollment_min)
+            groups.append(("the enrollment filter", "enrollment >= ?", [enrollment_min]))
         if enrollment_max is not None:
-            where.append("enrollment <= ?")
-            params.append(enrollment_max)
+            groups.append(("the enrollment filter", "enrollment <= ?", [enrollment_max]))
     if city_filter_ready and city.strip():
-        where.append("UPPER(location_city) = ?")
-        params.append(city.strip().upper())
+        groups.append(
+            ("the city filter", "UPPER(location_city) = ?", [city.strip().upper()])
+        )
+
+    def _assemble(skip: str = "") -> tuple[str, list[object]]:
+        """Flatten the filter groups into SQL, optionally dropping one label."""
+        sql_parts: list[str] = []
+        sql_params: list[object] = []
+        for label, clause, clause_params in groups:
+            if label == skip:
+                continue
+            sql_parts.append(clause)
+            sql_params.extend(clause_params)
+        return " AND ".join(sql_parts), sql_params
+
     reference_note = ("\n" + " ".join(reference_notes)) if reference_notes else ""
     try:
         connection = sqlite3.connect(f"file:{db_target}?mode=ro", uri=True, timeout=5.0)
         try:
             connection.row_factory = sqlite3.Row
             connection.execute("BEGIN")  # count + rows share one stable read snapshot
-            where_sql = " AND ".join(where)
+            where_sql, params = _assemble()
             total = int(
                 connection.execute(
                     f"{_SEARCH_CTE} SELECT COUNT(*) FROM searchable_leads WHERE {where_sql}",
@@ -674,7 +691,50 @@ def search_leads(
                 ).fetchone()[0]
             )
             if total == 0:
-                return "No grants matched those filters." + reference_note, None
+                # Guided recovery: never a bare dead end. Count what one dropped
+                # filter at a time would find so the model can offer real,
+                # numbered alternatives ("without the date window: 4,463").
+                hints: list[str] = []
+                for label, _clause, _clause_params in groups:
+                    if label == "base" or any(label in hint for hint in hints):
+                        continue
+                    relaxed_sql, relaxed_params = _assemble(skip=label)
+                    relaxed = int(
+                        connection.execute(
+                            f"{_SEARCH_CTE} SELECT COUNT(*) FROM searchable_leads "
+                            f"WHERE {relaxed_sql}",
+                            relaxed_params,
+                        ).fetchone()[0]
+                    )
+                    if relaxed > 0:
+                        hints.append(f"without {label}: {relaxed:,} matches")
+                    if len(hints) >= 3:
+                        break
+                if not hints:
+                    # Even one-filter-dropped counts were zero: report the whole
+                    # searchable pool so the model can still guide, never dead-end.
+                    pool = int(
+                        connection.execute(
+                            f"{_SEARCH_CTE} SELECT COUNT(*) FROM searchable_leads "
+                            f"WHERE {groups[0][1]}",
+                            [],
+                        ).fetchone()[0]
+                    )
+                    if pool > 0:
+                        hints.append(
+                            f"dropping every filter: {pool:,} leads on file overall"
+                        )
+                hint_note = (
+                    "\nNearby alternatives — " + "; ".join(hints) + ". Offer these "
+                    "to the user (with counts) and ask which to run; do not stop "
+                    "at a bare no-results answer."
+                    if hints
+                    else ""
+                )
+                return (
+                    "No grants matched those filters." + hint_note + reference_note,
+                    None,
+                )
             if (
                 total > 15
                 and int(limit or 50) > 15

@@ -56,9 +56,9 @@ def test_search_confirmation_lists_nondefault_filters() -> None:
         },
         "Five CA school districts over $250,000 and 5,000 students in Fresno, here.",
     )
-    assert "amount at least $250000" in reply
-    assert "enrollment at least 5000" in reply
-    assert "city Fresno" in reply
+    assert "amounts of $250000 and up" in reply
+    assert "enrollment of 5000 and up" in reply
+    assert "in the city of Fresno" in reply
 
 
 def test_unconfirmed_plan_cannot_claim_search_is_running() -> None:
@@ -104,8 +104,8 @@ def test_missing_marker_is_rebuilt_from_human_search_wording() -> None:
         search_confirmed=False,
     )
     assert output["reply"].startswith("Search plan:")
-    assert "IL · school" in output["reply"]
-    assert "How many — top 5, top 10, or all?" in output["reply"]
+    assert "in IL for schools" in output["reply"]
+    assert "How many do you want — top 5, top 10, or all of them?" in output["reply"]
     assert "Excel file, or a Google Sheet?" in output["reply"]
 
 
@@ -116,10 +116,10 @@ def test_malformed_enrollment_plan_is_replaced_with_exact_filters() -> None:
         {"intent": "question", "reply": "Search plan: CA districts with en"},
         search_confirmed=False,
     )
-    assert "CA · school" in output["reply"]
+    assert "in CA for schools" in output["reply"]
     assert "top 5" in output["reply"]
-    assert "enrollment at least 5001" in output["reply"]
-    assert "listed here in the thread" in output["reply"]
+    assert "enrollment of 5001 and up" in output["reply"]
+    assert "listed right here in the thread" in output["reply"]
 
 
 def test_basic_search_parser_preserves_amount_kind_and_export() -> None:

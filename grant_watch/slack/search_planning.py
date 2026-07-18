@@ -41,48 +41,22 @@ def search_plan_confirmed(user_text: str, thread_context: list[str] | None) -> b
 def _changes_prior_search_filters(
     user_text: str, thread_context: list[str] | None
 ) -> bool:
-    """Return whether a follow-up materially changes Grant's last search plan."""
-    prior = next(
-        (
-            line
-            for line in reversed((thread_context or [])[-10:])
-            if SEARCH_PLAN_MARKER.lower() in line.lower()
-        ),
-        "",
+    """Return whether a follow-up re-states any core filter after a shown plan.
+
+    The plan text itself is presentational (a natural sentence), so no prior
+    values are parsed out of it. Instead the gate is conservative: once a plan is
+    on screen, any follow-up that carries a state / org type / program / grade of
+    its own is treated as a correction and re-confirmed. Re-supplying the same
+    value costs one extra confirmation; a silently changed filter costs a wrong
+    search — so the trade goes to safety."""
+    prior_plan = any(
+        SEARCH_PLAN_MARKER.lower() in line.lower()
+        for line in (thread_context or [])[-10:]
     )
-    if not prior:
+    if not prior_plan:
         return False
     current = basic_search_arguments(user_text)
-    prior_values = {
-        key: value.strip().lower()
-        for key, value in re.findall(
-            r"\b(location|organization|program|grade)=([^;.]+)", prior, re.IGNORECASE
-        )
-    }
-    if not prior_values:
-        # Current human format: "Search plan: IL · school · SVPP · gold[ · …]".
-        marker_index = prior.lower().find(SEARCH_PLAN_MARKER.lower())
-        summary = prior[marker_index + len(SEARCH_PLAN_MARKER) :]
-        summary = summary.split(" — ", 1)[0].split(".", 1)[0]
-        fields = [field.strip().lower() for field in summary.split("·")]
-        if len(fields) >= 4:
-            prior_values = {
-                "location": fields[0],
-                "organization": fields[1],
-                "program": fields[2],
-                "grade": fields[3],
-            }
-    comparisons = {
-        "state": "location",
-        "org_type": "organization",
-        "program": "program",
-        "grade": "grade",
-    }
-    return any(
-        str(current[key]).lower() != prior_values.get(plan_key, "")
-        for key, plan_key in comparisons.items()
-        if key in current
-    )
+    return any(key in current for key in ("state", "org_type", "program", "grade"))
 
 
 _DATE_FIELD_PHRASES = {
@@ -103,35 +77,98 @@ _RECORD_KIND_PHRASES = {
 }
 
 
-def search_confirmation(arguments: dict[str, Any], user_text: str) -> str:
-    """Render the proposed read-only query as one scannable human line.
+# Literal opening of the deterministic scoping question, matched against thread
+# context so an unanswered scoping question is never re-asked in a loop.
+SCOPING_MARKER = "Quick scoping question"
 
-    Format contract (parsed by _changes_prior_search_filters): the four core
-    filters follow the marker as "location · org · program · grade"; everything
-    after " — " or the first period is presentation only."""
-    state = str(arguments.get("state") or "anywhere")
-    org_type = str(arguments.get("org_type") or "any org type")
-    program = str(arguments.get("program") or "any program")
-    grade = str(arguments.get("grade") or "any grade")
-    fields = [state, org_type, program, grade]
+_ORG_PHRASES = {
+    "school": "schools",
+    "city": "cities",
+    "county": "counties",
+    "nonprofit": "nonprofits",
+    "other": "other organizations",
+}
+
+
+def _scoping_question() -> str:
+    """One friendly question narrowing a fully open-ended search before any plan."""
+    return (
+        f"{SCOPING_MARKER} so I pull the right things: should I look everywhere "
+        "or focus on one state? And do you care about a particular kind of "
+        "organization — schools, cities — or everything that qualifies?"
+    )
+
+
+def search_confirmation(
+    arguments: dict[str, Any],
+    user_text: str,
+    thread_context: list[str] | None = None,
+) -> str:
+    """Render the proposed query as a natural sentence a colleague would say.
+
+    Two-stage behavior per Chase's UX rule: a fully open-ended ask (no state AND
+    no org type and no entity/city anchor) first gets ONE scoping question rather
+    than a plan full of "any"s; once the rep answers (or has already been asked),
+    the plan reads as one sentence starting with the literal "Search plan:"
+    marker the server keys on. The plan text is presentational only — follow-up
+    change detection no longer parses it."""
+    state = str(arguments.get("state") or "")
+    org_value = str(arguments.get("org_type") or "")
+    program = str(arguments.get("program") or "")
+    grade = str(arguments.get("grade") or "")
+    anchored = bool(
+        state
+        or org_value
+        or str(arguments.get("city") or "")
+        or str(arguments.get("name_contains") or "")
+    )
+    already_asked = any(
+        SCOPING_MARKER.lower() in line.lower()
+        for line in (thread_context or [])[-6:]
+    )
+    if not anchored and not already_asked:
+        return _scoping_question()
+
+    # Build the sentence: location, organizations, then only the filters that
+    # actually apply; unspecified program+grade collapse into one honest clause.
+    location = f"in {state}" if state else "across every state"
+    orgs = _ORG_PHRASES.get(org_value, "any kind of organization")
+    clauses: list[str] = []
+    if program:
+        clauses.append(f"with {program} funding")
+    if grade:
+        clauses.append(f"{grade} leads only")
+    if not program and not grade:
+        clauses.append("any program or grade")
+    elif not program:
+        clauses.append("any program")
+    elif not grade:
+        clauses.append("any grade")
     date_field = str(arguments.get("date_field") or "")
     date_from = str(arguments.get("date_from") or "")
     date_to = str(arguments.get("date_to") or "")
     if date_field and (date_from or date_to):
         phrase = _DATE_FIELD_PHRASES.get(date_field, date_field)
-        fields.append(f"{phrase} {date_from or 'any time'} to {date_to or 'any time'}")
+        clauses.append(
+            f"{phrase} {date_from or 'any time'} to {date_to or 'any time'}"
+        )
     for key, render in (
         ("record_kind", lambda v: _RECORD_KIND_PHRASES.get(str(v), str(v))),
-        ("amount_min", lambda v: f"amount at least ${v}"),
-        ("amount_max", lambda v: f"amount at most ${v}"),
-        ("enrollment_min", lambda v: f"enrollment at least {v}"),
-        ("enrollment_max", lambda v: f"enrollment at most {v}"),
-        ("city", lambda v: f"city {v}"),
-        ("name_contains", lambda v: f"matching “{v}”"),
+        ("amount_min", lambda v: f"amounts of ${v} and up"),
+        ("amount_max", lambda v: f"amounts up to ${v}"),
+        ("enrollment_min", lambda v: f"enrollment of {v} and up"),
+        ("enrollment_max", lambda v: f"enrollment up to {v}"),
+        ("city", lambda v: f"in the city of {v}"),
+        ("name_contains", lambda v: f"names matching “{v}”"),
     ):
         value = arguments.get(key)
         if value not in (None, ""):
-            fields.append(render(value))
+            clauses.append(render(value))
+    plan = (
+        f"{SEARCH_PLAN_MARKER} I'll look {location} for {orgs} — "
+        + ", ".join(clauses)
+        + "."
+    )
     limit = arguments.get("limit")
     scope = str(arguments.get("result_scope") or "top_n")
     count_requested = bool(
@@ -144,31 +181,30 @@ def search_confirmation(arguments: dict[str, Any], user_text: str) -> str:
         re.search(r"\b(?:here|thread|in slack)\b", user_text.lower())
     )
     export_value = str(arguments.get("export") or "")
-    plan = f"{SEARCH_PLAN_MARKER} " + " · ".join(fields) + "."
     chosen: list[str] = []
     if count_requested:
         if scope == "all":
             chosen.append("all matches")
         elif isinstance(limit, int):
-            chosen.append(f"top {limit}")
+            chosen.append(f"the top {limit}")
     if export_value:
         chosen.append(
-            {"excel": "Excel file", "google_sheet": "Google Sheet"}.get(
+            {"excel": "an Excel file", "google_sheet": "a Google Sheet"}.get(
                 export_value, export_value
             )
         )
     elif requested_thread:
-        chosen.append("listed here in the thread")
+        chosen.append("listed right here in the thread")
     if chosen:
-        plan += " I'll bring back the " + ", ".join(chosen) + "."
+        plan += " I'll bring back " + ", ".join(chosen) + "."
     questions: list[str] = []
     if not count_requested:
-        questions.append("How many — top 5, top 10, or all?")
+        questions.append("How many do you want — top 5, top 10, or all of them?")
     if not export_value and not requested_thread:
         questions.append("And here in the thread, an Excel file, or a Google Sheet?")
     if questions:
         return plan + " " + " ".join(questions)
-    return plan + " Reply yes and I’ll run it."
+    return plan + " Sound good? Reply yes and I'll run it."
 
 
 def finalize_unconfirmed_search_plan(

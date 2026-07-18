@@ -9,50 +9,120 @@ import pytest
 from grant_watch.slack import conversation, tools
 
 
-def test_initial_fully_specified_search_is_confirmed_before_tool_execution(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Even a complete first request cannot bypass Grant's confirm-first contract."""
+def _search_proposal_client(tool_input: dict[str, object]) -> type:
+    """Build a fake Anthropic client that proposes one search then summarizes."""
 
     class FakeMessages:
-        """Propose the exact lead query that must be gated before execution."""
+        """Propose the scripted lead query, then return final JSON."""
+
+        calls = 0
 
         def create(self, **_kwargs: object) -> object:
-            """Return one search tool call without executing a second model turn."""
-            block = SimpleNamespace(
-                type="tool_use",
-                name="search_leads",
-                input={
-                    "state": "CA",
-                    "org_type": "school",
-                    "grade": "gold",
-                    "limit": 1,
-                    "result_scope": "top_n",
-                },
-                id="search-1",
+            """Return the search tool call, then a final text answer."""
+            FakeMessages.calls += 1
+            if FakeMessages.calls == 1:
+                block = SimpleNamespace(
+                    type="tool_use",
+                    name="search_leads",
+                    input=dict(tool_input),
+                    id="search-1",
+                )
+                return SimpleNamespace(stop_reason="tool_use", content=[block])
+            return SimpleNamespace(
+                stop_reason="end_turn",
+                content=[
+                    SimpleNamespace(
+                        type="text",
+                        text='{"intent":"question","reply":"Here are the results."}',
+                    )
+                ],
             )
-            return SimpleNamespace(stop_reason="tool_use", content=[block])
 
     class FakeAnthropic:
-        """Expose the single-turn search proposal."""
+        """Expose the scripted search-proposal client."""
 
         def __init__(self, **_kwargs: object) -> None:
             """Initialize the fake message client."""
             self.messages = FakeMessages()
 
-    def forbidden_run_tool(*_args: object, **_kwargs: object) -> tuple[str, None]:
-        """Fail if the database search occurs before confirmation."""
-        raise AssertionError("search_leads must not execute before confirmation")
+    return FakeAnthropic
 
-    monkeypatch.setattr(conversation, "Anthropic", FakeAnthropic)
-    monkeypatch.setattr(tools, "run_tool", forbidden_run_tool)
+
+def test_anchored_first_search_executes_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A state/org-anchored ask runs right away — no plan recitation, no friction."""
+    executions: list[dict[str, object]] = []
+
+    def recording_run_tool(
+        _name: str, args: dict[str, object], *_pos: object, **_kw: object
+    ) -> tuple[str, None]:
+        """Record the read-only search execution."""
+        executions.append(args)
+        return "Lead #1 Example School District (CA) — $100,000 SVPP.", None
+
+    monkeypatch.setattr(
+        conversation,
+        "Anthropic",
+        _search_proposal_client(
+            {"state": "CA", "org_type": "school", "grade": "gold", "limit": 1}
+        ),
+    )
+    monkeypatch.setattr(tools, "run_tool", recording_run_tool)
     out = conversation.respond(
         "Give me one GOLD California school lead, just show it here.", None
     )
-    assert out["reply"].startswith("Search plan:")
-    assert "CA · school" in out["reply"]
-    assert "gold" in out["reply"]
-    assert "Reply yes" in out["reply"]
+    assert len(executions) == 1  # the anchored search really ran
+    assert out["reply"] == "Here are the results."
+
+
+def test_fully_open_ended_search_gets_one_scoping_question(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A no-anchor ask is scoped with ONE friendly question before any query runs."""
+
+    def forbidden_run_tool(*_args: object, **_kwargs: object) -> tuple[str, None]:
+        """Fail if the open-ended search executes before scoping."""
+        raise AssertionError("search_leads must not execute before scoping")
+
+    monkeypatch.setattr(
+        conversation, "Anthropic", _search_proposal_client({"limit": 5})
+    )
+    monkeypatch.setattr(tools, "run_tool", forbidden_run_tool)
+    out = conversation.respond("show me some leads", None)
+    assert out["reply"].startswith("Quick scoping question")
+    assert "everywhere" in out["reply"]
+    assert "schools, cities" in out["reply"]
+
+
+def test_scoping_question_is_never_asked_twice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After the scoping question, even an everything answer executes the search."""
+    executions: list[dict[str, object]] = []
+
+    def recording_run_tool(
+        _name: str, args: dict[str, object], *_pos: object, **_kw: object
+    ) -> tuple[str, None]:
+        """Record the post-scoping execution."""
+        executions.append(args)
+        return "Lead #2 Example City (WA) — $50,000 grant.", None
+
+    monkeypatch.setattr(
+        conversation, "Anthropic", _search_proposal_client({"limit": 5})
+    )
+    monkeypatch.setattr(tools, "run_tool", recording_run_tool)
+    context = [
+        "Chase: show me some leads",
+        "Grant: Quick scoping question so I pull the right things: should I look "
+        "everywhere or focus on one state? And do you care about a particular kind "
+        "of organization — schools, cities — or everything that qualifies?",
+    ]
+    out = conversation.respond(
+        "everywhere, everything that qualifies", None, thread_context=context
+    )
+    assert len(executions) == 1
+    assert out["reply"] == "Here are the results."
 
 
 def test_count_and_format_followup_confirms_existing_search_plan() -> None:
