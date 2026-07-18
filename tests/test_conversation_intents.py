@@ -285,6 +285,42 @@ def test_outreach_refusal_cannot_become_a_draft_request(message: str) -> None:
     assert output["reply"] == "No problem — I won’t request an outreach draft."
 
 
+@pytest.mark.parametrize(
+    "message",
+    (
+        "for City of East Providence get me the contact — LinkedIn if the site "
+        "names no one",
+        "find the city contact and address; use LinkedIn if the website lists "
+        "nobody by name",
+        "no verified email? then get me the general office address",
+    ),
+)
+def test_bare_no_inside_a_request_is_not_an_outreach_refusal(message: str) -> None:
+    """A "no" embedded in a fresh request never cancels a pending Persequor offer.
+
+    Live bug 2026-07-18: "…LinkedIn if the site names no one" was misread as a
+    decline and Grant discarded the East Providence contact request."""
+    output = conversation._normalize_action_intent(
+        message,
+        ["Grant: Want me to bring in Persequor to draft the intro email?"],
+        {"intent": "question", "reply": "Here is the contact result."},
+    )
+    assert output["intent"] == "question"
+    assert output["reply"] == "Here is the contact result."
+    assert "won’t request an outreach draft" not in output["reply"]
+
+
+def test_standalone_no_still_declines_a_pending_offer() -> None:
+    """A bare "no" as the whole reply is still an honest decline of the offer."""
+    output = conversation._normalize_action_intent(
+        "no",
+        ["Grant: Want me to have Persequor draft the intro email for you?"],
+        {"intent": "draft_email", "reply": "On it."},
+    )
+    assert output["intent"] == "question"
+    assert output["reply"] == "No problem — I won’t request an outreach draft."
+
+
 def test_explicit_redraft_request_can_start_a_new_draft() -> None:
     """A human can intentionally request another draft without replaying the offer."""
     output = conversation._normalize_action_intent(

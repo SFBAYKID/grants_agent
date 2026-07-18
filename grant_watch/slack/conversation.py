@@ -428,13 +428,18 @@ def _normalize_action_intent(
         or (prior_offer and re.search(r"\b(?:draft|yes\b|go ahead|do it)\b", current))
     )
     adversarial = bool(re.search(r"\b(?:ignore .*rules|invent|fabricate)\b", current))
-    # A refusal only matters as a decline of a PENDING outreach offer, so a stray
-    # "no" (as in "no email on file") never cancels anything on its own.
+    # A refusal only matters as a decline of a PENDING outreach offer. A bare "no"
+    # inside a larger request ("…LinkedIn if the site names no one", "no email on
+    # file") must NOT cancel anything — live bug 2026-07-18: a City of East
+    # Providence contact request was thrown away this way. So require a clear
+    # decline token, or a message that is ENTIRELY "no"/"nah".
     outreach_refusal = prior_offer and bool(
         re.search(
-            r"\b(?:no|nope|cancel|stop|not now|not yet|don't|do not|never|hold off)\b",
+            r"\b(?:nope|cancel|stop|not now|not yet|don'?t|do not|never|"
+            r"hold off|no thanks|no need)\b",
             current,
         )
+        or re.fullmatch(r"\W*(?:no|nah|na)\W*", current)
     )
     explicit_redraft = bool(
         re.search(

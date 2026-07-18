@@ -42,6 +42,38 @@ def _lead(tmp_path: Path) -> tuple[sqlite3.Connection, int]:
     return conn, int(conn.execute("SELECT id FROM leads").fetchone()["id"])
 
 
+def test_find_contact_reports_org_address_for_linkedin_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A LinkedIn-only result still reports the org address that was enriched.
+
+    Live bug 2026-07-18: City of Salmon / East Providence had the address stored
+    (200 Main Street / 145 Taunton Ave.) but the reply said "no mailing address"."""
+    from grant_watch.enrich import organization_profile
+    from grant_watch.slack.contact_enrichment import ContactOutcome
+
+    monkeypatch.setattr(tools.db, "connect", lambda *_a, **_k: sqlite3.connect(":memory:"))
+    monkeypatch.setattr(
+        tools,
+        "enrich_lead_contact",
+        lambda *_a, **_k: ContactOutcome(
+            "linkedin_only", "Jane Roe", "IT Director", "", "",
+            "https://www.linkedin.com/in/jane-roe",
+        ),
+    )
+    monkeypatch.setattr(
+        organization_profile,
+        "org_enrichment_summary",
+        lambda *_a, **_k: (
+            " From the organization's website I also added phone 208-756-3214; "
+            "address 200 Main Street, Salmon, 83467."
+        ),
+    )
+    out = tools.find_contact(3035)
+    assert "Jane Roe" in out  # the LinkedIn person is still reported
+    assert "200 Main Street, Salmon, 83467" in out  # the address is no longer dropped
+
+
 def test_scrape_keeps_footer_content(monkeypatch: pytest.MonkeyPatch) -> None:
     """The scrape requests full-page content (onlyMainContent=false) so an org's
     address / general email / phone in the FOOTER are not dropped (live 2026-07-18:

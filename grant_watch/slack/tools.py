@@ -462,18 +462,22 @@ def find_contact(
     from ..enrich.organization_profile import org_enrichment_summary
 
     outcome = enrich_lead_contact(conn, lead_id, on_progress)
+    if outcome.status == "unreachable":
+        return (
+            "I couldn't reach their website or search to verify a contact right now — "
+            "nothing recorded, so it's worth trying again shortly."
+        )
+    # The org profile (address / phone / general mailbox) is enriched ALONGSIDE the
+    # contact, so surface it in EVERY reachable outcome — not just the verified one.
+    # Live bug 2026-07-18: a LinkedIn-only city result said "no mailing address" even
+    # though the address (e.g. 200 Main Street, Salmon) was already stored.
+    org_line = org_enrichment_summary(conn, lead_id, on_progress)
     if outcome.status == "verified":
-        org_line = org_enrichment_summary(conn, lead_id, on_progress)
         phone = f" / {outcome.phone}" if outcome.phone else ""
         source = f" (found on {outcome.source_url})" if outcome.source_url else ""
         return (
             f"VERIFIED contact: {outcome.name} ({outcome.title}) — "
             f"{outcome.email}{phone}{source}.{org_line}"
-        )
-    if outcome.status == "unreachable":
-        return (
-            "I couldn't reach their website or search to verify a contact right now — "
-            "nothing recorded, so it's worth trying again shortly."
         )
     # Fallback-chain outcomes: the tool already tried the site, LinkedIn, and the
     # org's general mailbox — report exactly which rungs produced something.
@@ -483,25 +487,25 @@ def find_contact(
             f"No email shown on their own site, but LinkedIn surfaced "
             f"{outcome.name}{title} — profile {outcome.source_url} (ownership not "
             f"verified, saved to the lead) — and the organization's general mailbox "
-            f"is {outcome.email}, verified on their site."
+            f"is {outcome.email}, verified on their site.{org_line}"
         )
     if outcome.status == "linkedin_only":
         return (
             f"No verifiable email anywhere, but LinkedIn surfaced "
             f"{outcome.name}{title} — profile {outcome.source_url} (ownership not "
-            "verified, saved to the lead). No org mailbox verified either — "
-            "a LinkedIn message is the honest path."
+            "verified, saved to the lead), so a LinkedIn message is the honest path "
+            f"to the person.{org_line}"
         )
     if outcome.status == "org_email":
         return (
             "No named person verified on their site or LinkedIn, but the "
             f"organization's general mailbox is {outcome.email}, verified on "
-            f"{outcome.source_url or 'their site'}."
+            f"{outcome.source_url or 'their site'}.{org_line}"
         )
     return (
         "I checked their website, LinkedIn, and looked for a general organization "
         "mailbox — none produced a verifiable contact, so I've logged this one as "
-        "no contact found. A human may have better luck by phone."
+        f"no contact found. A human may have better luck by phone.{org_line}"
     )
 
 
