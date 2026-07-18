@@ -259,8 +259,11 @@ def test_award_timing_regression(
     forbid_model(monkeypatch)
     output = conversation.respond(prompt, None)
     assert_human_reply(output["reply"])
+    # All three honest date meanings are offered; funds receipt is disclaimed.
+    assert "never knows when money actually hit" in output["reply"]
+    assert "award-announcement" in output["reply"]
     assert "discovered" in output["reply"].lower()
-    assert "spend windows" in output["reply"].lower()
+    assert "spend window" in output["reply"].lower()
 
 
 @pytest.mark.parametrize(

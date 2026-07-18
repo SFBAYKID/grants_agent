@@ -283,9 +283,12 @@ def test_award_received_timing_is_never_mapped_to_import_date(message: str) -> N
     """Ambiguous receipt language gets the exact date-semantics clarification."""
     reply = conversation._ambiguous_award_timing_reply(message)
     assert reply is not None
-    assert "does not store a verified award-received" in reply
-    assert "import date" in reply
-    assert "spend windows" in reply
+    # Honest semantics: no funds-received date exists, but the verified
+    # award-announcement date, discovery date, and spend window are all offered.
+    assert "never knows when money actually hit" in reply
+    assert "award-announcement" in reply
+    assert "discovered" in reply
+    assert "spend window" in reply
 
 
 def test_discovered_and_spend_window_questions_remain_supported() -> None:

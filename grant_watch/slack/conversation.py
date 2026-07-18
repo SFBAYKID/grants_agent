@@ -511,10 +511,15 @@ def _ambiguous_award_timing_reply(user_text: str) -> str | None:
     )
     if not (received_language and time_language):
         return None
+    # Wording must match what the DB actually holds: no funds-received date exists,
+    # but SOME awards carry a verified announcement/obligation event date (what the
+    # award_received search sorts and filters on). Offer all three honest readings.
     return (
-        "Grant does not store a verified award-received or announcement date, so I "
-        "can’t truthfully answer that using the import date. Do you mean leads first "
-        "discovered by Grant in that period, or award spend windows that started then?"
+        "Quick clarification first: Grant never knows when money actually hit an "
+        "account. What I can search truthfully is the verified award-announcement "
+        "date (where the source recorded one), when a lead was first discovered, or "
+        "when an award's spend window started. Which of those do you want for that "
+        "time period?"
     )
 
 
