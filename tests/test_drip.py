@@ -492,3 +492,23 @@ def test_engagement_dedupes_per_user_and_kind(tmp_path: Path) -> None:
     assert db.engagement_stats(conn)["total"] == 3
     points = conn.execute("SELECT SUM(points) FROM outcome_events").fetchone()[0]
     assert points == 5  # two replies at +2 and one reaction at +1
+
+
+def test_bulletin_relevance_rejects_health_sector_noise() -> None:
+    """Precision-first bulletins: strong security phrase required, health excluded.
+
+    Live miss 2026-07-18: "Maternal Health Emergency Management Training (MHEMT)"
+    reached the channel by matching the bare word "emergency"."""
+    relevant = drip._BULLETIN_RELEVANT_RE
+    offtopic = drip._BULLETIN_OFFTOPIC_RE
+
+    def passes(title: str) -> bool:
+        """Apply the same accept/reject pair pick() uses."""
+        return bool(relevant.search(title)) and not bool(offtopic.search(title))
+
+    assert not passes("Maternal Health Emergency Management Training (MHEMT)")
+    assert not passes("School Lunch Modernization Program")
+    assert not passes("Behavioral Health Emergency Response Grants")
+    assert passes("School Violence Prevention Program (SVPP)")
+    assert passes("Nonprofit Security Grant Program")
+    assert passes("Campus Safety and Access Control Modernization")

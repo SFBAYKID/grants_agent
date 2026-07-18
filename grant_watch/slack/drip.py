@@ -29,9 +29,20 @@ from ..presentation import display_entity_name, plain_fragment
 
 # Bulletin relevance: grants.gov phrase-search still lets through noise (live check
 # 2026-07-13 surfaced 2011-era NSF programs). A bulletin must LOOK like our business.
+# Bulletin relevance is precision-first (Chase: surface the RIGHT things). Bare
+# words like "school", "safety", or "emergency" matched health-sector noise —
+# live miss 2026-07-18: "Maternal Health Emergency Management Training" reached
+# the channel. Require a strong physical-security phrase AND no off-domain term.
 _BULLETIN_RELEVANT_RE = re.compile(
-    r"school|violence|security|surveillance|access control|cctv|hardening"
-    r"|emergency|safety|svpp|cops",
+    r"school (?:security|safety|violence)|campus (?:security|safety)"
+    r"|violence prevention|surveillance|access control|cctv|camera"
+    r"|target hardening|hardening|physical security|security grant"
+    r"|nonprofit security|svpp|cops (?:office|grant)|securing our schools",
+    re.IGNORECASE,
+)
+_BULLETIN_OFFTOPIC_RE = re.compile(
+    r"maternal|medical|clinical|disease|nursing|hospital|patient|opioid"
+    r"|substance|behavioral health|mental health|medicaid|medicare",
     re.IGNORECASE,
 )
 
@@ -194,7 +205,10 @@ def pick(conn: sqlite3.Connection, channel: str) -> tuple[str, sqlite3.Row] | No
     )
     if bulletins_today < BULLETIN_MAX_PER_DAY:
         for cand in db.bulletin_candidates(conn):
-            if _BULLETIN_RELEVANT_RE.search(cand["title"] or ""):
+            title = cand["title"] or ""
+            if _BULLETIN_RELEVANT_RE.search(title) and not _BULLETIN_OFFTOPIC_RE.search(
+                title
+            ):
                 return "bulletin", cand
     return None
 
