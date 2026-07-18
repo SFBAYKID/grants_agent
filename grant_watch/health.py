@@ -24,6 +24,10 @@ SKIP_DIRECTORIES = frozenset(
         "__pycache__",
     }
 )
+# Runtime artifacts the deployed bot writes in place (keepalive/cron logs grow
+# without bound on the droplet); they are environment-owned, not repository text.
+RUNTIME_ARTIFACT_SUFFIXES = frozenset({".log"})
+RUNTIME_ARTIFACT_NAMES = frozenset({"nohup.out"})
 
 
 def _is_skipped(path: Path, root: Path) -> bool:
@@ -80,6 +84,11 @@ def oversized_text_issues(root: Path = ROOT) -> list[str]:
     issues: list[str] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file() or _is_skipped(path, root) or path.name == ".env":
+            continue
+        if (
+            path.suffix in RUNTIME_ARTIFACT_SUFFIXES
+            or path.name in RUNTIME_ARTIFACT_NAMES
+        ):
             continue
         raw = path.read_bytes()
         if b"\x00" in raw:

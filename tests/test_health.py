@@ -42,6 +42,7 @@ def test_size_and_nested_tree_audits_detect_repository_debris(tmp_path: Path) ->
     """Oversized text and copied test trees fail before normal pytest collection."""
     _package(tmp_path, '"""Healthy module."""\n')
     (tmp_path / "large.md").write_text("line\n" * (health.LINE_CAP + 1))
+    (tmp_path / "cron.log").write_text("tick\n" * (health.LINE_CAP + 1))
     copied_tests = tmp_path / "review-copy" / "tests"
     copied_tests.mkdir(parents=True)
     (copied_tests / "test_copy.py").write_text('"""Copied test."""\n')
