@@ -148,7 +148,7 @@ def test_human_mention_and_plain_followup_traverse_registered_handlers(
     )
     first_reply = app.client.messages[-1]
     assert first_reply["thread_ts"] == root_ts
-    assert "school districts: 975 total" in first_reply["text"]
+    assert "School districts: 975 in total" in first_reply["text"]
     assert db.is_conversation_thread(connection, "TWORK", "CGRANT", root_ts)
 
     followup_ts = "10.002"
@@ -171,7 +171,8 @@ def test_human_mention_and_plain_followup_traverse_registered_handlers(
     )
     second_reply = app.client.messages[-1]
     assert second_reply["thread_ts"] == root_ts
-    assert "nh.strafford_county.bids" in second_reply["text"]
+    assert "Strafford County current bids" in second_reply["text"]
+    assert "nh.strafford_county.bids" not in second_reply["text"]
 
     before_redelivery = len(app.client.messages)
     app.events["message"](

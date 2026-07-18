@@ -27,22 +27,25 @@ from grant_watch.source_discovery_store import initialize_batch, replace_checkpo
 def test_canonical_summary_preserves_inventory_lead_and_poller_boundaries() -> None:
     """Slack summary exposes exact aggregates without collapsing evidence layers."""
     text = status.source_inventory_status()
-    assert "catalog sources: 270" in text
-    assert "manually reviewed catalog sources: 29" in text
-    assert "selected-result evidence checks: 30" in text
-    assert "validated raw batches stored: 1" in text
-    assert "counties: 3144 total; 56 candidate_found; 3073 not_researched" in text
-    assert "school districts: 13363 total; 66 candidate_found" in text
-    assert "incorporated places: 32058 total; 14 candidate_found" in text
-    assert "Research inventory is not the lead database" in text
-    assert "live_positive_verified=5" in text
+    assert "270 candidate sources catalogued" in text
+    assert "29 reviewed by hand so far" in text
+    assert "30 pages checked with saved evidence" in text
+    assert "1 raw search batch stored" in text
+    assert "Counties: 3,144 in total" in text
+    assert "56 with a source link" in text
+    assert "3,073 not yet researched" in text
+    assert "School districts: 13,363 in total" in text
+    assert "66 with a source link" in text
+    assert "Incorporated places: 32,058 in total" in text
+    assert "This is our research list, not the leads themselves" in text
+    assert "5 live and finding matches" in text
 
 
 def test_state_summary_counts_only_batches_that_include_that_state() -> None:
     """A state-filtered answer never inherits an unrelated nationwide batch count."""
     text = status.source_inventory_status(view="summary", state="NV")
-    assert "Source discovery summary for NV" in text
-    assert "validated raw batches stored: 0" in text
+    assert "Source discovery status for NV" in text
+    assert "0 raw search batches stored" in text
 
 
 def test_state_namespace_coverage_is_exact_and_does_not_claim_integration() -> None:
@@ -51,21 +54,23 @@ def test_state_namespace_coverage_is_exact_and_does_not_claim_integration() -> N
         view="coverage", state="CA", namespace="school_district"
     )
     assert "Source research coverage for CA" in text
-    assert "school districts: 975 total" in text
-    assert "3 candidate_found" in text
-    assert "971 not_researched" in text
-    assert "1 not_applicable" in text
-    assert "does not mean a working poller or lead" in text
-    assert "counties:" not in text
+    assert "School districts: 975 in total" in text
+    assert "3 with a source link" in text
+    assert "971 not yet researched" in text
+    assert "1 no separate source needed" in text
+    assert "not a working feed or a lead" in text
+    assert "Counties:" not in text
 
 
 def test_reviewed_sources_expose_only_safe_reviewed_catalog_fields() -> None:
     """Reviewed-source UI omits raw queries, snippets, hashes, notes, and credentials."""
     text = status.source_inventory_status(view="reviewed_sources", state="NH", limit=5)
     assert "showing 3 of 3" in text
-    assert "nh.strafford_county.bids" in text
-    assert "access=public_no_auth/verified" in text
-    assert "integration=access_checked" in text
+    # Internal catalog slugs never surface to the human-facing answer.
+    assert "nh.strafford_county.bids" not in text
+    assert "Access: open, no login (confirmed)" in text
+    assert "Status: access confirmed, no feed built yet" in text
+    assert "county source" in text
     assert "https://co.strafford.nh.us/" in text
     lowered = text.lower()
     for forbidden in (
@@ -75,6 +80,8 @@ def test_reviewed_sources_expose_only_safe_reviewed_catalog_fields() -> None:
         "credential",
         "firecrawl_api_key",
         "notes=",
+        "access=",
+        "integration=",
     ):
         assert forbidden not in lowered
 
@@ -82,11 +89,11 @@ def test_reviewed_sources_expose_only_safe_reviewed_catalog_fields() -> None:
 def test_recent_batch_ui_labels_legacy_and_search_success_truthfully() -> None:
     """A completed raw search never becomes a reviewed/promoted-source claim."""
     text = status.source_inventory_status(view="recent_batches")
-    assert "20260716T004633Z" in text
-    assert "schema v1 (validation-only legacy)" in text
-    assert "tasks=27; attempts=27; results=126; success=27" in text
-    assert "search completed" in text
-    assert "does not mean a source was reviewed or promoted" in text
+    assert "Search from 2026-07-16" in text
+    assert "27 searches, 27 attempts, 126 results" in text
+    assert "27 completed" in text
+    assert "raw search results, not reviewed sources" in text
+    assert "doesn't mean a source was reviewed or added" in text
 
 
 def test_recent_batch_state_and_namespace_filters_scope_the_counts() -> None:
@@ -96,8 +103,9 @@ def test_recent_batch_state_and_namespace_filters_scope_the_counts() -> None:
         view="recent_batches", namespace="county"
     )
     for text in (state_text, county_text):
-        assert "tasks=9; attempts=9; results=45; success=9" in text
-        assert "tasks=27" not in text
+        assert "9 searches, 9 attempts, 45 results" in text
+        assert "9 completed" in text
+        assert "126 results" not in text
 
 
 @pytest.mark.parametrize(
@@ -225,7 +233,7 @@ def test_status_request_bypasses_anthropic_and_web_search(
     monkeypatch.setattr(conversation, "Anthropic", forbidden)
     result = conversation.respond("Show source discovery status", None)
     assert result["intent"] == "question"
-    assert "catalog sources: 270" in result["reply"]
+    assert "270 candidate sources catalogued" in result["reply"]
 
 
 def test_tool_schema_and_dispatch_expose_only_read_only_status() -> None:
@@ -239,7 +247,7 @@ def test_tool_schema_and_dispatch_expose_only_read_only_status() -> None:
     )
     assert artifact is None
     assert "Source research coverage for CA" in text
-    assert "counties:" in text
+    assert "Counties:" in text
 
 
 def _unsafe_entry() -> SourceCatalogEntry:
@@ -390,7 +398,7 @@ def test_batch_renderer_preserves_zero_failure_and_inflight_states(
         replace_checkpoint(batch_dir, checkpoint)
     paths = replace(status.DiscoveryStatusPaths(), batches=tmp_path)
     text = status.source_inventory_status(view="recent_batches", paths=paths)
-    assert "zero_results=1" in text
-    assert "non_retryable_failure=1" in text
-    assert "in_flight=1" in text
-    assert "tasks=3; attempts=3; results=0" in text
+    assert "1 no results" in text
+    assert "1 failed" in text
+    assert "1 still running" in text
+    assert "3 searches, 3 attempts, 0 results" in text

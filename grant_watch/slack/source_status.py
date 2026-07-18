@@ -336,21 +336,65 @@ def _scope(entries: list[SourceCatalogEntry], state: str) -> list[SourceCatalogE
     return [entry for entry in entries if not state or entry.state == state]
 
 
+# Plain-English phrasings for the machine vocabularies, so Slack answers read like
+# a human status update instead of enum tokens. Unknown values fall back to the raw
+# (safe-escaped) string rather than being hidden.
+_ACCESS_MODE_WORDS = {
+    "public_no_auth": "open, no login",
+    "public_api_key": "open with a free API key",
+    "free_account": "free account needed",
+    "supplier_account": "vendor account needed",
+    "paid": "paid access",
+    "manual_only": "manual download only",
+    "unknown": "access not yet checked",
+}
+_ACCESS_STATUS_WORDS = {
+    "verified": "confirmed",
+    "assumed": "assumed",
+    "needs-testing": "not yet tested",
+}
+_INTEGRATION_WORDS = {
+    "discovered": "found, not yet checked",
+    "access_checked": "access confirmed, no feed built yet",
+    "parser_tested": "parser tested",
+    "live_zero_verified": "live, no security matches yet",
+    "live_positive_verified": "live and finding matches",
+}
+# Order matters: the most useful categories are named first in a coverage line.
+_COVERAGE_WORDS = (
+    ("candidate_found", "with a source link"),
+    ("not_applicable", "no separate source needed"),
+    ("researched_not_found", "researched, nothing found"),
+    ("not_researched", "not yet researched"),
+)
+_BATCH_STATUS_WORDS = {
+    "success": "completed",
+    "zero_results": "no results",
+    "non_retryable_failure": "failed",
+    "retryable_failure": "failed (will retry)",
+    "in_flight": "still running",
+}
+
+
+def _coverage_line(label: str, counts: Counter[str]) -> str:
+    """One human coverage line: 'Counties: 3,144 in total — 56 with a source link…'."""
+    total = sum(counts.values())
+    parts = [
+        f"{counts[key]:,} {phrase}" for key, phrase in _COVERAGE_WORDS if counts.get(key)
+    ]
+    detail = " — " + ", ".join(parts) if parts else ""
+    return f"- {label[:1].upper()}{label[1:]}: {total:,} in total{detail}"
+
+
 def _render_coverage(paths: DiscoveryStatusPaths, state: str, namespace: str) -> str:
-    """Render coverage queues while preserving every research-state distinction."""
+    """Render coverage queues in plain English, keeping every research-state count."""
     scope = f" for {state}" if state else " nationwide"
     lines = [f"Source research coverage{scope}:"]
     for key, counts in _coverage_counts(paths, state, namespace):
-        total = sum(counts.values())
-        lines.append(
-            f"- {NAMESPACE_LABELS[key]}: {total} total; "
-            f"{counts['candidate_found']} candidate_found; "
-            f"{counts['not_researched']} not_researched; "
-            f"{counts['not_applicable']} not_applicable; "
-            f"{counts['researched_not_found']} researched_not_found"
-        )
+        lines.append(_coverage_line(NAMESPACE_LABELS[key], counts))
     lines.append(
-        "candidate_found means a reviewed source link exists; it does not mean a working poller or lead."
+        'A "source link" means we found a page worth reviewing — not a working feed '
+        "or a lead yet."
     )
     return "\n".join(lines)
 
@@ -378,24 +422,43 @@ def _render_reviewed_sources(
             continue
         seen.add(entry.source_id)
         reviewed.append((check, entry))
-    scope = f" for {state}" if state else ""
+    scope = f" in {state}" if state else ""
     lines = [
-        f"Reviewed source candidates{scope} (showing {min(limit, len(reviewed))} of {len(reviewed)}):"
+        f"Reviewed sources{scope} "
+        f"(showing {min(limit, len(reviewed))} of {len(reviewed)}):"
     ]
-    for check, entry in reviewed[:limit]:
+    for index, (check, entry) in enumerate(reviewed[:limit], start=1):
+        level = _safe_text(entry.jurisdiction_level.value.replace("_", " "))
+        mode = _ACCESS_MODE_WORDS.get(
+            entry.access_mode.value, _safe_text(entry.access_mode.value)
+        )
+        access_status = _ACCESS_STATUS_WORDS.get(
+            entry.access_status.value, _safe_text(entry.access_status.value)
+        )
+        stage = _INTEGRATION_WORDS.get(
+            entry.integration_status.value, _safe_text(entry.integration_status.value)
+        )
         lines.append(
-            f"- {_safe_text(entry.name)} [{_safe_text(entry.source_id)}] — "
-            f"{_safe_text(entry.jurisdiction_level.value)}; "
-            f"access={_safe_text(entry.access_mode.value)}/{_safe_text(entry.access_status.value)}; "
-            f"integration={_safe_text(entry.integration_status.value)}; "
-            f"reviewed={_safe_text(check.checked_on)}; {_safe_url(entry.url)}"
+            f"{index}. {_safe_text(entry.name)} — {level} source. "
+            f"Access: {mode} ({access_status}). "
+            f"Status: {stage}. Reviewed {_safe_text(check.checked_on)}. "
+            f"{_safe_url(entry.url)}"
         )
     if not reviewed:
-        lines.append("- No reviewed catalog sources matched those filters.")
+        lines.append("- No reviewed sources matched those filters.")
     lines.append(
-        "discovered candidates are not leads and are not working pollers unless integration says live."
+        "These are pages we've reviewed as candidates — not live feeds or leads "
+        'unless the status says "live".'
     )
     return "\n".join(lines)
+
+
+def _batch_date(batch_id: str) -> str:
+    """Turn a '20260716T004633Z' batch id into a readable '2026-07-16' date."""
+    match = re.match(r"(\d{4})(\d{2})(\d{2})", batch_id)
+    if match:
+        return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+    return _safe_text(batch_id)
 
 
 def _render_recent_batches(
@@ -437,27 +500,26 @@ def _render_recent_batches(
             statuses = Counter(item.terminal_status for item in checkpoints)
         rows.append((manifest, len(checkpoints), attempt_count, result_count, statuses))
     lines = [
-        f"Validated discovery batches (showing {min(limit, len(rows))} of {len(rows)}):"
+        f"Recent discovery batches (showing {min(limit, len(rows))} of {len(rows)}):"
     ]
     for manifest, task_count, attempt_count, result_count, status_counts in rows[
         :limit
     ]:
         statuses = ", ".join(
-            f"{_safe_text(status)}={count}"
+            f"{count} {_BATCH_STATUS_WORDS.get(status, _safe_text(status))}"
             for status, count in sorted(status_counts.items())
         )
-        schema_note = (
-            "validation-only legacy" if manifest.schema_version == 1 else "current"
-        )
+        outcome = f"; {statuses}" if statuses else ""
         lines.append(
-            f"- {_safe_text(manifest.batch_id)} — schema v{manifest.schema_version} ({schema_note}); "
-            f"tasks={task_count}; attempts={attempt_count}; "
-            f"results={result_count}; {statuses}"
+            f"- Search from {_batch_date(manifest.batch_id)} — "
+            f"{task_count:,} searches, {attempt_count:,} attempts, "
+            f"{result_count:,} results{outcome}."
         )
     if not rows:
-        lines.append("- No validated batches matched those filters.")
+        lines.append("- No discovery batches matched those filters.")
     lines.append(
-        "batch success means a search completed; it does not mean a source was reviewed or promoted."
+        "These are raw search results, not reviewed sources — a completed search "
+        "doesn't mean a source was reviewed or added."
     )
     return "\n".join(lines)
 
@@ -485,24 +547,32 @@ def _render_summary(paths: DiscoveryStatusPaths, state: str) -> str:
         and (not state or state in load_manifest(batch_dir).states)
     )
     scope = f" for {state}" if state else " nationwide"
+    # Items are semicolon-separated because several phrases contain their own comma.
+    access_phrase = "; ".join(
+        f"{value:,} {_ACCESS_MODE_WORDS.get(key, _safe_text(key))}"
+        for key, value in sorted(access.items(), key=lambda item: (-item[1], item[0]))
+    )
+    stage_phrase = "; ".join(
+        f"{value:,} {_INTEGRATION_WORDS.get(key, _safe_text(key))}"
+        for key, value in sorted(
+            integration.items(), key=lambda item: (-item[1], item[0])
+        )
+    )
+    batch_word = "batch" if batch_count == 1 else "batches"
     lines = [
-        f"Source discovery summary{scope}:",
-        f"- catalog sources: {len(entries)}",
-        f"- manually reviewed catalog sources: {len(reviewed_ids)}",
-        f"- selected-result evidence checks: {len(checks)}",
-        f"- validated raw batches stored: {batch_count}",
-        "- access modes: "
-        + ", ".join(
-            f"{_safe_text(key)}={value}" for key, value in sorted(access.items())
-        ),
-        "- integration states: "
-        + ", ".join(
-            f"{_safe_text(key)}={value}" for key, value in sorted(integration.items())
-        ),
+        f"Source discovery status{scope}:",
+        f"- {len(entries):,} candidate sources catalogued",
+        f"- {len(reviewed_ids):,} reviewed by hand so far",
+        f"- {len(checks):,} pages checked with saved evidence",
+        f"- {batch_count:,} raw search {batch_word} stored",
+        f"- How we'd reach them: {access_phrase}",
+        f"- How far along they are: {stage_phrase}",
+        "Research coverage:",
     ]
     lines.extend(_render_coverage(paths, state, "all").splitlines()[1:-1])
     lines.append(
-        "Research inventory is not the lead database: raw results, reviewed candidates, and live pollers are separate states."
+        "This is our research list, not the leads themselves — raw results, "
+        "reviewed candidates, and live feeds are separate things."
     )
     return "\n".join(lines)
 
