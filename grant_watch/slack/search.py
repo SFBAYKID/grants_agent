@@ -18,6 +18,10 @@ from pathlib import Path
 from .. import db
 from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact, make_spreadsheet
+from .search_presentation import contact_suffix as _contact_suffix
+from .search_presentation import entity_role_for_row as _entity_role_for_row
+from .search_presentation import record_link as _record_link
+from .search_presentation import window_label as _window_label
 
 Progress = Callable[[str], None]
 
@@ -323,28 +327,6 @@ def _date_clause(
     return "(" + " AND ".join(clauses) + ")", params, order_sql
 
 
-def _window_label(row: sqlite3.Row) -> str:
-    """Describe stored dates according to the row's verified record meaning."""
-    start = row["funds_start"] or "?"
-    end = row["funds_end"] or "?"
-    event_type = str(row["current_event_type"] or "")
-    event_date = str(row["current_event_occurred_on"] or "")
-    if event_type in {"award_announced", "award_obligated"}:
-        prefix = f"award event {event_date}; " if event_date else ""
-        return f"{prefix}spend window {start} through {end}"
-    if event_type == "application_window_opened":
-        return f"applications open {start}; close {end}"
-    if event_type == "rfp_posted":
-        return f"posted {event_date or start}; response due {end}"
-    if row["lead_grade"] == "gold":
-        return f"spend window {start} through {end}"
-    if row["source"] == "grants.gov":
-        return f"applications open {start}; close {end}"
-    if row["lead_grade"] == "silver":
-        return f"posted {start}; response due {end}"
-    return f"recorded window {start} through {end}"
-
-
 def _record_kind_for_row(row: sqlite3.Row) -> str:
     """Derive display/export meaning from the evidence-backed current event."""
     event_type = str(row["current_event_type"] or "")
@@ -355,36 +337,6 @@ def _record_kind_for_row(row: sqlite3.Row) -> str:
     if event_type == "rfp_posted":
         return RecordKind.SOLICITATION.value
     return "watch"
-
-
-def _entity_role_for_row(row: sqlite3.Row) -> str:
-    """Distinguish a funding/posting agency from an actual award recipient."""
-    event_type = str(row["current_event_type"] or "")
-    if event_type == "application_window_opened":
-        return "funding agency"
-    if event_type == "rfp_posted":
-        return "posting organization"
-    if event_type in {"award_announced", "award_obligated"}:
-        return "award recipient"
-    return "organization"
-
-
-def _contact_suffix(cell: list[object]) -> str:
-    """Render one enriched contact cell [name, title, email, status] as a short inline
-    suffix for the summary — honest about not_found / unreachable, never fabricated."""
-    name, title, email, status = (list(cell) + ["", "", "", ""])[:4]
-    if status == "verified":
-        who = f"{name} ({title})".strip()
-        return f" · contact: {who} {email}".rstrip()
-    if status == "not_found":
-        return " · contact: none found"
-    if status == "unreachable":
-        return " · contact: source unreachable — retry"
-    if status == "error":
-        return " · contact: lookup error"
-    if status:
-        return f" · contact: {status}"
-    return ""
 
 
 def _export_kind(raw: str | bool) -> str:
@@ -805,7 +757,10 @@ def search_leads(
             int(row["id"]),
             _record_kind_for_row(row),
             _entity_role_for_row(row),
-            *[row[column] for column in _SEARCH_COLUMNS],
+            *[
+                _record_link(row) if column == "detail_url" else row[column]
+                for column in _SEARCH_COLUMNS
+            ],
             _window_label(row),
         ]
         for row in rows
@@ -944,9 +899,11 @@ def search_leads(
         )
         # Every shown row carries its public source link — the link keeps the
         # model (and the pipeline) honest; a row without one says so plainly.
+        # _record_link pins the URL to THIS award when the source supports it.
+        record_url = _record_link(row)
         source_link = (
-            f" · <{row['detail_url']}|source>"
-            if row["detail_url"]
+            f" · <{record_url}|verify this record>"
+            if record_url
             else " · no source link on file"
         )
         lines.append(

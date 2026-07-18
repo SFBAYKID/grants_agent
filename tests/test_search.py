@@ -572,7 +572,43 @@ def test_results_carry_grade_split_and_source_links(tmp_path: Path) -> None:
     """Every shown row keeps its public source link; the header explains grades."""
     text, _ = search_leads(state="CA", db_path=_db(tmp_path))
     assert "gold (award won, money to spend)" in text
-    assert "|source>" in text  # Slack-formatted link on result rows
+    assert "|verify this record>" in text  # Slack-formatted link on result rows
+
+
+def test_ca_portal_rows_get_per_record_verification_links() -> None:
+    """CA dataset rows deep-link to THEIR award record, not the shared dataset.
+
+    Chase's honesty rule: 'under Pleasant View Elementary … there needs to be a
+    link to that specific [amount]' — a generic dataset URL repeated per row
+    proves nothing."""
+    from grant_watch.slack.search_presentation import record_link
+
+    class FakeRow(dict):
+        """Minimal sqlite3.Row stand-in supporting [] access."""
+
+        def __getitem__(self, key: str) -> object:
+            """Read one column value."""
+            return dict.__getitem__(self, key)
+
+    row = FakeRow(
+        source="ca-grants-award:2023-2024",
+        source_item_id="73146",
+        detail_url=(
+            "https://data.ca.gov/dataset/572d06aa-4f1f-44ad-80a4-167bec020881/"
+            "resource/018f3523-652d-4197-a4a8-a055bfd1544f"
+        ),
+    )
+    link = record_link(row)
+    assert "datastore_search" in link
+    assert "resource_id=018f3523-652d-4197-a4a8-a055bfd1544f" in link
+    assert "73146" in link
+    # Non-CA rows keep their own per-record page untouched.
+    usa = FakeRow(
+        source="usaspending",
+        source_item_id="X",
+        detail_url="https://www.usaspending.gov/award/ASST_NON_123",
+    )
+    assert record_link(usa) == "https://www.usaspending.gov/award/ASST_NON_123"
 
 
 def test_with_contacts_appends_columns_to_summary(
