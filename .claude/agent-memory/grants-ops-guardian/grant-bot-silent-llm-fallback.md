@@ -30,7 +30,11 @@ a code change (owner-side), not an ops action.
 **How to apply:**
 - Never read bot.log silence as "no errors". Diagnose by symptom text: exact fallback
   string = 200-but-unparseable model output; "trouble thinking right now (X)" = raised
-  exception X (bad key / 404 model / egress).
+  exception X (bad key / 404 model / egress); "That took more digging than I expected
+  and I hit my limit" = the tool loop exhausted MAX_TOOL_TURNS (6) without a final
+  answer — fall-through return in conversation.py (~line 683), also logs ZERO bytes
+  (re-proven live 2026-07-18T06:06Z: bot.log mtime 05:48:44Z predated the failing
+  turn; file contained only 69 startup pairs).
 - Presence-only env checks that worked: `grep -c '^KEY=..*' .env` and, for the LIVE
   process, `tr "\0" "\n" < /proc/<pid>/environ | grep -c '^KEY=..*'` (counts only,
   never values). Egress probe without the key: keyless curl to

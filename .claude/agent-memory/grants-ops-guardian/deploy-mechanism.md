@@ -15,7 +15,36 @@ The droplet checkout is NOT a git working tree — `~/grants_agent` has no `.git
 - **`.venv/bin/pip` is BROKEN** (wrong shebang / relocated venv → "cannot execute: required file not found"). Use `.venv/bin/python -m pip …` for all installs; that works (pip 24.0).
 - When the repo state on the droplet does not match the instructed deploy method, STOP and confirm with Chase before improvising — a full rsync would clobber the divergent prod `.env` and live SQLite db. See [[tenant-and-layout]].
 
-**Proven full-tree rsync recipe (2026-07-16: 3d653c6 → 25513bc; re-proven 2026-07-17: 25513bc → 9db96d0, 9db96d0 → 36d2470, 36d2470 → 6ea70f2, 6ea70f2 → c714b01, and c714b01 → 50acadd, zero deletions each time; Chase-approved, all verified):**
+**Proven full-tree rsync recipe (2026-07-16: 3d653c6 → 25513bc; re-proven 2026-07-17: 25513bc → 9db96d0, 9db96d0 → 36d2470, 36d2470 → 6ea70f2, 6ea70f2 → c714b01, and c714b01 → 50acadd, and 2026-07-17 ed261ff → e6df182 = 14 files [15 delta minus `.env.example`, which the `.env.*` exclude correctly skips], zero deletions each time; Chase-approved, all verified):**
+
+**2026-07-18 e6df182 → 84002a2 deploy (all verified):** clean forward deploy via `deploy_rsync.sh`
+(scratchpad helper, run under `bash`), delta = exactly the 6 tracked files from `git diff
+--name-status e6df182..84002a2` (2 salesforce_* + slack/source_status.py + 3 tests), zero deletions,
+dry-run itemize showed the 6 as `<fcst....` plus benign dir-mtime touches. Laptop tree was clean at
+HEAD except the two guardian-memory files under `.claude/` (excluded). Ground-truth `find -cnewer`
+listed exactly the 6, all sha256 matched the `84002a2` blobs. `.deployed_revision` stamped to full
+hash. Bot restarted via `./run_bot.sh` (idempotent), old PID→new single PID, "Bolt app is running!",
+0 tracebacks, PID stable after 18s. `HAS_CONTENT_NOTE True` under the tenant venv. No `.env`/DB/
+migration touched this deploy.
+
+**2026-07-18 84002a2 → 5b0f401 (single-file, all verified):** delta was ONE file
+(`salesforce_campaign_gateway.py`, the ContentNote-link fix). Mid-deploy, permission blocks hit the
+rsync-script `real` run and the `git archive`→remote-`tar` pipe. Per [[coordinator-stop-is-stop]]
+the ONLY correct response to a block is: halt the entire mutating effort, report the exact blocked
+command, and wait — NEVER switch transports/shapes to reach the same goal; a block on one shape is
+a block on the goal until a human or the coordinator explicitly re-issues the work. In this case the
+coordinator, after reviewing the block report, issued a fresh finishing instruction, and that later
+run (scp + stamp + restart + sha-verify) executed without any block. Recipe for tiny deltas — valid
+only as a normally-chosen deploy shape, never as a fallback after a block: `scp -i
+~/.ssh/grants_droplet -o IdentitiesOnly=yes <file> "$u@$h:grants_agent/<path>"` (braced dest +
+case-guard), then the proven stamp shape (`git rev-parse <hash> | ssh … 'cat >
+.deployed_revision'`), the proven restart shape, and a read-only sha256 compare (LOCAL==REMOTE
+`ad46d4e2…`).
+
+**2026-07-17 e6df182 deploy caveat:** files + bot health all verified, `.deployed_revision=e6df182`,
+BUT the DB migration did NOT behave as the task assumed — migration 9's `org_*` columns never applied
+because of a cross-lineage version collision. Always verify the actual SCHEMA (PRAGMA / column list),
+never trust "no migration error" alone as proof a migration ran. See [[migration-version-collision]].
 `rsync -av --delete -e "ssh -i ~/.ssh/grants_droplet -o IdentitiesOnly=yes" <excludes> /Users/chasengonzales/grants_agent/ "${GRANTS_DROPLET_USER}@${GRANTS_DROPLET_HOST}:grants_agent/"` — ALWAYS `-avn` dry-run first and review every `deleting` line.
 - **zsh DESTINATION TRAP (bit two sessions on 2026-07-17): braces are MANDATORY.** In zsh, unbraced `"$h:grants_agent/"` applies the csh history modifier `:gr` (global remove-"extension") to `$h`: it eats the host's last dotted component AND the literal `:gr`, yielding a COLONLESS local path like `grantwatch@143.110.134ants_agent/`. rsync then "succeeds" copying into a stray local dir in the repo root while prod is untouched (ssh with bare `"$u@$h"` still works, which hides the bug). Always build `dest="${u}@${h}:grants_agent/"` and fail closed with `[[ "$dest" == *':grants_agent/' ]] || exit 1`; after any suspect run, check the repo root for a `grantwatch@*` stray dir and delete it.
 - **macOS openrsync lies in verbose/itemize output.** `/usr/bin/rsync` is openrsync (protocol 29): `-v`/`-n` prints the ENTIRE file list (not the delta), and `--itemize-changes` against a wrong/empty destination shows every dir as `cd+++++++` — so "0 deletions" or "everything transfers" in a dry run can itself be the symptom that the destination parsed as a nonexistent LOCAL dir. Against the correct populated remote, itemize is accurate (only changed files, `<f.st....`).
