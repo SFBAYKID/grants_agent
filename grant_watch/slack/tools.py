@@ -463,8 +463,8 @@ def find_contact(
     from ..enrich.organization_profile import org_enrichment_summary
 
     outcome = enrich_lead_contact(conn, lead_id, on_progress)
-    org_line = org_enrichment_summary(conn, lead_id, on_progress)
     if outcome.status == "verified":
+        org_line = org_enrichment_summary(conn, lead_id, on_progress)
         phone = f" / {outcome.phone}" if outcome.phone else ""
         source = f" (found on {outcome.source_url})" if outcome.source_url else ""
         return (
@@ -476,10 +476,33 @@ def find_contact(
             "I couldn't reach their website or search to verify a contact right now — "
             "nothing recorded, so it's worth trying again shortly."
         )
+    # Fallback-chain outcomes: the tool already tried the site, LinkedIn, and the
+    # org's general mailbox — report exactly which rungs produced something.
+    title = f" ({outcome.title})" if outcome.title else ""
+    if outcome.status == "linkedin_org_email":
+        return (
+            f"No email shown on their own site, but LinkedIn surfaced "
+            f"{outcome.name}{title} — profile {outcome.source_url} (ownership not "
+            f"verified, saved to the lead) — and the organization's general mailbox "
+            f"is {outcome.email}, verified on their site."
+        )
+    if outcome.status == "linkedin_only":
+        return (
+            f"No verifiable email anywhere, but LinkedIn surfaced "
+            f"{outcome.name}{title} — profile {outcome.source_url} (ownership not "
+            "verified, saved to the lead). No org mailbox verified either — "
+            "a LinkedIn message is the honest path."
+        )
+    if outcome.status == "org_email":
+        return (
+            "No named person verified on their site or LinkedIn, but the "
+            f"organization's general mailbox is {outcome.email}, verified on "
+            f"{outcome.source_url or 'their site'}."
+        )
     return (
-        "No verifiable direct contact found on their website (a personal email must "
-        "appear on a page we actually fetched). Recorded as not_found."
-        f"{org_line} You can also try find_person_linkedin for a name."
+        "I checked their website, LinkedIn, and looked for a general organization "
+        "mailbox — none produced a verifiable contact, so this is recorded as "
+        "not_found. A human may have better luck by phone."
     )
 
 
