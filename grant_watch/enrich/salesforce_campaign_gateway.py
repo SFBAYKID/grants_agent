@@ -487,25 +487,13 @@ class SalesforceCampaignGateway:
         note = self._create_one("ContentNote", {"Title": title, "Content": content})
         if not note.success or not note.record_id:
             return note
-        try:
-            body = self._get(
-                "query",
-                {
-                    "q": "SELECT ContentDocumentId FROM ContentNote WHERE Id="
-                    f"'{_soql_literal(note.record_id)}'"
-                },
-            )
-            document_id = str((body.get("records") or [{}])[0].get("ContentDocumentId"))
-        except (requests.RequestException, KeyError, IndexError) as exc:
-            return CreateResult(
-                False,
-                note.record_id,
-                error=f"note created but link lookup failed: {type(exc).__name__}",
-            )
+        # A ContentNote is stored as a ContentDocument (FileType SNOTE) whose own Id
+        # IS its ContentDocumentId — so the document id is note.record_id directly,
+        # with no lookup (and SOQL on ContentNote is rejected in some orgs anyway).
         link = self._create_one(
             "ContentDocumentLink",
             {
-                "ContentDocumentId": document_id,
+                "ContentDocumentId": note.record_id,
                 "LinkedEntityId": parent_id,
                 "ShareType": "V",
                 "Visibility": "AllUsers",
