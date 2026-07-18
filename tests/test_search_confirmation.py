@@ -36,7 +36,7 @@ def test_initial_fully_specified_search_is_confirmed_before_tool_execution(
     class FakeAnthropic:
         """Expose the single-turn search proposal."""
 
-        def __init__(self) -> None:
+        def __init__(self, **_kwargs: object) -> None:
             """Initialize the fake message client."""
             self.messages = FakeMessages()
 

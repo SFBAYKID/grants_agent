@@ -63,7 +63,7 @@ def test_identical_model_tool_retry_executes_once(
     class FakeAnthropic:
         """Expose the scripted repeating-tool client."""
 
-        def __init__(self) -> None:
+        def __init__(self, **_kwargs: object) -> None:
             """Initialize its messages resource."""
             self.messages = FakeMessages()
 
@@ -117,7 +117,7 @@ def test_different_successful_tool_arguments_each_execute_once(
     class FakeAnthropic:
         """Expose the distinct-query model script."""
 
-        def __init__(self) -> None:
+        def __init__(self, **_kwargs: object) -> None:
             """Initialize its messages resource."""
             self.messages = FakeMessages()
 
@@ -174,7 +174,7 @@ def test_paid_web_search_executes_once_even_when_model_changes_query(
     class FakeAnthropic:
         """Expose the two-query model script."""
 
-        def __init__(self) -> None:
+        def __init__(self, **_kwargs: object) -> None:
             """Initialize its messages resource."""
             self.messages = FakeMessages()
 
@@ -235,7 +235,7 @@ def test_corrected_tool_arguments_reexecute_after_error(
     class FakeAnthropic:
         """Expose the error-then-corrected model script."""
 
-        def __init__(self) -> None:
+        def __init__(self, **_kwargs: object) -> None:
             """Initialize its messages resource."""
             self.messages = FakeMessages()
 
@@ -297,7 +297,7 @@ def test_tool_budget_exhaustion_forces_final_no_tools_answer(
     class FakeAnthropic:
         """Expose the never-finishing model script."""
 
-        def __init__(self) -> None:
+        def __init__(self, **_kwargs: object) -> None:
             """Initialize its messages resource."""
             self.messages = FakeMessages()
 

@@ -187,7 +187,7 @@ def test_model_failure_after_artifact_creation_cleans_file(
     class FakeAnthropic:
         """Expose the fake messages resource used by conversation.respond."""
 
-        def __init__(self) -> None:
+        def __init__(self, **_kwargs: object) -> None:
             """Initialize the test double."""
             self.messages = FakeMessages()
 
@@ -326,7 +326,7 @@ def test_respond_dispatches_with_contacts_second_step(
     class FakeAnthropic:
         """Expose the scripted messages resource."""
 
-        def __init__(self) -> None:
+        def __init__(self, **_kwargs: object) -> None:
             """Initialize the test double."""
             self.messages = FakeMessages()
 

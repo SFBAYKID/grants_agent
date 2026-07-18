@@ -188,7 +188,7 @@ def test_empty_model_turn_gets_one_bounded_retry(
     class FakeAnthropic:
         """Expose the retry-aware fake messages client."""
 
-        def __init__(self) -> None:
+        def __init__(self, **_kwargs: object) -> None:
             """Initialize the fake Anthropic surface."""
             self.messages = FakeMessages()
 

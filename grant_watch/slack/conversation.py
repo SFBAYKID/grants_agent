@@ -562,7 +562,10 @@ def respond(
             "files": [],
             "pending_crm_actions": [],
         }
-    client = Anthropic()  # ANTHROPIC_API_KEY from env
+    # ANTHROPIC_API_KEY from env. 60s covers a slow tool-planning turn without
+    # letting one hung request stall the Slack worker; 2 retries absorb the
+    # transient 429/5xx/connection errors that previously surfaced as failures.
+    client = Anthropic(timeout=60.0, max_retries=2)
     say = on_progress or (lambda _msg: None)
     # Keep a wider window so the confirmed filters (STEP 1) survive a few interleaved
     # messages before the rep replies "yes, top 5" (architectural-critic H1).
