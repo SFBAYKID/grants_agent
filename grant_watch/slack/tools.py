@@ -501,8 +501,8 @@ def find_contact(
         )
     return (
         "I checked their website, LinkedIn, and looked for a general organization "
-        "mailbox — none produced a verifiable contact, so this is recorded as "
-        "not_found. A human may have better luck by phone."
+        "mailbox — none produced a verifiable contact, so I've logged this one as "
+        "no contact found. A human may have better luck by phone."
     )
 
 
