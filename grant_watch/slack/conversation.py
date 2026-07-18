@@ -27,6 +27,7 @@ from anthropic import Anthropic
 from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact
 from . import tools
+from .intent_router import deterministic_reply as _deterministic_reply
 from .search_planning import (
     basic_search_arguments as _basic_search_arguments,
 )
@@ -539,6 +540,17 @@ def respond(
         return {
             "intent": "question",
             "reply": source_reply,
+            "files": [],
+            "pending_crm_actions": [],
+        }
+    # Deterministic router: capability help and simple inventory listings are
+    # answered without a model call. Runs after the source-status pre-pass so
+    # its richer parsing (and the paid-discovery refusal) always wins.
+    routed_reply = _deterministic_reply(user_text, thread_context)
+    if routed_reply is not None:
+        return {
+            "intent": "question",
+            "reply": routed_reply,
             "files": [],
             "pending_crm_actions": [],
         }
