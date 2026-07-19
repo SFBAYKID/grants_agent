@@ -559,12 +559,12 @@ def test_delivery_reservation_prevents_duplicate_post(tmp_path: Path) -> None:
     assert second == "skip: nothing new worth saying"
     assert client.calls == 1
     assert "blocks" not in client.last_kwargs
-    assert client.last_kwargs["mrkdwn"] is False
+    assert client.last_kwargs["mrkdwn"] is True  # source renders as a hyperlink
     assert client.last_kwargs["unfurl_links"] is False
     assert client.last_kwargs["unfurl_media"] is False
     assert client.last_kwargs["text"] == (
         "Castle Rock School District 401 in Washington has a verified "
-        "$500,000 SVPP funding award.\nSource: https://x.gov/a"
+        "$500,000 SVPP funding award.\n\n<https://x.gov/a|View the source record>"
     )
     assert (
         conn.execute("SELECT state FROM notification_outbox").fetchone()["state"]
@@ -632,9 +632,10 @@ def test_proactive_alert_carries_a_validated_source_line(tmp_path: Path) -> None
     client = _SlackClient()
     drip.run_drip(client, "C1", conn, force=True)
     posted = client.last_kwargs["text"]
-    assert "\nSource: https://x.gov/a" in posted
+    # hyperlinked source on its own line after a blank line (Chase 2026-07-19)
+    assert "\n\n<https://x.gov/a|View the source record>" in posted
     # The claim sentence remains a single inert sentence before the source.
-    sentence = posted.split("\nSource:")[0]
+    sentence = posted.split("\n\n")[0]
     assert sentence.count(".") == 1 and "\n" not in sentence
 
 

@@ -192,13 +192,14 @@ def build_rfp_alert(row: sqlite3.Row) -> tuple[str, str]:
 
 
 def source_line(row: sqlite3.Row) -> str:
-    """A separate, URL-validated 'Source: <url>' line for a proactive alert.
+    """A separate, hyperlinked source line for a proactive alert (Chase 2026-07-19:
+    hyperlink the label, don't show the raw URL, and leave a blank line before it).
 
-    Chase's rule: every funding claim carries its source. The one-sentence alert
-    stays inert (no untrusted text can inject a link); the URL comes only from
-    the stored, per-record detail link and is hardened through _safe_url — a
-    missing or unsafe URL yields no line rather than a bad one. Posted with
-    mrkdwn off, a bare https URL still auto-links in Slack."""
+    Every funding claim carries its source. The URL comes ONLY from the stored,
+    per-record detail link and is hardened through _safe_url — a missing or unsafe URL
+    yields no line rather than a bad one. Rendered as a Slack `<url|label>` link (the
+    post uses mrkdwn); the URL never comes from untrusted text, and the label is fixed,
+    so nothing injectable reaches the link."""
     try:
         url = record_link(row)
     except (KeyError, IndexError):
@@ -208,7 +209,7 @@ def source_line(row: sqlite3.Row) -> str:
     safe = _safe_url(url)
     if safe == "(URL unavailable)":
         return ""
-    return f"\nSource: {safe}"
+    return f"\n\n<{safe}|View the source record>"
 
 
 def pacing_ok(
@@ -390,7 +391,11 @@ def run_drip(
         resp = client.chat_postMessage(
             channel=channel,
             text=text,
-            mrkdwn=False,
+            # mrkdwn on so the source renders as a hyperlink (Chase 2026-07-19). Safe:
+            # the sentence is built only from sanitized facts (display_entity_name strips
+            # <>*_~|@`), and the URL is the stored, hardened detail link — nothing
+            # injectable reaches the render.
+            mrkdwn=True,
             unfurl_links=False,
             unfurl_media=False,
         )
