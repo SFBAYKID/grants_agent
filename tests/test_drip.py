@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import random
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -158,7 +158,8 @@ def test_min_gap_blocks(tmp_path: Path) -> None:
     )
     conn.commit()
     now = datetime.now(timezone.utc)
-    go, reason = drip.pacing_ok(conn, "C1", now, random.Random(1))
+    # urgent bypasses the 1/day cap but still respects the 90-minute gap
+    go, reason = drip.pacing_ok(conn, "C1", now, random.Random(1), urgent=True)
     assert not go and "since last post" in reason
 
 
@@ -351,13 +352,34 @@ def test_rfp_alert_names_cameras_and_access_control(tmp_path: Path) -> None:
     assert "security cameras and access control" in text
 
 
-def test_pick_surfaces_gold_rfp_before_a_gold_award(tmp_path: Path) -> None:
-    """A freshly-posted (GOLD) RFP — an active buyer — beats a gold award (Chase)."""
+def test_pick_prefers_a_gold_award_over_a_gold_rfp(tmp_path: Path) -> None:
+    """Grants outrank RFPs (Chase 2026-07-18: an RFP can be a formality). The award
+    here is >7 days old so it is a plain gold nugget, not platinum, yet still wins."""
     conn = db.connect(tmp_path / "t.db")
     _mk_lead(conn, iid="AWARD", entity="Fresh District", start="2026-06-01")
     _mk_rfp(conn, iid="GRFP", entity="City of Kemah", grade=LeadGrade.GOLD)
-    kind, row = drip.pick(conn, "C1")
-    assert kind == "rfp" and row["entity_name"] == "City of Kemah"
+    kind, row = drip.pick(conn, "C1", today=date(2026, 7, 18))
+    assert kind == "nugget" and row["entity_name"] == "Fresh District"
+
+
+def test_pick_surfaces_platinum_for_a_fresh_security_grant(tmp_path: Path) -> None:
+    """A verified SVPP award from the last few days is PLATINUM — the top card."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="PLAT", entity="Fresh District", start="2026-07-15")  # SVPP
+    _mk_rfp(conn, iid="GRFP", entity="City of Kemah", grade=LeadGrade.GOLD)
+    kind, row = drip.pick(conn, "C1", today=date(2026, 7, 18))
+    assert kind == "platinum" and row["entity_name"] == "Fresh District"
+    text, style = drip.build_platinum(row)
+    assert style == "platinum"
+    assert "just landed a verified" in text and "reaching out now" in text
+
+
+def test_stale_award_is_not_platinum(tmp_path: Path) -> None:
+    """An award older than the platinum window is a plain nugget, not platinum."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="OLD", entity="Old District", start="2026-06-01")  # >7 days
+    kind, _row = drip.pick(conn, "C1", today=date(2026, 7, 18))
+    assert kind == "nugget"
 
 
 def test_pick_puts_a_silver_rfp_after_a_gold_award(tmp_path: Path) -> None:

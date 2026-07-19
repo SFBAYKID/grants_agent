@@ -1,13 +1,17 @@
 """The drip engine: Grant surfaces one golden nugget at a time, sounding human.
 
 Chase's spec: structured underneath (best lead_score first), sporadic on the surface
-(jittered timing, never a wall of leads). The initial message is exactly one short,
-factual sentence (the RFP alert adds Chase's soft 'anybody want to talk?'), with no
-links, buttons, or menu inline; the source link rides a separate line.
-Three kinds:
+(jittered timing, never a wall of leads). The initial message is one short factual sentence (RFP/platinum add a soft nudge),
+with no links, buttons, or menu inline; the source link rides a separate line.
+
+ONE best card a day (Chase 2026-07-18: more than that and people tune out); an
+emergency may add a second. The single card is the best opportunity available, on a
+quality ladder — it reads as varied without being random:
+  platinum  a security grant awarded in the last few days — a buy is imminent (top)
+  nugget    an entity that WON security money   ("Castle Rock SD has a $500K award")
   rfp       an entity with an OPEN security RFP ("… open RFP for security cameras …")
-  nugget    an entity that just WON money   ("Castle Rock SD just got $500K...")
   bulletin  program-level news from grants.gov ("SVPP window just opened, closes 8/4")
+Grants outrank RFPs — an RFP can be a formality with a vendor already chosen.
 
 Run via cron every ~30 min; each tick decides for itself whether to speak:
   in the window? (Mon-Fri, 8:00 America/New_York through 17:00 America/Los_Angeles)
@@ -50,12 +54,16 @@ _BULLETIN_OFFTOPIC_RE = re.compile(
     re.IGNORECASE,
 )
 
-DAILY_AIM = 2  # normal target; jitter decides whether a third is worthwhile
-DAILY_CAP = 3  # normal hard cap across both kinds
-ABSOLUTE_CAP = 4  # rare fourth only for a newly dated exceptional event
+# Chase (2026-07-18): ONE card a day is plenty — too many and people tune out. The
+# single daily card is the best opportunity available (platinum > gold award > RFP),
+# so it reads as varied without being random. Emergencies (urgent) may add ONE more.
+DAILY_AIM = 1  # normal target: one best-of-the-day card
+DAILY_CAP = 1  # normal hard cap; only an urgent/emergency card exceeds it
+ABSOLUTE_CAP = 2  # the daily card plus at most one emergency
 MIN_GAP_MINUTES = 90  # never two posts closer than this
 POST_PROBABILITY = 0.45  # per-eligible-tick chance — the "sporadic" in the spec
 BULLETIN_MAX_PER_DAY = 1
+PLATINUM_DAYS = 7  # a security grant awarded within ~a week — the cream (buy imminent)
 
 ET = ZoneInfo("America/New_York")
 PT = ZoneInfo("America/Los_Angeles")
@@ -82,8 +90,11 @@ def _fmt_amount(amount: float | None) -> str:
     return f"${amount:,.2f}".removesuffix(".00")
 
 
-def build_nugget(row: sqlite3.Row) -> tuple[str, str]:
-    """Build one minimal award sentence using only persisted source facts."""
+def _award_facts(row: sqlite3.Row) -> tuple[str, str, str, str]:
+    """Validate + extract the persisted award facts shared by nugget and platinum.
+
+    Returns (entity, location, amount, program_text); raises on any unverified/missing
+    fact so a proactive card is never built on incomplete evidence."""
     if str(row["current_event_verification_status"] or "") != "verified":
         raise ValueError("proactive award must be verified")
     if str(row["current_event_type"] or "") not in {
@@ -100,12 +111,29 @@ def build_nugget(row: sqlite3.Row) -> tuple[str, str]:
     if not amt:
         raise ValueError("proactive award requires a finite positive amount")
     location = f" in {state}" if state else ""
-    amount = f" {amt}" if amt else ""
     program = plain_fragment(row["program"])
     program_text = f" {program}" if program else ""
+    return entity, location, f" {amt}", program_text
+
+
+def build_nugget(row: sqlite3.Row) -> tuple[str, str]:
+    """Build one minimal award sentence using only persisted source facts."""
+    entity, location, amount, program_text = _award_facts(row)
     return (
         f"{entity}{location} has a verified{amount}{program_text} funding award.",
         "award-brief",
+    )
+
+
+def build_platinum(row: sqlite3.Row) -> tuple[str, str]:
+    """The cream: a security grant awarded in the last few days — the buyer is about to
+    spend, so the card is timely and action-oriented (Chase: 'contact them now'). Facts
+    only — same verified award data as a nugget, just worded for urgency."""
+    entity, location, amount, program_text = _award_facts(row)
+    return (
+        f"{entity}{location} just landed a verified{amount}{program_text} security "
+        "award and is about to spend it — worth reaching out now.",
+        "platinum",
     )
 
 
@@ -243,34 +271,61 @@ def _is_exceptional(row: sqlite3.Row, today: date) -> bool:
     return base >= 0.85
 
 
-def pick(conn: sqlite3.Connection, channel: str) -> tuple[str, sqlite3.Row] | None:
-    """Choose the best gold/silver lead for the day (Chase 2026-07-18). Priority:
-    a GOLD RFP (freshly posted — an active buyer wanting cameras/access control) is the
-    hottest lead and goes first; then the top-scored unsurfaced GOLD award; then a
-    SILVER (older-but-open) RFP; then a program bulletin. Only gold/silver ever surface."""
+def _is_platinum(row: sqlite3.Row, today: date) -> bool:
+    """A verified PHYSICAL-security grant awarded within the last few days — the buyer
+    just got the money and is about to spend, so it outranks everything (Chase)."""
+    if str(row["current_event_verification_status"] or "") != "verified":
+        return False
+    occurred_raw = str(row["current_event_occurred_on"] or "")
+    try:
+        occurred = date.fromisoformat(occurred_raw[:10])
+    except ValueError:
+        return False
+    if occurred < today - timedelta(days=PLATINUM_DAYS) or occurred > today:
+        return False
+    # only a physical-security program counts (SVPP/NSGP/CSSGP/PCCD), not any grant
+    return scoring.PROGRAM_FIT.get(str(row["program"] or "").upper(), 0.0) >= 0.9
+
+
+def _best_nugget(conn: sqlite3.Connection, nuggets: list[sqlite3.Row]) -> sqlite3.Row:
+    """Top award by CRM-link tier then freshness-weighted score."""
+    return max(
+        nuggets,
+        key=lambda r: (
+            2
+            if r["salesforce_opportunity_link"]
+            else 1
+            if r["salesforce_account_link"]
+            else 0,
+            scoring.lead_score(
+                r["program"], r["amount"], r["current_event_occurred_on"] or ""
+            )
+            * scoring.feedback_multiplier(
+                db.program_outcome_points(conn, r["program"] or "")
+            ),
+        ),
+    )
+
+
+def pick(
+    conn: sqlite3.Connection, channel: str, today: date | None = None
+) -> tuple[str, sqlite3.Row] | None:
+    """Choose the single best opportunity of the day (Chase 2026-07-18). Quality ladder:
+    PLATINUM (a security grant awarded in the last few days — a buy is imminent) first;
+    then the top GOLD award; then a GOLD RFP (freshly posted); then a SILVER RFP; then a
+    program bulletin. Grants outrank RFPs — an RFP can be a formality with a vendor
+    already chosen. Only gold/silver+ ever surface; the daily cap keeps it to one."""
+    today = today or datetime.now(timezone.utc).date()
+    nuggets = db.nugget_candidates(conn)
+    platinum = [n for n in nuggets if _is_platinum(n, today)]
+    if platinum:
+        return "platinum", _best_nugget(conn, platinum)
+    if nuggets:
+        return "nugget", _best_nugget(conn, nuggets)
     rfps = db.rfp_candidates(conn)  # gold first, then silver, soonest deadline within
     gold_rfps = [r for r in rfps if str(r["lead_grade"]) == "gold"]
     if gold_rfps:
         return "rfp", gold_rfps[0]
-    nuggets = db.nugget_candidates(conn)
-    if nuggets:
-        best = max(
-            nuggets,
-            key=lambda r: (
-                2
-                if r["salesforce_opportunity_link"]
-                else 1
-                if r["salesforce_account_link"]
-                else 0,
-                scoring.lead_score(
-                    r["program"], r["amount"], r["current_event_occurred_on"] or ""
-                )
-                * scoring.feedback_multiplier(
-                    db.program_outcome_points(conn, r["program"] or "")
-                ),
-            ),
-        )
-        return "nugget", best
     silver_rfps = [r for r in rfps if str(r["lead_grade"]) == "silver"]
     if silver_rfps:
         return "rfp", silver_rfps[0]  # older but still-open RFP, soonest deadline
@@ -298,15 +353,18 @@ def run_drip(
     """One cron tick: maybe post one thing. Returns a human-readable outcome."""
     rng = rng or random.Random()
     now = datetime.now(timezone.utc)
-    choice = pick(conn, channel)
+    choice = pick(conn, channel, now.date())
     if choice is None:
         return "skip: nothing new worth saying"
     kind, row = choice
-    urgent = kind == "nugget" and _is_exceptional(row, now.date())
+    # A platinum (or exceptional gold) award may take the rare emergency second slot.
+    urgent = kind in ("platinum", "nugget") and _is_exceptional(row, now.date())
     go, reason = should_post(conn, channel, now, rng, force=force, urgent=urgent)
     if not go:
         return f"skip: {reason}"
-    if kind == "nugget":
+    if kind == "platinum":
+        text, style = build_platinum(row)
+    elif kind == "nugget":
         text, style = build_nugget(row)
     elif kind == "rfp":
         text, style = build_rfp_alert(row)
