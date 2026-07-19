@@ -313,6 +313,13 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 },
                 "date_from": {"type": "string", "description": "inclusive YYYY-MM-DD"},
                 "date_to": {"type": "string", "description": "inclusive YYYY-MM-DD"},
+                "open_only": {
+                    "type": "boolean",
+                    "description": "keep only records whose deadline has not passed "
+                    "(funds_end today or later) — the honest way to ask for "
+                    "'open RFPs' or still-open opportunities without knowing "
+                    "today's date. Excludes rows with no known deadline.",
+                },
                 "limit": {
                     "type": "integer",
                     "minimum": 1,
@@ -915,6 +922,7 @@ def run_tool(
                 date_field=str(args.get("date_field", "")),
                 date_from=str(args.get("date_from", "")),
                 date_to=str(args.get("date_to", "")),
+                open_only=bool(args.get("open_only", False)),
                 limit=int(args.get("limit", 50) or 50),
                 export=args.get("export", ""),
                 result_scope=str(args.get("result_scope", "top_n")),

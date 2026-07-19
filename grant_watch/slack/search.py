@@ -406,6 +406,7 @@ def search_leads(
     date_field: str = "",
     date_from: str = "",
     date_to: str = "",
+    open_only: bool = False,
     limit: int = 50,
     export: str | bool = "",
     result_scope: str = "top_n",
@@ -504,6 +505,18 @@ def search_leads(
         )
         if date_sql:
             groups.append(("the date window", date_sql, list(date_params)))
+        if open_only:
+            # "Still open": the record's deadline/close/spend-end (funds_end) is today or
+            # later, evaluated in SQL against date('now') so the caller never has to know
+            # today's date. Rows with no funds_end are excluded — we can't confirm they're
+            # open, and claiming so would violate the honesty rule.
+            groups.append(
+                (
+                    "the still-open filter",
+                    "funds_end IS NOT NULL AND date(funds_end) >= date('now')",
+                    [],
+                )
+            )
     except ValueError as exc:
         return f"ERROR: {exc}.", None
 

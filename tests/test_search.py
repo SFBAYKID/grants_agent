@@ -294,6 +294,57 @@ def test_response_due_range_is_solicitation_specific(tmp_path: Path) -> None:
     assert "Tustin" not in text
 
 
+def test_open_only_keeps_future_deadlines_and_drops_expired(tmp_path: Path) -> None:
+    """open_only surfaces still-open RFPs and excludes ones whose deadline has passed.
+
+    Dates are far past / far future so the assertion holds whatever day the suite runs
+    (open_only compares funds_end to SQL date('now'), the real current date)."""
+    path = tmp_path / "open.db"
+    conn = db.connect(path)
+    _insert(conn, "rfp", "R_OPEN", "City of Sacramento", "CA", "RFP:security",
+            None, "2026-06-01", "2099-12-31", LeadGrade.SILVER)
+    _insert(conn, "rfp", "R_CLOSED", "City of Fresno", "CA", "RFP:security",
+            None, "2019-06-01", "2020-01-01", LeadGrade.SILVER)
+    conn.close()
+
+    open_text, _ = search_leads(
+        state="CA", record_kind="solicitation", open_only=True, db_path=path
+    )
+    assert "City of Sacramento" in open_text
+    assert "City of Fresno" not in open_text
+
+    # Without open_only, the expired solicitation is still part of the record set.
+    all_text, _ = search_leads(
+        state="CA", record_kind="solicitation", db_path=path
+    )
+    assert "City of Sacramento" in all_text
+    assert "City of Fresno" in all_text
+
+
+def test_open_only_export_is_complete_and_source_linked(tmp_path: Path) -> None:
+    """An 'open RFPs -> Excel' export carries every open row with its source link."""
+    path = tmp_path / "open_export.db"
+    conn = db.connect(path)
+    _insert(conn, "rfp", "R_OPEN", "City of Sacramento", "CA", "RFP:security",
+            None, "2026-06-01", "2099-12-31", LeadGrade.SILVER)
+    _insert(conn, "rfp", "R_CLOSED", "City of Fresno", "CA", "RFP:security",
+            None, "2019-06-01", "2020-01-01", LeadGrade.SILVER)
+    conn.close()
+
+    text, artifact = search_leads(
+        state="CA", record_kind="solicitation", open_only=True,
+        export="excel", result_scope="all", db_path=path,
+    )
+    assert artifact is not None
+    wb = load_workbook(artifact.path)
+    rows = list(wb.active.iter_rows(values_only=True))
+    header = rows[0]
+    entities = {r[header.index("entity_name")] for r in rows[1:]}
+    assert entities == {"City of Sacramento"}  # only the open RFP exported
+    detail = rows[1][header.index("detail_url")]
+    assert detail and detail.startswith("http")  # honest source link travels to the file
+
+
 def test_award_received_uses_verified_event_date_with_coverage_disclosure(
     tmp_path: Path,
 ) -> None:
