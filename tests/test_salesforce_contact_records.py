@@ -240,9 +240,10 @@ def test_preview_persists_without_write(tmp_path: Path) -> None:
     assert gateway.calls == []
     assert "Jane Smith" in action.preview
     assert "jsmith@alpha.k12.ca.us" in action.preview
-    assert "Street: blank" in action.preview
+    blanks_line = action.preview.split("Blank (no verified source):")[1]
+    assert "Street" in blanks_line  # blank fields are named on one compact line
     assert "Record Type (Verkada): set" in action.preview
-    assert "Plus a Note on the record" in action.preview
+    assert "Plus a Note with the grant context" in action.preview
     row = conn.execute("SELECT state,action_type FROM crm_actions").fetchone()
     assert tuple(row) == ("ready", records.ACTION_TYPE)
 
@@ -253,8 +254,8 @@ def test_preview_discloses_blanks_and_never_guesses(tmp_path: Path) -> None:
     lead_id = _lead_row(conn, "a2", "Beta School District")
     _verified_contact(conn, lead_id, phone="", official_domain="")
     action = _prepare(conn, FakeGateway(), lead_id)
-    assert "Phone: blank — no verified number" in action.preview
-    assert "Website: blank" in action.preview
+    blanks_line = action.preview.split("Blank (no verified source):")[1]
+    assert "Phone" in blanks_line and "Website" in blanks_line
     payload = __import__("json").loads(
         str(conn.execute("SELECT payload_json FROM crm_actions").fetchone()[0])
     )
@@ -543,7 +544,7 @@ def test_linkedin_only_contact_builds_emailless_lead(tmp_path: Path) -> None:
     gateway = FakeGateway()
     action = _prepare(conn, gateway, lead_id)
     assert "LinkedIn profile (ownership not verified)" in action.preview
-    assert "Email: blank" in action.preview
+    assert "Email" in action.preview.split("Blank (no verified source):")[1]
     result = _confirm(conn, gateway, action)
     assert result.state == campaigns.CampaignActionState.COMPLETE
     payload = gateway.created_leads[0]
@@ -618,7 +619,7 @@ def test_org_name_masquerading_as_title_is_dropped(tmp_path: Path) -> None:
     )
     gateway = FakeGateway()
     action = _prepare(conn, gateway, lead_id)
-    assert "Title: blank" in action.preview
+    assert "Title" in action.preview.split("Blank (no verified source):")[1]
     _confirm(conn, gateway, action)
     assert "Title" not in gateway.created_leads[0]
     # With no verified title, the Note describes them by org, not a bogus title.

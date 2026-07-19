@@ -499,8 +499,13 @@ def _preview_text(
                 value = "set" if key == "RecordTypeId" else lead_payload[key]
                 lines.append(f"• {label}: {value}")
         lines.append(f"• Owner: {owner.name} ({owner_email})")
-        lines.append(f"• Description: {lead_payload['Description']}")
-        lines.extend(f"• {note}" for note in _blank_disclosures(lead_payload, mode))
+        # Show the grant + evidence, not the internal provenance ids that follow it.
+        desc = str(lead_payload["Description"]).split(" Grant lead ")[0].strip()
+        lines.append(f"• Description: {desc}")
+        blanks = [d.split(":")[0] for d in _blank_disclosures(lead_payload, mode)]
+        if blanks:
+            lines.append(f"• Blank (no verified source): {', '.join(blanks)}")
+        lines.append("")
         lines.append(
             "Duplicate check: a complete Salesforce search found no existing "
             "record for this organization."
@@ -516,12 +521,19 @@ def _preview_text(
             f"{target.link or 'no link'} (single high-confidence match)"
         )
         lines.append("• A Note with the grant context will be added to it instead.")
-    # One Lightning Note carries the grant + contact context for both a fresh Lead
-    # and an existing record — Grant creates no Salesforce activity Tasks.
-    lines.append("Plus a Note on the record:")
-    lines.append(f"• Title: {note_payload.get('Title', 'Grant lead')}")
-    for note_line in str(note_payload.get("Body", "")).split("\n"):
-        lines.append(f"    {note_line}" if note_line else "")
+    # One Lightning Note carries the grant context (Grant creates no activity Tasks).
+    # Summarize it in ONE line — the full body would just re-dump the fields above and
+    # read as clutter (Chase, 2026-07-18).
+    note_first = next(
+        (ln for ln in str(note_payload.get("Body", "")).split("\n") if ln.strip()), ""
+    )
+    grant_summary = re.sub(r"\s*—\s*Lead #\d+\s*—\s*", " — ", note_first).strip()
+    lines.append("")
+    lines.append(
+        f"Plus a Note with the grant context: {grant_summary}"
+        if grant_summary
+        else "Plus a Note with the grant context."
+    )
     return "\n".join(lines)
 
 
