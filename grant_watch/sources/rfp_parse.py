@@ -71,6 +71,17 @@ _NON_DEADLINE_LABEL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# --- posting-date labels: when the RFP was PUT OUT (drives fresh=GOLD vs SILVER) -----
+# Chase (2026-07-18): a recently-posted RFP is GOLD, an older-but-open one is SILVER.
+# Same adjacency discipline as the deadline — a posting date must sit next to a posting
+# label, never guessed. Absent/unverifiable posting date -> SILVER (conservative).
+_POSTED_LABEL_RE = re.compile(
+    r"(?:date\s+)?(?:posted|issued|advertised|released|published)"
+    r"|(?:posting|publication|issue|release|advertis\w*)\s+date"
+    r"|date\s+of\s+(?:issue|posting|publication)",
+    re.IGNORECASE,
+)
+
 # --- closed/withdrawn status (H1): open needs a future date AND no closed token -----
 _CLOSED_STATUS_RE = re.compile(
     # status label then a closed word within a few separators (handles markdown tables
@@ -186,14 +197,20 @@ def parse_iso_date(raw: str) -> str | None:
         return None
 
 
-def label_adjacent_date(page_text: str, printed_date: str, window: int = 90) -> str:
-    """Return the verbatim '<deadline label> … <date>' evidence line, or '' (C1/M2).
+def _label_adjacent_date(
+    page_text: str,
+    printed_date: str,
+    want_re: re.Pattern[str],
+    avoid_re: re.Pattern[str] | None,
+    window: int = 90,
+) -> str:
+    """Return the verbatim '<want label> … <date>' evidence line, or '' (C1/M2).
 
     The date must appear on the page (destroying it as evidence otherwise), AND a
-    submission-deadline label must sit within `window` characters before it, AND no
-    OTHER-date label (pre-bid, questions-due, meeting) may sit between that label and
-    the date. This is what `_text_field_on_page` cannot do — it flattens the whole page
-    and loses adjacency, so a pre-bid date that is verbatim-present would pass.
+    `want_re` label must sit within `window` characters before it, AND no `avoid_re`
+    label may sit between that label and the date. This is what `_text_field_on_page`
+    cannot do — it flattens the whole page and loses adjacency, so a pre-bid date that
+    is verbatim-present would pass.
     """
     if not printed_date.strip() or not _text_field_on_page(page_text, printed_date):
         return ""
@@ -203,16 +220,35 @@ def label_adjacent_date(page_text: str, printed_date: str, window: int = 90) -> 
     for occurrence in re.finditer(pattern, page_text, re.IGNORECASE):
         preceding = page_text[max(0, occurrence.start() - window) : occurrence.start()]
         label = None
-        for label in _DEADLINE_LABEL_RE.finditer(preceding):
-            pass  # keep the LAST (closest) deadline label before the date
+        for label in want_re.finditer(preceding):
+            pass  # keep the LAST (closest) wanted label before the date
         if label is None:
             continue
         between = preceding[label.end() :]
-        if _NON_DEADLINE_LABEL_RE.search(between):
-            continue  # a meeting/questions label sits closer to the date — not it
+        if avoid_re is not None and avoid_re.search(between):
+            continue  # a different-date label sits closer to the date — not it
         snippet = preceding[label.start() :] + occurrence.group()
         return " ".join(snippet.split())[:300]
     return ""
+
+
+def label_adjacent_date(page_text: str, printed_date: str, window: int = 90) -> str:
+    """Evidence line proving the printed date is the SUBMISSION deadline (C1)."""
+    return _label_adjacent_date(
+        page_text, printed_date, _DEADLINE_LABEL_RE, _NON_DEADLINE_LABEL_RE, window
+    )
+
+
+def posted_iso_date(page_text: str, printed_date: str, window: int = 90) -> str | None:
+    """ISO posting date only when a posting label sits right beside the printed date.
+
+    Freshness (GOLD vs SILVER) hangs on this, so it is held to the same adjacency bar:
+    a bare date, or one not next to a posting label, yields None -> the RFP defaults to
+    SILVER rather than being called freshly-posted on a guess.
+    """
+    if not _label_adjacent_date(page_text, printed_date, _POSTED_LABEL_RE, None, window):
+        return None
+    return parse_iso_date(printed_date)
 
 
 def is_relevant(text: str) -> bool:
@@ -270,7 +306,8 @@ def build_rawitem(
     Order (C1/C2/L1): reject index pages; require a gov entity echoed by the official
     host; require the printed due date to be label-adjacent on the page; parse THAT
     verbatim date to ISO; require physical-security relevance on verified text; require
-    OPEN (future date AND no closed status). Only then is it VERIFIED SILVER-eligible.
+    OPEN (future date AND no closed status). Only then is it VERIFIED; scoring then
+    grades it GOLD (a verified recent posting date) or SILVER (older / unproven posting).
     """
     if is_index_page(page_text):
         return None
@@ -300,6 +337,9 @@ def build_rawitem(
     state = state_from(url, extracted.get("state") or "")
     portal = (extracted.get("portal") or "").strip()[:80]
     item_id = rfp_item_id(entity, rfp_number, verified_title or title, due_iso, url)
+    # Posting date drives GOLD (freshly put out) vs SILVER (older-but-open) in scoring —
+    # only when a posting label sits next to it; otherwise blank -> SILVER default.
+    posted_iso = posted_iso_date(page_text, (extracted.get("posted_date") or "").strip())
     return RawItem(
         source="rfp",
         item_id=item_id,
@@ -308,16 +348,17 @@ def build_rawitem(
         state=state,
         program="RFP:security",
         amount=None,  # a solicitation has no awarded dollars — never fabricate one
-        start="",  # posting date is not the meaningful RFP date; see rfp.py note
-        end=due_iso,  # the SUBMISSION deadline; scoring grades SILVER when >= today
+        start=posted_iso or "",  # verified posting date, or blank when unproven
+        end=due_iso,  # the SUBMISSION deadline; scoring grades SILVER/GOLD when >= today
         url=url,
         raw={
             "rfp_number": rfp_number,
             "portal": portal,
             "due_date_printed": printed_date,
+            "posted_date_printed": (extracted.get("posted_date") or "").strip(),
         },
         event_type=FundingEventType.RFP_POSTED,
-        event_date="",  # RFP freshness/drip ranking is deliberately Phase 2 (M4)
+        event_date=posted_iso or "",  # posting date -> freshness (GOLD when recent)
         date_precision=DatePrecision.DAY,
         application_portal=portal,
         source_locator=rfp_number or item_id,

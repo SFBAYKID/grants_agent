@@ -74,6 +74,55 @@ def test_open_physical_security_rfp_becomes_verified_silver_item() -> None:
     assert scoring.grade(item, today=BEFORE_DUE).grade is LeadGrade.SILVER
 
 
+# A page that also prints a POSTING date next to a posting label.
+POSTED_PAGE = (
+    "# City of Riverton — Request for Proposals\n\n"
+    "RFP 2027-11 Access Control and Video Surveillance System\n\n"
+    "Posted: July 5, 2027\n\n"
+    "The City of Riverton is requesting proposals for an access control and video "
+    "surveillance camera system.\n\n"
+    "Proposals are due December 15, 2027 at 2:00 PM.\n"
+)
+POSTED_EXTRACT = {
+    "entity": "City of Riverton",
+    "state": "",
+    "rfp_number": "2027-11",
+    "title": "RFP 2027-11 Access Control and Video Surveillance System",
+    "due_date": "December 15, 2027",
+    "posted_date": "July 5, 2027",
+    "status": "",
+    "portal": "",
+}
+
+
+def test_fresh_posting_date_grades_rfp_gold() -> None:
+    """An open RFP posted within the last ~month is GOLD (an active buyer)."""
+    item = rfp_parse.build_rawitem(POSTED_EXTRACT, POSTED_PAGE, OPEN_URL, date(2027, 7, 10))
+    assert item is not None
+    assert item.event_date == "2027-07-05" and item.start == "2027-07-05"
+    assert scoring.grade(item, today=date(2027, 7, 10)).grade is LeadGrade.GOLD
+
+
+def test_old_posting_date_grades_rfp_silver() -> None:
+    """Open but posted more than ~a month ago -> SILVER, not GOLD."""
+    item = rfp_parse.build_rawitem(POSTED_EXTRACT, POSTED_PAGE, OPEN_URL, date(2027, 8, 20))
+    assert item is not None
+    assert scoring.grade(item, today=date(2027, 8, 20)).grade is LeadGrade.SILVER
+
+
+def test_unproven_posting_date_defaults_to_silver() -> None:
+    """No posting label next to a date -> no posting date -> SILVER, never GOLD."""
+    item = rfp_parse.build_rawitem(OPEN_EXTRACT, OPEN_PAGE, OPEN_URL, BEFORE_DUE)
+    assert item is not None and item.event_date == ""
+    assert scoring.grade(item, today=BEFORE_DUE).grade is LeadGrade.SILVER
+
+
+def test_posted_date_needs_a_posting_label_adjacent() -> None:
+    """A date next to 'questions due' (not a posting label) is not a posting date."""
+    assert rfp_parse.posted_iso_date(POSTED_PAGE, "July 5, 2027") == "2027-07-05"
+    assert rfp_parse.posted_iso_date(OPEN_PAGE, "July 20, 2027") is None  # questions-due
+
+
 # --------------------------------------------------------- C1: label-adjacency gate
 def test_pre_bid_meeting_date_is_rejected_even_though_verbatim() -> None:
     """The wrong-but-present date (pre-bid meeting) must not become the deadline."""
@@ -244,7 +293,7 @@ def test_scoring_grades_rfp_source() -> None:
     assert scoring.grade(stale, today=BEFORE_DUE).grade is LeadGrade.WATCH
 
 
-# ---------------------------------------- drip boundary regression (pins Phase-2 gate)
+# ---------------------------------- drip path separation (RFP vs award vs bulletin)
 def _rfp_silver_lead(conn: sqlite3.Connection) -> None:
     """Persist one open RFP SILVER lead."""
     item = rfp_parse.build_rawitem(OPEN_EXTRACT, OPEN_PAGE, OPEN_URL, BEFORE_DUE)
@@ -253,13 +302,13 @@ def _rfp_silver_lead(conn: sqlite3.Connection) -> None:
     db.upsert_lead(conn, scoring.grade(item, today=BEFORE_DUE))
 
 
-def test_rfp_silver_lead_never_reaches_drip(tmp_path: Path) -> None:
-    """An RFP SILVER lead appears in NEITHER nugget nor bulletin candidates.
-
-    This pins the promise that proactive RFP alerts are a deliberate later phase — it
-    fails the instant someone widens the drip queries to include RFP sources."""
+def test_rfp_lead_uses_its_own_drip_query_only(tmp_path: Path) -> None:
+    """An RFP lead flows through the RFP alert query and NEITHER the award-nugget nor
+    the program-bulletin query — keeping the three drip paths cleanly separated so an
+    RFP can never be mis-surfaced as an award or a grants.gov bulletin."""
     conn = db.connect(tmp_path / "rfp.db")
     _rfp_silver_lead(conn)
+    assert len(db.rfp_candidates(conn)) == 1
     assert db.nugget_candidates(conn) == []
     assert db.bulletin_candidates(conn) == []
 

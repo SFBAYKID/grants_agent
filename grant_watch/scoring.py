@@ -28,6 +28,7 @@ RFP_SOURCES = ("webs", "sam.gov", "oregonbuys", "rfp")
 SIGNAL_SOURCES = ("grants.gov",)
 
 FRESH_MONTHS = 12  # Chase: after ~a year, awardees likely have vendors locked in.
+FRESH_RFP_DAYS = 30  # Chase: an RFP "just put out" within ~a month is GOLD, else SILVER.
 
 
 def _parse_date(iso: str) -> date | None:
@@ -52,6 +53,18 @@ def grade(item: RawItem, today: date | None = None) -> Lead:
         if end is None or end < today:
             return Lead(item, LeadGrade.WATCH)
         return Lead(item, LeadGrade.GOLD)
+
+    # Security-RFP discovery: an OPEN RFP is GOLD when freshly posted (an active buyer
+    # who just put it out), SILVER when open but older, WATCH once the deadline passes
+    # (Chase, 2026-07-18). The posting date must be verified (item.event_date); an
+    # unproven posting date defaults to SILVER, never GOLD on a guess.
+    if item.source == "rfp":
+        deadline = _parse_date(item.end)
+        if deadline is None or deadline < today:
+            return Lead(item, LeadGrade.WATCH)
+        posted = _parse_date(item.event_date)
+        fresh = posted is not None and posted >= today - timedelta(days=FRESH_RFP_DAYS)
+        return Lead(item, LeadGrade.GOLD if fresh else LeadGrade.SILVER)
 
     if item.source in RFP_SOURCES:
         deadline = _parse_date(item.end)
@@ -87,6 +100,7 @@ PROGRAM_FIT: dict[str, float] = {
     "PCCD": 1.0,  # PA school safety
     "NSGP": 0.9,  # nonprofit hardening — near-pure physical security
     "STOP": 0.5,  # skews software/threat-assessment (docs/FINDINGS.md)
+    "RFP:SECURITY": 1.0,  # an open camera/access-control RFP is a direct buy signal
 }
 _DEFAULT_FIT = 0.6  # RFPs and unknown programs: relevant but unproven
 _AMOUNT_NORM = 500_000  # SVPP max award — a natural "full marks" dollar anchor

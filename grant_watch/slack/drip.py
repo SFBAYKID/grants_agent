@@ -2,8 +2,10 @@
 
 Chase's spec: structured underneath (best lead_score first), sporadic on the surface
 (jittered timing, never a wall of leads). The initial message is exactly one short,
-factual sentence with no links, buttons, menu, Salesforce detail, or call to action.
-Two kinds:
+factual sentence (the RFP alert adds Chase's soft 'anybody want to talk?'), with no
+links, buttons, or menu inline; the source link rides a separate line.
+Three kinds:
+  rfp       an entity with an OPEN security RFP ("… open RFP for security cameras …")
   nugget    an entity that just WON money   ("Castle Rock SD just got $500K...")
   bulletin  program-level news from grants.gov ("SVPP window just opened, closes 8/4")
 
@@ -120,6 +122,47 @@ def build_bulletin(row: sqlite3.Row) -> tuple[str, str]:
     return text, "bulletin-open"
 
 
+_RFP_CAMERA_RE = re.compile(r"camera|surveillance|cctv|\bvideo\b", re.IGNORECASE)
+_RFP_ACCESS_RE = re.compile(r"access control|door (?:access|hardening)|card reader",
+                            re.IGNORECASE)
+
+
+def build_rfp_alert(row: sqlite3.Row) -> tuple[str, str]:
+    """One human sentence for an OPEN physical-security RFP a rep can act on now.
+
+    Chase (2026-07-18): an open camera/access-control RFP is an active buyer — Grant
+    should flag it individually ('… just opened an RFP … anybody want to talk?'). Kept
+    honest: it says the RFP is OPEN with its verified deadline, never a posting date we
+    did not read. The subject is drawn from the verified title/evidence, not invented.
+    """
+    if str(row["current_event_verification_status"] or "") != "verified":
+        raise ValueError("proactive RFP must be verified")
+    if str(row["current_event_type"] or "") != "rfp_posted":
+        raise ValueError("proactive RFP has unsupported event type")
+    entity = display_entity_name(row["entity_name"])
+    if not entity:
+        raise ValueError("proactive RFP requires an entity")
+    haystack = (
+        f"{row['title'] or ''} {row['current_event_evidence_excerpt'] or ''}"
+    )
+    camera = bool(_RFP_CAMERA_RE.search(haystack))
+    access = bool(_RFP_ACCESS_RE.search(haystack))
+    if camera and access:
+        subject = "security cameras and access control"
+    elif access:
+        subject = "access control"
+    elif camera:
+        subject = "security cameras"
+    else:
+        subject = "physical security"
+    due = str(row["funds_end"] or "")[:10]
+    due_text = f", responses due {due}" if due else ""
+    return (
+        f"{entity} has an open RFP for {subject}{due_text}. Anybody want to talk?",
+        "rfp-open",
+    )
+
+
 def source_line(row: sqlite3.Row) -> str:
     """A separate, URL-validated 'Source: <url>' line for a proactive alert.
 
@@ -201,8 +244,14 @@ def _is_exceptional(row: sqlite3.Row, today: date) -> bool:
 
 
 def pick(conn: sqlite3.Connection, channel: str) -> tuple[str, sqlite3.Row] | None:
-    """Choose what to say: the top-scored unsurfaced GOLD nugget wins; a bulletin runs
-    only when no nugget is available and today's bulletin slot is unused."""
+    """Choose the best gold/silver lead for the day (Chase 2026-07-18). Priority:
+    a GOLD RFP (freshly posted — an active buyer wanting cameras/access control) is the
+    hottest lead and goes first; then the top-scored unsurfaced GOLD award; then a
+    SILVER (older-but-open) RFP; then a program bulletin. Only gold/silver ever surface."""
+    rfps = db.rfp_candidates(conn)  # gold first, then silver, soonest deadline within
+    gold_rfps = [r for r in rfps if str(r["lead_grade"]) == "gold"]
+    if gold_rfps:
+        return "rfp", gold_rfps[0]
     nuggets = db.nugget_candidates(conn)
     if nuggets:
         best = max(
@@ -222,6 +271,9 @@ def pick(conn: sqlite3.Connection, channel: str) -> tuple[str, sqlite3.Row] | No
             ),
         )
         return "nugget", best
+    silver_rfps = [r for r in rfps if str(r["lead_grade"]) == "silver"]
+    if silver_rfps:
+        return "rfp", silver_rfps[0]  # older but still-open RFP, soonest deadline
     bulletins_today = sum(
         1 for p in db.posts_today(conn, channel) if p["kind"] == "bulletin"
     )
@@ -254,7 +306,12 @@ def run_drip(
     go, reason = should_post(conn, channel, now, rng, force=force, urgent=urgent)
     if not go:
         return f"skip: {reason}"
-    text, style = build_nugget(row) if kind == "nugget" else build_bulletin(row)
+    if kind == "nugget":
+        text, style = build_nugget(row)
+    elif kind == "rfp":
+        text, style = build_rfp_alert(row)
+    else:
+        text, style = build_bulletin(row)
     # Every proactive funding claim carries its source on a separate, safe line.
     text = text + source_line(row)
     if dry_run:

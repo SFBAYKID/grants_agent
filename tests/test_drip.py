@@ -70,6 +70,46 @@ def _mk_lead(
     )
 
 
+def _mk_rfp(
+    conn: sqlite3.Connection,
+    iid: str = "R1",
+    entity: str = "City of Kemah",
+    grade: LeadGrade = LeadGrade.GOLD,
+    end: str = "2030-12-31",
+    title: str = "Video Surveillance Camera Systems RFP",
+) -> int:
+    """Insert one open physical-security RFP lead (source='rfp', RFP_POSTED)."""
+    db.upsert_lead(
+        conn,
+        Lead(
+            item=RawItem(
+                source="rfp",
+                item_id=iid,
+                title=title,
+                entity=entity,
+                state="TX",
+                program="RFP:security",
+                amount=None,
+                start="2030-01-01",
+                end=end,
+                url="https://www.kemahtx.gov/bids",
+                raw={},
+                event_type=FundingEventType.RFP_POSTED,
+                event_date="2030-01-01",
+                date_precision=DatePrecision.DAY,
+                verification_status=VerificationStatus.VERIFIED,
+                evidence_excerpt=f"Proposals due 2030-12-31 — {title}",
+            ),
+            grade=grade,
+        ),
+    )
+    return int(
+        conn.execute("SELECT id FROM leads WHERE source_item_id=?", (iid,)).fetchone()[
+            "id"
+        ]
+    )
+
+
 # ------------------------------------------------------------------ window
 def test_window_monday_morning_et_ok() -> None:
     # 13:30 UTC Monday = 8:30 ET / 5:30 PT (summer) -> inside
@@ -289,6 +329,52 @@ def test_pick_prefers_top_scored_nugget(tmp_path: Path) -> None:
     )
     kind, row = drip.pick(conn, "C1")
     assert kind == "nugget" and row["entity_name"] == "Fresh District"
+
+
+def test_rfp_alert_is_short_human_and_actionable(tmp_path: Path) -> None:
+    """The RFP alert names the entity, the subject, the deadline, and Chase's CTA."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_rfp(conn)
+    row = db.rfp_candidates(conn)[0]
+    text, style = drip.build_rfp_alert(row)
+    assert style == "rfp-open"
+    assert text.startswith("City of Kemah has an open RFP for security cameras")
+    assert "responses due 2030-12-31" in text
+    assert text.endswith("Anybody want to talk?")
+
+
+def test_rfp_alert_names_cameras_and_access_control(tmp_path: Path) -> None:
+    """A dual-scope RFP is described as both."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_rfp(conn, title="Access Control and Video Surveillance Camera System RFP")
+    text, _ = drip.build_rfp_alert(db.rfp_candidates(conn)[0])
+    assert "security cameras and access control" in text
+
+
+def test_pick_surfaces_gold_rfp_before_a_gold_award(tmp_path: Path) -> None:
+    """A freshly-posted (GOLD) RFP — an active buyer — beats a gold award (Chase)."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="AWARD", entity="Fresh District", start="2026-06-01")
+    _mk_rfp(conn, iid="GRFP", entity="City of Kemah", grade=LeadGrade.GOLD)
+    kind, row = drip.pick(conn, "C1")
+    assert kind == "rfp" and row["entity_name"] == "City of Kemah"
+
+
+def test_pick_puts_a_silver_rfp_after_a_gold_award(tmp_path: Path) -> None:
+    """An older (SILVER) open RFP ranks below a gold award, above a bulletin."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="AWARD", entity="Fresh District", start="2026-06-01")
+    _mk_rfp(conn, iid="SRFP", entity="City of Ames", grade=LeadGrade.SILVER)
+    kind, row = drip.pick(conn, "C1")
+    assert kind == "nugget" and row["entity_name"] == "Fresh District"
+
+
+def test_pick_surfaces_a_silver_rfp_when_no_award(tmp_path: Path) -> None:
+    """With no gold award, an open silver RFP still surfaces (before any bulletin)."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_rfp(conn, iid="SRFP", entity="City of Ames", grade=LeadGrade.SILVER)
+    kind, row = drip.pick(conn, "C1")
+    assert kind == "rfp" and row["entity_name"] == "City of Ames"
 
 
 def test_needs_testing_event_cannot_enter_proactive_notifications(
