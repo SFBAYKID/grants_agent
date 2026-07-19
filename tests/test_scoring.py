@@ -35,6 +35,19 @@ def test_open_window_award_is_gold() -> None:
     assert grade(_award(), TODAY).grade is LeadGrade.GOLD
 
 
+def test_award_freshness_splits_gold_fresh_from_silver_older() -> None:
+    """Gold-fresh / silver-older split by the verified award (obligation) date: a recent
+    security award is GOLD, the same award obligated over a year ago (window still open)
+    is SILVER, a closed window is WATCH, and an unknown award date is never guessed stale."""
+    assert grade(_award(event_date="2026-06-01"), TODAY).grade is LeadGrade.GOLD
+    assert grade(_award(event_date="2024-01-01"), TODAY).grade is LeadGrade.SILVER
+    assert (
+        grade(_award(event_date="2024-01-01", end="2025-01-01"), TODAY).grade
+        is LeadGrade.WATCH
+    )
+    assert grade(_award(event_date=""), TODAY).grade is LeadGrade.GOLD
+
+
 def test_negative_amount_deobligation_is_watch() -> None:
     # Live run 2026-07-13 surfaced real $-7,017 rows — these are money LEAVING.
     """Verify negative amount deobligation is watch."""

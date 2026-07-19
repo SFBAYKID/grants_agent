@@ -52,6 +52,14 @@ def grade(item: RawItem, today: date | None = None) -> Lead:
             return Lead(item, LeadGrade.WATCH)
         if end is None or end < today:
             return Lead(item, LeadGrade.WATCH)
+        # Gold-fresh / silver-older split (Chase): a security award obligated within the
+        # last FRESH_MONTHS is a hot new buyer (GOLD); the same award obligated over a
+        # year ago still has an open window but the awardee likely has vendors locked in,
+        # so it drops to SILVER. A verified award date is required to downgrade — an
+        # unknown award date stays GOLD rather than guess the money is stale.
+        awarded = _parse_date(item.event_date)
+        if awarded is not None and awarded < today - timedelta(days=FRESH_MONTHS * 30):
+            return Lead(item, LeadGrade.SILVER)
         return Lead(item, LeadGrade.GOLD)
 
     # Security-RFP discovery: an OPEN RFP is GOLD when freshly posted (an active buyer

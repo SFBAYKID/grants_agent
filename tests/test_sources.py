@@ -51,6 +51,39 @@ def test_usaspending_field_mapping(usaspending_16710_wa: dict[str, Any]) -> None
     assert item.url.startswith("https://www.usaspending.gov/award/")
 
 
+def test_prime_award_captures_base_obligation_date_never_guesses() -> None:
+    """The verified award-action date (Base Obligation Date) becomes event_date, distinct
+    from the spend-window Start Date; a row missing the field gets no guessed date."""
+    payload = {
+        "results": [
+            {
+                "Award ID": "A1",
+                "Recipient Name": "Fresh SD",
+                "Award Amount": 500000.0,
+                "Start Date": "2026-07-01",
+                "End Date": "2029-06-30",
+                "Base Obligation Date": "2026-07-15",
+                "Description": "SVPP school violence prevention",
+                "generated_internal_id": "ASST_NON_A1_015",
+            },
+            {
+                "Award ID": "A2",
+                "Recipient Name": "NoDate SD",
+                "Award Amount": 100000.0,
+                "Start Date": "2026-07-01",
+                "End Date": "2029-06-30",
+                "Description": "SVPP school violence prevention",
+                "generated_internal_id": "ASST_NON_A2_015",
+            },
+        ]
+    }
+    items = usaspending.parse_awards(payload, "16.071", "CA")
+    assert len(items) == 2
+    assert items[0].event_date == "2026-07-15"  # obligation date, NOT the 2026-07-01 start
+    assert items[0].raw["Base Obligation Date"] == "2026-07-15"
+    assert items[1].event_date == ""  # missing field is never guessed
+
+
 def test_nsgp_subawards_map_end_recipients_and_explicit_dates(
     usaspending_nsgp_wa: dict[str, Any],
 ) -> None:

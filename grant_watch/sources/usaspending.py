@@ -140,6 +140,11 @@ def _query_page(
                     "Award Amount",
                     "Start Date",
                     "End Date",
+                    # The real award-action date (when the money was obligated), distinct
+                    # from Start Date (the period-of-performance start). VERIFIED live
+                    # 2026-07-19: FY25 SVPP awards return Base Obligation Date 2025-10-10
+                    # while Start Date is 2025-10-01. Drives freshness + the platinum tier.
+                    "Base Obligation Date",
                     "Description",
                     "generated_internal_id",
                 ]
@@ -161,6 +166,13 @@ def parse_awards(payload: dict[str, Any], cfda: str, state: str) -> list[RawItem
         if cfda == "16.710" and not _SVPP_RE.search(desc):
             continue  # COPS umbrella noise (CHP hiring, TRGP, ...) — not school security
         gid: str = a.get("generated_internal_id") or ""
+        # The real award-action date (money obligated). Verified live to be present and
+        # distinct from Start Date; may be absent on some historical rows, so it is used
+        # only when present and never guessed from the spend-window start.
+        obligated: str = str(a.get("Base Obligation Date") or "")[:10]
+        # Prefer the true award date for the historical/backfill cutoff; fall back to the
+        # spend-window start only when the award date is missing.
+        dated = obligated or (str(a.get("Start Date") or "")[:10])
         out.append(
             RawItem(
                 source=f"usaspending:{cfda}",
@@ -180,25 +192,24 @@ def parse_awards(payload: dict[str, Any], cfda: str, state: str) -> list[RawItem
                         "Award Amount",
                         "Start Date",
                         "End Date",
+                        "Base Obligation Date",
                         "generated_internal_id",
                     )
                 },
                 event_type=FundingEventType.AWARD_OBLIGATED,
-                # This endpoint does not return an obligation-action date. Spend start is
-                # retained separately and must never be described as the award date.
-                event_date="",
-                date_precision=DatePrecision.UNKNOWN,
+                # The verified obligation date — the honest award date that drives
+                # freshness and the platinum tier. Empty (never guessed) when absent.
+                event_date=obligated,
+                date_precision=DatePrecision.DAY if obligated else DatePrecision.UNKNOWN,
                 funded_scope=desc[:500],
                 eligible_scope="SVPP school security",
                 source_locator=str(a.get("Award ID") or gid),
                 evidence_excerpt=desc[:500],
                 verification_status=VerificationStatus.VERIFIED,
-                # Start is not an award date, but an already-started window proves the
-                # record is historical enough to suppress first-rollout notification waves.
+                # An award obligated (or, lacking that, started) over 90 days ago is
+                # historical — suppress it from first-rollout drip waves.
                 backfill=bool(
-                    a.get("Start Date")
-                    and str(a["Start Date"])[:10]
-                    < (date.today() - timedelta(days=90)).isoformat()
+                    dated and dated < (date.today() - timedelta(days=90)).isoformat()
                 ),
             )
         )
