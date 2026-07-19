@@ -50,12 +50,15 @@ def _active_pollers() -> list[tuple[str, Poller]]:
         pollers.append(("SAM.gov", lambda: sam_gov.poll(sam_key)))
     else:
         print("[skip] SAM.gov — set SAM_API_KEY in .env to enable", file=sys.stderr)
-    # RFP discovery is paid + LLM-backed, so it is opt-in (like SAM.gov's key gate) and
-    # never in the free static POLLERS list (architectural-critic H4).
+    # RFP discovery is paid, so it is opt-in (like SAM.gov's key gate) and never in the
+    # free static POLLERS list. The AGGREGATOR source (Starbridge listing) is the one
+    # wired: it finds the OPEN target-state RFPs cheaply (one scrape). The `.gov`-page
+    # hunt (sources/rfp.py) is kept available but not wired — it found ~0 open pages
+    # (Chase 2026-07-18: most individual RFP pages are already closed).
     if os.environ.get("RFP_DISCOVERY_ENABLED", "").strip() in ("1", "true", "yes"):
-        from .sources import rfp
+        from .sources import rfp_aggregator
 
-        pollers.append(("Security RFP discovery", rfp.poll))
+        pollers.append(("Security RFP discovery", rfp_aggregator.poll))
     else:
         print(
             "[skip] Security RFP discovery — set RFP_DISCOVERY_ENABLED=1 to enable",

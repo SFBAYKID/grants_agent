@@ -7,10 +7,13 @@ Verification labels (Constitution rule 1) — status through 2026-07-14:
     ca_grants     verified   (live CKAN/CSV parse; 831 records in dry-run)
     oregon_buys   verified   (live fetch/table/zero match; positive row needs-testing)
     webs          verified   (live fetch/parser/zero match; positive row needs-testing)
-    rfp           needs-testing (paid LLM discovery probe; env-gated, NOT in POLLERS)
+    rfp            available   (verbatim .gov-page RFP extraction; NOT wired — found ~0
+                               open pages, superseded by the aggregator below)
+    rfp_aggregator needs-testing (open target-state RFPs from a bid aggregator listing;
+                               env-gated, the WIRED RFP source)
 
-cli.py iterates POLLERS; sam.gov is appended there only when SAM_API_KEY is set, and
-the paid `rfp` discovery probe only when RFP_DISCOVERY_ENABLED=1 (see cli._active_pollers).
+cli.py iterates POLLERS; sam.gov is appended there only when SAM_API_KEY is set, and the
+paid `rfp_aggregator` source only when RFP_DISCOVERY_ENABLED=1 (see cli._active_pollers).
 """
 
 from __future__ import annotations
