@@ -104,6 +104,39 @@ _SCHOOL_ROLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A LinkedIn result title reads "Name - Title - Org | LinkedIn", but a title-led card
+# ("IT Director - City of Kemah | LinkedIn") makes parts[0] a ROLE, which would become a
+# fabricated person Lead (FirstName="IT", LastName="Director"). A real name STARTS with a
+# given name, never a role/domain word — its surname may coincide with one ("Pat
+# Marshall"), so only the FIRST token is tested (Constitution rule 1: a fabricated
+# contact is worse than none). Honorifics are intentionally excluded so "Dr Jane Smith"
+# is not rejected.
+_ROLE_LEAD_WORDS = frozenset(
+    {
+        "director", "manager", "superintendent", "coordinator", "officer", "chief",
+        "administrator", "principal", "president", "supervisor", "specialist",
+        "analyst", "engineer", "technician", "assistant", "deputy", "head", "lead",
+        "it", "technology", "information", "systems", "security", "facilities",
+        "operations", "business", "finance", "department", "dept", "office", "division",
+        "city", "county", "district", "school", "schools", "university", "college",
+        "board", "authority", "public", "the",
+    }
+)
+
+
+def _looks_like_person_name(name: str) -> bool:
+    """True only when a LinkedIn card's leading segment reads as a real person name.
+
+    Guards H2: requires at least two name-shaped tokens (first + last, allowing a middle
+    initial / hyphen / apostrophe) and a first token that is NOT a role/org word, so a
+    role or organization is never split into FirstName/LastName."""
+    tokens = [t for t in re.split(r"\s+", name.strip()) if t]
+    if len(tokens) < 2:
+        return False
+    if tokens[0].lower().strip(".") in _ROLE_LEAD_WORDS:
+        return False
+    return all(re.fullmatch(r"[A-Za-z][A-Za-z.'-]*", t) for t in tokens)
+
 
 def _org_kind(entity: str) -> str:
     """'city' for a municipal government, else 'school' (the SVPP default).
@@ -462,7 +495,9 @@ def linkedin_person(
         context = " ".join(parts[1:]).lower()
         if is_city and _SCHOOL_ROLE_RE.search(context):
             continue
-        if name:
+        # Only return parts[0] when it actually reads as a person (H2) — a title-led
+        # card must fall through to the next result, never become a "person" Lead.
+        if name and _looks_like_person_name(name):
             say(f"Found {name} on LinkedIn")
             return {"name": name, "title": role, "url": url}
     return None

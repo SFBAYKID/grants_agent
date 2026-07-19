@@ -20,6 +20,7 @@ from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact, make_spreadsheet
 from .search_presentation import contact_suffix as _contact_suffix
 from .search_presentation import entity_role_for_row as _entity_role_for_row
+from .search_presentation import grade_phrases as _grade_phrases
 from .search_presentation import record_link as _record_link
 from .search_presentation import window_label as _window_label
 
@@ -939,12 +940,13 @@ def search_leads(
         else ""
     )
     # Lead with the grade split so a rep who has never heard the internal
-    # gold/silver/watch jargon still gets it explained in the same breath.
-    grade_phrases = {
-        "gold": "gold (award won, money to spend)",
-        "silver": "silver (open solicitation)",
-        "watch": "watch (worth monitoring)",
-    }
+    # gold/silver/watch jargon still gets it explained in the same breath. The wording
+    # is tied to the record kind actually searched: a fixed "gold (award won)" /
+    # "silver (open solicitation)" lied for RFP result sets — a gold RFP is a fresh
+    # posting, not an award won, and a silver RFP whose deadline has passed is not an
+    # "open" solicitation (its due date is shown per row, but the tier must not assert
+    # openness it hasn't checked). Stay generic when the kind is mixed/unknown.
+    grade_phrases = _grade_phrases(record_value, rows)
     split = ", ".join(
         f"{grade_counts[key]} {grade_phrases.get(key, key)}"
         for key in ("gold", "silver", "watch")

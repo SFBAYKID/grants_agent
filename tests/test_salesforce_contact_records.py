@@ -411,7 +411,9 @@ def test_multiple_or_weak_matches_fail_closed(tmp_path: Path) -> None:
             confidence="possible",
         )
     ]
-    with pytest.raises(ValueError, match="more than one plausible"):
+    # A single low-confidence ("possible") match is zero HIGH matches — the message
+    # must say so, not falsely claim "more than one" (still fail-closed either way).
+    with pytest.raises(ValueError, match="none a confident single record"):
         _prepare(conn, FakeGateway(), lead_id, lookup=_found(weak))
 
 

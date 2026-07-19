@@ -45,6 +45,52 @@ _CA_RESOURCE_RE = re.compile(
 )
 
 
+def grade_phrases(
+    record_value: str, rows: list[sqlite3.Row] | None = None
+) -> dict[str, str]:
+    """Grade-tier wording that stays TRUE for the record kind actually shown.
+
+    The old fixed wording called every gold "award won, money to spend" and every silver
+    "open solicitation" — wrong when the results are RFPs (a gold RFP is a fresh posting,
+    not an award; a past-due silver RFP is not open). Use the explicit record_kind filter
+    when given; otherwise infer it from the shown rows' event types so a plain award
+    search keeps the helpful "money to spend" phrasing while an all-RFP set never claims
+    an award or unverified openness. Mixed/unknown stays generic. The literals mirror
+    RecordKind.*.value (kept here to avoid a search.py import cycle)."""
+    kind = record_value
+    if not kind and rows:
+        kinds = {str(r["current_event_type"] or "") for r in rows}
+        if kinds and kinds <= {"award_announced", "award_obligated"}:
+            kind = "award"
+        elif kinds == {"rfp_posted"}:
+            kind = "solicitation"
+        elif kinds == {"application_window_opened"}:
+            kind = "funding_opportunity"
+    if kind == "award":
+        return {
+            "gold": "gold (award won, money to spend)",
+            "silver": "silver (funding in progress)",
+            "watch": "watch (worth monitoring)",
+        }
+    if kind == "solicitation":
+        return {
+            "gold": "gold (recently posted RFP)",
+            "silver": "silver (RFP posted earlier — check the due date)",
+            "watch": "watch (check the due date)",
+        }
+    if kind == "funding_opportunity":
+        return {
+            "gold": "gold (top-fit opportunity)",
+            "silver": "silver (open opportunity)",
+            "watch": "watch (worth monitoring)",
+        }
+    return {
+        "gold": "gold (freshest, top priority)",
+        "silver": "silver (solid lead)",
+        "watch": "watch (worth monitoring)",
+    }
+
+
 def record_link(row: sqlite3.Row) -> str:
     """Best per-record verification URL — deep-linked when the source allows.
 

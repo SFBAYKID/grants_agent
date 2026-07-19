@@ -34,14 +34,19 @@ def _row(title: str, buyer: str, close: str, release: str = "", extra: str = "")
 
 # ------------------------------------------------------------------ real fixture
 def test_real_starbridge_fixture_yields_target_state_open_rfps() -> None:
-    """The live listing yields the cherry-picked PA + CA open RFPs, deduped."""
+    """The live listing yields the cherry-picked PA + CA open RFPs.
+
+    The two SCI Pine Grove rows are DISTINCT bid packages (General/HVAC vs Plumbing
+    *REBID*), same buyer and due date — they must NOT collapse (C2 regression)."""
     items = rfp_aggregator.parse_starbridge(_FIXTURE, TODAY)
     states = {i.state for i in items}
     assert states == {"PA", "CA"}  # only target states; NJ/IL/NY rows excluded
     assert all(i.source == "rfp" and i.program == "RFP:security" for i in items)
     assert all(i.amount is None for i in items)  # solicitation, no fabricated dollars
-    # the same PA RFP listed twice (case-different slug) collapses to one lead
-    assert len({i.item_id for i in items}) == len(items)
+    assert len({i.item_id for i in items}) == len(items)  # every id distinct
+    pa = [i for i in items if i.state == "PA"]
+    assert len(pa) == 2  # both SCI Pine Grove packages survive; neither is dropped
+    assert len({i.item_id for i in pa}) == 2  # ...with distinct ids (C2)
     ca = next(i for i in items if i.state == "CA")
     assert scoring.grade(ca, today=TODAY).grade is LeadGrade.GOLD  # posted 2026-06-24
 
@@ -67,6 +72,22 @@ def test_state_cherry_pick_only_accepts_named_target_states(
 
 
 # ------------------------------------------------------------------ openness / grading
+def test_two_target_states_in_one_row_is_dropped_never_misfiled() -> None:
+    """A row naming two target states (e.g. a PA buyer in 'Washington County,
+    Pennsylvania') is dropped, NEVER filed under the first dict-order match (C1)."""
+    row = _row(
+        "Security Camera System",
+        "Washington County Corrections",
+        "Aug 25, 2026",
+        "Jul 1, 2026",
+        "Washington County, Pennsylvania secure facility",
+    )
+    items = rfp_aggregator.parse_starbridge(row, TODAY)
+    assert items == []  # ambiguous -> dropped; must not become WA
+    # And directly: the state resolver returns no guess for an ambiguous block.
+    assert rfp_aggregator._row_state("Washington County, Pennsylvania") == ""
+
+
 def test_past_due_row_is_dropped() -> None:
     """A row whose Close date has passed is not surfaced."""
     row = _row("Access Control", "California DGS", "Jan 1, 2026", "Dec 1, 2025",

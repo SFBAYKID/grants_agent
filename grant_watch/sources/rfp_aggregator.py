@@ -50,16 +50,21 @@ _DC_RE = re.compile(r"\bd\.?c\.?\b|district of columbia", re.IGNORECASE)
 
 
 def _row_state(block: str) -> str:
-    """A target state's USPS code when the row's prose names it, else ''.
+    """A target state's USPS code ONLY when the row's prose names EXACTLY ONE target
+    state, else '' (drop the row).
 
-    Conservative: only a full state name is trusted, and 'Washington' is rejected when
-    the row also reads as Washington, D.C. — a guessed state is worse than no state."""
+    Conservative on purpose: returning the first dict-order match let a block that names
+    two target states — e.g. a Pennsylvania buyer in "Washington County, Pennsylvania" —
+    mis-file as WA simply because 'washington' is checked first. A guessed state is worse
+    than no state (module docstring; Constitution rule 1), so any ambiguity (zero or more
+    than one distinct target state named) drops the row rather than picking one."""
+    found: set[str] = set()
     for name, code in _STATE_NAMES.items():
         if re.search(rf"\b{name}\b", block, re.IGNORECASE):
             if code == "WA" and _DC_RE.search(block):
-                continue
-            return code
-    return ""
+                continue  # 'Washington' here reads as Washington, D.C. — not the state
+            found.add(code)
+    return next(iter(found)) if len(found) == 1 else ""
 
 
 def parse_starbridge(
@@ -85,9 +90,16 @@ def parse_starbridge(
         state = _row_state(block)
         if state not in states:
             continue  # cherry-pick: only a clearly-target-state row (backfill later)
-        # status: the word right after the title link; "Unavailable" is closed
-        after_title = page_text[match.end() : match.end() + 20]
-        if re.match(r"\s*Unavailable", after_title, re.IGNORECASE):
+        # status: the word right after the title link. Only a status word IN THAT
+        # POSITION is trusted as closed — checking the prose would false-positive on
+        # "closed-circuit" cameras. Starbridge uses "Unavailable"; the others are a
+        # cheap safety net if it ever surfaces a future-dated closed/awarded listing.
+        after_title = page_text[match.end() : match.end() + 24]
+        if re.match(
+            r"\s*(?:Unavailable|Closed|Awarded|Cancelled|Canceled|Withdrawn)",
+            after_title,
+            re.IGNORECASE,
+        ):
             continue
 
         close_match = _CLOSE_RE.search(block)

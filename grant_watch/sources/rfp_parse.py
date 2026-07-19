@@ -289,7 +289,14 @@ def rfp_item_id(entity: str, rfp_number: str, title: str, due_iso: str, url: str
     if rfp_number and rfp_number.strip():
         num = "-".join(re.findall(r"[a-z0-9]+", rfp_number.lower()))
         return f"{ent}|{num}"
-    title_tokens = "-".join(re.findall(r"[a-z0-9]+", (title or "").lower())[:6])
+    # Use the FULL normalized title, not a 6-token prefix: two distinct packages of the
+    # same project (e.g. "…Control Room… - General and HVAC Construction" vs "…Control
+    # Room… - Plumbing Construction *REBID*") share the first six tokens, the same buyer,
+    # and the same due date, so a prefix key silently collapsed them and dropped one real
+    # solicitation. The full title keeps distinct bid packages distinct; the only cost is
+    # that a re-worded re-listing of the SAME RFP yields two leads — the safe direction
+    # (a duplicate lead beats a lost lead, Constitution rule 1).
+    title_tokens = "-".join(re.findall(r"[a-z0-9]+", (title or "").lower()))
     if title_tokens and due_iso:
         return f"{ent}|{title_tokens}|{due_iso}"
     # last resort: normalized URL (strip query/fragment/trailing slash, lowercase host)

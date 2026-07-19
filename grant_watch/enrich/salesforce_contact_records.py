@@ -356,10 +356,14 @@ def _resolve_existing_record(
     ]
     if len(highs) != 1:
         links = ", ".join(m.link for m in result.matches[:3] if m.link)
+        problem = (
+            "shows more than one plausible existing record"
+            if len(highs) > 1
+            else "has possible matches but none a confident single record"
+        )
         raise ValueError(
-            "Salesforce shows more than one plausible existing record for "
-            f"{entity}; refusing to pick one automatically. Candidates: "
-            f"{links or 'no links returned'}"
+            f"Salesforce {problem} for {entity}; refusing to pick one automatically. "
+            f"Candidates: {links or 'no links returned'}"
         )
     match = highs[0]
     ref = SalesforceRecordRef(

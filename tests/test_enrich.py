@@ -98,6 +98,54 @@ def test_linkedin_person_targets_city_roles_and_skips_school_people(
     assert out["name"] == "Pat Manager"  # the school superintendent was skipped
 
 
+def test_linkedin_person_rejects_role_titled_card_over_a_person(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A title-led card ('IT Director - City of Kemah') must never become a person
+    named 'IT Director'; a later real-person card is preferred (H2)."""
+
+    def _fake_search(query: str, limit: int = 5) -> list[dict[str, str]]:
+        """A role-titled result first, then a genuine person."""
+        return [
+            {
+                "url": "https://www.linkedin.com/in/kemah-it",
+                "title": "IT Director - City of Kemah | LinkedIn",
+            },
+            {
+                "url": "https://www.linkedin.com/in/jane-doe",
+                "title": "Jane Doe - City Manager - City of Kemah | LinkedIn",
+            },
+        ]
+
+    monkeypatch.setattr(finder, "_search", _fake_search)
+    out = finder.linkedin_person("City of Kemah", "TX")
+    assert out is not None
+    assert out["name"] == "Jane Doe"  # the role-titled card was rejected, not split
+
+
+def test_linkedin_person_returns_none_when_only_role_cards_exist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When every result is a role/org card, return None rather than a fabricated
+    person Lead (H2)."""
+
+    def _fake_search(query: str, limit: int = 5) -> list[dict[str, str]]:
+        """Only role/org-titled cards, no real person name."""
+        return [
+            {
+                "url": "https://www.linkedin.com/in/kemah-it",
+                "title": "IT Director - City of Kemah | LinkedIn",
+            },
+            {
+                "url": "https://www.linkedin.com/in/kemah-pw",
+                "title": "Public Works Director - City of Kemah | LinkedIn",
+            },
+        ]
+
+    monkeypatch.setattr(finder, "_search", _fake_search)
+    assert finder.linkedin_person("City of Kemah", "TX") is None
+
+
 def test_find_contact_reports_org_address_for_linkedin_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

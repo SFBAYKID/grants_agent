@@ -627,6 +627,33 @@ def test_results_carry_grade_split_and_source_links(tmp_path: Path) -> None:
     assert "|verify this record>" in text  # Slack-formatted link on result rows
 
 
+def test_grade_phrases_are_record_kind_honest() -> None:
+    """The grade-tier wording matches the record kind: a gold RFP is never called an
+    'award won', a silver RFP never a blanket 'open solicitation'; awards keep the
+    helpful 'money to spend' phrasing (C3)."""
+    from grant_watch.slack.search import _grade_phrases
+
+    sol = _grade_phrases("solicitation")
+    assert "award won" not in sol["gold"] and "RFP" in sol["gold"]
+    assert "open solicitation" not in sol["silver"]
+    award = _grade_phrases("award")
+    assert award["gold"] == "gold (award won, money to spend)"
+
+
+def test_solicitation_grade_split_never_claims_award_or_open(tmp_path: Path) -> None:
+    """An RFP search's grade header must not assert 'open solicitation' — a past-due
+    RFP's due date is shown per row, not blessed open by the tier label (C3)."""
+    path = tmp_path / "sol.db"
+    conn = db.connect(path)
+    _insert(conn, "rfp", "R_OLD", "City of Fresno", "CA", "RFP:security",
+            None, "2026-01-01", "2098-01-01", LeadGrade.SILVER)
+    conn.close()
+    text, _ = search_leads(state="CA", record_kind="solicitation", db_path=path)
+    assert "award won" not in text
+    assert "open solicitation" not in text  # openness is not asserted by the tier
+    assert "RFP posted earlier" in text  # honest RFP-specific wording is used
+
+
 def test_ca_portal_rows_get_per_record_verification_links() -> None:
     """CA dataset rows deep-link to THEIR award record, not the shared dataset.
 
