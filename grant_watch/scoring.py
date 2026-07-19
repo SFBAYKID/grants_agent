@@ -24,7 +24,7 @@ AWARD_SOURCES_PREFIX = (
     "ca-grants-award:",
     "seed:",
 )
-RFP_SOURCES = ("webs", "sam.gov", "oregonbuys")
+RFP_SOURCES = ("webs", "sam.gov", "oregonbuys", "rfp")
 SIGNAL_SOURCES = ("grants.gov",)
 
 FRESH_MONTHS = 12  # Chase: after ~a year, awardees likely have vendors locked in.

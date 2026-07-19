@@ -17,6 +17,16 @@ The droplet checkout is NOT a git working tree — `~/grants_agent` has no `.git
 
 **Proven full-tree rsync recipe (2026-07-16: 3d653c6 → 25513bc; re-proven 2026-07-17: 25513bc → 9db96d0, 9db96d0 → 36d2470, 36d2470 → 6ea70f2, 6ea70f2 → c714b01, and c714b01 → 50acadd, and 2026-07-17 ed261ff → e6df182 = 14 files [15 delta minus `.env.example`, which the `.env.*` exclude correctly skips], zero deletions each time; Chase-approved, all verified):**
 
+**2026-07-18 9740787 → 21c0b46 (4-file, all verified):** routine clean forward deploy, identical shape
+to the entries below (nothing surprising). Deployable delta = exactly 4 tracked files (slack/conversation.py
++ slack/tools.py + tests/test_salesforce_contact_records.py + tests/test_tools.py) — 5th path in
+`git diff 9740787..21c0b46` was guardian-memory `deploy-mechanism.md`, excluded by `.claude`. `-cain`
+dry-run = the 4 as `<fcst....` + benign dir touches, ZERO deletions; post-run dry-run EMPTY. `find -cnewer`
+= the 4 (+ live `cron.log`, excluded); all 4 remote sha256 == local blobs. `.env`(07-17T15:01)/`run_bot.sh`
+(07-16T02:05)/`grant_watch.db`(07-18T12:00) mtimes untouched. IMPORT_OK before kill; `.deployed_revision`
+stamped full hash. Restart (pkill + `nohup bash run_bot.sh`): OLDPID 834360 dead → new single PID 2188588,
+"⚡️ Bolt app is running!", NO_TRACEBACK, PID_COUNT=1 stable on recheck.
+
 **2026-07-18 d9a2a90 → 9740787 (2-file, all verified):** clean forward deploy via `deploy_rsync.sh`
 (bash, persisted scratchpad helper). `git diff --name-status d9a2a90..9740787` = 3 paths but one was
 the guardian-memory `deploy-mechanism.md` (excluded by `.claude`), so deployable delta = exactly 2
