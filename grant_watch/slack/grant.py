@@ -240,7 +240,16 @@ def create_app() -> App:
                 thread_ts,
                 user_id,
             )
-        except (PermissionError, TimeoutError) as exc:
+        except TimeoutError:
+            # An expired preview must offer the way forward, not a
+            # dead end (Chase hit this live, 2026-07-18).
+            _thread_reply(client, body,
+                          "Salesforce was not changed - this approval "
+                          "preview expired before the tap. Ask me again "
+                          "(for example: add Breann Green to Salesforce) "
+                          "and I'll rebuild it with current data.")
+            return
+        except PermissionError as exc:
             _thread_reply(client, body, f"Salesforce was not changed: {str(exc)}")
             return
         except ValueError:

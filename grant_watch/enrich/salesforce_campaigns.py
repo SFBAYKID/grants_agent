@@ -45,7 +45,11 @@ from .salesforce_campaign_gateway import (
     validate_record_id,
 )
 
-ACTION_TTL_MINUTES = 15
+# 24 hours: a rep reads Slack on their own schedule — a 15-minute
+# window meant every real-world tap landed on a corpse (Chase hit
+# this live, 2026-07-18). Freshness is still guarded by the payload
+# hash and the create-only writer.
+ACTION_TTL_MINUTES = 24 * 60
 
 
 def _stable_json(value: object) -> str:
