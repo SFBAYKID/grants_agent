@@ -29,6 +29,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
 
 from .. import db
+from ..config import configured_channel_ids, primary_channel_id
 from ..spreadsheets import GeneratedArtifact
 
 
@@ -179,12 +180,15 @@ def _interaction_thread_ts(body: dict[str, Any]) -> str:
 
 
 def _in_configured_channel(event: dict[str, Any]) -> bool:
-    """Allow conversations only in Grant's explicitly configured test channel."""
-    configured = os.environ.get("SLACK_CHANNEL_ID", "").strip()
+    """Allow conversations only in Grant's explicitly configured channel(s).
+
+    `SLACK_CHANNEL_ID` may list several channels (e.g. production plus the dev
+    playground); a mention in ANY of them is honored, but never a DM."""
+    allowed = set(configured_channel_ids())
     item = event.get("item") or {}
     channel = event.get("channel") or item.get("channel")
     return bool(
-        configured and channel == configured and event.get("channel_type") != "im"
+        allowed and channel in allowed and event.get("channel_type") != "im"
     )
 
 
@@ -925,14 +929,14 @@ def sweep_orphaned_spinners(client: WebClient, channel: str) -> int:
 def main() -> None:
     """Start the Socket Mode listener (blocks forever; Ctrl-C to stop)."""
     load_dotenv()
-    if not os.environ.get("SLACK_CHANNEL_ID", "").strip():
+    if not configured_channel_ids():
         raise RuntimeError(
-            "SLACK_CHANNEL_ID must be the Monarch Bot Playground channel"
+            "SLACK_CHANNEL_ID must name at least one channel "
+            "(comma-separated to serve several, e.g. production plus playground)"
         )
     app = create_app()
-    swept = sweep_orphaned_spinners(
-        app.client, os.environ["SLACK_CHANNEL_ID"].strip()
-    )
+    # Spinners are only ever posted to the primary channel, so sweep just that one.
+    swept = sweep_orphaned_spinners(app.client, primary_channel_id())
     if swept:
         print(f"Finalized {swept} orphaned progress message(s) from a prior run.")
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])

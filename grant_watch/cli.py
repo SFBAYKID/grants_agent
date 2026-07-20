@@ -29,6 +29,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from . import db, scoring
+from .config import primary_channel_id
 from .models import RawItem, RunStats
 from .sources import POLLERS, sam_gov
 
@@ -160,7 +161,8 @@ def cmd_drip(force: bool, dry_run: bool) -> int:
 
     from .slack import drip as drip_mod
 
-    channel = os.environ.get("SLACK_CHANNEL_ID", "")
+    # Proactive drip always posts to the PRIMARY channel (first configured id).
+    channel = primary_channel_id()
     if not channel:
         print("SLACK_CHANNEL_ID is not set in .env", file=sys.stderr)
         return 1
@@ -207,7 +209,7 @@ def cmd_salesforce_followups(dry_run: bool, smoke: bool) -> int:
 
     from .slack import salesforce_followups
 
-    channel = os.environ.get("SLACK_CHANNEL_ID", "")
+    channel = primary_channel_id()
     if not channel:
         print("SLACK_CHANNEL_ID is not set in .env", file=sys.stderr)
         return 1

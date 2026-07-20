@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timezone
 
 from .. import db
+from ..config import configured_channel_ids
 from .salesforce_campaign_gateway import SalesforceRecordRef
 
 
@@ -24,8 +25,9 @@ def write_channel_allowed(channel: str) -> bool:
     configured = os.environ.get("GRANT_SALESFORCE_WRITE_CHANNEL_IDS", "")
     values = {item.strip() for item in configured.split(",") if item.strip()}
     if not values:
-        fallback = os.environ.get("SLACK_CHANNEL_ID", "").strip()
-        values = {fallback} if fallback else set()
+        # No explicit write allowlist: fall back to EVERY configured Grant channel
+        # (SLACK_CHANNEL_ID may list several), never a single raw comma-joined string.
+        values = set(configured_channel_ids())
     return bool(channel and channel in values)
 
 

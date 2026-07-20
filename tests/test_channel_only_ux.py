@@ -151,11 +151,14 @@ def test_digest_poster_module_remains_absent() -> None:
     assert not Path(grant.__file__).with_name("digest.py").exists()
 
 
-def test_startup_requires_explicit_playground_channel(
+def test_startup_requires_configured_channel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Grant cannot start with workspace-wide routing caused by a missing channel."""
+    """Grant cannot start with workspace-wide routing caused by a missing channel.
+
+    SLACK_CHANNEL_ID may now name one or several channels; an unset value must
+    still fail closed at boot rather than default to answering everywhere."""
     monkeypatch.setattr(grant, "load_dotenv", lambda: None)
     monkeypatch.delenv("SLACK_CHANNEL_ID", raising=False)
-    with pytest.raises(RuntimeError, match="Monarch Bot Playground"):
+    with pytest.raises(RuntimeError, match="must name at least one channel"):
         grant.main()
