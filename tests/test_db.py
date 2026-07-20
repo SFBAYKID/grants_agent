@@ -131,7 +131,9 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
             "SELECT version FROM schema_migrations ORDER BY version"
         )
     ]
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    # 13 (not 10): the "widen post kinds" migration is numbered above the droplet's
+    # divergent 10-12 lineage so it is never masked as already-applied (see migrations.py).
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 13]
     crm_tables = {
         row[0]
         for row in conn.execute(

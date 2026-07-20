@@ -515,8 +515,16 @@ def _migration_9_organization_profile(conn: sqlite3.Connection) -> None:
         _add_column(conn, "leads", definition)
 
 
-def _migration_10_widen_post_kinds(conn: sqlite3.Connection) -> None:
+def _migration_13_widen_post_kinds(conn: sqlite3.Connection) -> None:
     """Allow the two newer drip kinds — 'platinum' and 'rfp' — in posts.kind.
+
+    NOTE ON THE VERSION GAP (10-12): the production droplet's schema_migrations ledger
+    already recorded versions 10, 11, and 12 from a divergent lineage that never landed
+    in main (its code references none of those tables). The runner keys purely on version
+    NUMBER, so numbering this migration 10 would be masked as "already applied" and
+    silently skipped on the droplet — leaving the CHECK narrow and drip crashing. It is
+    therefore numbered 13 (the next free number above the droplet's max) so it runs on
+    both the droplet and a fresh main DB. Reconciling the ledger lineage is separate work.
 
     The original CHECK only listed ('nugget','bulletin'); once drip began emitting
     platinum-award and open-RFP posts, record_post raised a CHECK violation AFTER the
@@ -575,7 +583,9 @@ MIGRATIONS: tuple[Migration, ...] = (
         8, "Salesforce follow-up reminder state", _migration_8_salesforce_followup_state
     ),
     Migration(9, "organization profile columns", _migration_9_organization_profile),
-    Migration(10, "widen post kinds for platinum/rfp drip", _migration_10_widen_post_kinds),
+    # 10-12 are consumed by the droplet's divergent lineage (see _migration_13 docstring);
+    # main's next migration is 13 so it is not masked as already-applied on the droplet.
+    Migration(13, "widen post kinds for platinum/rfp drip", _migration_13_widen_post_kinds),
 )
 
 
