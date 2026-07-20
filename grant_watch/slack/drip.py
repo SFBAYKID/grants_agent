@@ -311,11 +311,12 @@ def _best_nugget(conn: sqlite3.Connection, nuggets: list[sqlite3.Row]) -> sqlite
 def pick(
     conn: sqlite3.Connection, channel: str, today: date | None = None
 ) -> tuple[str, sqlite3.Row] | None:
-    """Choose the single best opportunity of the day (Chase 2026-07-18). Quality ladder:
+    """Choose the single best opportunity of the day (Chase 2026-07-19). Quality ladder:
     PLATINUM (a security grant awarded in the last few days — a buy is imminent) first;
-    then the top GOLD award; then a GOLD RFP (freshly posted); then a SILVER RFP; then a
-    program bulletin. Grants outrank RFPs — an RFP can be a formality with a vendor
-    already chosen. Only gold/silver+ ever surface; the daily cap keeps it to one."""
+    then the top GOLD award; then a SILVER RFP (soonest deadline). Grants ALWAYS outrank
+    RFPs — a district that already won money beats a solicitation, which is a lot of work
+    with a low hit rate (so RFPs are silver at best, never surfaced above a grant). A
+    program bulletin is the last resort. The daily cap keeps it to one."""
     today = today or datetime.now(timezone.utc).date()
     nuggets = db.nugget_candidates(conn)
     platinum = [n for n in nuggets if _is_platinum(n, today)]
@@ -323,13 +324,10 @@ def pick(
         return "platinum", _best_nugget(conn, platinum)
     if nuggets:
         return "nugget", _best_nugget(conn, nuggets)
-    rfps = db.rfp_candidates(conn)  # gold first, then silver, soonest deadline within
-    gold_rfps = [r for r in rfps if str(r["lead_grade"]) == "gold"]
-    if gold_rfps:
-        return "rfp", gold_rfps[0]
+    rfps = db.rfp_candidates(conn)  # open RFPs (silver), soonest deadline first
     silver_rfps = [r for r in rfps if str(r["lead_grade"]) == "silver"]
     if silver_rfps:
-        return "rfp", silver_rfps[0]  # older but still-open RFP, soonest deadline
+        return "rfp", silver_rfps[0]  # open RFP, soonest deadline
     bulletins_today = sum(
         1 for p in db.posts_today(conn, channel) if p["kind"] == "bulletin"
     )

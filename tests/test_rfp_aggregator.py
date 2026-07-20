@@ -48,7 +48,8 @@ def test_real_starbridge_fixture_yields_target_state_open_rfps() -> None:
     assert len(pa) == 2  # both SCI Pine Grove packages survive; neither is dropped
     assert len({i.item_id for i in pa}) == 2  # ...with distinct ids (C2)
     ca = next(i for i in items if i.state == "CA")
-    assert scoring.grade(ca, today=TODAY).grade is LeadGrade.GOLD  # posted 2026-06-24
+    # RFPs are SILVER at best — never gold, even freshly posted (Chase 2026-07-19).
+    assert scoring.grade(ca, today=TODAY).grade is LeadGrade.SILVER
 
 
 # ------------------------------------------------------------------ state cherry-pick
@@ -95,15 +96,16 @@ def test_past_due_row_is_dropped() -> None:
     assert rfp_aggregator.parse_starbridge(row, TODAY) == []
 
 
-def test_fresh_release_grades_gold_old_release_silver() -> None:
-    """Posting date drives GOLD (recent) vs SILVER (old-but-open)."""
+def test_open_rfp_is_silver_regardless_of_posting_age() -> None:
+    """An open RFP is SILVER whether posted recently or long ago — RFPs are never gold
+    (Chase 2026-07-19: winning one is a lot of work with a low hit rate)."""
     fresh = _row("Camera RFP", "California DGS", "Sep 1, 2026", "Jul 10, 2026",
                  "State of California")
     stale = _row("Camera RFP 2", "California DGS", "Sep 1, 2026", "Jan 1, 2026",
                  "State of California")
     g = rfp_aggregator.parse_starbridge(fresh, TODAY)[0]
     s = rfp_aggregator.parse_starbridge(stale, TODAY)[0]
-    assert scoring.grade(g, today=TODAY).grade is LeadGrade.GOLD
+    assert scoring.grade(g, today=TODAY).grade is LeadGrade.SILVER
     assert scoring.grade(s, today=TODAY).grade is LeadGrade.SILVER
 
 

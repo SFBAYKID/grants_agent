@@ -26,18 +26,20 @@ from .source_status import (
 # workflow (search_leads, lead_stats, find_contact, source_inventory_status,
 # Salesforce previews, and the Persequor handoff). No backticks (Slack renders
 # them red); bullets and plain quotes only.
-CAPABILITIES_REPLY = """Happy to help! Here's what I can do:
-• Find schools and cities that recently won government security funding
+CAPABILITIES_REPLY = """Happy to introduce myself! I'm Grant. Here's what I can do:
+• Find schools and cities that recently won government security funding — the freshest awards rise to the top
 • Search our grant leads by state, program, grade, amount, or date
+• Pull a list of open RFPs for a state and hand you an Excel or Google Sheet
 • Break down our leads by state, program, or grade
 • Track down the best contact at an awardee and check Salesforce for them
 • Show which funding sources we've reviewed and how far research coverage has gotten
+• Post the best new opportunity here on my own — a district that just got funded outranks an open RFP
 • Add qualified leads to Salesforce — you approve every change first
 • Bring in Persequor to draft outreach email — a human always approves the send
 
 Try one of these:
 • "Find gold school leads in Michigan"
-• "List the last 5 reviewed sources"
+• "Give me the open RFPs in California as an Excel"
 • "Who's the best contact at Mt. Morris Consolidated Schools?"
 
 Just ask in plain English, right here in the thread."""

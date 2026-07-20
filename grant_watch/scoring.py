@@ -1,14 +1,17 @@
 """Lead grading: GOLD / SILVER / WATCH, per Chase's definitions in CLAUDE.md.
 
-Rules (v1 — deliberately simple, tuned as feedback arrives through Grant's threads):
-  GOLD    an actual award (money in hand) whose spend window is still open and whose
-          amount is positive. Freshness matters: awards started within the last
-          FRESH_MONTHS are the hottest; older-but-open awards stay gold but rank
-          below fresh events — expired windows drop to watch.
-  SILVER  an open RFP/bid matched to our keywords (WEBS, SAM.gov).
+Rules (Chase, refined 2026-07-19 — grants outrank RFPs; freshness is everything):
+  GOLD    an actual award (money in hand), positive amount, spend window still open, AND
+          obligated within the last FRESH_MONTHS — a district that just got funded is a
+          hot buyer. The same award obligated over a year ago drops to SILVER (they
+          likely have vendors locked in). A verified obligation date within a few days
+          becomes PLATINUM at the drip layer.
+  SILVER  an open RFP/bid (the aggregator, WEBS, SAM.gov, OregonBuys) OR an older-but-
+          still-open award. RFPs are SILVER AT BEST, never gold: winning one is a lot of
+          work with a low hit rate, so a solicitation never outranks a real award.
   WATCH   everything ambiguous: grants.gov opportunities (pipeline signal, not money),
           negative/zero amounts (de-obligations — found in the 2026-07-13 live run),
-          unknown windows. Per CLAUDE.md we keep these rather than drop them.
+          past-due RFPs, unknown windows. Per CLAUDE.md we keep these rather than drop.
 """
 
 from __future__ import annotations
@@ -28,7 +31,6 @@ RFP_SOURCES = ("webs", "sam.gov", "oregonbuys", "rfp")
 SIGNAL_SOURCES = ("grants.gov",)
 
 FRESH_MONTHS = 12  # Chase: after ~a year, awardees likely have vendors locked in.
-FRESH_RFP_DAYS = 30  # Chase: an RFP "just put out" within ~a month is GOLD, else SILVER.
 
 
 def _parse_date(iso: str) -> date | None:
@@ -62,19 +64,12 @@ def grade(item: RawItem, today: date | None = None) -> Lead:
             return Lead(item, LeadGrade.SILVER)
         return Lead(item, LeadGrade.GOLD)
 
-    # Security-RFP discovery: an OPEN RFP is GOLD when freshly posted (an active buyer
-    # who just put it out), SILVER when open but older, WATCH once the deadline passes
-    # (Chase, 2026-07-18). The posting date must be verified (item.event_date); an
-    # unproven posting date defaults to SILVER, never GOLD on a guess.
-    if item.source == "rfp":
-        deadline = _parse_date(item.end)
-        if deadline is None or deadline < today:
-            return Lead(item, LeadGrade.WATCH)
-        posted = _parse_date(item.event_date)
-        fresh = posted is not None and posted >= today - timedelta(days=FRESH_RFP_DAYS)
-        return Lead(item, LeadGrade.GOLD if fresh else LeadGrade.SILVER)
-
-    if item.source in RFP_SOURCES:
+    # RFPs are SILVER at best, never GOLD/PLATINUM (Chase, 2026-07-19): winning an RFP is
+    # a lot of work with a relatively low hit rate, so an open solicitation is a Silver
+    # lead — it never outranks a grant a district has already been awarded. An OPEN RFP
+    # (future deadline) is SILVER; once the deadline passes it drops to WATCH. This covers
+    # the aggregator (source=='rfp') and the state bid sources (WEBS/SAM/OregonBuys) alike.
+    if item.source == "rfp" or item.source in RFP_SOURCES:
         deadline = _parse_date(item.end)
         return Lead(
             item,

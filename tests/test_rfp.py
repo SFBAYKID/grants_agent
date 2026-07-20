@@ -95,16 +95,17 @@ POSTED_EXTRACT = {
 }
 
 
-def test_fresh_posting_date_grades_rfp_gold() -> None:
-    """An open RFP posted within the last ~month is GOLD (an active buyer)."""
+def test_fresh_posting_date_still_grades_rfp_silver() -> None:
+    """An open RFP is SILVER even when freshly posted — RFPs are never gold (Chase
+    2026-07-19: a solicitation is a lot of work and never outranks a real award)."""
     item = rfp_parse.build_rawitem(POSTED_EXTRACT, POSTED_PAGE, OPEN_URL, date(2027, 7, 10))
     assert item is not None
     assert item.event_date == "2027-07-05" and item.start == "2027-07-05"
-    assert scoring.grade(item, today=date(2027, 7, 10)).grade is LeadGrade.GOLD
+    assert scoring.grade(item, today=date(2027, 7, 10)).grade is LeadGrade.SILVER
 
 
 def test_old_posting_date_grades_rfp_silver() -> None:
-    """Open but posted more than ~a month ago -> SILVER, not GOLD."""
+    """Open but posted more than ~a month ago -> still SILVER."""
     item = rfp_parse.build_rawitem(POSTED_EXTRACT, POSTED_PAGE, OPEN_URL, date(2027, 8, 20))
     assert item is not None
     assert scoring.grade(item, today=date(2027, 8, 20)).grade is LeadGrade.SILVER
