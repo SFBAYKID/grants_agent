@@ -758,3 +758,29 @@ def test_note_body_reads_like_a_lead_briefing(tmp_path: Path) -> None:
     content = str(gateway.created_notes[0]["Content"])
     assert content.startswith("<p>") and "<br/>" in content
     assert "Lead #" in content
+
+
+def test_writer_credentials_fall_back_to_reader(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One Connected App for read+write is valid (Chase): the writer client id/secret and
+    My Domain default to the READER's when no separate SALESFORCE_WRITE_* app is set — no
+    env duplication — while a distinct writer app still takes precedence when configured."""
+    for key in (
+        "SALESFORCE_WRITE_CLIENT_ID",
+        "SALESFORCE_WRITE_CLIENT_SECRET",
+        "SALESFORCE_WRITE_MY_DOMAIN_URL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("SALESFORCE_CLIENT_ID", "reader-id")
+    monkeypatch.setenv("SALESFORCE_CLIENT_SECRET", "reader-secret")
+    monkeypatch.setenv("SALESFORCE_MY_DOMAIN_URL", "https://acme.my.salesforce.com")
+
+    assert gateway_mod._write_client_id() == "reader-id"
+    assert gateway_mod._write_client_secret() == "reader-secret"
+    assert gateway_mod._write_my_domain() == "https://acme.my.salesforce.com"
+
+    # A dedicated writer app, when set, overrides the reader fallback per-field.
+    monkeypatch.setenv("SALESFORCE_WRITE_CLIENT_ID", "writer-id")
+    monkeypatch.setenv("SALESFORCE_WRITE_MY_DOMAIN_URL", "https://writer.my.salesforce.com")
+    assert gateway_mod._write_client_id() == "writer-id"
+    assert gateway_mod._write_my_domain() == "https://writer.my.salesforce.com"
+    assert gateway_mod._write_client_secret() == "reader-secret"  # unset -> still reader

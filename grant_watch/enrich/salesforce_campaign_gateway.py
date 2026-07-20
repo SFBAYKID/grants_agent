@@ -94,10 +94,37 @@ def _soql_literal(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
+# Writer credentials fall back to the READER's when no separate writer app is
+# configured (Chase, 2026-07-19): one Connected App for both read and write is a valid,
+# common setup, so requiring duplicate SALESFORCE_WRITE_CLIENT_ID/SECRET/MY_DOMAIN_URL
+# that just mirror the reader is needless env duplication. A distinct writer app is still
+# supported — set the SALESFORCE_WRITE_* vars and they take precedence. The write-SAFETY
+# vars (SALESFORCE_WRITE_ORG_ID and SALESFORCE_WRITE_EXPECT_SANDBOX) remain explicit and
+# have no fallback — they must be set deliberately before any write.
+def _write_client_id() -> str:
+    """Writer OAuth client id, defaulting to the reader's when not separately set."""
+    return os.environ.get("SALESFORCE_WRITE_CLIENT_ID") or os.environ["SALESFORCE_CLIENT_ID"]
+
+
+def _write_client_secret() -> str:
+    """Writer OAuth client secret, defaulting to the reader's when not separately set."""
+    return (
+        os.environ.get("SALESFORCE_WRITE_CLIENT_SECRET")
+        or os.environ["SALESFORCE_CLIENT_SECRET"]
+    )
+
+
+def _write_my_domain() -> str:
+    """Writer My Domain URL, defaulting to the reader's when not separately set."""
+    return (
+        os.environ.get("SALESFORCE_WRITE_MY_DOMAIN_URL")
+        or os.environ["SALESFORCE_MY_DOMAIN_URL"]
+    )
+
+
 def _configured_host() -> str:
     """Return the exact writer-org hostname allowed in pasted Salesforce links."""
-    raw = os.environ.get("SALESFORCE_WRITE_MY_DOMAIN_URL", "")
-    return (urlparse(raw).hostname or "").lower()
+    return (urlparse(_write_my_domain()).hostname or "").lower()
 
 
 def validate_record_id(record_id: str, expected_sobject: str) -> str:
@@ -138,8 +165,8 @@ class SalesforceCampaignGateway:
     def _auth(self, force: bool = False) -> tuple[str, str]:
         """Authenticate with the dedicated writer Connected App."""
         now = time.time()
-        domain = os.environ["SALESFORCE_WRITE_MY_DOMAIN_URL"].rstrip("/")
-        client_id = os.environ["SALESFORCE_WRITE_CLIENT_ID"]
+        domain = _write_my_domain().rstrip("/")
+        client_id = _write_client_id()
         credential_scope = f"{domain}|{client_id}"
         if (
             not force
@@ -153,7 +180,7 @@ class SalesforceCampaignGateway:
             data={
                 "grant_type": "client_credentials",
                 "client_id": client_id,
-                "client_secret": os.environ["SALESFORCE_WRITE_CLIENT_SECRET"],
+                "client_secret": _write_client_secret(),
             },
             timeout=20,
         )
@@ -170,7 +197,7 @@ class SalesforceCampaignGateway:
     def verify_write_scope(self) -> SalesforceOrganizationIdentity:
         """Require exact configured org identity and sandbox status before a write."""
         token, instance = self._auth()
-        configured = os.environ["SALESFORCE_WRITE_MY_DOMAIN_URL"].rstrip("/")
+        configured = _write_my_domain().rstrip("/")
         configured_parsed = urlparse(configured)
         instance_parsed = urlparse(instance)
         if configured_parsed.scheme != "https" or instance_parsed.scheme != "https":
