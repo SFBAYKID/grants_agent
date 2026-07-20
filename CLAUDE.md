@@ -112,12 +112,24 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
-## Current status (2026-07-18)
+## Current status (2026-07-20)
 
-- `verified` offline: `python -m pytest tests -q` passes 517 tests (71 skipped live-marked). The
-  package uses nine ordered SQLite migrations, typed evidence/funding models, deduplication, scoring,
+- `verified` 2026-07-20 PRODUCTION CUTOVER (guardian + read-only API): Grant is LIVE on the
+  production channel `C01DGT9D11D` (monarch-cloud-team-vekada, `is_member:true`), running `aa09dca`
+  with migration 13 applied. Salesforce is PRODUCTION — read verified live, `verify_write_scope`
+  PASSES (IsSandbox=False, Org `…8EAM`, EXPECT_SANDBOX=0); writes are ARMED but gated per-record by
+  `verify_write_scope` + human Slack approval, and NO production insert has fired yet. Writer OAuth
+  creds fall back to the reader's (aa09dca); the two write-SAFETY vars keep no fallback. Crons
+  (Pacific): drip every 30 min 04:00–17:30 weekdays, poll 07:00 weekdays, keepalive 5-min. The
+  playground `C0B02721MNK` is now quiet (multi-channel dev support not yet built). architectural-critic
+  sweep of aa09dca: zero critical code bugs. LOCAL Mac env BROKEN: Homebrew removed python@3.13, so
+  local `pytest` cannot run until Python 3.13 is reinstalled and the venv recreated.
+- `verified` offline (last green run, before the local env broke): `python -m pytest tests -q` passed
+  627 tests (71 skipped live-marked). The package uses ordered SQLite migrations (through v13), typed
+  evidence/funding models, deduplication, scoring (RFPs Silver-at-best, award freshness Gold/Silver),
   guided search with zero-result relaxation hints, per-record verification links, export, Slack
-  receipt/reconciliation state, outreach retry state, and Salesforce create-only writes.
+  receipt/reconciliation state, outreach retry state, and Salesforce create-only writes (person +
+  organization-only Leads, note-on-existing, fail-closed duplicate guard).
 - `verified` live 2026-07-17→18, full-workflow campaign in Slack (runs 1–7 plus Chase's realism
   passes): natural asks ("find me schools in Texas") search immediately and answer with a plain-words
   grade split, names, and a per-record source link on every row; open-ended asks get ONE scoping

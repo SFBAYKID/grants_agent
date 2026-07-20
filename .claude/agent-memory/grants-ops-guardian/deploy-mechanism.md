@@ -7,6 +7,21 @@ metadata:
 
 The droplet checkout is NOT a git working tree — `~/grants_agent` has no `.git` and `git` commands fail there. Do not assume `git pull` works to deploy.
 
+**A BOT RESTART DOES NOT APPLY SQLite MIGRATIONS (verified 2026-07-20).** The bot entrypoint
+`grant_watch.slack.grant:main()` does `load_dotenv → create_app → sweep_orphaned_spinners (Slack API
+ONLY, no DB) → SocketModeHandler.start()`; there is NO module-level or startup `db.connect()`. The
+MIGRATING `db.connect()` (which runs `apply_migrations`) is called only INSIDE Slack event handlers and
+by fresh `cli drip`/`cli poll` processes. So a healthy restart with "⚡️ Bolt app is running!" can leave a
+new migration PENDING (`schema_migrations` MAX unchanged) — exactly what happened deploying aa09dca's
+migration 13 (code on disk, MAX still 12 after restart). It is self-healing/safe (connect() applies the
+migration BEFORE any dependent insert in that process, so e.g. a platinum/rfp post can't hit the old
+narrow CHECK), but to VERIFY a migration deploy you must either trigger a DB event or run a one-shot
+migrating connect: `cd ~/grants_agent && .venv/bin/python -c "from grant_watch import db; db.connect().close()"`
+(that WRITES — needs per-run authorization). NEVER report a migration "applied" just because the bot
+restarted cleanly — read `schema_migrations` MAX + the actual schema. Also note Chase's manual deploys may
+skip stamping `.deployed_revision` (it read stale `ba0a7b7` while aa09dca code was actually on disk) —
+confirm the CODE on disk (grep a known new symbol), not just the revision file. See [[migration-version-collision]].
+
 **Why:** Deploys are done by copying the tree from the laptop, not by pulling. Evidence: a `.deployed_revision` file at repo root holds the deployed commit hash (was `3f35a26974...` = commit 3f35a26 on 2026-07-14); the prior deploy left a backup `~/.grants_agent.previous.pre-3f35a269` (tree renamed to `.previous.pre-<oldhash>` before laying down the new one). `.env`, `.venv`, `grant_watch.db*`, and logs are preserved across deploys (they are not in git and differ from the laptop).
 
 **How to apply:**
@@ -16,6 +31,136 @@ The droplet checkout is NOT a git working tree — `~/grants_agent` has no `.git
 - When the repo state on the droplet does not match the instructed deploy method, STOP and confirm with Chase before improvising — a full rsync would clobber the divergent prod `.env` and live SQLite db. See [[tenant-and-layout]].
 
 **Proven full-tree rsync recipe (2026-07-16: 3d653c6 → 25513bc; re-proven 2026-07-17: 25513bc → 9db96d0, 9db96d0 → 36d2470, 36d2470 → 6ea70f2, 6ea70f2 → c714b01, and c714b01 → 50acadd, and 2026-07-17 ed261ff → e6df182 = 14 files [15 delta minus `.env.example`, which the `.env.*` exclude correctly skips], zero deletions each time; Chase-approved, all verified):**
+
+**2026-07-19 190b097 → ba0a7b7 (6-file, all verified) — routine clean forward + drip-cron realign:**
+CODE-ONLY (2 commits: f7dfddc "RFPs Silver not Gold" + ba0a7b7 "drip window opens 7am ET"). Live
+`.deployed_revision` read first = 190b097 (matched task; no drift). Ancestry clean. `git diff
+--name-status 190b097..ba0a7b7` = exactly 6 tracked files, ALL modifications, zero add/delete: 3 source
+(scoring.py, slack/drip.py, slack/intent_router.py) + 3 tests (test_drip, test_rfp, test_rfp_aggregator).
+Working tree clean at HEAD except the 4 `.claude/agent-memory/*` files (excluded). `-cain` dry-run = the
+6 as `<fcst....` + 3 benign `.d..t....` dir touches, ZERO deletions; post-run dry-run FULLY EMPTY
+(idempotent, even dir touches gone). `find -cnewer` = the 6 (+ live cron.log, excluded); all 6 remote
+sha256 == ba0a7b7 blobs. `.env`(1784436291)/`run_bot.sh`(1784192756) mtimes UNCHANGED before+after;
+db(1784481352) excluded. IMPORT_OK (grant+scoring+drip+intent_router) BEFORE kill; `.deployed_revision`
+stamped full hash. Restart (pkill + `nohup bash run_bot.sh`): OLDPID 755817 (== the PID memory recorded
+for the 190b097 deploy → confirms no out-of-band restart) dead → new single PID 1989352, "Grant is
+listening (Socket Mode)…" + "⚡️ Bolt app is running!", NO_TRACEBACK, PID_COUNT=1 stable. THEN realigned
+drip crontab 5-17→4-17 (see [[tenant-and-layout]] for the fail-closed recipe + the pipefail/diff gotcha).
+Reused persisted target-agnostic helpers deploy_rsync.sh/set_marker.sh/restart_verify.sh/final_check.sh;
+wrote fresh stamp_ba0a7b7.sh + verify_ba0a7b7.sh (never reuse target-specific stamp/verify across deploys).
+
+**2026-07-19 eabf6e5 → 190b097 (4-file, all verified) — routine clean forward, nothing surprising:**
+CODE-ONLY grading change (usaspending.py captures 'Base Obligation Date' as award date; scoring.py adds
+gold-fresh/silver-older award split) — changes FUTURE grading only, writes nothing itself. Live
+`.deployed_revision` read first = eabf6e5 (matched memory + task; no drift). Ancestry clean (eabf6e5 IS
+ancestor of 190b097). `git diff --name-status eabf6e5..190b097` = exactly 4 tracked files, ALL
+modifications, zero add/delete: 2 source (scoring.py, sources/usaspending.py) + 2 tests (test_scoring,
+test_sources). `-cain` dry-run = the 4 as `<fcst....` + 3 benign `.d..t....` dir touches (grant_watch/,
+grant_watch/sources/, tests/), ZERO deletions; 2nd dry-run after real run FULLY EMPTY (idempotent).
+`find -cnewer` = exactly the 4 (no stray/live files this run); all 4 remote sha256 == local 190b097 blobs.
+`.env`(1784436291)/`run_bot.sh`(1784192756) mtimes UNCHANGED before AND after restart; `grant_watch.db`
+(1784481352) excluded. IMPORT_OK (grant + scoring + sources.usaspending) BEFORE kill; `.deployed_revision`
+stamped full hash. Restart (pkill + `nohup bash run_bot.sh`): OLDPID 372564 dead → new single PID 755817,
+"Grant is listening (Socket Mode)…" + "⚡️ Bolt app is running!", NO_TRACEBACK, PID_COUNT=1 stable after
+20s. crontab still 4 lines (3 active + disabled salesforce-followups comment). No DB/migration/.env/poll
+touched. NOTE: stale scratchpad helpers from the PRIOR deploy (stamp.sh, verify_after.sh, local/remote_sha
+.txt) still target eabf6e5's 10-file list — do NOT reuse target-specific helpers across deploys; only
+deploy_rsync.sh / set_marker.sh / restart_verify.sh / final_check.sh are target-agnostic, write fresh
+stamp+verify per target.
+
+**2026-07-19 170abba → eabf6e5 (10-file, all verified) — routine clean forward, nothing surprising:**
+CODE-ONLY honesty/correctness bug sweep ("fix: honesty + correctness bugs from RFP/export bug sweep").
+Live `.deployed_revision` read first = 170abba (matched memory; no out-of-band drift). Ancestry clean
+(170abba IS ancestor of eabf6e5). `git diff --name-status 170abba..eabf6e5` = exactly 10 tracked files,
+ALL modifications, zero add/delete: 6 source (enrich/finder.py, enrich/salesforce_contact_records.py,
+slack/search.py, slack/search_presentation.py, sources/rfp_aggregator.py, sources/rfp_parse.py) + 4 tests
+(test_enrich, test_rfp_aggregator, test_salesforce_contact_records, test_search). `-cain` dry-run = the 10
+as `<fcst....` + benign `.d..t....` dir touches (`./`, enrich/, slack/, sources/, tests/), ZERO deletions;
+2nd dry-run after real run was FULLY EMPTY (idempotent). `find -cnewer` = exactly the 10; all 10 remote
+sha256 == local eabf6e5 blobs. `.env`(epoch 1784436291)/`run_bot.sh`(epoch 1784192756) mtimes UNTOUCHED
+before AND after restart; DB excluded. IMPORT_OK (grant + all 6 changed modules) BEFORE kill;
+`.deployed_revision` stamped full hash. Restart (pkill + `nohup bash run_bot.sh`): OLDPID 1830839 dead →
+new single PID 372564, "Grant is listening (Socket Mode)…" + "⚡️ Bolt app is running!", NO_TRACEBACK,
+PID_COUNT=1 stable after 20s. crontab still 4 lines (3 active + disabled salesforce-followups comment).
+No DB/migration/.env touched (task was explicit code-only). GOTCHA (cost one round-trip): a plain `ssh
+… -n 'bash -s' <<'HEREDOC'` runs NOTHING — `-n` points ssh stdin at /dev/null, so the remote `bash -s`
+gets no script; drop `-n` on the ssh that IS the heredoc/`bash -s` stdin consumer (inverse of the
+existing add-`-n` note for ssh that doesn't need stdin).
+
+**2026-07-19 c3d3ea7 → 170abba (4-file, all verified) — routine clean forward, nothing surprising:**
+via `deploy_rsync.sh` (bash). Live `.deployed_revision` read first = c3d3ea7 (matched memory; no
+out-of-band drift this time). `git diff --name-status c3d3ea7..170abba` = exactly 4 tracked files, ALL
+modifications, zero add/delete (slack/conversation.py, slack/search.py, slack/tools.py, tests/test_search.py
+— "on-demand open-RFP export via open_only search filter"). `-cain` dry-run = the 4 as `<fcst....` + benign
+`.d..t....` dir touches (`./`, `grant_watch/slack/`, `tests/`), ZERO deletions. `find -cnewer` = exactly the
+4; all 4 remote sha256 == local. `.env`(07-18T21:44:51)/`run_bot.sh`(07-16T02:05) mtimes UNTOUCHED (DB mtime
+advanced = live tenant writes, `*.db` excluded). IMPORT_OK (grant + slack.search/conversation/tools) BEFORE
+kill; `.deployed_revision` stamped full hash. Restart (pkill + `nohup bash run_bot.sh`): OLDPID 3926720 dead
+→ new single PID 1830839, "⚡️ Bolt app is running!", NO_TRACEBACK, PID stable. RFP_DISCOVERY_ENABLED already
+==1 (append step was a no-op), crontab still 4 lines.
+
+**2026-07-19 d9713d9 → c3d3ea7 (7-file, all verified) — droplet was AHEAD of the task's stated base:**
+routine clean forward deploy via `deploy_rsync.sh` (bash). Task said droplet was at 194d364 with a 2-commit
+delta; live `.deployed_revision` was actually **d9713d9** — some deploy advanced 194d364→d9713d9 OUTSIDE
+guardian memory (not recorded here; the prior memory entry ends at the d11d5db→194d364 deploy). Measured
+from the REAL base, `git diff --name-status d9713d9..c3d3ea7` = exactly the 7 tracked files the task listed
+(cli.py, slack/drip.py, sources/__init__.py + NEW sources/rfp_aggregator.py, tests/test_drip.py, NEW
+tests/test_rfp_aggregator.py, NEW tests/fixtures/rfp/starbridge_physical_security.md). The two "extra"
+files that appear in 194d364..c3d3ea7 (enrich/salesforce_campaigns.py + slack/grant.py) are byte-IDENTICAL
+at d9713d9 and c3d3ea7 — they landed in the unrecorded d9713d9 deploy, so already correct on the droplet;
+checksum rsync correctly skipped them. Ancestry checked clean-forward first (194d364 IS ancestor of
+c3d3ea7). `-cain` dry-run = the 7 as `<fcst....`/`<f+++++++` + benign `.d..t....` dir touches, ZERO
+deletions; find -cnewer = exactly the 7; all 7 remote sha256 == c3d3ea7 blobs. `.env`(07-18T21:44:51)/
+`grant_watch.db`(07-18T12:00)/`run_bot.sh`(07-16T02:05) mtimes UNTOUCHED. IMPORT_OK (grant +
+sources.rfp_aggregator) BEFORE kill; `.deployed_revision` stamped full hash. Restart (pkill + `nohup bash
+run_bot.sh`): OLDPID 1941309 dead → new single PID 3926720, "Grant is listening (Socket Mode)…" + "⚡️ Bolt
+app is running!", NO_TRACEBACK, PID_COUNT=1 stable after 20s. RFP_DISCOVERY_ENABLED still ==1 (no dup);
+crontab still 4 lines. LESSON: always read live `.deployed_revision` before computing the delta — the
+coordinator's stated base can be stale; measure from the REAL base, not the task's claim. Persisted
+`deploy_rsync.sh` from a prior session survives in the (nominally session-specific) scratchpad and still
+matches the proven recipe.
+
+**2026-07-18 d11d5db → 194d364 (2-file, all verified):** routine clean forward deploy via
+`deploy_rsync.sh` (bash), nothing surprising. `git diff --name-status d11d5db..194d364` = exactly 2
+tracked files (`grant_watch/slack/drip.py` + `tests/test_drip.py` — "one best card a day + platinum
+tier"), all modifications, zero add/delete. Deployable working tree clean at HEAD (start-of-session
+git-status snapshot stale as usual; re-checked live). `-cain` dry-run = the 2 as `<fcst....` + benign
+`.d..t....` dir touches on `grant_watch/slack/` and `tests/`, ZERO deletions. `find -cnewer` = exactly
+the 2; both remote sha256 == 194d364 blobs (drip=bc28718d…, test=2d5cea0f…). `.env`(07-18T21:44:51,
+= the RFP-flag-append mtime, unchanged)/`grant_watch.db`(07-18T12:00)/`run_bot.sh`(07-16T02:05) mtimes
+UNTOUCHED. IMPORT_OK (grant + slack.drip) BEFORE kill; `.deployed_revision` stamped full hash. Restart
+(pkill + `nohup bash run_bot.sh`): OLDPID 1643396 dead → new single PID 1941309, "Grant is listening
+(Socket Mode)…" + "⚡️ Bolt app is running!", NO_TRACEBACK, PID_COUNT=1 stable after 18s. Preserved:
+RFP_DISCOVERY_ENABLED still ==1 (no dup), crontab still 4 lines.
+
+**2026-07-18 d317e6f → d11d5db (9-file, all verified) + RFP feature-flag enable:** clean forward deploy
+via `deploy_rsync.sh` (bash). `git diff --name-status d317e6f..d11d5db` = exactly 9 tracked files, ALL
+modifications, zero add/delete (db.py, enrich/salesforce_contact_records.py, scoring.py, slack/drip.py,
+sources/rfp.py, sources/rfp_parse.py + the 3 matching tests) — the rfp.py/rfp_parse.py that shipped NEW in
+d317e6f are now just modified. `-cain` dry-run = the 9 as `<fcst....` + benign `.d..t....` dir touches,
+ZERO deletions. `find -cnewer` = exactly the 9; all 9 remote sha256 == local d11d5db blobs. `.env`
+(07-17T15:01)/`grant_watch.db`(07-18T12:00)/`run_bot.sh`(07-16T02:05) mtimes + `.env` sha (a3df9a07…)
+UNTOUCHED by the rsync. IMPORT_OK (grant + sources.rfp) BEFORE kill; `.deployed_revision` stamped full
+hash. Restart (pkill + `nohup bash run_bot.sh </dev/null >>cron.log`): OLDPID 419591 dead in 1s → new
+single PID 1643396, "Grant is listening (Socket Mode)…" + "⚡️ Bolt app is running!", NO traceback,
+pid_count=1. THEN enabled `RFP_DISCOVERY_ENABLED=1` (see [[tenant-and-layout]] for the flag + safe
+append-only `.env` recipe). NOTE: the Bolt startup line lags the new PID by several seconds — the first
+post-restart `tail` showed an EMPTY fresh region; re-check the log after ~15s before calling it healthy.
+
+**2026-07-18 21c0b46 → d317e6f (8-file, all verified):** clean forward deploy via `deploy_rsync.sh`
+(bash). `git diff --name-status 21c0b46..d317e6f` = 11 paths but 3 were under `.claude/agent-memory/`
+(2 architectural-critic + this deploy-mechanism.md, all excluded by `.claude`), so deployable delta =
+exactly 8 tracked files: cli.py + scoring.py + sources/__init__.py (modified, `<fcst....`) and NEW
+sources/rfp.py + sources/rfp_parse.py + tests/test_rfp.py + 2 tests/fixtures/rfp/*.md (`<f+++++++`,
+new dir `tests/fixtures/rfp/` = `cd+++++++`). This shipped the DORMANT security-RFP discovery source:
+it only runs when `RFP_DISCOVERY_ENABLED=1` — verified ABSENT from droplet .env (`grep -c` = 0), so ZERO
+cron behavior change; .env deliberately NOT touched. `-cain` dry-run = the 8 + benign `.d..t....` dir
+touches, ZERO deletions; post-run dry-run EMPTY (idempotent). `find -cnewer` = exactly the 8; all 8
+remote sha256 == local d317e6f blobs. `.env`(07-17T15:01)/`grant_watch.db`(07-18T12:00)/`run_bot.sh`
+(07-16T02:05) mtimes untouched. Crontab unchanged (3 active lines + the commented salesforce-followups).
+IMPORT_OK (grant + sources.rfp) BEFORE kill; `.deployed_revision` stamped full hash. Restart (pkill +
+`nohup bash run_bot.sh`): OLDPID 2188588 dead → new single PID 419591, "⚡️ Bolt app is running!",
+NO_TRACEBACK, PID_COUNT=1 stable after 20s.
 
 **2026-07-18 9740787 → 21c0b46 (4-file, all verified):** routine clean forward deploy, identical shape
 to the entries below (nothing surprising). Deployable delta = exactly 4 tracked files (slack/conversation.py
