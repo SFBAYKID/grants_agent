@@ -206,7 +206,14 @@ def org_enrichment_summary(
 
     try:
         profile = enrich_org_profile(conn, lead_id, on_progress)
-    except Exception:  # noqa: BLE001 — any failure is a retryable non-result
+    except SourceUnreachable as exc:
+        # EXPECTED, already-handled non-result: the org's site couldn't be read
+        # (blocked, offline, or no contact page). Nothing is recorded and it's
+        # retryable, so log a clean one-liner — a full traceback here reads like a
+        # code bug when it is just an unreachable website.
+        print(f"[org-enrichment] site unreachable, nothing recorded ({exc})", file=sys.stderr)
+        return ""
+    except Exception:  # noqa: BLE001 — an UNEXPECTED failure: keep the full traceback
         print("[tool-error] org_enrichment_summary:", file=sys.stderr)
         traceback.print_exc()
         return ""

@@ -318,6 +318,44 @@ def test_enrich_unreachable_records_nothing(
     )  # nothing fabricated, nothing final
 
 
+def test_org_enrichment_summary_logs_unreachable_cleanly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An unreachable org site is an EXPECTED retryable non-result: return '' and log a
+    clean one-liner — never the alarming [tool-error] traceback that reads like a code bug
+    (live 2026-07-20: WICHITA FALLS ISD's unreachable site logged a full traceback)."""
+    from grant_watch.enrich import organization_profile
+
+    def _unreachable(*_a: object, **_k: object) -> object:
+        """Stand in for a site that could not be read."""
+        raise SourceUnreachable("could not read any page for WICHITA FALLS ISD")
+
+    monkeypatch.setattr(organization_profile, "enrich_org_profile", _unreachable)
+    assert organization_profile.org_enrichment_summary(None, 1) == ""
+    err = capsys.readouterr().err
+    assert "[tool-error]" not in err  # no alarming error marker
+    assert "Traceback" not in err  # no full traceback for an expected condition
+    assert "unreachable" in err.lower()  # the retryable non-result is still noted
+
+
+def test_org_enrichment_summary_still_traces_unexpected_errors(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A genuinely UNEXPECTED exception still returns '' but keeps the full traceback, so a
+    real bug is never silently swallowed by the clean-up above."""
+    from grant_watch.enrich import organization_profile
+
+    def _boom(*_a: object, **_k: object) -> object:
+        """Stand in for an unexpected code fault."""
+        raise ValueError("unexpected org-enrichment fault")
+
+    monkeypatch.setattr(organization_profile, "enrich_org_profile", _boom)
+    assert organization_profile.org_enrichment_summary(None, 999) == ""
+    err = capsys.readouterr().err
+    assert "[tool-error] org_enrichment_summary" in err  # unexpected → loud
+    assert "Traceback" in err
+
+
 def _stub_fallbacks(
     monkeypatch: pytest.MonkeyPatch,
     person: dict[str, str] | None,
