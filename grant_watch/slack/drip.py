@@ -404,17 +404,32 @@ def run_drip(
             "unknown: Slack delivery could not be confirmed; Grant will not "
             "auto-retry this event to avoid a duplicate"
         )
-    db.record_post(
-        conn,
-        kind,
-        int(row["id"]),
-        channel,
-        resp["ts"],
-        style,
-        delivery_key=delivery_key,
-        event_id=event_id,
-        urgent=urgent,
-    )
-    db.finish_notification(conn, delivery_key, "delivered", slack_ts=resp["ts"])
-    db.mark_surfaced(conn, [int(row["id"])])
+    # Post-send bookkeeping: the message is ALREADY in Slack, so a failure here must not
+    # crash the cron tick or leave the outbox stuck in 'sending' (an orphaned reservation
+    # silently wedges the picker's ladder — the stuck lead stays top-ranked and blocks
+    # every tier beneath it). Finalize best-effort and report honestly instead.
+    try:
+        db.record_post(
+            conn,
+            kind,
+            int(row["id"]),
+            channel,
+            resp["ts"],
+            style,
+            delivery_key=delivery_key,
+            event_id=event_id,
+            urgent=urgent,
+        )
+        db.finish_notification(conn, delivery_key, "delivered", slack_ts=resp["ts"])
+        db.mark_surfaced(conn, [int(row["id"])])
+    except Exception as exc:  # noqa: BLE001 — never crash the tick after a confirmed send
+        try:
+            db.finish_notification(conn, delivery_key, "delivered", slack_ts=resp["ts"])
+            db.mark_surfaced(conn, [int(row["id"])])
+        except Exception:  # noqa: BLE001 — last-ditch; the message still went out
+            pass
+        return (
+            f"posted {kind} ({style}) for lead #{row['id']}, but recording it hit "
+            f"{type(exc).__name__}; the message is in Slack and will not be repeated"
+        )
     return f"posted {kind} ({style}) for lead #{row['id']}: {row['entity_name']}"

@@ -955,12 +955,12 @@ def rfp_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         conn.execute(
             f"""SELECT {_LEAD_EVENT_SELECT} FROM leads l
             JOIN funding_events e ON e.id=l.current_event_id
-            WHERE l.source='rfp' AND l.lead_grade IN ('gold','silver')
+            WHERE l.source='rfp' AND l.lead_grade='silver'
               AND e.suppressed=0 AND e.verification_status='verified'
               AND e.event_type='rfp_posted'
               AND l.id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL)
               AND l.funds_end != '' AND date(l.funds_end) >= date('now')
-            ORDER BY (l.lead_grade='gold') DESC, date(l.funds_end) ASC, l.id"""
+            ORDER BY date(l.funds_end) ASC, l.id"""
         )
     )
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import random
 import sqlite3
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -74,7 +74,7 @@ def _mk_rfp(
     conn: sqlite3.Connection,
     iid: str = "R1",
     entity: str = "City of Kemah",
-    grade: LeadGrade = LeadGrade.GOLD,
+    grade: LeadGrade = LeadGrade.SILVER,  # RFPs are silver at best (never gold)
     end: str = "2030-12-31",
     title: str = "Video Surveillance Camera Systems RFP",
 ) -> int:
@@ -358,12 +358,13 @@ def test_rfp_alert_names_cameras_and_access_control(tmp_path: Path) -> None:
     assert "security cameras and access control" in text
 
 
-def test_pick_prefers_a_gold_award_over_a_gold_rfp(tmp_path: Path) -> None:
-    """Grants outrank RFPs (Chase 2026-07-18: an RFP can be a formality). The award
-    here is >7 days old so it is a plain gold nugget, not platinum, yet still wins."""
+def test_pick_prefers_a_gold_award_over_an_rfp(tmp_path: Path) -> None:
+    """Grants outrank RFPs (Chase: an RFP is a lot of work and never beats a real award).
+    The award here is >7 days old so it is a plain gold nugget, not platinum, yet wins
+    over an open silver RFP."""
     conn = db.connect(tmp_path / "t.db")
     _mk_lead(conn, iid="AWARD", entity="Fresh District", start="2026-06-01")
-    _mk_rfp(conn, iid="GRFP", entity="City of Kemah", grade=LeadGrade.GOLD)
+    _mk_rfp(conn, iid="SRFP", entity="City of Kemah")  # silver open RFP
     kind, row = drip.pick(conn, "C1", today=date(2026, 7, 18))
     assert kind == "nugget" and row["entity_name"] == "Fresh District"
 
@@ -372,7 +373,7 @@ def test_pick_surfaces_platinum_for_a_fresh_security_grant(tmp_path: Path) -> No
     """A verified SVPP award from the last few days is PLATINUM — the top card."""
     conn = db.connect(tmp_path / "t.db")
     _mk_lead(conn, iid="PLAT", entity="Fresh District", start="2026-07-15")  # SVPP
-    _mk_rfp(conn, iid="GRFP", entity="City of Kemah", grade=LeadGrade.GOLD)
+    _mk_rfp(conn, iid="SRFP", entity="City of Kemah")  # silver open RFP
     kind, row = drip.pick(conn, "C1", today=date(2026, 7, 18))
     assert kind == "platinum" and row["entity_name"] == "Fresh District"
     text, style = drip.build_platinum(row)
@@ -592,6 +593,55 @@ def test_ambiguous_slack_timeout_is_not_blindly_retried(tmp_path: Path) -> None:
         conn.execute("SELECT state FROM notification_outbox").fetchone()["state"]
         == "unknown"
     )
+
+
+def test_run_drip_posts_platinum_end_to_end(tmp_path: Path) -> None:
+    """A fresh (<=7-day) verified SVPP award posts as PLATINUM and records cleanly.
+
+    Guards C1: 'platinum' was not in the posts.kind CHECK, so record_post crashed the
+    tick AFTER the Slack message was sent. This is the designed happy path for a fresh
+    award — it must complete end-to-end."""
+    conn = db.connect(tmp_path / "t.db")
+    recent = (date.today() - timedelta(days=2)).isoformat()
+    lead_id = _mk_lead(conn, iid="P1", start=recent, end="2031-09-30")
+    client = _SlackClient()
+    out = drip.run_drip(client, "C1", conn, force=True)
+    assert out.startswith("posted platinum")
+    assert client.calls == 1
+    assert conn.execute("SELECT kind FROM posts").fetchone()["kind"] == "platinum"
+    assert (
+        conn.execute("SELECT state FROM notification_outbox").fetchone()["state"]
+        == "delivered"
+    )
+    assert (
+        conn.execute(
+            "SELECT status FROM leads WHERE id=?", (lead_id,)
+        ).fetchone()["status"]
+        == "surfaced"
+    )
+
+
+def test_run_drip_posts_open_rfp_end_to_end(tmp_path: Path) -> None:
+    """An open silver RFP (no gold award available) posts as an 'rfp' kind and records
+    cleanly. Guards C1: 'rfp' was also missing from the posts.kind CHECK."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_rfp(conn, iid="R9", grade=LeadGrade.SILVER, end="2031-12-31")
+    client = _SlackClient()
+    out = drip.run_drip(client, "C1", conn, force=True)
+    assert out.startswith("posted rfp")
+    assert conn.execute("SELECT kind FROM posts").fetchone()["kind"] == "rfp"
+    assert (
+        conn.execute("SELECT state FROM notification_outbox").fetchone()["state"]
+        == "delivered"
+    )
+
+
+def test_posts_kind_accepts_all_four_drip_kinds(tmp_path: Path) -> None:
+    """posts.kind accepts every kind pick() can emit (migration 10), so a live post can
+    never violate the CHECK after the message is already in Slack."""
+    conn = db.connect(tmp_path / "t.db")
+    for index, kind in enumerate(("platinum", "nugget", "rfp", "bulletin")):
+        assert db.record_post(conn, kind, None, "C1", f"9.{index}", "s") > 0
 
 
 # ------------------------------------------------------------------ engagement points

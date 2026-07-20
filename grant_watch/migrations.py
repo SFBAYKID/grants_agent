@@ -515,6 +515,46 @@ def _migration_9_organization_profile(conn: sqlite3.Connection) -> None:
         _add_column(conn, "leads", definition)
 
 
+def _migration_10_widen_post_kinds(conn: sqlite3.Connection) -> None:
+    """Allow the two newer drip kinds — 'platinum' and 'rfp' — in posts.kind.
+
+    The original CHECK only listed ('nugget','bulletin'); once drip began emitting
+    platinum-award and open-RFP posts, record_post raised a CHECK violation AFTER the
+    Slack message was already sent, orphaning the notification_outbox row and wedging the
+    picker's ladder. SQLite can't ALTER a CHECK, so rebuild posts with the widened
+    constraint, preserving every column, row, and id (engagement.post_id references stay
+    valid; FK enforcement is off for the migration run per apply_migrations)."""
+    _execute_script(
+        conn,
+        """
+        CREATE TABLE posts_new (
+          id INTEGER PRIMARY KEY,
+          kind TEXT NOT NULL CHECK(kind IN ('platinum','nugget','rfp','bulletin')),
+          lead_id INTEGER REFERENCES leads(id),
+          channel TEXT NOT NULL,
+          ts TEXT NOT NULL,
+          style TEXT,
+          posted_at TIMESTAMP,
+          event_id INTEGER,
+          delivery_key TEXT,
+          delivery_status TEXT,
+          urgent INTEGER DEFAULT 0,
+          UNIQUE(channel, ts)
+        );
+        INSERT INTO posts_new
+          (id,kind,lead_id,channel,ts,style,posted_at,event_id,delivery_key,
+           delivery_status,urgent)
+          SELECT id,kind,lead_id,channel,ts,style,posted_at,event_id,delivery_key,
+                 delivery_status,urgent
+          FROM posts;
+        DROP TABLE posts;
+        ALTER TABLE posts_new RENAME TO posts;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_delivery_key
+          ON posts(delivery_key) WHERE delivery_key IS NOT NULL;
+        """,
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "legacy-compatible base", _migration_1_base),
     Migration(2, "truth observations and events", _migration_2_truth_events),
@@ -535,6 +575,7 @@ MIGRATIONS: tuple[Migration, ...] = (
         8, "Salesforce follow-up reminder state", _migration_8_salesforce_followup_state
     ),
     Migration(9, "organization profile columns", _migration_9_organization_profile),
+    Migration(10, "widen post kinds for platinum/rfp drip", _migration_10_widen_post_kinds),
 )
 
 
@@ -551,17 +592,29 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
     applied = {
         int(row[0]) for row in conn.execute("SELECT version FROM schema_migrations")
     }
-    for migration in MIGRATIONS:
-        if migration.version in applied:
-            continue
-        try:
-            conn.execute("BEGIN IMMEDIATE")
-            migration.apply(conn)
-            conn.execute(
-                "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?,?,?)",
-                (migration.version, migration.name, _now()),
-            )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
+    pending = [m for m in MIGRATIONS if m.version not in applied]
+    if not pending:
+        return
+    # Foreign-key enforcement OFF for the duration of the DDL run so a migration can
+    # REBUILD a table that a child table references (e.g. widening a CHECK on posts,
+    # referenced by engagement) via CREATE-copy-DROP-rename without tripping the child
+    # FK. This PRAGMA is a no-op inside a transaction, so it is toggled here, OUTSIDE the
+    # per-migration BEGIN/COMMIT, and restored afterward. Row ids are preserved by every
+    # rebuild, so no child reference is actually broken.
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        for migration in pending:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                migration.apply(conn)
+                conn.execute(
+                    "INSERT INTO schema_migrations(version, name, applied_at)"
+                    " VALUES (?,?,?)",
+                    (migration.version, migration.name, _now()),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")

@@ -154,8 +154,8 @@ def cmd_status() -> int:
 
 
 def cmd_drip(force: bool, dry_run: bool) -> int:
-    """One drip tick: Grant decides whether to surface one nugget/bulletin now.
-    Designed for a 30-minute cron, Mon-Fri, inside the 8am ET - 5pm PT window."""
+    """One drip tick: Grant decides whether to surface one opportunity now.
+    Designed for a 30-minute cron, Mon-Fri, inside the 7am ET - 5pm PT window."""
     from slack_sdk import WebClient
 
     from .slack import drip as drip_mod
