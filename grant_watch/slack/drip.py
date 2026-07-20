@@ -14,7 +14,7 @@ quality ladder — it reads as varied without being random:
 Grants outrank RFPs — an RFP can be a formality with a vendor already chosen.
 
 Run via cron every ~30 min; each tick decides for itself whether to speak:
-  in the window? (Mon-Fri, 8:00 America/New_York through 17:00 America/Los_Angeles)
+  in the window? (Mon-Fri, 7:00 America/New_York through 17:00 America/Los_Angeles)
   under the daily cap? past the min gap? and a random skip so timing feels human.
 Details and source links are available only after a human replies in the thread.
 """
@@ -78,9 +78,10 @@ _STATE_NAMES = {
 
 
 def in_window(now_utc: datetime) -> bool:
-    """Mon-Fri, from 8:00 Eastern until 17:00 Pacific (per Chase)."""
+    """Mon-Fri, from 7:00 Eastern until 17:00 Pacific (Chase 2026-07-19) — the full
+    coast-to-coast business day, opening on the East Coast and closing on the West."""
     et, pt = now_utc.astimezone(ET), now_utc.astimezone(PT)
-    return et.weekday() < 5 and et.hour >= 8 and pt.hour < 17
+    return et.weekday() < 5 and et.hour >= 7 and pt.hour < 17
 
 
 def _fmt_amount(amount: float | None) -> str:
@@ -253,7 +254,7 @@ def should_post(
     if force:
         return True, "forced"
     if not in_window(now_utc):
-        return False, "outside Mon-Fri 8am ET – 5pm PT window"
+        return False, "outside Mon-Fri 7am ET – 5pm PT window"
     return pacing_ok(conn, channel, now_utc, rng, urgent=urgent)
 
 

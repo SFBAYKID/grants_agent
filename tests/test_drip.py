@@ -117,10 +117,16 @@ def test_window_monday_morning_et_ok() -> None:
     assert drip.in_window(datetime(2026, 7, 13, 13, 30, tzinfo=timezone.utc))
 
 
-def test_window_before_8am_et_closed() -> None:
-    # 11:00 UTC = 7:00 ET -> outside
-    """Verify window before 8am et closed."""
-    assert not drip.in_window(datetime(2026, 7, 13, 11, 0, tzinfo=timezone.utc))
+def test_window_7am_et_open() -> None:
+    # 11:00 UTC = 7:00 ET (summer) -> inside; the window opens at 7am ET (Chase).
+    """Verify the window opens at 7am ET."""
+    assert drip.in_window(datetime(2026, 7, 13, 11, 0, tzinfo=timezone.utc))
+
+
+def test_window_before_7am_et_closed() -> None:
+    # 10:30 UTC = 6:30 ET -> outside (before the 7am ET open).
+    """Verify before 7am ET is still closed."""
+    assert not drip.in_window(datetime(2026, 7, 13, 10, 30, tzinfo=timezone.utc))
 
 
 def test_window_after_5pm_pt_closed() -> None:
