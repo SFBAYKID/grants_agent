@@ -221,3 +221,68 @@ def test_bot_authored_mention_is_ignored_before_any_receipt(
         0
     ]
     assert count == 0
+
+
+def test_thread_followup_addressing_someone_else_keeps_grant_silent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In an active Grant thread, a follow-up that @mentions ANY other party — another
+    agent like Persequor OR a teammate — is not Grant's turn. Grant stays silent and
+    claims no receipt (Chase's rule, generalized beyond the old Persequor-only check)."""
+    connection = db.connect(tmp_path / "silence-gate.db")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANT")
+    monkeypatch.setattr(grant, "App", FakeBoltApp)
+    monkeypatch.setattr(grant.db, "connect", lambda *_args, **_kwargs: connection)
+    grant.create_app()
+    app = FakeBoltApp.latest
+    assert app is not None
+
+    # Establish a registered Grant conversation thread with an opening @Grant mention.
+    root_ts = "30.001"
+    first_text = "<@UGRANT> show school district research coverage in California"
+    _register_human_message(app.client, first_text, root_ts)
+    app.events["app_mention"](
+        event={
+            "team": "TWORK", "channel": "CGRANT", "user": "UCHASE",
+            "text": first_text, "ts": root_ts, "channel_type": "channel",
+        },
+        body={"event_id": "Ev-gate-1", "team_id": "TWORK"},
+        say=lambda **_kwargs: None,
+        client=app.client,
+    )
+    assert db.is_conversation_thread(connection, "TWORK", "CGRANT", root_ts)
+
+    def _grant_posts() -> int:
+        """Count messages Grant actually posted (bot-authored)."""
+        return sum(1 for m in app.client.messages if m.get("bot_id"))
+
+    posts_before = _grant_posts()
+    assert posts_before >= 1  # Grant answered the opening mention
+
+    for index, followup in enumerate(
+        (
+            "<@UBRETT> can you take this lead from here?",
+            "<@UPERSEQUOR> please draft the intro email",
+        ),
+        start=2,
+    ):
+        event_id = f"Ev-gate-{index}"
+        ts = f"30.00{index}"
+        _register_human_message(app.client, followup, ts, root_ts)
+        app.events["message"](
+            event={
+                "team": "TWORK", "channel": "CGRANT", "user": "UCHASE",
+                "text": followup, "ts": ts, "thread_ts": root_ts,
+                "channel_type": "channel",
+            },
+            body={"event_id": event_id, "team_id": "TWORK"},
+            say=lambda **_kwargs: None,
+            client=app.client,
+        )
+        assert _grant_posts() == posts_before  # Grant added nothing — it stayed out
+
+    claimed = {
+        row[0] for row in connection.execute("SELECT event_id FROM slack_event_receipts")
+    }
+    assert "Ev-gate-2" not in claimed and "Ev-gate-3" not in claimed

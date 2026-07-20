@@ -310,7 +310,6 @@ def create_app() -> App:
 
     # ---------------------------------------------------------------- conversation
     bot_user_id: str = app.client.auth_test()["user_id"]
-    persequor_id: str = os.environ.get("PERSEQUOR_USER_ID", "")
 
     @app.event("app_mention")
     def on_mention(
@@ -409,8 +408,12 @@ def create_app() -> App:
         text = event.get("text") or ""
         if f"<@{bot_user_id}>" in text:
             return  # the app_mention handler owns this one — no double replies
-        if persequor_id and f"<@{persequor_id}>" in text:
-            return  # they're talking to Persequor — Grant stays out of it (Chase's rule)
+        if re.search(r"<@[^>]+>", text):
+            # Any OTHER @mention — a different agent like @Persequor, or a teammate —
+            # means this message is addressed to someone else, so Grant stays out of it
+            # (Chase's rule). Grant's own mention already returned just above, so a plain
+            # follow-up (no @mention) is the only thing Grant continues a thread on.
+            return
         thread_ts = event.get("thread_ts")
         if not thread_ts or not text.strip():
             return  # top-level channel chatter isn't Grant's business
