@@ -12,13 +12,19 @@ Verified live 2026-07-14 over the scoped grants SSH (`-i ~/.ssh/grants_droplet -
 - Venv: `/home/grantwatch/grants_agent/.venv` (Python 3.12.3).
 - Local SQLite still in use on droplet: `grant_watch.db` (+ `-wal`/`-shm`) in the repo root — live data, do not clobber. `DATABASE_URL` is set in the droplet `.env` (value not read). Postgres migration (Phase 4) not confirmed active this session.
 - Grant Slack bot run command: `.venv/bin/python -u -m grant_watch.slack.grant` (Socket Mode). Logs to `~/grants_agent/bot.log`.
-- **Slack channel: `SLACK_CHANNEL_ID` in `.env`.** Went to PRODUCTION 2026-07-20: `C01DGT9D11D`
-  (monarch-cloud-team-vekada). Old playground value was `C0B02721MNK`. The bot reads SLACK_CHANNEL_ID
-  ONLY at startup (`main()` raises if empty), so changing the channel requires a bot restart to take
-  effect. Channel IDs are non-secret. Slack-side caveat (outside droplet scope, can't verify read-only
-  from the box without the bot token): the Grant app must be a MEMBER of the target channel to post/read;
-  `sweep_orphaned_spinners` swallows a not-in-channel error silently, so a clean bot.log does NOT prove
-  membership — confirm on the Slack side.
+- **Slack channel(s): `SLACK_CHANNEL_ID` in `.env`.** MULTI-CHANNEL since 2026-07-20 (commit `a1d2484`):
+  value is a comma-separated list `C01DGT9D11D,C0B02721MNK` = production `monarch-cloud-team-vekada`
+  (FIRST = PRIMARY: drip posts + orphan-spinner sweep target it) + `C0B02721MNK` playground (also a valid
+  channel for answering mentions). Parsing lives in `grant_watch/config.py`
+  (`configured_channel_ids()` splits on comma; `primary_channel_id()` = first). CRITICAL ordering
+  gotcha: pre-a1d2484 code read `SLACK_CHANNEL_ID` as ONE literal id — setting the comma value with old
+  code makes Grant deaf in ALL channels. So a multi-channel `.env` change is only safe AFTER a1d2484 is
+  deployed; sequence = rsync new code → edit `.env` → restart (the running old bot doesn't re-read `.env`
+  until restart, so order-within is fine as long as the code is on disk before the restart). Bot reads
+  the value ONLY at startup, so a channel change needs a restart. Channel IDs are non-secret. Slack-side
+  caveat (can't verify read-only from the box without the bot token): the Grant app must be a MEMBER of
+  each channel to post/read; `sweep_orphaned_spinners` swallows a not-in-channel error silently, so a
+  clean bot.log does NOT prove membership — confirm on the Slack side.
 - Bot manager = cron keepalive, NOT systemd. Server TZ = **America/Los_Angeles (PDT/PT)**, NTP-synced
   (verified `timedatectl` 2026-07-19) — so ALL cron times are Pacific. Crontab (grantwatch), 4 lines:
   - `*/5 * * * * ~/grants_agent/run_bot.sh >> ~/grants_agent/cron.log 2>&1`
@@ -39,8 +45,10 @@ Verified live 2026-07-14 over the scoped grants SSH (`-i ~/.ssh/grants_droplet -
     `~/crontab.backup.20260717T194112Z`. Recipe that worked: `crontab -l` → `cp -a` backup → `awk` sub
     on the anchored active drip line → fail-closed guards (line count stable, exactly ONE line changed,
     removed==5-17-drip / added==4-17-drip, poll+keepalive+disabled `grep -qxF` byte-identical, no active
-    line still carries 5-17) → `crontab newfile` → read-back diff == new. Cap observed in cron.log =
-    `drip: skip: daily cap reached (3)` (cap is 3/day, not 1).
+    line still carries 5-17) → `crontab newfile` → read-back diff == new. **CAP CORRECTION (2026-07-20):
+    the old note here said "cap is 3/day" — that is STALE. `DAILY_CAP = 1` since commit 194d364
+    (2026-07-18, "one best card a day"). The `(N)` in `drip: skip: daily cap reached (N)` is the CAP
+    CONSTANT, not the day's post count. See [[drip-pacing-and-cap]].**
   - **GOTCHA (cost one round-trip 2026-07-19): `set -o pipefail` + `diff` as pipeline stage-1.**
     `diff a b | grep '^<' | grep -q PATTERN` ALWAYS returns non-zero under pipefail because `diff`
     exits 1 when files differ — regardless of whether grep matched — so a `|| exit 1` guard trips on

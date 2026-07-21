@@ -13,3 +13,6 @@
 - [ContentNote link bug](salesforce-contentnote-link-bug.md) — create_content_note inserts the note but its link-lookup SOQL 400s in monarchdev, leaving the note unattached; note.Id already == ContentDocumentId; auto author-link gotcha
 - [Stop means stop](coordinator-stop-is-stop.md) — a classifier block or coordinator stop halts the whole mutating effort; never finish the goal via an alternate allowed path
 - [Salesforce connection test](salesforce-connection-test.md) — read-only recipe for which org the droplet creds hit (prod vs sandbox); verify_write_scope is read-only; EXPECT_SANDBOX=1 is the fail-closed prod-write guard
+- [Drip pacing + daily cap](drip-pacing-and-cap.md) — ONE card/day by design (DAILY_CAP=1, the `(N)` is the cap not the count); tick-audit + read-only DB recipes; gold backlog suppressed so RFP supply is the real constraint
+- [RFP dedup key drift](rfp-dedup-key-drift.md) — dup RFP leads = 6-token→full-title KEY migration (not case); recompute-key proof; orphan gold RFP #9534; gold backlog has no usable award dates
+- [Grant Slack event flow](grant-slack-event-flow.md) — both app_mention+message handlers exist; slack_event_receipts has no event-type col; message-handler receipt is gated by thread-ownership; private channels need message.groups/groups:history

@@ -314,6 +314,122 @@ def test_rfp_lead_uses_its_own_drip_query_only(tmp_path: Path) -> None:
     assert db.bulletin_candidates(conn) == []
 
 
+# ------------------------------------------- item_id format drift (real 2026-07-20 bug)
+def _rfp_item(
+    item_id: str,
+    url: str,
+    title: str = "Camera and Access Control RFP",
+    entity: str = "Pennsylvania Department of Corrections",
+) -> RawItem:
+    """One open, verified RFP item under an explicit item_id/url — lets a test replay the
+    same real solicitation arriving under two different key formats."""
+    return RawItem(
+        source="rfp",
+        item_id=item_id,
+        title=title,
+        entity=entity,
+        state="PA",
+        program="RFP:security",
+        amount=None,
+        start="",
+        end="2027-08-14",
+        url=url,
+        event_type=FundingEventType.RFP_POSTED,
+        verification_status=VerificationStatus.VERIFIED,
+    )
+
+
+_DRIFT_URL = "https://starbridge.ai/rfp/sci-pine-grove-control-room-security-cameras-and-0"
+
+
+def test_item_id_format_change_adopts_the_existing_lead(tmp_path: Path) -> None:
+    """Re-keying an item_id must NOT duplicate the lead (the PA DOC repost, 2026-07-20).
+
+    eabf6e5 changed rfp_item_id from a 6-token title prefix to the full title. Because
+    upsert_lead matched only on (source, source_item_id), the stored row went unrecognized
+    and the next poll inserted the same solicitation a second time — so Grant queued the
+    identical card twice. The old row is adopted and re-keyed instead."""
+    conn = db.connect(tmp_path / "drift.db")
+    legacy = _rfp_item("pa-doc|sci-pine-grove-control-room-security|2027-08-14", _DRIFT_URL)
+    assert db.upsert_lead(conn, scoring.grade(legacy, today=BEFORE_DUE)) is True
+    original_id = int(conn.execute("SELECT id FROM leads").fetchone()["id"])
+
+    current = _rfp_item(
+        "pa-doc|sci-pine-grove-control-room-security-cameras-and-other|2027-08-14",
+        _DRIFT_URL,
+    )
+    # same real solicitation, new key shape: no new lead and no fresh alert
+    assert db.upsert_lead(conn, scoring.grade(current, today=BEFORE_DUE)) is False
+
+    rows = list(conn.execute("SELECT id, source_item_id FROM leads"))
+    assert len(rows) == 1, "a re-keyed solicitation must not become a second lead"
+    assert int(rows[0]["id"]) == original_id, "lead id must survive so posts stay valid"
+    assert rows[0]["source_item_id"] == current.item_id, "row migrates to the new key"
+    # and it is still exactly one postable candidate, not two
+    assert len(db.rfp_candidates(conn)) == 1
+
+
+def test_a_sibling_solicitation_at_its_own_url_stays_separate(tmp_path: Path) -> None:
+    """URL adoption must not swallow a genuinely distinct bid package.
+
+    Real case: SCI Pine Grove listed 'General and HVAC Construction' and a 'Plumbing
+    Construction *REBID*' package — same buyer and due date, different URL. Collapsing
+    them would drop a real solicitation (Constitution rule 1)."""
+    conn = db.connect(tmp_path / "sibling.db")
+    db.upsert_lead(conn, scoring.grade(_rfp_item("pa|general-hvac|2027-08-14", _DRIFT_URL), today=BEFORE_DUE))
+    rebid = _rfp_item(
+        "pa|plumbing-rebid|2027-08-14",
+        "https://starbridge.ai/rfp/sci-pine-grove-control-room-security-cameras-and-2",
+        title="Plumbing Construction *REBID*",
+    )
+    db.upsert_lead(conn, scoring.grade(rebid, today=BEFORE_DUE))
+    assert len(list(conn.execute("SELECT id FROM leads"))) == 2
+
+
+def test_two_agencies_sharing_a_url_are_never_merged(tmp_path: Path) -> None:
+    """A URL alone is too weak an identity — the organization must match too.
+
+    Caught by the existing search fixtures, which give every lead the same placeholder
+    URL: matching on URL alone fused City of Sacramento and City of Fresno into one lead.
+    Destroying a real lead is worse than keeping a duplicate (Constitution rule 1)."""
+    conn = db.connect(tmp_path / "agencies.db")
+    shared = "https://example.gov/bids"
+    for entity, key in (("City of Sacramento", "sac|1"), ("City of Fresno", "fres|1")):
+        item = _rfp_item(key, shared, entity=entity)
+        db.upsert_lead(conn, scoring.grade(item, today=BEFORE_DUE))
+    rows = list(conn.execute("SELECT entity_name FROM leads ORDER BY id"))
+    assert len(rows) == 2
+    assert {r["entity_name"] for r in rows} == {"City of Sacramento", "City of Fresno"}
+
+
+def test_url_adoption_is_restricted_to_per_record_url_sources(tmp_path: Path) -> None:
+    """A source whose many items share one program landing page must never merge on URL.
+
+    grants.gov/USAspending items routinely point at a shared program page, so a blanket
+    URL match would fuse unrelated awards into one lead."""
+    assert "rfp" in db._PER_RECORD_URL_SOURCES
+    assert "grants.gov" not in db._PER_RECORD_URL_SOURCES
+    conn = db.connect(tmp_path / "shared.db")
+    shared = "https://www.grants.gov/program/landing"
+    for key in ("grants.gov|award-1", "grants.gov|award-2"):
+        item = RawItem(
+            source="grants.gov",
+            item_id=key,
+            title="Program award",
+            entity="Some District",
+            state="CA",
+            program="SVPP",
+            amount=100000.0,
+            start="",
+            end="2027-08-14",
+            url=shared,
+            event_type=FundingEventType.RFP_POSTED,
+            verification_status=VerificationStatus.VERIFIED,
+        )
+        db.upsert_lead(conn, scoring.grade(item, today=BEFORE_DUE))
+    assert len(list(conn.execute("SELECT id FROM leads"))) == 2
+
+
 # ------------------------------------------------------ poll orchestration (mock I/O)
 def test_poll_isolates_a_failing_query_and_still_returns(
     monkeypatch: pytest.MonkeyPatch,

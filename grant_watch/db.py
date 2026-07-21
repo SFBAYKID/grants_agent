@@ -12,10 +12,13 @@ import json
 import re
 import sqlite3
 import uuid
-from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
+from .db_common import (
+    CRM_CONTEXT_SELECT as _CRM_CONTEXT_SELECT,
+    LEAD_EVENT_SELECT as _LEAD_EVENT_SELECT,
+    _now,
+)
 from .migrations import apply_migrations
 from .models import (
     FundingEventType,
@@ -28,53 +31,6 @@ from .models import (
 
 # Default DB lives next to the repo root; git-ignored (*.db).
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "grant_watch.db"
-_LEAD_EVENT_SELECT = """l.*, e.event_type AS current_event_type,
-    e.occurred_on AS current_event_occurred_on,
-    e.date_precision AS current_event_date_precision,
-    e.verification_status AS current_event_verification_status,
-    e.evidence_excerpt AS current_event_evidence_excerpt,
-    e.source_url AS current_event_source_url,
-    e.source_locator AS current_event_source_locator,
-    e.backfill AS current_event_backfill,
-    e.suppressed AS current_event_suppressed"""
-_CRM_CONTEXT_SELECT = """
-    (SELECT s.status FROM salesforce_lookup_state s
-     WHERE s.lead_id=l.id) AS salesforce_status,
-    (SELECT m.link FROM salesforce_matches m
-     JOIN salesforce_lookup_state s ON s.lead_id=m.lead_id
-     WHERE m.lead_id=l.id AND m.sobject='Opportunity'
-       AND m.confidence='high' AND COALESCE(m.is_closed,0)=0
-       AND s.status='found' AND datetime(s.checked_at) >= datetime('now','-24 hours')
-     ORDER BY m.record_id LIMIT 1) AS salesforce_opportunity_link,
-    (SELECT m.name FROM salesforce_matches m
-     JOIN salesforce_lookup_state s ON s.lead_id=m.lead_id
-     WHERE m.lead_id=l.id AND m.sobject='Opportunity'
-       AND m.confidence='high' AND COALESCE(m.is_closed,0)=0
-       AND s.status='found' AND datetime(s.checked_at) >= datetime('now','-24 hours')
-     ORDER BY m.record_id LIMIT 1) AS salesforce_opportunity_name,
-    (SELECT m.owner FROM salesforce_matches m
-     JOIN salesforce_lookup_state s ON s.lead_id=m.lead_id
-     WHERE m.lead_id=l.id AND m.sobject='Opportunity'
-       AND m.confidence='high' AND COALESCE(m.is_closed,0)=0
-       AND s.status='found' AND datetime(s.checked_at) >= datetime('now','-24 hours')
-     ORDER BY m.record_id LIMIT 1) AS salesforce_opportunity_owner,
-    (SELECT m.link FROM salesforce_matches m
-     JOIN salesforce_lookup_state s ON s.lead_id=m.lead_id
-     WHERE m.lead_id=l.id AND m.sobject='Account' AND m.confidence='high'
-       AND s.status='found' AND datetime(s.checked_at) >= datetime('now','-24 hours')
-     ORDER BY m.record_id LIMIT 1) AS salesforce_account_link,
-    (SELECT m.owner FROM salesforce_matches m
-     JOIN salesforce_lookup_state s ON s.lead_id=m.lead_id
-     WHERE m.lead_id=l.id AND m.sobject='Account' AND m.confidence='high'
-       AND s.status='found' AND datetime(s.checked_at) >= datetime('now','-24 hours')
-     ORDER BY m.record_id LIMIT 1) AS salesforce_account_owner"""
-
-
-def _now() -> str:
-    """UTC ISO timestamp — one format everywhere so Postgres migration is painless."""
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
 def connect(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     """Open a writable database and apply explicit versioned migrations."""
     conn = sqlite3.connect(db_path, timeout=10.0)
@@ -110,6 +66,58 @@ def canonical_entity_key(entity: str, state: str = "") -> str:
     return f"{normalized}|{state.strip().upper()}"
 
 
+# Sources whose detail_url addresses exactly ONE record, so the URL can be trusted as a
+# second identity when the item_id formula changes shape (see _adopt_drifted_lead).
+# Deliberately an allowlist, never blanket: most sources point many items at one program
+# landing page, where matching on URL would merge genuinely distinct leads.
+_PER_RECORD_URL_SOURCES: frozenset[str] = frozenset({"rfp"})
+
+
+def _adopt_drifted_lead(
+    conn: sqlite3.Connection,
+    source: str,
+    url: str,
+    entity_key: str,
+    new_item_id: str,
+) -> sqlite3.Row | None:
+    """Adopt a stored lead that IS this item but was keyed under an older item_id format,
+    re-keying it in place. Returns None when there is no such row.
+
+    Why: upsert_lead identifies a lead only by (source, source_item_id), so changing an
+    item_id formula orphans every row already stored under the old shape and the next
+    poll re-inserts each one as a brand-new lead — a duplicate alert to the channel. This
+    happened for real: eabf6e5 switched rfp_item_id from a 6-token title prefix to the
+    full title, and the same Pennsylvania DOC solicitation landed twice. For sources whose
+    detail_url identifies one record, the URL survives that change, so the old row is
+    adopted instead of duplicated. Re-keying IN PLACE keeps the lead id stable, so posts,
+    receipts, and CRM links that already reference it stay valid.
+
+    The ORGANIZATION must match too, not just the URL. A URL alone is too weak an identity
+    — distinct buyers can share a portal or landing URL, and fusing two agencies into one
+    lead would silently destroy a real lead (Constitution rule 1). Same source + same URL +
+    same organization is the narrow case that actually means "this row was re-keyed".
+    """
+    if source not in _PER_RECORD_URL_SOURCES or not url or not entity_key:
+        return None
+    row = conn.execute(
+        """SELECT * FROM leads
+           WHERE source=? AND detail_url=? AND canonical_entity_key=?
+           ORDER BY id LIMIT 1""",
+        (source, url, entity_key),
+    ).fetchone()
+    if row is None:
+        return None
+    # Cannot violate UNIQUE(source, source_item_id): the caller only reaches here when no
+    # row holds new_item_id. Oldest row wins, so if a pair already duplicated, the item
+    # collapses back onto the original — the one carrying the post history.
+    conn.execute(
+        "UPDATE leads SET source_item_id=? WHERE id=?", (new_item_id, int(row["id"]))
+    )
+    return conn.execute(
+        "SELECT * FROM leads WHERE id=?", (int(row["id"]),)
+    ).fetchone()
+
+
 def upsert_lead(conn: sqlite3.Connection, lead: Lead) -> bool:
     """Project one source item and append evidence when its facts changed.
 
@@ -124,6 +132,18 @@ def upsert_lead(conn: sqlite3.Connection, lead: Lead) -> bool:
         "SELECT * FROM leads WHERE source=? AND source_item_id=?",
         (it.source, str(it.item_id)),
     ).fetchone()
+    adopted = False
+    if existing is None:
+        # No row under this key: it may still be a lead we already hold under a previous
+        # item_id format. Adopting it prevents a re-keyed item from alerting twice.
+        existing = _adopt_drifted_lead(
+            conn,
+            it.source,
+            it.url,
+            canonical_entity_key(it.entity, it.state),
+            str(it.item_id),
+        )
+        adopted = existing is not None
     inserted = existing is None
     if inserted:
         conn.execute(
@@ -174,28 +194,42 @@ def upsert_lead(conn: sqlite3.Connection, lead: Lead) -> bool:
     suppressed = it.backfill or it.event_type == FundingEventType.RECORD_OBSERVED
 
     lead_id = int(existing["id"])
-    conn.execute(
-        """INSERT OR IGNORE INTO source_observations
-             (lead_id, source, source_item_id, observed_at, payload_hash, raw_json,
-              source_url, source_locator, verification_status)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
-        (
-            lead_id,
-            it.source,
-            str(it.item_id),
-            now,
-            payload_hash,
-            raw_json,
-            it.url,
-            it.source_locator,
-            it.verification_status.value,
-        ),
-    )
-    observation = conn.execute(
-        """SELECT id FROM source_observations
-           WHERE source=? AND source_item_id=? AND payload_hash=?""",
-        (it.source, str(it.item_id), payload_hash),
-    ).fetchone()
+    observation = None
+    if adopted:
+        # The lead was just re-keyed, so an observation of this EXACT payload already
+        # exists under the old item_id. source_observations is keyed by
+        # (source, source_item_id, payload_hash), so inserting again would mint a second
+        # observation and therefore a second funding_event — the same duplicate alert,
+        # one level down. Reuse the prior observation instead. Past observations are
+        # never rewritten: what was observed, under the key it was observed with, stands.
+        observation = conn.execute(
+            """SELECT id FROM source_observations
+               WHERE lead_id=? AND source=? AND payload_hash=? ORDER BY id LIMIT 1""",
+            (lead_id, it.source, payload_hash),
+        ).fetchone()
+    if observation is None:
+        conn.execute(
+            """INSERT OR IGNORE INTO source_observations
+                 (lead_id, source, source_item_id, observed_at, payload_hash, raw_json,
+                  source_url, source_locator, verification_status)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                lead_id,
+                it.source,
+                str(it.item_id),
+                now,
+                payload_hash,
+                raw_json,
+                it.url,
+                it.source_locator,
+                it.verification_status.value,
+            ),
+        )
+        observation = conn.execute(
+            """SELECT id FROM source_observations
+               WHERE source=? AND source_item_id=? AND payload_hash=?""",
+            (it.source, str(it.item_id), payload_hash),
+        ).fetchone()
     assert observation is not None
 
     event_insert = conn.execute(
@@ -821,169 +855,26 @@ def mark_slack_event_reviewed(conn: sqlite3.Connection, event_id: str) -> bool:
     return cur.rowcount == 1
 
 
-def record_engagement(
-    conn: sqlite3.Connection, post_id: int, slack_user: str, kind: str
-) -> bool:
-    """+1 point when a human interacts with a post. Deduped per (post, user, kind)
-    so one enthusiastic user can't inflate the score. Returns True if new."""
-    cur = conn.execute(
-        "INSERT OR IGNORE INTO engagement (post_id, slack_user, kind, at) "
-        "VALUES (?,?,?,?)",
-        (post_id, slack_user, kind, _now()),
-    )
-    conn.commit()
-    if cur.rowcount == 1:
-        post = conn.execute(
-            "SELECT lead_id FROM posts WHERE id=?", (post_id,)
-        ).fetchone()
-        if post is not None:
-            record_outcome(
-                conn,
-                int(post["lead_id"]) if post["lead_id"] is not None else None,
-                post_id,
-                slack_user,
-                kind,
-                f"engagement:{post_id}:{slack_user}:{kind}",
-            )
-    return cur.rowcount == 1
+# Human-signal and drip-selection queries live in db_engagement.py (file-size cap).
+# Re-exported here so `db.<name>` stays the single persistence entry point for callers.
+from .db_engagement import (  # noqa: E402  (facade re-export, must follow definitions)
+    bulletin_candidates,
+    engagement_stats,
+    nugget_candidates,
+    posts_today,
+    program_outcome_points,
+    record_engagement,
+    record_outcome,
+    rfp_candidates,
+)
 
-
-_OUTCOME_POINTS = {
-    "reaction": 1,
-    "reply": 2,
-    "question": 2,
-    "snoozed": -2,
-    "bad_lead": -8,
-    "contacted": 6,
-    "campaign_added": 8,
-}
-
-
-def record_outcome(
-    conn: sqlite3.Connection,
-    lead_id: int | None,
-    post_id: int | None,
-    slack_user: str,
-    kind: str,
-    source_key: str,
-) -> bool:
-    """Persist one deduplicated human reward signal with an explicit point weight."""
-    if kind not in _OUTCOME_POINTS:
-        raise ValueError(f"unsupported outcome kind '{kind}'")
-    with conn:
-        cur = conn.execute(
-            """INSERT OR IGNORE INTO outcome_events
-                 (id,lead_id,post_id,slack_user,kind,points,source_key,occurred_at)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            (
-                str(uuid.uuid4()),
-                lead_id,
-                post_id,
-                slack_user,
-                kind,
-                _OUTCOME_POINTS[kind],
-                source_key,
-                _now(),
-            ),
-        )
-    return cur.rowcount == 1
-
-
-def program_outcome_points(conn: sqlite3.Connection, program: str) -> list[int]:
-    """Return verified human outcome weights for one exact program label."""
-    return [
-        int(row[0])
-        for row in conn.execute(
-            """SELECT o.points FROM outcome_events o
-           JOIN leads l ON l.id=o.lead_id
-           WHERE UPPER(COALESCE(l.program,''))=UPPER(?)""",
-            (program or "",),
-        )
-    ]
-
-
-def engagement_stats(conn: sqlite3.Connection) -> dict[str, int]:
-    """Grant's score: total points + per-kind breakdown (the tuning signal)."""
-    stats = {"total": conn.execute("SELECT COUNT(*) FROM engagement").fetchone()[0]}
-    for kind, n in conn.execute("SELECT kind, COUNT(*) FROM engagement GROUP BY kind"):
-        stats[kind] = n
-    return stats
-
-
-def posts_today(
-    conn: sqlite3.Connection, channel: str, now_utc: datetime | None = None
-) -> list[sqlite3.Row]:
-    """Today's proactive posts in Pacific time, where the Slack team operates."""
-    now_utc = now_utc or datetime.now(timezone.utc)
-    local_date = now_utc.astimezone(ZoneInfo("America/Los_Angeles")).date()
-    start_local = datetime.combine(
-        local_date, time.min, tzinfo=ZoneInfo("America/Los_Angeles")
-    )
-    start_utc = start_local.astimezone(timezone.utc)
-    end_utc = (start_local + timedelta(days=1)).astimezone(timezone.utc)
-    return list(
-        conn.execute(
-            """SELECT * FROM posts WHERE channel=? AND posted_at>=? AND posted_at<?
-           ORDER BY posted_at,id""",
-            (channel, start_utc.isoformat(), end_utc.isoformat()),
-        )
-    )
-
-
-def nugget_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Unsurfaced GOLD leads eligible for a drip nugget."""
-    return list(
-        conn.execute(
-            f"""SELECT {_LEAD_EVENT_SELECT}, {_CRM_CONTEXT_SELECT}
-            FROM leads l
-            JOIN funding_events e ON e.id=l.current_event_id
-            WHERE l.lead_grade='gold' AND l.status='new' AND e.suppressed=0
-              AND e.verification_status='verified'
-              AND e.event_type IN ('award_announced','award_obligated')"""
-        )
-    )
-
-
-def rfp_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Open, unsurfaced physical-security RFP leads for a proactive alert.
-
-    An open RFP (verified future deadline) for cameras/access control is an active
-    buyer, so these are surfaced individually and promptly (Chase, 2026-07-18) — the
-    soonest deadline first. Already-posted leads are excluded so nothing repeats.
-    """
-    return list(
-        conn.execute(
-            f"""SELECT {_LEAD_EVENT_SELECT} FROM leads l
-            JOIN funding_events e ON e.id=l.current_event_id
-            WHERE l.source='rfp' AND l.lead_grade='silver'
-              AND e.suppressed=0 AND e.verification_status='verified'
-              AND e.event_type='rfp_posted'
-              AND l.id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL)
-              AND l.funds_end != '' AND date(l.funds_end) >= date('now')
-            ORDER BY date(l.funds_end) ASC, l.id"""
-        )
-    )
-
-
-def bulletin_candidates(
-    conn: sqlite3.Connection, max_age_days: int = 14
-) -> list[sqlite3.Row]:
-    """Return fresh federal or California application-window bulletins.
-
-    These are program-level signals rather than award evidence. The earliest
-    verified closing date sorts first so users see the most time-sensitive item.
-    """
-    return list(
-        conn.execute(
-            f"""SELECT {_LEAD_EVENT_SELECT} FROM leads l
-            JOIN funding_events e ON e.id=l.current_event_id
-            WHERE l.source IN ('grants.gov','ca-grants-portal')
-              AND l.first_seen >= datetime('now', ?)
-              AND e.suppressed=0 AND e.verification_status='verified'
-              AND e.event_type='application_window_opened'
-              AND l.id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL)
-              AND l.funds_end != '' AND date(l.funds_end) >= date('now')
-            ORDER BY date(l.funds_end) ASC,l.id""",
-            (f"-{max_age_days} days",),
-        )
-    )
+__all__ = [
+    "bulletin_candidates",
+    "engagement_stats",
+    "nugget_candidates",
+    "posts_today",
+    "program_outcome_points",
+    "record_engagement",
+    "record_outcome",
+    "rfp_candidates",
+]
