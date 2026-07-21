@@ -112,20 +112,48 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
-## Current status (2026-07-20)
+## Current status (2026-07-21)
 
 - `verified` 2026-07-20 PRODUCTION CUTOVER (guardian + read-only API): Grant is LIVE on the
-  production channel `C01DGT9D11D` (monarch-cloud-team-vekada, `is_member:true`), running `aa09dca`
+  production channel `C01DGT9D11D` (monarch-cloud-team-vekada, `is_member:true`), running `15263d2`
   with migration 13 applied. Salesforce is PRODUCTION — read verified live, `verify_write_scope`
   PASSES (IsSandbox=False, Org `…8EAM`, EXPECT_SANDBOX=0); writes are ARMED but gated per-record by
   `verify_write_scope` + human Slack approval, and NO production insert has fired yet. Writer OAuth
   creds fall back to the reader's (aa09dca); the two write-SAFETY vars keep no fallback. Crons
   (Pacific): drip every 30 min 04:00–17:30 weekdays, poll 07:00 weekdays, keepalive 5-min. The
   playground `C0B02721MNK` is now quiet (multi-channel dev support not yet built). architectural-critic
-  sweep of aa09dca: zero critical code bugs. LOCAL Mac env BROKEN: Homebrew removed python@3.13, so
-  local `pytest` cannot run until Python 3.13 is reinstalled and the venv recreated.
-- `verified` offline (last green run, before the local env broke): `python -m pytest tests -q` passed
-  627 tests (71 skipped live-marked). The package uses ordered SQLite migrations (through v13), typed
+  sweep of aa09dca: zero critical code bugs. LOCAL Mac env WORKS again (Python 3.13.14, venv intact) —
+  the earlier "Homebrew removed python@3.13" note is stale.
+- `verified` 2026-07-21 duplicate-lead fix (Chase-authorized; he ran the prod write himself after the
+  permission gate blocked the guardian twice — the guardian correctly stopped both times rather than
+  improvising a transport). ROOT CAUSE: `upsert_lead` identified a lead ONLY by
+  `(source, source_item_id)`, so `eabf6e5`'s legitimate change to the `rfp_item_id` formula orphaned
+  every row stored under the old shape and the next poll re-inserted them — Grant had an exact repeat
+  of the PA DOC card queued for 07-22. FIXED in two halves: (a) prod data reconciled — leads 9564/9534
+  and their `funding_events` deleted, 9533 re-keyed onto the current key, keeping its post history;
+  (b) `db._adopt_drifted_lead` now re-keys a drifted row IN PLACE instead of duplicating it, gated on
+  source + detail_url + ORGANIZATION (URL alone fused two different cities in the search fixtures).
+  The code guard alone would NOT have repaired the existing duplicate — the data fix was load-bearing.
+  NOTE: Chase chose to KEEP the two `source_observations` rows, so `PRAGMA foreign_key_check` now
+  reports 2 orphaned rows PERMANENTLY. That is the decision, not damage; `integrity_check` is `ok`.
+  Do not "fix" it. Backup retained: `/home/grantwatch/grant_watch.db.bak.20260721T075909Z`.
+- `verified` 2026-07-21 `db.py` split (it crossed the 1000-line cap): `db_common.py` holds the shared
+  row-shape fragments and `_now`; `db_engagement.py` holds human signals + the drip-selection queries.
+  Both are re-exported from `db.py`, so every `db.<name>` call site is unchanged.
+- `needs-testing` 2026-07-21 drip TIMING, the likeliest cause of low team engagement: `in_window()`
+  opens at 7am ET = **4:00 AM Pacific** and `POST_PROBABILITY=0.45` per 30-min tick, so with
+  `DAILY_CAP=1` the single daily card is ~95% likely to be spent before 6 AM PT — hours before the
+  Pacific team logs on, with nothing left for the rest of the day. Monday's landed 04:30 PT. Proposed
+  fix (not yet approved): open the window at 08:00 PT. Chase has decided the cap STAYS at 1/day.
+- `needs-testing` 2026-07-21 the 546-lead gold backlog CANNOT be surfaced honestly yet: there is zero
+  award-date variance in it. The 351 `ca-grants-award` rows carry no award date at all (raw_json has
+  only `PublishDate`/`LastUpdated`/`FiscalYear`), and all 195 `usaspending:16.071` rows read
+  `2025-10-10` with `Base Obligation Date` at distinct=1 while amounts (153 distinct) and IDs (195
+  distinct) vary normally — i.e. a probable poller capture bug, not 195 same-day awards. Any freshness
+  cutoff would assert recency the data cannot evidence (Constitution rule 1). Fix the date capture
+  first. Composition is otherwise good: ~546 distinct orgs, CA 356 / AZ 22 / IL 15 / KY 14.
+- `verified` 2026-07-21: `python -m pytest tests -q` passed 642 tests (71 skipped live-marked); health
+  gate green; `ruff check` clean. The package uses ordered SQLite migrations (through v13), typed
   evidence/funding models, deduplication, scoring (RFPs Silver-at-best, award freshness Gold/Silver),
   guided search with zero-result relaxation hints, per-record verification links, export, Slack
   receipt/reconciliation state, outreach retry state, and Salesforce create-only writes (person +

@@ -32,6 +32,28 @@ confirm the CODE on disk (grep a known new symbol), not just the revision file. 
 
 **Proven full-tree rsync recipe (2026-07-16: 3d653c6 → 25513bc; re-proven 2026-07-17: 25513bc → 9db96d0, 9db96d0 → 36d2470, 36d2470 → 6ea70f2, 6ea70f2 → c714b01, and c714b01 → 50acadd, and 2026-07-17 ed261ff → e6df182 = 14 files [15 delta minus `.env.example`, which the `.env.*` exclude correctly skips], zero deletions each time; Chase-approved, all verified):**
 
+**2026-07-21 f4d6237 → 15263d2 (4-file, all verified) — FIRST deploy that ADDS new files:**
+Every prior entry here was "ALL modifications, zero add/delete", so this is the shape to copy when a
+commit introduces modules. `db.py` crossed the 1000-line cap and was split, so the delta was 2 mods
+(`grant_watch/db.py` 989→880 lines, `tests/test_rfp.py`) + **2 ADDS** (`grant_watch/db_common.py` 56,
+`grant_watch/db_engagement.py` 183). `git diff --name-status` listed 9 paths but 5 were
+`.claude/agent-memory/*` (excluded), so deployable delta = 4. In `-cain` itemize an ADD shows as
+**`<f+++++++`** (vs `<fcst....` for a modification) — confirm one `<f+++++++` per new file or the add
+silently didn't ship. **A missed add here is fatal, not subtle:** `db.py` now re-exports `_now`,
+`_LEAD_EVENT_SELECT`, `_CRM_CONTEXT_SELECT` FROM `db_common`, so a partial deploy = ImportError on boot
+and a dead bot. Verified the new modules were ABSENT beforehand (proving they're real adds).
+**Dropped `--delete` for this run:** the delta had zero deletions, so `--delete` was pure risk. Ran a
+`-cain --delete` **delete-preview** first purely to inspect (0 deleting lines), then the real run with
+plain `-cai`. Keep that pattern: preview deletions, then omit `--delete` when the delta has none.
+IMPORT_OK before kill covered db_common + db_engagement + db explicitly (plus grant/scoring/drip/
+rfp_parse) AND asserted `db.py` still exposes the re-exported names + the new `_adopt_drifted_lead`.
+`find -cnewer` = exactly the 4; all 4 remote sha256 == local blobs; 2nd dry-run fully idempotent.
+`.env`(1784571508)/`run_bot.sh`(1784192756)/`grant_watch.db`(1784576126) mtimes identical before AND
+after restart. Restart: OLDPID 4148415 dead in 2s → single NEWPID 515819, Bolt pair present,
+IMPORT_ERROR_FOUND=NO, NO_TRACEBACK, PID_COUNT=1. crontab still 4 lines; schema_migrations MAX still 13
+(commit adds no migration). Fresh target-specific helpers written (`deploy_rsync_15263d2.sh`,
+`restart_verify_15263d2.sh`) — never reuse target-specific stamp/verify across deploys.
+
 **2026-07-19 190b097 → ba0a7b7 (6-file, all verified) — routine clean forward + drip-cron realign:**
 CODE-ONLY (2 commits: f7dfddc "RFPs Silver not Gold" + ba0a7b7 "drip window opens 7am ET"). Live
 `.deployed_revision` read first = 190b097 (matched task; no drift). Ancestry clean. `git diff
