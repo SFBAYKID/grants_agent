@@ -66,3 +66,20 @@ Watch this: the cap is 1/day, so supply of 3 is only ~3 days of runway.
 **Dedup:** an earlier version of this memory said the PA DOC leads "differed only by title
 case" — that was WRONG (I inferred it from truncated poll-log lines). The real mechanism is
 a dedup-key format migration. See [[rfp-dedup-key-drift]].
+
+## 2026-07-22 refresh (read-only, revision 15263d2) — the RFP pool is now EMPTY
+
+`nugget_candidates` still **0**, and the reason hardened: **638/638 gold leads have
+`suppressed=1, backfill=1`** — not one exception (whole-table: 1050 events non-suppressed,
+10866 suppressed). Non-suppressed `award_*` events of ANY grade = 29, all `lead_grade='watch'`.
+So the gold ladder rung in `drip.pick()` (platinum → gold → silver RFP → bulletin) can never
+fire from current data; every daily card falls through to an RFP.
+
+`rfp_candidates` = **0** as of 2026-07-22, because only 3 `source='rfp'` leads exist
+(#9533, #9565, #9566) and **all three are now in `posts`** (07-20, 07-21, 07-22), so the
+`NOT IN (SELECT lead_id FROM posts)` guard excludes them all. #9566 also expires today
+(funds_end 2026-07-22) and #9533/#9565 tomorrow. Next tick therefore falls to bulletins,
+or to `skip: nothing new worth saying` if the relevance regex rejects them. The 07-22 poll
+logged `[Security RFP discovery] 3 items, 0 new` — the aggregator is returning the same 3
+listings, not new supply. See [[rfp-poll-populate]] (supply is small and short-fused by
+design) and [[identical-rfp-card-text]].

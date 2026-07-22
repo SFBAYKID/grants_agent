@@ -145,13 +145,44 @@ affect Chase's other projects.
   `DAILY_CAP=1` the single daily card is ~95% likely to be spent before 6 AM PT — hours before the
   Pacific team logs on, with nothing left for the rest of the day. Monday's landed 04:30 PT. Proposed
   fix (not yet approved): open the window at 08:00 PT. Chase has decided the cap STAYS at 1/day.
-- `needs-testing` 2026-07-21 the 546-lead gold backlog CANNOT be surfaced honestly yet: there is zero
-  award-date variance in it. The 351 `ca-grants-award` rows carry no award date at all (raw_json has
-  only `PublishDate`/`LastUpdated`/`FiscalYear`), and all 195 `usaspending:16.071` rows read
-  `2025-10-10` with `Base Obligation Date` at distinct=1 while amounts (153 distinct) and IDs (195
-  distinct) vary normally — i.e. a probable poller capture bug, not 195 same-day awards. Any freshness
-  cutoff would assert recency the data cannot evidence (Constitution rule 1). Fix the date capture
-  first. Composition is otherwise good: ~546 distinct orgs, CA 356 / AZ 22 / IL 15 / KY 14.
+  CONFIRMED against prod cron.log 2026-07-22: the last three cards landed 04:30 / 04:00 / 05:00 PT,
+  each followed by 24–26 consecutive `skip: daily cap reached (1)` ticks. Chase reviewed this on
+  2026-07-22 and chose to LEAVE THE WINDOW AS IS — do not change `in_window()` without asking again.
+- `verified` 2026-07-22 CORRECTION — the 2026-07-21 "probable poller capture bug" claim above the
+  gold backlog was WRONG and is retracted. Queried live against the public USASpending API this
+  session: **27 of 27** FY25 SVPP (`16.071`) awards across CA/PA/TX/WA return
+  `Base Obligation Date = 2025-10-10`, alongside normally-varying amounts and IDs. DOJ obligated the
+  entire FY25 SVPP cohort on ONE day. The poller captures it correctly; `distinct=1` is the truth,
+  not a defect. Consequence: `PLATINUM_DAYS=7` can essentially only fire once a year, around the
+  next cohort obligation (~Oct 2026) — platinum is not a daily tier and should not be treated as one.
+  The 347 `ca-grants-award` rows genuinely carry no award date (`event_date=""`, ca_grants.py:211);
+  `build_nugget` asserts no date, so they stay honest but rank last (`lead_score` fresh=0.3).
+- `verified` 2026-07-22 ROOT CAUSE of "Grant never posts gold" (Chase's report), measured on prod:
+  **638 of 638** gold leads had `suppressed=1, backfill=1` — not one exception — so
+  `nugget_candidates` returned 0 on EVERY tick and `pick()` fell past platinum and gold to a silver
+  RFP daily. Chain: every award poller sets `backfill=True` for anything obligated >90 days ago (or
+  merely undated — 427 of 638 have `occurred_on` NULL), `db.upsert_lead:194` turns that into
+  `suppressed=1`, and `nugget_candidates` required `suppressed=0`. The flag was a first-rollout
+  anti-wave guard that had become a permanent gag. FIXED: `nugget_candidates` no longer filters on
+  `suppressed` (the wave it guarded against is already prevented by `DAILY_CAP=1`) and now also
+  excludes any lead already in `posts`, so a status reset cannot re-open a posted lead.
+- `verified` 2026-07-22 the "same message every morning" was a RENDERING collision, not a repeat.
+  Posts 18/19/20 carry three DISTINCT lead ids (PA 07-20 → CA 07-21 → PA 07-22); the dedup fix
+  `15263d2` is byte-confirmed live and held. `build_rfp_alert` printed only the agency, a
+  regex-derived subject and the deadline — never the title — so prod leads #9533 ("…General and HVAC
+  Construction") and #9565 ("…Plumbing Construction *REBID*"), two trade packages of one SCI Pine
+  Grove project sharing an agency and a close date, rendered as identical text. FIXED: the card now
+  names the solicitation, trimmed at a word boundary.
+- `verified` 2026-07-22 territory tagging shipped (`grant_watch/territory.py`): every proactive card
+  @-mentions the rep owning that state — PA→Brett D'Ambrosio `U08C1NBH875`, CA→Anthony Dambrosio
+  `U01DFJWQQJ3`, WA/TX/OR→Kerry Hilligus `U01E908206M`. All three ids were read from the live Monarch
+  Slack directory, never inferred from a name. An unmapped state posts with NO mention rather than a
+  guessed one. `GRANT_TERRITORY_OWNERS="PA=U…,CA=U…"` overrides without a deploy; a set-but-malformed
+  value yields no tags rather than silently reverting to the built-in reps.
+  **OPEN:** Chase asked for "Carrie Hilgus"; no such account exists in the workspace and Kerry
+  Hilligus (kerry@monarchconnected.com) is the only phonetic match — confirm before this deploys.
+  `grant_watch/presentation.py:state_display_name` now covers all 50 states + DC; drip previously
+  knew only 5, so a real Texas award rendered "in TX".
 - `verified` 2026-07-21: `python -m pytest tests -q` passed 642 tests (71 skipped live-marked); health
   gate green; `ruff check` clean. The package uses ordered SQLite migrations (through v13), typed
   evidence/funding models, deduplication, scoring (RFPs Silver-at-best, award freshness Gold/Silver),

@@ -33,8 +33,13 @@ def _mk_lead(
     start: str = "2025-10-01",
     end: str = "2028-09-30",
     title: str = "SVPP award",
+    backfill: bool = False,
 ) -> int:
-    """Provide test-local behavior for mk lead."""
+    """Provide test-local behavior for mk lead.
+
+    `backfill` reproduces what every award poller actually sets for an award obligated
+    more than 90 days ago — the shape ALL 638 production gold leads have — which
+    db.upsert_lead stores as suppressed=1."""
     event_type = (
         FundingEventType.APPLICATION_WINDOW_OPENED
         if source in {"grants.gov", "ca-grants-portal"}
@@ -59,6 +64,7 @@ def _mk_lead(
                 event_date=start,
                 date_precision=DatePrecision.DAY,
                 verification_status=VerificationStatus.VERIFIED,
+                backfill=backfill,
             ),
             grade=grade,
         ),
@@ -77,6 +83,7 @@ def _mk_rfp(
     grade: LeadGrade = LeadGrade.SILVER,  # RFPs are silver at best (never gold)
     end: str = "2030-12-31",
     title: str = "Video Surveillance Camera Systems RFP",
+    url: str = "https://www.kemahtx.gov/bids",
 ) -> int:
     """Insert one open physical-security RFP lead (source='rfp', RFP_POSTED)."""
     db.upsert_lead(
@@ -92,7 +99,7 @@ def _mk_rfp(
                 amount=None,
                 start="2030-01-01",
                 end=end,
-                url="https://www.kemahtx.gov/bids",
+                url=url,
                 raw={},
                 event_type=FundingEventType.RFP_POSTED,
                 event_date="2030-01-01",
@@ -571,7 +578,10 @@ def test_delivery_reservation_prevents_duplicate_post(tmp_path: Path) -> None:
     assert client.last_kwargs["unfurl_media"] is False
     assert client.last_kwargs["text"] == (
         "Castle Rock School District 401 in Washington has a verified "
-        "$500,000 SVPP funding award.\n\n<https://x.gov/a|View the source record>"
+        "$500,000 SVPP funding award."
+        "\n\n<@U01E908206M> — Washington is your territory. "
+        "Want me to find the right contact?"
+        "\n\n<https://x.gov/a|View the source record>"
     )
     assert (
         conn.execute("SELECT state FROM notification_outbox").fetchone()["state"]
@@ -710,3 +720,118 @@ def test_source_line_fails_closed_on_missing_or_unsafe_url(tmp_path: Path) -> No
     conn.commit()
     row = db.get_lead(conn, lead_id)
     assert drip.source_line(row) == ""  # http + credential query -> unavailable
+
+
+# ---------------------------------------------- territory tagging + gold reachability
+def test_backfilled_gold_award_still_reaches_the_daily_card(tmp_path: Path) -> None:
+    """A gold award older than the 90-day backfill cutoff must still be postable.
+
+    Regression for the production state measured 2026-07-22: every award poller marks
+    anything obligated more than 90 days ago as backfill, db.upsert_lead turns that into
+    suppressed=1, and nugget_candidates required suppressed=0. Result: 638 of 638 gold
+    leads were invisible, pick() fell past GOLD every tick, and the channel got a silver
+    RFP every day. The real FY25 SVPP cohort was obligated 2025-10-10 — verified live
+    against the USASpending API — so this is the ONLY shape gold currently comes in.
+    """
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="BACKFILL", entity="Montebello Unified School District",
+             start="2025-10-10", end="2028-09-30", backfill=True)
+    assert conn.execute(
+        "SELECT suppressed FROM funding_events"
+    ).fetchone()["suppressed"] == 1, "fixture must reproduce the suppressed shape"
+    assert len(db.nugget_candidates(conn)) == 1
+    kind, row = drip.pick(conn, "C1")
+    assert kind == "nugget"
+    assert row["entity_name"] == "Montebello Unified School District"
+
+
+def test_gold_award_outranks_an_open_rfp_even_when_backfilled(tmp_path: Path) -> None:
+    """Chase's ladder holds: an award in hand beats a solicitation, backfilled or not."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_rfp(conn, iid="R_LOSE", end="2031-12-31")
+    _mk_lead(conn, iid="G_WIN", entity="Castle Rock School District 401",
+             start="2025-10-10", end="2028-09-30")
+    kind, _ = drip.pick(conn, "C1")
+    assert kind == "nugget"
+
+
+def test_nugget_never_repeats_an_already_posted_lead(tmp_path: Path) -> None:
+    """A lead already in `posts` can never be picked again, even if a later poll resets
+    its status to 'new' (upsert_lead does exactly that when a new event lands)."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _mk_lead(conn, iid="ONCE", start="2025-10-10", end="2028-09-30")
+    db.record_post(conn, "nugget", lead_id, "C1", "1.0", "award-brief")
+    conn.execute("UPDATE leads SET status='new' WHERE id=?", (lead_id,))
+    conn.commit()
+    assert db.nugget_candidates(conn) == []
+
+
+def test_sibling_rfps_do_not_render_as_the_same_card(tmp_path: Path) -> None:
+    """Two trade packages of ONE project must not produce identical text.
+
+    This is the literal complaint ('Grant keeps posting the exact same message'):
+    production leads #9533 and #9565 are different SCI Pine Grove solicitations sharing
+    an agency and a deadline, and the card printed neither title."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_rfp(conn, iid="HVAC", entity="Pennsylvania Department of Corrections",
+            title="SCI Pine Grove - Control Room, Security Cameras - HVAC Construction",
+            url="https://starbridge.ai/rfp/sci-pine-grove-hvac")
+    _mk_rfp(conn, iid="PLUMB", entity="Pennsylvania Department of Corrections",
+            title="SCI Pine Grove - Control Room, Security Cameras - Plumbing REBID",
+            url="https://starbridge.ai/rfp/sci-pine-grove-plumbing")
+    rendered = {drip.build_rfp_alert(row)[0] for row in db.rfp_candidates(conn)}
+    assert len(rendered) == 2, f"cards are indistinguishable: {rendered}"
+    assert any("HVAC" in text for text in rendered)
+    assert any("Plumbing" in text for text in rendered)
+
+
+def test_rfp_card_stays_one_readable_sentence(tmp_path: Path) -> None:
+    """A very long solicitation title is trimmed at a word boundary, not mid-word."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_rfp(conn, iid="LONG", title=(
+        "Video Surveillance Camera Systems and Related Electronic Security "
+        "Infrastructure Replacement Program for Multiple Municipal Facilities"))
+    text, _ = drip.build_rfp_alert(db.rfp_candidates(conn)[0])
+    assert "…" in text and text.endswith("Anybody want to talk?")
+    assert len(text) < 260
+    assert "  " not in text
+
+
+def test_posted_card_tags_the_territory_owner(tmp_path: Path) -> None:
+    """End-to-end: the message that reaches Slack @-mentions the state's rep."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="PA1", entity="Bethlehem Area School District",
+             start="2025-10-10", end="2028-09-30")
+    conn.execute("UPDATE leads SET state='PA' WHERE source_item_id='PA1'")
+    conn.commit()
+    client = _SlackClient()
+    assert drip.run_drip(client, "C1", conn, force=True).startswith("posted")
+    text = str(client.last_kwargs["text"])
+    assert "<@U08C1NBH875>" in text  # Brett D'Ambrosio owns Pennsylvania
+    assert "Pennsylvania is your territory" in text
+    assert "in Pennsylvania has a verified" in text
+
+
+def test_posted_card_for_an_unowned_state_goes_out_untagged(tmp_path: Path) -> None:
+    """No rep owns New York, so the card ships with no mention — never a wrong one."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="NY1", start="2025-10-10", end="2028-09-30")
+    conn.execute("UPDATE leads SET state='NY' WHERE source_item_id='NY1'")
+    conn.commit()
+    client = _SlackClient()
+    assert drip.run_drip(client, "C1", conn, force=True).startswith("posted")
+    text = str(client.last_kwargs["text"])
+    assert "<@" not in text
+    assert "in New York has a verified" in text
+
+
+def test_award_card_spells_out_a_state_beyond_the_original_five(
+    tmp_path: Path,
+) -> None:
+    """Polling is nationwide; a Texas award used to render the bare code 'in TX'."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="TX1", start="2025-10-10", end="2028-09-30")
+    conn.execute("UPDATE leads SET state='TX' WHERE source_item_id='TX1'")
+    conn.commit()
+    text, _ = drip.build_nugget(db.nugget_candidates(conn)[0])
+    assert "in Texas has a verified" in text

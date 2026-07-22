@@ -604,7 +604,7 @@ def test_find_person_linkedin_persists_with_lead(
         },
     )
     text = tools.find_person_linkedin("Provo City", "UT", lead_id=lead_id)
-    assert f"Saved as contact" in text
+    assert "Saved as contact" in text
     row = conn.execute(
         "SELECT name,contact_status,email FROM contacts WHERE lead_id=?", (lead_id,)
     ).fetchone()

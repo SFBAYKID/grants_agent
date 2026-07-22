@@ -13,6 +13,9 @@ quality ladder — it reads as varied without being random:
   bulletin  program-level news from grants.gov ("SVPP window just opened, closes 8/4")
 Grants outrank RFPs — an RFP can be a formality with a vendor already chosen.
 
+Each card is then addressed to the rep who owns that state (grant_watch/territory.py),
+so it lands as a notification on one person's phone instead of as channel wallpaper.
+
 Run via cron every ~30 min; each tick decides for itself whether to speak:
   in the window? (Mon-Fri, 7:00 America/New_York through 17:00 America/Los_Angeles)
   under the daily cap? past the min gap? and a random skip so timing feels human.
@@ -30,8 +33,8 @@ from zoneinfo import ZoneInfo
 
 from slack_sdk import WebClient
 
-from .. import db, scoring
-from ..presentation import display_entity_name, plain_fragment
+from .. import db, scoring, territory
+from ..presentation import display_entity_name, plain_fragment, state_display_name
 from .search_presentation import record_link
 from .source_status import _safe_url
 
@@ -68,14 +71,6 @@ PLATINUM_DAYS = 7  # a security grant awarded within ~a week — the cream (buy 
 ET = ZoneInfo("America/New_York")
 PT = ZoneInfo("America/Los_Angeles")
 
-_STATE_NAMES = {
-    "WA": "Washington",
-    "CA": "California",
-    "MI": "Michigan",
-    "PA": "Pennsylvania",
-    "OR": "Oregon",
-}
-
 
 def in_window(now_utc: datetime) -> bool:
     """Mon-Fri, from 7:00 Eastern until 17:00 Pacific (Chase 2026-07-19) — the full
@@ -106,8 +101,9 @@ def _award_facts(row: sqlite3.Row) -> tuple[str, str, str, str]:
     entity = display_entity_name(row["entity_name"])
     if not entity:
         raise ValueError("proactive award requires an entity")
-    state_code = plain_fragment(row["state"]).upper()
-    state = plain_fragment(_STATE_NAMES.get(state_code, state_code))
+    # Nationwide polling means the code may be any state; an unrecognized code yields
+    # no location rather than printing a bare abbreviation at a rep.
+    state = plain_fragment(state_display_name(row["state"]))
     amt = _fmt_amount(row["amount"])
     if not amt:
         raise ValueError("proactive award requires a finite positive amount")
@@ -151,6 +147,21 @@ def build_bulletin(row: sqlite3.Row) -> tuple[str, str]:
     return text, "bulletin-open"
 
 
+def _short_title(value: object, limit: int = 80) -> str:
+    """Sanitized solicitation title, trimmed at a word boundary so it reads as prose.
+
+    plain_fragment already strips URLs, punctuation and every Slack control character
+    (<>@`*_~|), so nothing here can inject a mention or a link; this only keeps the
+    result short enough to sit inside one sentence without cutting a word in half.
+    """
+    text = plain_fragment(value, max_length=200)
+    if len(text) <= limit:
+        return text
+    clipped = text[:limit]
+    space = clipped.rfind(" ")
+    return (clipped[:space] if space > 0 else clipped).rstrip(" ,;:-") + "…"
+
+
 _RFP_CAMERA_RE = re.compile(r"camera|surveillance|cctv|\bvideo\b", re.IGNORECASE)
 _RFP_ACCESS_RE = re.compile(r"access control|door (?:access|hardening)|card reader",
                             re.IGNORECASE)
@@ -186,8 +197,18 @@ def build_rfp_alert(row: sqlite3.Row) -> tuple[str, str]:
         subject = "physical security"
     due = str(row["funds_end"] or "")[:10]
     due_text = f", responses due {due}" if due else ""
+    # Name the solicitation. Chase reported "the same card every morning" on
+    # 2026-07-22; the leads were in fact DIFFERENT (verified in production: #9533
+    # "…General and HVAC Construction" and #9565 "…Plumbing Construction *REBID*", two
+    # trade packages of one SCI Pine Grove project). Because this sentence printed only
+    # the agency, the regex-derived subject and the shared deadline, two genuinely
+    # distinct RFPs rendered as identical text — indistinguishable from a repeat, and
+    # useless to a rep who cannot tell which package they are being asked about.
+    project = _short_title(row["title"])
+    project_text = f" — {project}" if project else ""
     return (
-        f"{entity} has an open RFP for {subject}{due_text}. Anybody want to talk?",
+        f"{entity} has an open RFP for {subject}{due_text}{project_text}. "
+        "Anybody want to talk?",
         "rfp-open",
     )
 
@@ -370,8 +391,9 @@ def run_drip(
         text, style = build_rfp_alert(row)
     else:
         text, style = build_bulletin(row)
-    # Every proactive funding claim carries its source on a separate, safe line.
-    text = text + source_line(row)
+    # Hand the card to the rep who owns that state, then carry the source. Both lines
+    # are separate blocks so the opening sentence still reads as one short human line.
+    text = text + territory.mention_line(row["state"]) + source_line(row)
     if dry_run:
         return f"[dry-run] would post {kind} ({style}): {text}"
     event_id = int(row["current_event_id"]) if row["current_event_id"] else None

@@ -90,3 +90,12 @@ obligated the same day. Do not present these as per-record award dates to Chase.
 Composition: 545 distinct `entity_name` / 546 distinct `canonical_entity_key` for 546 leads
 — essentially one award per org, not a few orgs repeated. Heavy CA skew (CA n=356 = 65%).
 See [[drip-pacing-and-cap]] for the read-only probe recipe.
+
+**2026-07-22 recount over ALL 638 gold leads** (the 546 above is only the `status='new'`
+subset; the rest are 75 `dead` + 17 `surfaced`): `ca-grants-award:2024-2025` 347 +
+`ca-grants-award:2023-2024` 5 + `seed:svpp_csv` 75 — all three sources `occurred_on` NULL —
+and `usaspending:16.071` 211, every row `occurred_on='2025-10-10'` (min==max). The
+date-poverty finding is unchanged and now covers the seed rows too: **no gold source on the
+droplet carries per-record award dates**, so `backfill` (a >90-day-old `dated` test in
+`usaspending.parse_*`, where a MISSING date also counts as backfill) evaluates true for
+every one of them.

@@ -125,15 +125,37 @@ def posts_today(
 
 
 def nugget_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Unsurfaced GOLD leads eligible for a drip nugget."""
+    """Unsurfaced GOLD leads eligible for a drip nugget.
+
+    NOTE the deliberate absence of `e.suppressed=0` (Chase, 2026-07-22 — "gold is what
+    we should really be serving users each day"). `suppressed` is set by
+    `db.upsert_lead` from `RawItem.backfill`, which every award poller sets for anything
+    obligated (or, lacking a date, merely published) more than 90 days ago. That flag
+    was a first-rollout guard against a notification wave. Measured on production
+    2026-07-22 it had become a permanent gag: 638 of 638 gold leads carried
+    `suppressed=1`, this query returned 0 rows on every tick, and `drip.pick()` fell
+    past GOLD to a silver RFP every single day. The wave it was written to prevent is
+    already prevented by `drip.DAILY_CAP = 1` — one card a day cannot be a wave.
+
+    The award-event filter below is what keeps this honest: only a *verified* award
+    event can surface, `drip.build_nugget` states no date it was not given, and
+    `scoring.lead_score` ranks a dated recent award far above an undated one, so the
+    freshest evidence still leads.
+
+    Leads already in `posts` are excluded outright. `upsert_lead` resets a lead's status
+    to 'new' whenever a new unsuppressed event lands, which would otherwise re-open an
+    already-posted lead for a second card — the exact repeat-in-the-channel class of bug
+    Chase reported on 2026-07-22.
+    """
     return list(
         conn.execute(
             f"""SELECT {LEAD_EVENT_SELECT}, {CRM_CONTEXT_SELECT}
             FROM leads l
             JOIN funding_events e ON e.id=l.current_event_id
-            WHERE l.lead_grade='gold' AND l.status='new' AND e.suppressed=0
+            WHERE l.lead_grade='gold' AND l.status='new'
               AND e.verification_status='verified'
-              AND e.event_type IN ('award_announced','award_obligated')"""
+              AND e.event_type IN ('award_announced','award_obligated')
+              AND l.id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL)"""
         )
     )
 
