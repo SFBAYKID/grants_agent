@@ -471,3 +471,79 @@ def test_drip_blocked_renders_guards_and_leads_together(
     assert "holds_until=2099-01-01T00:00:00+00:00" in out
     assert "drip-unblock" in out  # the remedy is named
     assert "Quarantined District" in out, "a guard hid the quarantined leads"
+
+
+def test_a_new_incident_escalates_from_the_beginning(tmp_path: Path) -> None:
+    """H-1 REGRESSION, proven against the DB rather than the pure function.
+
+    `_incident_lapsed` computed a fresh attempts=1 in Python, and `set_channel_guard`'s
+    upsert then did `attempts+1` onto the stale row and never reset `created_at`. Both
+    symptoms returned on the SECOND tick: escalation jumped to the 8-hour cap, and
+    `first_failure` reported an outage starting months before the outage."""
+    conn = db.connect(tmp_path / "t.db")
+    # A long-finished incident: 4 periods deep, expired months ago.
+    db.set_channel_guard(conn, "C1", "blocked", "invalid_auth",
+                         available_at="2026-04-23T00:00:00+00:00")
+    for _ in range(3):
+        db.set_channel_guard(conn, "C1", "blocked", "invalid_auth",
+                             available_at="2026-04-23T00:00:00+00:00")
+    stale = db.channel_guard_any(conn, "C1", "blocked")
+    assert stale is not None and int(stale["attempts"]) >= 4
+
+    for _ in range(2):  # two ticks of a brand-new incident
+        _mk_lead(conn, iid=f"N{_}", entity=f"District {_}", amount=500_000.0 - _,
+                 start="2025-10-10", end="2028-09-30", backfill=True)
+        drip.run_drip(_RejectingClient("invalid_auth"), "C1", conn, force=True)
+    fresh = db.channel_guard_any(conn, "C1", "blocked")
+    assert fresh is not None
+    # Second tick of a NEW incident is the 2nd period, not the 5th/6th.
+    assert int(fresh["attempts"]) == 2, "the upsert overwrote the incident reset"
+    assert not str(fresh["created_at"]).startswith("2026-04"), (
+        "first_failure inherited a months-old date"
+    )
+
+
+def test_a_backoff_never_masks_an_active_block(tmp_path: Path) -> None:
+    """A block needs a human and exits non-zero; a backoff is routine and exits 0.
+    Ordering purely by expiry let a 429 hide a live credential outage behind a benign
+    line for up to an hour — and `drip --force` is exactly how an operator trips it."""
+    conn = db.connect(tmp_path / "t.db")
+    db.set_channel_guard(conn, "C1", "blocked", "invalid_auth",
+                         available_at="2099-01-01T00:00:00+00:00")
+    db.set_channel_guard(conn, "C1", "backoff", "ratelimited",
+                         available_at="2099-06-01T00:00:00+00:00")  # expires LATER
+    guard = db.channel_guard(conn, "C1")
+    assert guard is not None and guard["state"] == "blocked"
+    outcome = drip.run_drip(_SlackClient(), "C1", conn, force=False)
+    assert outcome.startswith("blocked:"), outcome
+
+
+def test_a_short_backoff_cannot_shorten_or_inflate_a_long_block(
+    tmp_path: Path,
+) -> None:
+    """Separate rows per failure class: two unrelated conditions must not corrupt each
+    other's escalation."""
+    conn = db.connect(tmp_path / "t.db")
+    db.set_channel_guard(conn, "C1", "blocked", "invalid_auth",
+                         available_at="2099-01-01T00:00:00+00:00")
+    before = db.channel_guard_any(conn, "C1", "blocked")
+    assert before is not None
+    db.set_channel_guard(conn, "C1", "backoff", "ratelimited",
+                         available_at="2026-07-22T00:00:30+00:00")
+    after = db.channel_guard_any(conn, "C1", "blocked")
+    assert after is not None
+    assert after["attempts"] == before["attempts"]
+    assert after["available_at"] == before["available_at"]
+
+
+def test_drip_unblock_does_not_discard_an_active_rate_limit(tmp_path: Path) -> None:
+    """`drip-unblock` means "the channel/token is fixed" — it says nothing about
+    Slack's rate limiter, and clearing it would send the next tick into the 429."""
+    conn = db.connect(tmp_path / "t.db")
+    db.set_channel_guard(conn, "C1", "blocked", "invalid_auth",
+                         available_at="2099-01-01T00:00:00+00:00")
+    db.set_channel_guard(conn, "C1", "backoff", "ratelimited",
+                         available_at="2099-01-01T00:00:00+00:00")
+    assert db.clear_channel_guard(conn, "C1") is True  # default: blocked only
+    assert db.channel_guard_any(conn, "C1", "blocked") is None
+    assert db.channel_guard_any(conn, "C1", "backoff") is not None

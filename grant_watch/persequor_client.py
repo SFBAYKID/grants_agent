@@ -49,7 +49,6 @@ class OutreachBrief(TypedDict):
     amount_usd: int | None
     window_start: str | None
     window_end: str | None
-    window_meaning: str  # what those dates MEAN: spend window / response deadline / …
     source_url: str | None
     requested_by_slack: str
     send_as: str
@@ -165,13 +164,25 @@ def build_brief(
         "entity_type": row["entity_type"] or "school_district",
         "state": row["state"] or "",
         "program": row["program"] or "",
-        "amount_usd": int(round(row["amount"])) if row["amount"] else None,
+        # Gated on the record kind, NOT merely on presence. Persequor is an LLM
+        # drafting agent: give it `program="SVPP"` and `amount_usd=487657` and it will
+        # write "your $487,657 SVPP award", however carefully `angle` is hedged. On a
+        # record whose kind cannot establish what the amount represents, sending the
+        # figure IS the award claim. Withheld rather than relabelled, because
+        # outreach-request.v1 is a pinned external schema and inventing a key here
+        # could 422 every brief if Persequor forbids unknown fields.
+        "amount_usd": (
+            int(round(row["amount"]))
+            if row["amount"] and _meaning.asserts_amount
+            else None
+        ),
         # The window fields ship ONLY when the record kind gives them a stateable
-        # meaning. Previously the preview omitted a date the payload still sent, so the
-        # draft a human approved and the brief Persequor wrote from disagreed.
+        # meaning; `angle` already states which meaning that is, in prose the schema
+        # supports. No new key is introduced: `outreach-request.v1` is pinned and
+        # agreed with Persequor, and an unknown field would 422 every brief if their
+        # endpoint forbids extras. Changing the shape needs their agreement first.
         "window_start": (row["funds_start"] or None) if _meaning.asserts_dates else None,
         "window_end": (row["funds_end"] or None) if _meaning.asserts_dates else None,
-        "window_meaning": _meaning.window_noun or "unknown",
         "source_url": row["current_event_source_url"] or row["detail_url"] or None,
         "requested_by_slack": requested_by_slack,
         "send_as": send_as,

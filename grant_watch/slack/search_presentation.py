@@ -10,9 +10,9 @@ honest") that pin a URL to THE award being shown whenever the source allows.
 from __future__ import annotations
 
 import re
+import sqlite3
 
 from ..record_semantics import semantics_for
-import sqlite3
 import urllib.parse
 
 

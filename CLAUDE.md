@@ -192,6 +192,43 @@ affect Chase's other projects.
   mid-title bid number; (H6) no missed-slot backstop, so a 90-min outage costs the day; (M1) the
   posts-exclusion is global, so a playground post burns a production lead; (M2) no `last_seen`
   staleness filter; (M3) `salesforce_followups` bypasses drip's caps and uses UTC day boundaries.
+- `verified` 2026-07-22 C-1/C-2/H-1 from the FOURTH critic review. **C-2 first, because it is about
+  this file's own honesty:** the record-semantics commit claimed as `verified` that "the draft a human
+  approves can no longer disagree with the brief" — in the very entry that corrected a previous false
+  `verified`. THAT CLAIM WAS FALSE. The real flow (`slack/grant.py:688`) is `build_brief` →
+  `submit_brief` → **the POST happens** → `compose_draft` renders ONLY as fallback copy when
+  submission failed. The rep approves a yes/no question ("Want me to have Persequor draft the intro
+  email?"); on the success path they never see the draft, and they never see the brief's fields at
+  all. Corrected in CLAUDE.md, `compose_draft`'s docstring, `RecordSemantics`' docstring and
+  `build_brief`'s comment. The true guarantee is narrower: the fallback draft and the payload derive
+  from one object, so the two DESCRIPTIONS cannot diverge. Whether a rep should see the asserted facts
+  before the POST is an open product question, not a fixed bug.
+  **C-1 (a fabricated award claim in outbound email).** `amount_usd` shipped UNCONDITIONALLY, ungated
+  by record kind. Every prose surface correctly refused to say money was awarded, then the payload
+  handed Persequor — an LLM drafting agent — `program='SVPP'` + `amount_usd=487657`, which IS an award
+  claim however hedged `angle` is. The create-only Salesforce headline had the same hole
+  (`SVPP · $487,657`). FIXED via a new `asserts_amount` facet, gating both. `window_meaning` was
+  REMOVED again: `outreach-request.v1` is a pinned EXTERNAL contract, an unknown key would 422 every
+  brief if Persequor forbids extras, and that is unasked. A test now pins the exact serialized key set.
+  `verified` 2026-07-22 by grants-ops-guardian, read-only: `OUTREACH_TEST_EMAIL` IS set to a non-empty
+  value in BOTH `.env` and the live process environ (PID 1859872), no drift — so C-1 could not have
+  reached a school administrator. The value was never printed. Name-presence alone had NOT proved this
+  and was explicitly not treated as proof.
+  **H-1 (the incident reset was defeated on tick 2).** `set_channel_guard`'s upsert did `attempts+1`
+  and never reset `created_at`, silently undoing the caller's fresh count — so escalation jumped to
+  the 8h cap and `first_failure` reported a months-old date. FIXED atomically IN PERSISTENCE
+  (`reset=True` deletes the row inside the same transaction). `_incident_lapsed` now measures from the
+  guard's EXPIRY, not its last write — measuring from `updated_at` made every incident lapse at each
+  8-hour boundary, so the ladder ran 1h→8h→1h→8h and never held.
+  Also: an active BLOCK now outranks a shorter backoff for reporting and exit status (a 429 picked up
+  during `drip --force` could mask a live credential outage behind a benign exit-0 line);
+  `drip-unblock` no longer discards an active rate limit.
+  `needs-testing`: five duplicate event-type mappings REMAIN (`grade_phrases`, `_record_clause` SQL,
+  the drip builders, the three candidate queries, and a SECOND `RecordKind` enum in `search.py`). The
+  critic advised NOT routing the drip builders through the helper — their fail-closed gating is
+  stronger than its permissive fallback — so the fix is sharing constants, not the function.
+  `needs-testing`: `grade_phrases` infers record kind from a LIMIT-ed 50-row slice and applies it to
+  full-set counts, so a 500-row mixed result can be headlined "award won". Last grade→meaning leak.
 - `verified` 2026-07-22 THE ARCHITECTURAL FIX Chase ordered after the third review: record meaning was
   derived INDEPENDENTLY in five places, two of them from `lead_grade`. Patching copies was producing
   one new defect per round. Now there is ONE typed helper — `grant_watch/record_semantics.py` —
@@ -199,9 +236,8 @@ affect Chase's other projects.
   **The rule: GRADE decides PRIORITY; EVENT TYPE decides WHAT HAPPENED. Never the reverse.**
   All five consumers route through it: search/export `window_label` + `entity_role_for_row` +
   `_record_kind_for_row`; the Persequor preview AND payload (from the SAME object, so the draft a
-  human approves can no longer disagree with the brief that writes the email — `build_brief` now also
-  ships an explicit `window_meaning` and omits window dates entirely when the kind cannot give them a
-  meaning); the model's own instructions in `conversation.py`/`tools.py`, which had been TEACHING the
+  FALLBACK DRAFT can no longer disagree with the brief that writes the email — `build_brief` omits
+  window dates entirely when the kind cannot give them a meaning); the model's own instructions in `conversation.py`/`tools.py`, which had been TEACHING the
   false grade→date equation; and the permanent create-only Salesforce headline + note, whose lead row
   is now JOINED (`db.get_lead`) rather than a bare `SELECT * FROM leads` that silently degraded every
   real award. `record_observed` (migration 6's backfill shape) asserts nothing at all.

@@ -550,15 +550,19 @@ def _incident_lapsed(prior: sqlite3.Row, now: datetime) -> bool:
     """Whether a prior guard is stale enough to count as a FINISHED incident.
 
     A guard is only cleared by a successful post, so a quiet stretch (empty pool, cap
-    spent, weekend) can leave an expired row behind indefinitely. Treat anything last
-    touched longer ago than the maximum backoff as a closed incident so the next failure
-    escalates from the beginning rather than inheriting a months-old count.
+    spent, weekend) can leave an expired row behind indefinitely. Treat anything whose
+    hold ended longer ago than the maximum backoff as a closed incident, so the next
+    failure escalates from the beginning rather than inheriting a months-old count.
+
+    Measured from the guard's EXPIRY, not its last write. Measuring from `updated_at`
+    made every incident lapse at each 8-hour boundary — because `available_at` IS
+    `updated_at + 8h` at the cap — so the ladder ran 1h→8h→1h→8h and never held.
     """
     try:
-        last = datetime.fromisoformat(str(prior["updated_at"]))
+        expired_at = datetime.fromisoformat(str(prior["available_at"]))
     except (TypeError, ValueError):
         return True
-    return (now - last) > timedelta(minutes=_SYSTEMIC_BACKOFF_MAX_MINUTES)
+    return (now - expired_at) > timedelta(minutes=_SYSTEMIC_BACKOFF_MAX_MINUTES)
 
 
 def _log_channel_block(
@@ -750,7 +754,10 @@ def run_drip(
             # The FIRST line of an incident previously reported first_failure as the
             # future unblock time — the one line an operator greps for was the wrong one.
             first_failure = str(prior["created_at"]) if continuing else now_iso
-            db.set_channel_guard(conn, channel, "blocked", code, available_at=until)
+            db.set_channel_guard(
+                conn, channel, "blocked", code, available_at=until,
+                reset=not continuing,
+            )
             _log_channel_block(channel, code, until, attempts, first_failure)
             return (
                 f"blocked: Slack rejected posting to this channel ({code}); no lead was "
@@ -794,7 +801,7 @@ def run_drip(
         db.mark_surfaced(conn, [int(row["id"])])
         # A confirmed delivery proves the channel and token work again, so retire any
         # guard. This is the normal WRITABLE path — reads never clear a guard.
-        db.clear_channel_guard(conn, channel)
+        db.clear_channel_guard(conn, channel, ("blocked", "backoff"))
     except Exception as exc:  # noqa: BLE001 — never crash the tick after a confirmed send
         try:
             db.finish_notification(conn, delivery_key, "delivered", slack_ts=resp["ts"])

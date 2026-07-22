@@ -11,6 +11,7 @@ Each one is written so that reverting to a grade-driven branch fails it.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -146,30 +147,103 @@ def test_unknown_event_claims_nothing_anywhere(tmp_path: Path) -> None:
     assert "dates unverified" in sf._grant_summary(row)
 
 
-# ------------------------------------------------- preview and payload must agree
-def test_preview_and_payload_never_disagree_about_dates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+# ------------------------------------------- payload must assert nothing prose denies
+_ALL_EVENT_TYPES = [
+    FundingEventType.AWARD_OBLIGATED,
+    FundingEventType.AWARD_ANNOUNCED,
+    FundingEventType.RFP_POSTED,
+    FundingEventType.APPLICATION_WINDOW_OPENED,
+    FundingEventType.RECORD_OBSERVED,
+]
+
+
+@pytest.mark.parametrize("event_type", _ALL_EVENT_TYPES)
+def test_payload_asserts_nothing_the_semantics_deny(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, event_type: FundingEventType
 ) -> None:
-    """The human approves `compose_draft`; Persequor writes from `build_brief`. They
-    derive from the same object, so a date the preview omits cannot ride along in the
-    payload — which it previously did."""
+    """THE C-1 REGRESSION, across EVERY event type.
+
+    The prose surfaces all correctly refused to say money was awarded — and the payload
+    shipped `amount_usd` anyway. Persequor is an LLM: `program='SVPP'` plus
+    `amount_usd=487657` IS an award claim, however hedged `angle` is. Every fact-bearing
+    field must be gated on the matching `asserts_*` facet, not merely on presence.
+    """
     monkeypatch.setenv("OUTREACH_TEST_EMAIL", "chase@monarchconnected.com")
     conn = db.connect(tmp_path / "t.db")
-    for index, event_type in enumerate(
-        (FundingEventType.AWARD_OBLIGATED, FundingEventType.RECORD_OBSERVED)
-    ):
-        row = _lead(conn, event_type, LeadGrade.SILVER, iid=f"P{index}")
-        draft = persequor.compose_draft(row)
-        brief = persequor_client.build_brief(
-            row, None, "U01DPJVURHU", "chase@monarchconnected.com"
-        )
-        assert brief is not None
-        shows_date_in_preview = "2028-09-30" in draft
-        ships_date_in_payload = brief["window_end"] is not None
-        assert shows_date_in_preview == ships_date_in_payload, event_type
-        assert brief["window_meaning"] == (
-            semantics_for(row).window_noun or "unknown"
-        )
+    row = _lead(conn, event_type, LeadGrade.GOLD)
+    meaning = semantics_for(row)
+    brief = persequor_client.build_brief(
+        row, None, "U01DPJVURHU", "chase@monarchconnected.com"
+    )
+    assert brief is not None
+    if meaning.asserts_amount:
+        assert brief["amount_usd"] == 487657
+    else:
+        assert brief["amount_usd"] is None, "a money figure escaped on a non-award"
+    if meaning.asserts_dates:
+        assert brief["window_end"] == "2028-09-30"
+    else:
+        assert brief["window_start"] is None and brief["window_end"] is None
+        assert brief["expires_at"] is None
+    assert brief["angle"] == meaning.angle
+
+
+def test_payload_keeps_the_pinned_v1_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`outreach-request.v1` is an EXTERNAL pinned contract. An added key would 422
+    every brief if Persequor forbids extras — which is unknown and unasked. Assert the
+    exact serialized key set, so a future field cannot slip in unnoticed."""
+    monkeypatch.setenv("OUTREACH_TEST_EMAIL", "chase@monarchconnected.com")
+    conn = db.connect(tmp_path / "t.db")
+    row = _lead(conn, FundingEventType.AWARD_OBLIGATED, LeadGrade.GOLD)
+    brief = persequor_client.build_brief(
+        row, None, "U01DPJVURHU", "chase@monarchconnected.com"
+    )
+    assert brief is not None
+    assert set(json.loads(json.dumps(brief))) == {
+        "schema", "request_id", "entity", "entity_type", "state", "program",
+        "amount_usd", "window_start", "window_end", "source_url",
+        "requested_by_slack", "send_as", "contact_name", "contact_email",
+        "contact_title", "angle", "rep_notes", "expires_at", "slack_channel",
+        "slack_thread_ts",
+    }
+    assert brief["schema"] == "outreach-request.v1"
+
+
+@pytest.mark.parametrize("event_type", _ALL_EVENT_TYPES)
+def test_fallback_draft_and_payload_describe_the_same_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, event_type: FundingEventType
+) -> None:
+    """`compose_draft` is FALLBACK copy — `submit_brief` POSTs first and the rep only
+    sees the draft when submission FAILED. So this is not "what a human approves"; it
+    is the guarantee that the two descriptions of one record cannot diverge."""
+    monkeypatch.setenv("OUTREACH_TEST_EMAIL", "chase@monarchconnected.com")
+    conn = db.connect(tmp_path / "t.db")
+    row = _lead(conn, event_type, LeadGrade.SILVER)
+    draft = persequor.compose_draft(row)
+    brief = persequor_client.build_brief(
+        row, None, "U01DPJVURHU", "chase@monarchconnected.com"
+    )
+    assert brief is not None
+    money_in_draft = "487,657" in draft
+    assert money_in_draft == (brief["amount_usd"] is not None), event_type
+    date_in_draft = "2028-09-30" in draft
+    assert date_in_draft == (brief["window_end"] is not None), event_type
+
+
+@pytest.mark.parametrize("event_type", _ALL_EVENT_TYPES)
+def test_salesforce_note_never_implies_an_unestablished_award(
+    tmp_path: Path, event_type: FundingEventType
+) -> None:
+    """The CRM note is create-only and permanent. A bare `SVPP · $487,657` headline
+    reads as an award no matter what the body says."""
+    conn = db.connect(tmp_path / "t.db")
+    row = _lead(conn, event_type, LeadGrade.GOLD)
+    meaning = semantics_for(row)
+    headline = sf._grant_headline(row)
+    assert ("487,657" in headline) == meaning.asserts_amount, headline
+    assert ("spend window" in headline) == meaning.asserts_award, headline
 
 
 # ------------------------------------------------- no internal identifiers escape

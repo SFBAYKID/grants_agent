@@ -13,14 +13,13 @@ create-only.
 from __future__ import annotations
 
 import re
-
-from ..record_semantics import RecordKind, semantics_for
 import sqlite3
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict
 
 from ..presentation import strip_leading_honorifics
+from ..record_semantics import RecordKind, semantics_for
 from . import salesforce
 from .salesforce_campaign_gateway import (
     SalesforceCampaignGateway,
@@ -141,7 +140,12 @@ def _spend_window(row: sqlite3.Row) -> str:
 def _grant_headline(row: sqlite3.Row) -> str:
     """Compact 'SVPP · $500,000 · spend window Oct 2025 – Sep 2028' summary line."""
     meaning = semantics_for(row)
-    parts = [str(row["program"] or meaning.noun), _amount_text(row)]
+    # The amount rides along ONLY when the kind establishes it as awarded money. A bare
+    # "SVPP · $487,657" in a create-only CRM note reads as an award no matter what the
+    # body says, and the note cannot be corrected afterwards.
+    parts = [str(row["program"] or meaning.noun)]
+    if meaning.asserts_amount:
+        parts.append(_amount_text(row))
     window = _spend_window(row)
     if window:
         parts.append(window)

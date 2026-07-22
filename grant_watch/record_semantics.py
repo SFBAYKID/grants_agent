@@ -43,9 +43,16 @@ class RecordKind(str, Enum):
 class RecordSemantics:
     """Every human-facing consequence of one record's kind, in one immutable object.
 
-    Both the human preview and the machine payload read the SAME instance, so the draft
-    a rep approves and the brief that generates the email cannot disagree — they
-    previously could, because the preview omitted a date the payload still shipped.
+    The fallback draft and the outbound payload read the SAME instance, so the two
+    descriptions of one record cannot diverge. NOTE the flow precisely: `build_brief`
+    is submitted to Persequor FIRST, and `compose_draft` renders only as fallback copy
+    when submission failed — so on the successful path a rep never sees the draft at
+    all. An earlier version of this docstring called it "the draft a human approves",
+    which is not true and is corrected here.
+
+    `asserts_amount` exists because prose is not the only place a claim can be made:
+    handing an LLM drafting agent a program name and a dollar figure IS an award claim,
+    however carefully the surrounding prose is hedged.
     """
 
     kind: RecordKind
@@ -55,6 +62,7 @@ class RecordSemantics:
     subject_kind: str  # the noun used in an email subject line
     planning_clause: str  # the "if you're …" clause in outreach copy
     asserts_award: bool  # may copy say money was awarded?
+    asserts_amount: bool  # is `amount` an AWARDED sum we may state as money in hand?
     asserts_dates: bool  # do funds_start/funds_end have a stateable meaning?
     window_noun: str  # "spend window" / "response deadline" / … ; "" when unknown
 
@@ -96,6 +104,7 @@ _AWARD = RecordSemantics(
     subject_kind="funding",
     planning_clause="If you're planning how to use the funding",
     asserts_award=True,
+    asserts_amount=True,
     asserts_dates=True,
     window_noun="spend window",
 )
@@ -107,6 +116,8 @@ _SOLICITATION = RecordSemantics(
     subject_kind="solicitation",
     planning_clause="If you're evaluating security options for the solicitation",
     asserts_award=False,
+    # A solicitation's `amount` is an estimate or a ceiling, never money in hand.
+    asserts_amount=False,
     asserts_dates=True,
     window_noun="response deadline",
 )
@@ -118,6 +129,7 @@ _OPPORTUNITY = RecordSemantics(
     subject_kind="opportunity",
     planning_clause="If you're evaluating whether the program fits your security plans",
     asserts_award=False,
+    asserts_amount=False,
     asserts_dates=True,
     window_noun="application window",
 )
@@ -130,6 +142,7 @@ _UNKNOWN = RecordSemantics(
     subject_kind="record",
     planning_clause="If security funding is something you're looking at",
     asserts_award=False,
+    asserts_amount=False,
     asserts_dates=False,
     window_noun="",
 )

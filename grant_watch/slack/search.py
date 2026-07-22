@@ -15,6 +15,7 @@ from datetime import date
 from enum import Enum
 from pathlib import Path
 
+from ..record_semantics import semantics_for
 from .. import db
 from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact, make_spreadsheet
@@ -75,9 +76,6 @@ _SEARCH_CTE = """WITH searchable_leads AS (
            e.verification_status AS current_event_verification_status
       FROM leads l LEFT JOIN funding_events e ON e.id=l.current_event_id
 )"""
-
-
-from ..record_semantics import semantics_for  # noqa: E402
 
 
 class RecordKind(str, Enum):

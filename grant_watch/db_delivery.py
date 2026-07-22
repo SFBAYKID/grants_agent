@@ -158,6 +158,7 @@ def set_channel_guard(
     state: str,
     reason: str,
     available_at: str = "",
+    reset: bool = False,
 ) -> None:
     """Record a channel-wide condition that must stop the drip for this audience.
 
@@ -184,6 +185,13 @@ def set_channel_guard(
         raise ValueError(f"unsupported channel guard state '{state}'")
     now = _now()
     key = _channel_guard_key(channel, state)
+    # `reset=True` starts a genuinely NEW incident. The reset MUST happen here, in the
+    # same transaction as the insert: computing `attempts=1` in the caller was silently
+    # undone by this statement's `attempts+1`, so the escalation jumped straight to the
+    # 8-hour cap on the second tick and `first_failure` reported a months-old date —
+    # the one line an operator greps, fabricated.
+    if reset:
+        conn.execute("DELETE FROM notification_outbox WHERE delivery_key=?", (key,))
     with conn:
         conn.execute(
             """INSERT INTO notification_outbox
@@ -218,10 +226,17 @@ def channel_guard(conn: sqlite3.Connection, channel: str) -> sqlite3.Row | None:
     (`clear_channel_guard`, called after a successful post or by `cli drip-unblock`).
     """
     now = _now()
+    # A BLOCK outranks a backoff for REPORTING even when the backoff expires later: a
+    # block needs a human and exits non-zero, a backoff is routine and exits 0. Ordering
+    # purely by available_at let a 429 picked up during `drip --force` mask an active
+    # credential outage behind a benign "backoff" line for up to an hour. The hold
+    # itself is unaffected — run_drip returns early on ANY active guard, and the later
+    # expiry is re-evaluated on the next tick.
     return conn.execute(
         """SELECT * FROM notification_outbox
            WHERE delivery_key IN (?,?) AND available_at > ?
-           ORDER BY available_at DESC LIMIT 1""",
+           ORDER BY CASE state WHEN 'blocked' THEN 0 ELSE 1 END,
+                    available_at DESC LIMIT 1""",
         (
             _channel_guard_key(channel, "blocked"),
             _channel_guard_key(channel, "backoff"),
@@ -245,15 +260,21 @@ def channel_guard_any(
     ).fetchone()
 
 
-def clear_channel_guard(conn: sqlite3.Connection, channel: str) -> bool:
-    """Remove a channel guard. Returns whether one was present."""
+def clear_channel_guard(
+    conn: sqlite3.Connection, channel: str, states: tuple[str, ...] = ("blocked",)
+) -> bool:
+    """Remove channel guards of the given states. Returns whether any was present.
+
+    Defaults to the BLOCKED guard only. `cli drip-unblock` says "Slack's credentials or
+    channel are fixed" — it says nothing about Slack's rate limiter, and clearing an
+    active `Retry-After` would send the next tick straight back into the 429. A
+    confirmed delivery clears both, because that proves neither condition holds.
+    """
     with conn:
         cur = conn.execute(
-            "DELETE FROM notification_outbox WHERE delivery_key IN (?,?)",
-            (
-                _channel_guard_key(channel, "blocked"),
-                _channel_guard_key(channel, "backoff"),
-            ),
+            "DELETE FROM notification_outbox WHERE delivery_key IN "
+            f"({','.join('?' * len(states))})",
+            tuple(_channel_guard_key(channel, state) for state in states),
         )
     return cur.rowcount > 0
 

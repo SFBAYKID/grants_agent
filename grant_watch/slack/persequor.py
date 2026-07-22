@@ -29,9 +29,16 @@ def compose_draft(row: sqlite3.Row) -> str:
     """Deterministic outreach draft from a lead row. Facts only — no invented names,
     dates, or figures; unknown fields degrade gracefully rather than being guessed.
 
-    Wording is taken from `record_semantics.semantics_for(row)`, the SAME object
-    `persequor_client.build_brief` uses, so the draft a human approves and the payload
-    that generates the real email cannot describe the record differently.
+    Wording comes from `record_semantics.semantics_for(row)`, the SAME object
+    `persequor_client.build_brief` uses, so the two descriptions of one record cannot
+    diverge.
+
+    THIS IS FALLBACK COPY, not an approval preview. `grant.py` calls `build_brief` and
+    then `submit_brief` — the POST happens FIRST — and renders this draft only when
+    submission failed. On the successful path the rep never sees it. What the rep
+    approves is a yes/no question ("Want me to have Persequor draft the intro email?"),
+    not this text and not the brief's fields. An earlier docstring called this "the
+    draft a human approves", which was untrue and is corrected here.
     """
     entity = display_entity_name(row["entity_name"])
     program = row["program"] or "security"
