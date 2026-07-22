@@ -147,19 +147,28 @@ def build_bulletin(row: sqlite3.Row) -> tuple[str, str]:
     return text, "bulletin-open"
 
 
-def _short_title(value: object, limit: int = 80) -> str:
-    """Sanitized solicitation title, trimmed at a word boundary so it reads as prose.
+def _short_title(value: object, limit: int = 88) -> str:
+    """Sanitized solicitation title shortened from the MIDDLE, keeping head and tail.
+
+    Tail-cutting is wrong here, and it shipped that way once. Sibling solicitations
+    from one project share a long prefix and differ only at the end — the two real PA
+    Corrections rows are 'Sci Pine Grove - Control Room, Security Cameras and Other
+    Facility Upgrades - **General and HVAC Construction**' and '… - **Plumbing
+    Construction \\*REBID\\***'. Trimming the tail cut off the only words that told them
+    apart, so both cards still read identically (caught by Chase in the 2026-07-22
+    playground preview). Keeping both ends preserves what the RFP is AND which package.
 
     plain_fragment already strips URLs, punctuation and every Slack control character
-    (<>@`*_~|), so nothing here can inject a mention or a link; this only keeps the
-    result short enough to sit inside one sentence without cutting a word in half.
+    (<>@`*_~|), so nothing here can inject a mention or a link.
     """
-    text = plain_fragment(value, max_length=200)
+    text = plain_fragment(value, max_length=240)
     if len(text) <= limit:
         return text
-    clipped = text[:limit]
-    space = clipped.rfind(" ")
-    return (clipped[:space] if space > 0 else clipped).rstrip(" ,;:-") + "…"
+    head_budget = limit // 2
+    head = text[:head_budget].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    tail_budget = limit - len(head)
+    tail = text[-tail_budget:].split(" ", 1)[-1].lstrip(" ,;:-")
+    return f"{head} … {tail}" if tail else f"{head}…"
 
 
 _RFP_CAMERA_RE = re.compile(r"camera|surveillance|cctv|\bvideo\b", re.IGNORECASE)

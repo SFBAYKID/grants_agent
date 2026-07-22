@@ -773,16 +773,23 @@ def test_sibling_rfps_do_not_render_as_the_same_card(tmp_path: Path) -> None:
     production leads #9533 and #9565 are different SCI Pine Grove solicitations sharing
     an agency and a deadline, and the card printed neither title."""
     conn = db.connect(tmp_path / "t.db")
+    # The titles are VERBATIM from production leads #9533 and #9565. An earlier version
+    # of this test used shortened stand-ins, so it passed while the real cards still
+    # rendered identically — the fixture has to carry the real length or it guards
+    # nothing. They share a 76-character prefix and differ only in the final words.
     _mk_rfp(conn, iid="HVAC", entity="Pennsylvania Department of Corrections",
-            title="SCI Pine Grove - Control Room, Security Cameras - HVAC Construction",
+            title="Sci Pine Grove - Control Room, Security Cameras and Other Facility "
+                  "Upgrades - General and HVAC Construction",
             url="https://starbridge.ai/rfp/sci-pine-grove-hvac")
     _mk_rfp(conn, iid="PLUMB", entity="Pennsylvania Department of Corrections",
-            title="SCI Pine Grove - Control Room, Security Cameras - Plumbing REBID",
+            title="SCI Pine Grove - Control Room, Security Cameras and Other Facility "
+                  "Upgrades - Plumbing Construction *REBID*",
             url="https://starbridge.ai/rfp/sci-pine-grove-plumbing")
     rendered = {drip.build_rfp_alert(row)[0] for row in db.rfp_candidates(conn)}
     assert len(rendered) == 2, f"cards are indistinguishable: {rendered}"
-    assert any("HVAC" in text for text in rendered)
-    assert any("Plumbing" in text for text in rendered)
+    # The DISCRIMINATING words must survive shortening, not just the shared prefix.
+    assert any("HVAC" in text for text in rendered), rendered
+    assert any("Plumbing" in text for text in rendered), rendered
 
 
 def test_rfp_card_stays_one_readable_sentence(tmp_path: Path) -> None:
