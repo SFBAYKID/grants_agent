@@ -159,6 +159,35 @@ affect Chase's other projects.
   inverted band collapses to a single slot rather than silencing the card. `in_window()` is
   UNCHANGED (still 7am ET–5pm PT) and now only acts as the outer guard. Urgent/exceptional cards
   bypass the slot. Simulated: Mon 11:24, Tue 10:14, Wed 10:04, Thu 11:01, Fri 10:09 PT.
+- `verified` 2026-07-22 TWO CRITICAL DEFECTS found by architectural-critic review of the day's work,
+  both REPRODUCED against a real DB before fixing, both now fixed with tests proven to fail first.
+  (C1) PERMANENT SILENT WEDGE: an ambiguous Slack send (5xx/ratelimit/timeout) leaves
+  `notification_outbox` in state 'unknown' and is deliberately never retried — but the lead stayed
+  `status='new'`, absent from `posts`, and still the winner of `_best_nugget`'s deterministic `max()`
+  over a STATIC pool. Every later tick re-picked it, `reserve_notification` returned None on the
+  existing delivery_key, and `run_drip` returned early BEFORE the RFP and bulletin tiers. One
+  ambiguous send silenced the WHOLE product forever, behind a benign `skip:` line and exit code 0 —
+  and over ~250 posts/year that is near-certain. FIX: `nugget_candidates`, `rfp_candidates` and
+  `bulletin_candidates` now also exclude leads present in `notification_outbox`, so the never-blind-
+  retry guarantee holds (that lead stays skipped) while the queue ADVANCES.
+  (C2) WRONG-REP TAGGING: `rfp_aggregator._row_state` infers state by searching row prose for five
+  state NAMES, so "Oregon City Schools, Ohio"→OR, "City of California, Missouri"→CA, "1600
+  Pennsylvania Avenue NW"→PA. `RFP_DISCOVERY_ENABLED` IS live in prod (the 07-22 poll logged
+  "[Security RFP discovery] 3 items"), so territory tagging would have pinged a rep's phone claiming
+  they own another rep's deal. FIX: `territory.VERIFIED_STATE_SOURCES` allowlist — only sources whose
+  state is the API query filter (usaspending) or a poller constant (ca_grants=CA, webs=WA,
+  oregonbuys=OR, sam.gov=WA) may tag. Everything else, and any unknown/omitted source, posts
+  UNTAGGED. Allowlist not blocklist, so a new source is untrusted until proven.
+  (H5) `slot_band()` is now CLAMPED to 04:00–16:30 PT: a hand-typed band of e.g. 17:00–17:30 drew a
+  target `in_window` can never admit, silencing the card forever behind two routine-looking log lines.
+  STILL OPEN from that review, NOT yet fixed — see the report for detail: (H1) all ~195 SVPP rows
+  expire together ~2026-10-05, so only ~54 of them can ever post at 1/day and ~140 expire unsurfaced,
+  and the drain order is ~54 near-identical "$500,000 SVPP" cards; (H2) undated `ca-grants-award`
+  rows are graded GOLD on ABSENCE of a date, which inverts rule 1 — render `ProjectStartDate` or
+  demote to SILVER; (H3) `_short_title` middle-elision still collides when the discriminator is a
+  mid-title bid number; (H6) no missed-slot backstop, so a 90-min outage costs the day; (M1) the
+  posts-exclusion is global, so a playground post burns a production lead; (M2) no `last_seen`
+  staleness filter; (M3) `salesforce_followups` bypasses drip's caps and uses UTC day boundaries.
 - `verified` 2026-07-22 FLOOD BUG found by production-ops-guardian review of `264b0e2` AND FIXED
   (`grant_watch/slack/drip.py`, `db_engagement.py`). `record_post` runs AFTER
   `chat_postMessage`; if it raised (full disk — prod is at 97% — a lock, or a CHECK violation) the

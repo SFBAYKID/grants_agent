@@ -36,12 +36,12 @@ def test_state_code_is_case_and_whitespace_insensitive() -> None:
 def test_unmapped_or_malformed_state_tags_nobody(state: object) -> None:
     """An unowned or unparseable state yields no owner — never a fallback rep."""
     assert territory.owner_for_state(state) is None
-    assert territory.mention_line(state) == ""
+    assert territory.mention_line(state, "usaspending:16.071") == ""
 
 
 def test_mention_line_names_the_rep_the_state_and_asks_for_a_reply() -> None:
     """The line must notify a human and give them something to answer."""
-    line = territory.mention_line("PA")
+    line = territory.mention_line("PA", "usaspending:16.071")
     assert line.startswith("\n\n<@U08C1NBH875>")
     assert "Pennsylvania is your territory" in line
     assert line.rstrip().endswith("?")
@@ -49,7 +49,7 @@ def test_mention_line_names_the_rep_the_state_and_asks_for_a_reply() -> None:
 
 def test_mention_line_spells_out_texas() -> None:
     """Regression: drip only knew 5 states, so a TX card used to read 'in TX'."""
-    assert "Texas is your territory" in territory.mention_line("TX")
+    assert "Texas is your territory" in territory.mention_line("TX", "webs")
 
 
 def test_env_override_replaces_the_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -86,7 +86,7 @@ def test_malformed_override_entry_is_dropped_not_rendered(
     """A bad env entry must fail safe (no tag), never emit broken or injectable text."""
     monkeypatch.setenv("GRANT_TERRITORY_OWNERS", raw)
     assert territory.owner_for_state("PA") is None
-    assert territory.mention_line("PA") == ""
+    assert territory.mention_line("PA", "usaspending:16.071") == ""
 
 
 def test_malformed_override_does_not_crash_the_tick(
@@ -106,6 +106,6 @@ def test_every_default_id_is_a_well_formed_slack_id() -> None:
 
 def test_mention_line_contains_no_injectable_markup() -> None:
     """The rendered line is built only from validated ids and a fixed state table."""
-    line = territory.mention_line("CA")
+    line = territory.mention_line("CA", "ca-grants-award:2024-2025")
     assert line.count("<") == 1 and line.count(">") == 1
     assert "http" not in line and "`" not in line

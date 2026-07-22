@@ -113,18 +113,38 @@ def _parse_slot_time(raw: str, fallback: str) -> time:
     return time(int(hour), int(minute))
 
 
+# The latest slot `in_window` can actually deliver. It closes at 17:00 PT and ticks run
+# every 30 minutes, so a target after 16:30 has no tick left to fire on.
+_LATEST_DELIVERABLE_PT = time(16, 30)
+_EARLIEST_DELIVERABLE_PT = time(4, 0)  # 7:00 ET, when in_window opens
+
+
 def slot_band() -> tuple[time, time]:
     """Return the configured Pacific band the daily card may land in.
 
     `DRIP_SLOT_START_PT` / `DRIP_SLOT_END_PT` ("HH:MM", Pacific) tune this without a
-    deploy. An inverted or malformed band collapses to a single start-time slot rather
-    than raising — a bad env value must not silence the daily card entirely.
+    deploy. Malformed values fall back and an inverted band collapses to a single slot.
+
+    The band is also CLAMPED into the window `in_window` will actually admit. Without
+    that, a plausible typo silences the product permanently and quietly: a band of
+    17:00-17:30 draws a target `in_window` can never admit, so every tick logs
+    `holding for today's 17:13 PT slot` and then `outside window` — two lines that both
+    read as routine — and no card is ever posted again. This variable exists precisely
+    so it can be retuned by hand, which is exactly when a typo happens.
     """
     start = _parse_slot_time(
         os.environ.get("DRIP_SLOT_START_PT", ""), DEFAULT_SLOT_START_PT
     )
     end = _parse_slot_time(os.environ.get("DRIP_SLOT_END_PT", ""), DEFAULT_SLOT_END_PT)
-    return (start, start) if end < start else (start, end)
+    clamped_start = min(max(start, _EARLIEST_DELIVERABLE_PT), _LATEST_DELIVERABLE_PT)
+    clamped_end = min(max(end, clamped_start), _LATEST_DELIVERABLE_PT)
+    if (clamped_start, clamped_end) != (start, end):
+        print(
+            f"[drip] slot band {start:%H:%M}-{end:%H:%M} PT is outside the deliverable "
+            f"window; using {clamped_start:%H:%M}-{clamped_end:%H:%M} PT",
+            file=sys.stderr,
+        )
+    return clamped_start, clamped_end
 
 
 def daily_slot(local_date: date, channel: str) -> time:
@@ -484,7 +504,9 @@ def run_drip(
         text, style = build_bulletin(row)
     # Hand the card to the rep who owns that state, then carry the source. Both lines
     # are separate blocks so the opening sentence still reads as one short human line.
-    text = text + territory.mention_line(row["state"]) + source_line(row)
+    # The source is passed so a lead whose state was INFERRED from prose (the RFP
+    # aggregator) can never tag a rep — see territory.VERIFIED_STATE_SOURCES.
+    text = text + territory.mention_line(row["state"], row["source"]) + source_line(row)
     if dry_run:
         return f"[dry-run] would post {kind} ({style}): {text}"
     event_id = int(row["current_event_id"]) if row["current_event_id"] else None

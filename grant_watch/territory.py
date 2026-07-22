@@ -99,14 +99,49 @@ def owner_for_state(state: object) -> str | None:
     return territory_owners().get(code)
 
 
-def mention_line(state: object) -> str:
+# Only sources whose state is a FACT may tag a human. For these, `state` is either the
+# API query filter the rows were requested under (usaspending) or a constant the poller
+# hardcodes because the source covers exactly one state (WEBS=WA, OregonBuys=OR,
+# SAM=WA place-of-performance, CA portal=CA). Anything not listed here is treated as
+# inferred and posts untagged.
+#
+# The excluded case is real and live: `rfp_aggregator._row_state` derives a state by
+# searching the row's prose for five state NAMES, so "Oregon City Schools, Ohio" reads
+# as OR, "City of California, Missouri" as CA, and "1600 Pennsylvania Avenue NW" as PA.
+# Before territory tagging that produced a wrong two-letter label on a card; now it
+# would send a rep's phone a notification asserting they own someone else's deal.
+# An allowlist (not a blocklist) so a NEW source is untagged until proven, never
+# silently trusted.
+VERIFIED_STATE_SOURCES: tuple[str, ...] = (
+    "usaspending:",
+    "usaspending-subaward:",
+    "ca-grants-award:",
+    "ca-grants-portal",
+    "webs",
+    "oregonbuys",
+    "sam.gov",
+)
+
+
+def state_is_verified(source: object) -> bool:
+    """Whether this source's `state` is evidence rather than inference."""
+    return str(source or "").startswith(VERIFIED_STATE_SOURCES)
+
+
+def mention_line(state: object, source: object = None) -> str:
     """Return the '\\n\\n<@U…> — <State> is your territory…' line for a proactive card.
 
-    Empty string when the state is unknown or unowned, so the card simply goes out
-    untagged. The rendered text contains no source-controlled input: the id comes from
-    the validated map and the state name from a fixed lookup, so nothing injectable can
-    reach the mention (Slack renders this post with mrkdwn on).
+    Empty string when the state is unknown, unowned, or came from a source that only
+    INFERRED it (see VERIFIED_STATE_SOURCES) — the card then goes out untagged. The
+    rendered text contains no source-controlled input: the id comes from the validated
+    map and the state name from a fixed lookup, so nothing injectable can reach the
+    mention (Slack renders this post with mrkdwn on).
+
+    `source` defaults to None, which is UNVERIFIED. A caller that forgets to pass it
+    gets no mention rather than a possibly-wrong one.
     """
+    if not state_is_verified(source):
+        return ""
     owner = owner_for_state(state)
     if not owner:
         return ""

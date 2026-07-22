@@ -630,14 +630,22 @@ def test_delivery_reservation_prevents_duplicate_post(tmp_path: Path) -> None:
 
 
 def test_ambiguous_slack_timeout_is_not_blindly_retried(tmp_path: Path) -> None:
-    """A timeout remains unknown so Grant cannot create a duplicate notification."""
+    """A timeout remains unknown so Grant cannot create a duplicate notification.
+
+    The observable changed with the C1 wedge fix; the invariant did not. The ambiguous
+    lead is now excluded from the candidate queries outright, so a later tick reports
+    having nothing to say rather than 'already reserved'. What must never change is that
+    it is not re-sent — asserted on the Slack call count and the retained 'unknown'
+    state, not on the wording of a skip message. See tests/test_drip_pacing.py for the
+    wedge regression itself.
+    """
     conn = db.connect(tmp_path / "t.db")
     _mk_lead(conn)
     client = _SlackClient(fail=True)
     first = drip.run_drip(client, "C1", conn, force=True)
     second = drip.run_drip(client, "C1", conn, force=True)
     assert first.startswith("unknown:")
-    assert "already reserved" in second
+    assert second.startswith("skip:")
     assert client.calls == 1
     assert (
         conn.execute("SELECT state FROM notification_outbox").fetchone()["state"]

@@ -181,6 +181,19 @@ def nugget_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     already-posted lead for a second card — the exact repeat-in-the-channel class of bug
     Chase reported on 2026-07-22.
 
+    Leads present in `notification_outbox` are excluded for a DIFFERENT and more
+    dangerous reason (architectural-critic, 2026-07-22, reproduced against a real DB).
+    When a Slack send is ambiguous — 5xx, ratelimited, socket timeout — the row is left
+    in state 'unknown' and deliberately never retried, because the message may in fact
+    have been delivered. But the lead then stays `status='new'`, absent from `posts`,
+    and still the winner of `_best_nugget`'s deterministic `max()` over a static pool.
+    Every later tick re-picked that same lead, `reserve_notification` hit the existing
+    delivery_key and returned None, and `run_drip` returned early — BEFORE ever reaching
+    the RFP or bulletin tiers. One ambiguous send therefore silenced the entire product,
+    permanently, with a benign-looking `skip:` line and exit code 0. Excluding reserved
+    leads keeps the never-blind-retry guarantee (that lead stays skipped) while letting
+    the queue advance to the next one.
+
     The `amount > 0` filter is a WEDGE GUARD, not a quality rule. `drip._award_facts`
     raises on a missing or non-positive amount, and `cli.cmd_drip` has no handler, so an
     amountless gold lead reaching the top of `_best_nugget` would crash the tick before
@@ -198,7 +211,9 @@ def nugget_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
               AND e.verification_status='verified'
               AND e.event_type IN ('award_announced','award_obligated')
               AND l.amount IS NOT NULL AND l.amount > 0
-              AND l.id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL)"""
+              AND l.id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL)
+              AND l.id NOT IN (SELECT lead_id FROM notification_outbox
+                              WHERE lead_id IS NOT NULL)"""
         )
     )
 
@@ -218,6 +233,8 @@ def rfp_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
               AND e.suppressed=0 AND e.verification_status='verified'
               AND e.event_type='rfp_posted'
               AND l.id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL)
+              AND l.id NOT IN (SELECT lead_id FROM notification_outbox
+                              WHERE lead_id IS NOT NULL)
               AND l.funds_end != '' AND date(l.funds_end) >= date('now')
             ORDER BY date(l.funds_end) ASC, l.id"""
         )
@@ -241,6 +258,8 @@ def bulletin_candidates(
               AND e.suppressed=0 AND e.verification_status='verified'
               AND e.event_type='application_window_opened'
               AND l.id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL)
+              AND l.id NOT IN (SELECT lead_id FROM notification_outbox
+                              WHERE lead_id IS NOT NULL)
               AND l.funds_end != '' AND date(l.funds_end) >= date('now')
             ORDER BY date(l.funds_end) ASC,l.id""",
             (f"-{max_age_days} days",),
