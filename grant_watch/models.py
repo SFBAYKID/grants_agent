@@ -87,7 +87,16 @@ class RawItem:
     end: str
     url: str
     raw: dict[str, Any] = field(default_factory=dict)
-    event_type: FundingEventType = FundingEventType.RECORD_OBSERVED
+    # REQUIRED, keyword-only, and deliberately without a default (Chase, 2026-07-22).
+    # The old `= RECORD_OBSERVED` default is what MANUFACTURED unknown records: a source
+    # that forgot the field produced rows that assert nothing forever, and three test
+    # fixtures silently built "awards" that were not awards — which is how a grade-driven
+    # wording bug reached outbound email undetected. `record_semantics` treats an unknown
+    # event as "claim nothing", so a missing event type is not a small omission; it
+    # silently degrades every downstream surface. Forcing the decision at construction is
+    # the one change that stops the class. kw_only because this field sits after
+    # defaulted ones and must not be passed positionally.
+    event_type: FundingEventType = field(kw_only=True)
     event_date: str = ""
     date_precision: DatePrecision = DatePrecision.UNKNOWN
     funded_scope: str = ""

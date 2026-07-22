@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from grant_watch import live_verification as live
-from grant_watch.models import RawItem
+from grant_watch.models import FundingEventType, RawItem
 
 
 def _award(**changes: object) -> RawItem:
@@ -24,6 +24,9 @@ def _award(**changes: object) -> RawItem:
         "end": live.TARGET_END,
         "url": ("https://www.usaspending.gov/award/ASST_NON_15JCOPS25GG01291SSIX_015"),
         "raw": {},
+        # The golden fixture mirrors a real USAspending award row, which the poller
+        # always stamps AWARD_OBLIGATED.
+        "event_type": FundingEventType.AWARD_OBLIGATED,
     }
     values.update(changes)
     return RawItem(**values)  # type: ignore[arg-type]  # typed drift fixture

@@ -25,6 +25,7 @@ def _award(**kw: object) -> RawItem:
         end="2028-09-30",
         url="",
         raw={},
+        event_type=FundingEventType.AWARD_OBLIGATED,
     )
     base.update(kw)
     return RawItem(**base)  # type: ignore[arg-type]

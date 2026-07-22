@@ -43,6 +43,7 @@ def _lead(item_id: str = "A1", source: str = "usaspending:16.071") -> Lead:
             end="2028-09-30",
             url="https://example.gov/a1",
             raw={"k": "v"},
+            event_type=FundingEventType.AWARD_OBLIGATED,
         ),
         grade=LeadGrade.GOLD,
     )

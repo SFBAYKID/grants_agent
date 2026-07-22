@@ -9,7 +9,7 @@ import pytest
 
 from grant_watch import db
 from grant_watch.enrich import nces
-from grant_watch.models import Lead, LeadGrade, RawItem
+from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem
 
 
 def _districts() -> list[nces.NCESDistrict]:
@@ -55,6 +55,7 @@ def test_enrich_state_leads_updates_only_unique_matches(tmp_path: Path) -> None:
                     "2027-01-01",
                     "",
                     {},
+                    event_type=FundingEventType.RECORD_OBSERVED,
                 ),
                 LeadGrade.GOLD,
                 entity_type="school_district",

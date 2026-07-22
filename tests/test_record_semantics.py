@@ -268,3 +268,27 @@ def test_outbound_copy_never_contains_an_internal_source_key(
     assert str(row["source"]) not in body, body
     for token in ("usaspending:", "ca-grants-award:", "seed:", "16.071"):
         assert token not in body, token
+
+
+def test_event_type_is_required_and_cannot_default_to_unknown() -> None:
+    """The default that MANUFACTURED unknown records is gone.
+
+    `RawItem.event_type` used to default to RECORD_OBSERVED, so a source that forgot the
+    field produced rows asserting nothing forever — and three test fixtures silently
+    built "awards" that were not awards, which is how a grade-driven wording defect
+    reached outbound email undetected. Omitting it must now be a construction error, not
+    a silent downgrade."""
+    with pytest.raises(TypeError, match="event_type"):
+        RawItem(  # type: ignore[call-arg]
+            source="test",
+            item_id="X",
+            title="t",
+            entity="e",
+            state="CA",
+            program="p",
+            amount=None,
+            start="",
+            end="",
+            url="",
+            raw={},
+        )

@@ -13,7 +13,7 @@ import requests
 from grant_watch import db
 from grant_watch.enrich import salesforce_campaigns as campaigns
 from grant_watch.enrich import salesforce_campaign_gateway as gateway_mod
-from grant_watch.models import Lead, LeadGrade, RawItem
+from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem
 
 CAMPAIGN_ID = "701000000000001"
 LEAD_ID = "00Q000000000001"
@@ -146,6 +146,7 @@ def _lead(
                 end="2027-12-31",
                 url=f"https://source.test/{item_id}",
                 raw={},
+                event_type=FundingEventType.AWARD_OBLIGATED,
             ),
             grade=LeadGrade.GOLD,
         ),

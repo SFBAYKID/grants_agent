@@ -8,7 +8,7 @@ import pytest
 from openpyxl import load_workbook
 
 from grant_watch import db
-from grant_watch.models import Lead, LeadGrade, RawItem
+from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem
 from grant_watch.slack import tools
 from grant_watch.spreadsheets import make_spreadsheet
 
@@ -33,6 +33,7 @@ def test_lead_stats_uses_typed_allowlisted_view(tmp_path: Path) -> None:
                 "2027-01-01",
                 "",
                 {},
+                event_type=FundingEventType.RECORD_OBSERVED,
             ),
             LeadGrade.GOLD,
         ),
@@ -110,6 +111,7 @@ def _seed(conn: "db.sqlite3.Connection", item_id: str, entity: str, state: str) 
             RawItem(
                 "test", item_id, "award", entity, state, "SVPP",
                 100_000, "2026-01-01", "2027-01-01", "", {},
+                event_type=FundingEventType.RECORD_OBSERVED,
             ),
             LeadGrade.GOLD,
         ),

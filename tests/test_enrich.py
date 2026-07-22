@@ -13,7 +13,7 @@ import requests
 from grant_watch import db
 from grant_watch.enrich import finder
 from grant_watch.enrich.finder import ContactCandidate, SourceUnreachable
-from grant_watch.models import Lead, LeadGrade, RawItem
+from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem
 from grant_watch.slack import tools
 
 
@@ -35,6 +35,7 @@ def _lead(tmp_path: Path) -> tuple[sqlite3.Connection, int]:
                 end="2028-09-30",
                 url="https://x.gov/a",
                 raw={},
+                event_type=FundingEventType.AWARD_OBLIGATED,
             ),
             grade=LeadGrade.GOLD,
         ),

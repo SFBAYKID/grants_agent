@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from grant_watch import cli
-from grant_watch.models import RawItem
+from grant_watch.models import FundingEventType, RawItem
 
 
 def _item() -> RawItem:
@@ -24,6 +24,7 @@ def _item() -> RawItem:
         end="",
         url="",
         raw={},
+        event_type=FundingEventType.RECORD_OBSERVED,
     )
 
 
