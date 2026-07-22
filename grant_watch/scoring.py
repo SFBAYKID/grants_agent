@@ -57,10 +57,21 @@ def grade(item: RawItem, today: date | None = None) -> Lead:
         # Gold-fresh / silver-older split (Chase): a security award obligated within the
         # last FRESH_MONTHS is a hot new buyer (GOLD); the same award obligated over a
         # year ago still has an open window but the awardee likely has vendors locked in,
-        # so it drops to SILVER. A verified award date is required to downgrade — an
-        # unknown award date stays GOLD rather than guess the money is stale.
+        # so it drops to SILVER.
+        #
+        # An UNKNOWN award date is SILVER, not GOLD (Chase, 2026-07-22). This inverts the
+        # earlier rule, which kept undated awards GOLD "rather than guess the money is
+        # stale". That reasoning was backwards: GOLD is defined as "just got funding …
+        # ideally < 12 months old", so awarding it on the ABSENCE of a date grades on
+        # absent evidence and asserts a recency the data cannot support (Constitution
+        # rule 1). It is also not hypothetical — the 347 `ca-grants-award` rows carry no
+        # award date at all (ca_grants.py sets event_date=""), so this rule governs the
+        # majority of the award pool. They remain fully searchable and exportable as
+        # SILVER; they are simply not served as proactive GOLD.
         awarded = _parse_date(item.event_date)
-        if awarded is not None and awarded < today - timedelta(days=FRESH_MONTHS * 30):
+        if awarded is None:
+            return Lead(item, LeadGrade.SILVER)
+        if awarded < today - timedelta(days=FRESH_MONTHS * 30):
             return Lead(item, LeadGrade.SILVER)
         return Lead(item, LeadGrade.GOLD)
 

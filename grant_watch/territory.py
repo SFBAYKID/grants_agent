@@ -112,20 +112,41 @@ def owner_for_state(state: object) -> str | None:
 # would send a rep's phone a notification asserting they own someone else's deal.
 # An allowlist (not a blocklist) so a NEW source is untagged until proven, never
 # silently trusted.
-VERIFIED_STATE_SOURCES: tuple[str, ...] = (
+# Namespaced sources: the part after the colon varies (a CFDA number, a fiscal year), so
+# these must match by PREFIX. `usaspending:` derives state from the API query filter;
+# `ca-grants-award:` hardcodes "CA".
+VERIFIED_STATE_SOURCE_PREFIXES: tuple[str, ...] = (
     "usaspending:",
-    "usaspending-subaward:",
+    "usaspending-subaward:",  # `assumed`: the recipient_locations filter is believed to
+    # bind the sub-recipient under subawards=true; not evidenced in code or a cited doc.
     "ca-grants-award:",
-    "ca-grants-portal",
-    "webs",
-    "oregonbuys",
-    "sam.gov",
+)
+# Constant-state sources: the whole source name is fixed, so these must match EXACTLY.
+# Prefix-matching them would trust a future `webs-national` or `sam.gov-scraped` purely
+# because of how it was named — the failure this allowlist exists to prevent.
+VERIFIED_STATE_SOURCE_NAMES: frozenset[str] = frozenset(
+    {
+        "ca-grants-portal",  # hardcodes "CA"
+        "webs",  # hardcodes "WA"
+        "oregonbuys",  # hardcodes "OR"
+        "sam.gov",  # hardcodes "WA"; `assumed` to mean place-of-performance
+    }
 )
 
 
 def state_is_verified(source: object) -> bool:
-    """Whether this source's `state` is evidence rather than inference."""
-    return str(source or "").startswith(VERIFIED_STATE_SOURCES)
+    """Whether this source's `state` is evidence rather than inference.
+
+    NOTE none of the four constant-state names can currently produce a proactive card —
+    `rfp_candidates` hardcodes `source='rfp'`, `nugget_candidates` requires an award
+    event, and `bulletin_candidates` hardcodes grants.gov/ca-grants-portal. They are
+    listed so the classification stays complete as those queries change, not because
+    they fire today.
+    """
+    name = str(source or "")
+    return name in VERIFIED_STATE_SOURCE_NAMES or name.startswith(
+        VERIFIED_STATE_SOURCE_PREFIXES
+    )
 
 
 def mention_line(state: object, source: object = None) -> str:

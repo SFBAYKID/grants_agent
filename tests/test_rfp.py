@@ -309,9 +309,9 @@ def test_rfp_lead_uses_its_own_drip_query_only(tmp_path: Path) -> None:
     RFP can never be mis-surfaced as an award or a grants.gov bulletin."""
     conn = db.connect(tmp_path / "rfp.db")
     _rfp_silver_lead(conn)
-    assert len(db.rfp_candidates(conn)) == 1
-    assert db.nugget_candidates(conn) == []
-    assert db.bulletin_candidates(conn) == []
+    assert len(db.rfp_candidates(conn, "C1")) == 1
+    assert db.nugget_candidates(conn, "C1") == []
+    assert db.bulletin_candidates(conn, "C1") == []
 
 
 # ------------------------------------------- item_id format drift (real 2026-07-20 bug)
@@ -366,7 +366,7 @@ def test_item_id_format_change_adopts_the_existing_lead(tmp_path: Path) -> None:
     assert int(rows[0]["id"]) == original_id, "lead id must survive so posts stay valid"
     assert rows[0]["source_item_id"] == current.item_id, "row migrates to the new key"
     # and it is still exactly one postable candidate, not two
-    assert len(db.rfp_candidates(conn)) == 1
+    assert len(db.rfp_candidates(conn, "C1")) == 1
 
 
 def test_a_sibling_solicitation_at_its_own_url_stays_separate(tmp_path: Path) -> None:

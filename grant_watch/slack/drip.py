@@ -36,6 +36,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 
 from .. import db, scoring, territory
 from ..presentation import display_entity_name, plain_fragment, state_display_name
@@ -453,13 +454,13 @@ def pick(
     with a low hit rate (so RFPs are silver at best, never surfaced above a grant). A
     program bulletin is the last resort. The daily cap keeps it to one."""
     today = today or datetime.now(timezone.utc).date()
-    nuggets = db.nugget_candidates(conn)
+    nuggets = db.nugget_candidates(conn, channel)
     platinum = [n for n in nuggets if _is_platinum(n, today)]
     if platinum:
         return "platinum", _best_nugget(conn, platinum)
     if nuggets:
         return "nugget", _best_nugget(conn, nuggets)
-    rfps = db.rfp_candidates(conn)  # open RFPs (silver), soonest deadline first
+    rfps = db.rfp_candidates(conn, channel)  # open RFPs (silver), soonest deadline first
     silver_rfps = [r for r in rfps if str(r["lead_grade"]) == "silver"]
     if silver_rfps:
         return "rfp", silver_rfps[0]  # open RFP, soonest deadline
@@ -467,13 +468,48 @@ def pick(
         1 for p in db.posts_today(conn, channel) if p["kind"] == "bulletin"
     )
     if bulletins_today < BULLETIN_MAX_PER_DAY:
-        for cand in db.bulletin_candidates(conn):
+        for cand in db.bulletin_candidates(conn, channel):
             title = cand["title"] or ""
             if _BULLETIN_RELEVANT_RE.search(title) and not _BULLETIN_OFFTOPIC_RE.search(
                 title
             ):
                 return "bulletin", cand
     return None
+
+
+# Slack errors that describe the CHANNEL or the CREDENTIALS, not this particular card.
+# Retrying the same lead is pointless and consuming it is destructive, so the lead is
+# released and the failure is reported loudly instead.
+_SYSTEMIC_SLACK_ERRORS = frozenset(
+    {
+        "channel_not_found",
+        "not_in_channel",
+        "is_archived",
+        "invalid_auth",
+        "account_inactive",
+        "token_revoked",
+        "token_expired",
+        "no_permission",
+        "org_login_required",
+        "ratelimited",
+    }
+)
+
+
+def _ambiguous(
+    conn: sqlite3.Connection, delivery_key: str, exc: BaseException
+) -> str:
+    """Record a delivery whose outcome genuinely cannot be determined.
+
+    A timeout or a 5xx may mean Slack accepted the post, so the reservation is KEPT —
+    that is what prevents a duplicate — and the lead is permanently set aside rather
+    than retried. `cli drip-blocked` lists these so the loss is visible, not silent.
+    """
+    db.finish_notification(conn, delivery_key, "unknown", error=type(exc).__name__)
+    return (
+        "unknown: Slack delivery could not be confirmed; Grant will not "
+        "auto-retry this event to avoid a duplicate (see `cli drip-blocked`)"
+    )
 
 
 def run_drip(
@@ -494,14 +530,35 @@ def run_drip(
     go, reason = should_post(conn, channel, now, force=force, urgent=urgent)
     if not go:
         return f"skip: {reason}"
-    if kind == "platinum":
-        text, style = build_platinum(row)
-    elif kind == "nugget":
-        text, style = build_nugget(row)
-    elif kind == "rfp":
-        text, style = build_rfp_alert(row)
-    else:
-        text, style = build_bulletin(row)
+    builder = {
+        "platinum": build_platinum,
+        "nugget": build_nugget,
+        "rfp": build_rfp_alert,
+        "bulletin": build_bulletin,
+    }[kind]
+    try:
+        text, style = builder(row)
+    except ValueError as exc:
+        # The renderers fail closed on unusable data (an entity that sanitizes to
+        # nothing, a missing title) and they run BEFORE any reservation exists — so
+        # nothing recorded the failure, the same top-ranked lead was re-picked on every
+        # tick, and the tick crashed with a traceback that only cron.log ever saw. The
+        # product went silent permanently while writing nothing anywhere. Quarantine the
+        # lead durably so the candidate exclusion skips it AND `cli drip-blocked` can
+        # show a human what was set aside.
+        if not dry_run:
+            db.quarantine_lead(
+                conn,
+                int(row["id"]),
+                int(row["current_event_id"]) if row["current_event_id"] else None,
+                channel,
+                kind,
+                str(exc),
+            )
+        return (
+            f"skip: lead #{row['id']} cannot be rendered as a {kind} card ({exc}); "
+            "quarantined and visible in `cli drip-blocked`"
+        )
     # Hand the card to the rep who owns that state, then carry the source. Both lines
     # are separate blocks so the opening sentence still reads as one short human line.
     # The source is passed so a lead whose state was INFERRED from prose (the RFP
@@ -533,12 +590,34 @@ def run_drip(
             unfurl_links=False,
             unfurl_media=False,
         )
-    except Exception as exc:  # noqa: BLE001 — timeout is ambiguous; never blind-retry
-        db.finish_notification(conn, delivery_key, "unknown", error=type(exc).__name__)
+    except SlackApiError as exc:
+        # Slack ANSWERED and refused. HTTP 200 with an `error` payload means the message
+        # provably did not land, which is the opposite of ambiguous. Treating it as
+        # ambiguous consumed a real lead per attempt: under a revoked token or a wrong
+        # channel id that silently destroyed 1-2 gold leads every weekday while posting
+        # nothing at all, because the reservation is what the caps and the candidate
+        # exclusion both key off.
+        if getattr(exc.response, "status_code", None) != 200:
+            return _ambiguous(conn, delivery_key, exc)
+        code = str(exc.response.get("error") or "unknown_error")
+        if code in _SYSTEMIC_SLACK_ERRORS:
+            # Nothing about THIS lead is wrong — the channel or the token is. Put the
+            # lead straight back in the pool so a misconfiguration cannot eat inventory,
+            # and say so loudly; every later tick will fail the same way until it is
+            # fixed, which is the correct, visible behavior.
+            db.release_notification(conn, delivery_key)
+            return (
+                f"halt: Slack rejected the post for this channel ({code}); no lead was "
+                "consumed. Fix the channel or token — every tick will fail until then"
+            )
+        # Lead-specific refusal (e.g. msg_too_long): quarantine durably and visibly.
+        db.finish_notification(conn, delivery_key, "rejected", error=code)
         return (
-            "unknown: Slack delivery could not be confirmed; Grant will not "
-            "auto-retry this event to avoid a duplicate"
+            f"skip: Slack rejected this card ({code}); lead #{row['id']} quarantined "
+            "and visible in `cli drip-blocked`"
         )
+    except Exception as exc:  # noqa: BLE001 — timeout is ambiguous; never blind-retry
+        return _ambiguous(conn, delivery_key, exc)
     # Post-send bookkeeping: the message is ALREADY in Slack, so a failure here must not
     # crash the cron tick or leave the outbox stuck in 'sending' (an orphaned reservation
     # silently wedges the picker's ladder — the stuck lead stays top-ranked and blocks

@@ -31,21 +31,25 @@ def _award(**kw: object) -> RawItem:
 
 
 def test_open_window_award_is_gold() -> None:
-    """Verify open window award is gold."""
-    assert grade(_award(), TODAY).grade is LeadGrade.GOLD
+    """A DATED, recent, open-window award is gold."""
+    assert grade(_award(event_date="2026-06-01"), TODAY).grade is LeadGrade.GOLD
 
 
 def test_award_freshness_splits_gold_fresh_from_silver_older() -> None:
     """Gold-fresh / silver-older split by the verified award (obligation) date: a recent
     security award is GOLD, the same award obligated over a year ago (window still open)
-    is SILVER, a closed window is WATCH, and an unknown award date is never guessed stale."""
+    is SILVER, and a closed window is WATCH."""
     assert grade(_award(event_date="2026-06-01"), TODAY).grade is LeadGrade.GOLD
     assert grade(_award(event_date="2024-01-01"), TODAY).grade is LeadGrade.SILVER
     assert (
         grade(_award(event_date="2024-01-01", end="2025-01-01"), TODAY).grade
         is LeadGrade.WATCH
     )
-    assert grade(_award(event_date=""), TODAY).grade is LeadGrade.GOLD
+    # An UNKNOWN award date is SILVER, never GOLD (Chase, 2026-07-22). GOLD means "just
+    # got funding"; granting it on the ABSENCE of a date grades on absent evidence and
+    # asserts a recency the source cannot support. This governs the 347 undated
+    # ca-grants-award rows, which stay searchable and exportable — just not proactive.
+    assert grade(_award(event_date=""), TODAY).grade is LeadGrade.SILVER
 
 
 def test_negative_amount_deobligation_is_watch() -> None:
@@ -66,8 +70,11 @@ def test_unknown_amount_or_window_is_watch() -> None:
 
 
 def test_seed_source_counts_as_award() -> None:
-    """Verify seed source counts as award."""
-    assert grade(_award(source="seed:svpp_csv"), TODAY).grade is LeadGrade.GOLD
+    """A seed row is graded on the award ladder, not dropped — dated recent means GOLD."""
+    assert (
+        grade(_award(source="seed:svpp_csv", event_date="2026-06-01"), TODAY).grade
+        is LeadGrade.GOLD
+    )
 
 
 def test_rfp_sources_are_silver() -> None:

@@ -153,7 +153,7 @@ def test_retired_seed_leaves_proactive_candidates(tmp_path: Path) -> None:
         "2026-09-30",
     )
     db.reconcile_seed_duplicates(conn)
-    candidates = db.nugget_candidates(conn)
+    candidates = db.nugget_candidates(conn, "C1")
     assert len(candidates) == 1  # the live row only
     assert candidates[0]["source"] == "usaspending:16.071"
 

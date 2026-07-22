@@ -158,7 +158,9 @@ def delivery_attempts_today(
     )
 
 
-def nugget_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def nugget_candidates(
+    conn: sqlite3.Connection, channel: str
+) -> list[sqlite3.Row]:
     """Unsurfaced GOLD leads eligible for a drip nugget.
 
     NOTE the deliberate absence of `e.suppressed=0` (Chase, 2026-07-22 — "gold is what
@@ -211,14 +213,16 @@ def nugget_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
               AND e.verification_status='verified'
               AND e.event_type IN ('award_announced','award_obligated')
               AND l.amount IS NOT NULL AND l.amount > 0
-              AND l.id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL)
+              AND l.id NOT IN (SELECT lead_id FROM posts
+                               WHERE lead_id IS NOT NULL AND channel=?)
               AND l.id NOT IN (SELECT lead_id FROM notification_outbox
-                              WHERE lead_id IS NOT NULL)"""
+                               WHERE lead_id IS NOT NULL AND audience=?)""",
+            (channel, channel),
         )
     )
 
 
-def rfp_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def rfp_candidates(conn: sqlite3.Connection, channel: str) -> list[sqlite3.Row]:
     """Open, unsurfaced physical-security RFP leads for a proactive alert.
 
     An open RFP (verified future deadline) for cameras/access control is an active
@@ -232,17 +236,19 @@ def rfp_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
             WHERE l.source='rfp' AND l.lead_grade='silver'
               AND e.suppressed=0 AND e.verification_status='verified'
               AND e.event_type='rfp_posted'
-              AND l.id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL)
+              AND l.id NOT IN (SELECT lead_id FROM posts
+                               WHERE lead_id IS NOT NULL AND channel=?)
               AND l.id NOT IN (SELECT lead_id FROM notification_outbox
-                              WHERE lead_id IS NOT NULL)
+                               WHERE lead_id IS NOT NULL AND audience=?)
               AND l.funds_end != '' AND date(l.funds_end) >= date('now')
-            ORDER BY date(l.funds_end) ASC, l.id"""
+            ORDER BY date(l.funds_end) ASC, l.id""",
+            (channel, channel),
         )
     )
 
 
 def bulletin_candidates(
-    conn: sqlite3.Connection, max_age_days: int = 14
+    conn: sqlite3.Connection, channel: str, max_age_days: int = 14
 ) -> list[sqlite3.Row]:
     """Return fresh federal or California application-window bulletins.
 
@@ -257,11 +263,12 @@ def bulletin_candidates(
               AND l.first_seen >= datetime('now', ?)
               AND e.suppressed=0 AND e.verification_status='verified'
               AND e.event_type='application_window_opened'
-              AND l.id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL)
+              AND l.id NOT IN (SELECT lead_id FROM posts
+                               WHERE lead_id IS NOT NULL AND channel=?)
               AND l.id NOT IN (SELECT lead_id FROM notification_outbox
-                              WHERE lead_id IS NOT NULL)
+                               WHERE lead_id IS NOT NULL AND audience=?)
               AND l.funds_end != '' AND date(l.funds_end) >= date('now')
             ORDER BY date(l.funds_end) ASC,l.id""",
-            (f"-{max_age_days} days",),
+            (f"-{max_age_days} days", channel, channel),
         )
     )

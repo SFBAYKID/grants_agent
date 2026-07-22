@@ -5,6 +5,7 @@ Usage (from the repo root, venv active):
     python -m grant_watch.cli seed
     python -m grant_watch.cli status
     python -m grant_watch.cli drip [--force] [--dry-run]   # drip tick (30-min cron target)
+    python -m grant_watch.cli drip-blocked                 # leads set aside, never delivered
     python -m grant_watch.cli outreach-retry [--dry-run]
     python -m grant_watch.cli salesforce-sync [--limit N] [--dry-run]
     python -m grant_watch.cli salesforce-followups [--dry-run] [--smoke]
@@ -173,6 +174,34 @@ def cmd_drip(force: bool, dry_run: bool) -> int:
     return 1 if outcome.startswith("unknown:") else 0
 
 
+def cmd_drip_blocked() -> int:
+    """List leads that were set aside and never delivered.
+
+    Every non-delivered outbox row permanently excludes a real lead from the proactive
+    pool. Without this surface, silent inventory loss is indistinguishable from a quiet
+    week — which is exactly how a wedged drip went undiagnosed for a day.
+    """
+    conn = db.connect_readonly()
+    rows = db.blocked_notifications(conn)
+    if not rows:
+        print("no blocked notifications: every reserved delivery was confirmed")
+        return 0
+    print(f"{len(rows)} lead(s) set aside and never delivered:\n")
+    for row in rows:
+        entity = row["entity_name"] or "(unknown entity)"
+        reason = row["last_error"] or "no reason recorded"
+        print(
+            f"  lead #{row['lead_id']}  [{row['state']}]  {entity} "
+            f"({row['lead_state'] or '??'})\n"
+            f"      channel={row['audience']}  at={row['created_at']}  reason={reason}"
+        )
+    print(
+        "\n'unknown' may have reached Slack and is never auto-retried. 'rejected' and "
+        "'unrenderable' provably did not. Clearing any of these is a human decision."
+    )
+    return 0
+
+
 def cmd_outreach_retry(dry_run: bool) -> int:
     """Run one bounded Persequor retry pass using persisted idempotency keys."""
     from . import persequor_client
@@ -258,6 +287,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("seed", help="seed leads from the verified SVPP CSV")
     sub.add_parser("status", help="lead counts by source and grade")
+    sub.add_parser("drip-blocked", help="list leads set aside and never delivered")
     p_drip = sub.add_parser("drip", help="one drip tick (maybe post one nugget)")
     p_drip.add_argument(
         "--force",
@@ -317,6 +347,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_poll(args.source, args.dry_run)
     if args.command == "seed":
         return cmd_seed()
+    if args.command == "drip-blocked":
+        return cmd_drip_blocked()
     if args.command == "drip":
         return cmd_drip(args.force, args.dry_run)
     if args.command == "outreach-retry":

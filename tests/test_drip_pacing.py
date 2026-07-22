@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from slack_sdk.errors import SlackApiError
+
 from grant_watch import db, territory
 from grant_watch.slack import drip
 
@@ -43,7 +45,7 @@ def test_ambiguous_send_does_not_wedge_the_drip_forever(tmp_path: Path) -> None:
         "SELECT state FROM notification_outbox"
     ).fetchone()["state"] == "unknown"
     # The ambiguous lead must never be retried...
-    assert all(row["id"] != stuck for row in db.nugget_candidates(conn))
+    assert all(row["id"] != stuck for row in db.nugget_candidates(conn, "C1"))
     # ...but the queue must ADVANCE rather than stop.
     good = _SlackClient()
     outcome = drip.run_drip(good, "C1", conn, force=True)
@@ -106,3 +108,117 @@ def test_band_outside_the_delivery_window_is_clamped(
     monkeypatch.setenv("DRIP_SLOT_END_PT", end)
     slot = drip.daily_slot(date(2026, 7, 22), "C1")
     assert time(4, 0) <= slot <= time(16, 30), f"{start}-{end} drew unreachable {slot}"
+
+
+# ------------------------------------------- durable quarantine + failure classification
+class _RejectingClient:
+    """A Slack client that ANSWERS and refuses — HTTP 200 with an error payload."""
+
+    def __init__(self, code: str) -> None:
+        """Record the Slack error code this client will refuse with."""
+        self.code, self.calls = code, 0
+
+    def chat_postMessage(self, **kwargs: object) -> dict[str, str]:  # noqa: N802
+        """Raise the way slack_sdk does for a definitive rejection."""
+        self.calls += 1
+        raise SlackApiError("rejected", _FakeResponse(self.code))
+
+
+class _FakeResponse:
+    """Minimal stand-in for slack_sdk's SlackResponse."""
+
+    def __init__(self, code: str) -> None:
+        """HTTP 200 plus an error code is Slack's definitive-rejection shape."""
+        self.status_code, self._code = 200, code
+
+    def get(self, key: str, default: object = None) -> object:
+        """Return the error code the way SlackResponse's mapping access does."""
+        return self._code if key == "error" else default
+
+
+def test_systemic_slack_rejection_releases_the_lead(tmp_path: Path) -> None:
+    """A wrong channel or revoked token is not this lead's fault. Treating Slack's
+    definitive 'no' as ambiguous consumed a real lead per attempt — measured at 1-2 gold
+    leads destroyed per weekday while nothing was posted. The lead must go back."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    client = _RejectingClient("channel_not_found")
+    outcome = drip.run_drip(client, "C1", conn, force=True)
+    assert outcome.startswith("halt:") and "channel_not_found" in outcome
+    assert conn.execute("SELECT COUNT(*) FROM notification_outbox").fetchone()[0] == 0
+    assert len(db.nugget_candidates(conn, "C1")) == 1, "a good lead was consumed"
+
+
+def test_lead_specific_rejection_is_quarantined_not_released(tmp_path: Path) -> None:
+    """A card Slack refuses on its own merits must not be retried forever either."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    outcome = drip.run_drip(_RejectingClient("msg_too_long"), "C1", conn, force=True)
+    assert outcome.startswith("skip:") and "msg_too_long" in outcome
+    assert conn.execute(
+        "SELECT state FROM notification_outbox"
+    ).fetchone()["state"] == "rejected"
+    assert db.nugget_candidates(conn, "C1") == []
+    assert len(db.blocked_notifications(conn)) == 1
+
+
+def test_ambiguous_failure_still_burns_the_lead(tmp_path: Path) -> None:
+    """The distinction is the invariant: ambiguous KEEPS the reservation (a duplicate is
+    worse than a lost lead), definitive rejection releases it."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    assert drip.run_drip(_SlackClient(fail=True), "C1", conn, force=True).startswith(
+        "unknown:"
+    )
+    assert conn.execute(
+        "SELECT state FROM notification_outbox"
+    ).fetchone()["state"] == "unknown"
+    assert db.nugget_candidates(conn, "C1") == []
+
+
+def test_unrenderable_lead_is_quarantined_and_the_next_one_posts(tmp_path: Path) -> None:
+    """The renderers raise BEFORE any reservation exists, so nothing recorded the
+    failure: the same top-ranked lead was re-picked every tick, the tick crashed with a
+    traceback only cron.log saw, and the product went silent permanently."""
+    conn = db.connect(tmp_path / "t.db")
+    bad = _mk_lead(conn, iid="BAD", entity="Good District", amount=900_000.0,
+                   start="2025-10-10", end="2028-09-30", backfill=True)
+    _mk_lead(conn, iid="OK", entity="Next District", amount=400_000.0,
+             start="2025-10-10", end="2028-09-30", backfill=True)
+    # '***' sanitizes to an empty entity, so build_nugget raises.
+    conn.execute("UPDATE leads SET entity_name='***' WHERE id=?", (bad,))
+    conn.commit()
+    client = _SlackClient()
+    first = drip.run_drip(client, "C1", conn, force=True)
+    assert first.startswith("skip:") and "cannot be rendered" in first
+    assert client.calls == 0
+    assert conn.execute(
+        "SELECT state FROM notification_outbox"
+    ).fetchone()["state"] == "unrenderable"
+    second = drip.run_drip(client, "C1", conn, force=True)
+    assert second.startswith("posted") and "Next District" in second
+
+
+def test_a_playground_reservation_does_not_burn_a_production_lead(
+    tmp_path: Path,
+) -> None:
+    """Both exclusions are audience-scoped, so testing in one channel cannot silently
+    consume the other channel's inventory."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    assert drip.run_drip(_SlackClient(fail=True), "PLAYGROUND", conn,
+                         force=True).startswith("unknown:")
+    assert db.nugget_candidates(conn, "PLAYGROUND") == []
+    assert len(db.nugget_candidates(conn, "PRODUCTION")) == 1
+
+
+def test_allowlist_uses_exact_match_for_constant_state_sources() -> None:
+    """Prefix-matching a constant-state source would trust a future 'webs-inferred'
+    purely because of how it was named — the exact failure the allowlist prevents."""
+    assert territory.state_is_verified("webs")
+    assert not territory.state_is_verified("webs-inferred")
+    assert not territory.state_is_verified("sam.gov-scraped")
+    assert not territory.state_is_verified("ca-grants-portal-mirror")
+    # Namespaced sources still match by prefix, because the suffix legitimately varies.
+    assert territory.state_is_verified("usaspending:16.710")
+    assert territory.state_is_verified("ca-grants-award:2023-2024")

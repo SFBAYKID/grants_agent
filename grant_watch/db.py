@@ -713,8 +713,18 @@ def finish_notification(
     slack_ts: str = "",
     error: str = "",
 ) -> None:
-    """Finalize a reserved Slack delivery as delivered or unknown."""
-    if state not in {"delivered", "unknown"}:
+    """Finalize a reserved Slack delivery.
+
+    States: `delivered` (confirmed), `unknown` (ambiguous — may or may not have landed,
+    never auto-retried), `rejected` (Slack answered and refused THIS card, so it
+    provably did not land and must not be retried), `unrenderable` (the card could not
+    be built from the lead's data at all — no Slack call was ever made).
+
+    `rejected` and `unrenderable` are durable quarantines: the lead stays excluded from
+    the candidate queries, but the row records WHY, so `cli drip-blocked` can show a
+    human what was set aside instead of it vanishing silently.
+    """
+    if state not in {"delivered", "unknown", "rejected", "unrenderable"}:
         raise ValueError(f"unsupported notification state '{state}'")
     with conn:
         conn.execute(
@@ -722,6 +732,81 @@ def finish_notification(
                SET state=?,slack_ts=?,last_error=?,updated_at=? WHERE delivery_key=?""",
             (state, slack_ts or None, error or None, _now(), delivery_key),
         )
+
+
+def release_notification(conn: sqlite3.Connection, delivery_key: str) -> None:
+    """Delete a reservation for a card that provably did NOT reach Slack.
+
+    Used only when Slack answered and refused (HTTP 200 + an error code): the message
+    did not land, so the lead must go back in the pool rather than be consumed. Leaving
+    the row would permanently destroy a good lead — measured behavior before this
+    existed was 1-2 gold leads burned per weekday under a revoked token, with nothing
+    posted and nothing reported.
+    """
+    with conn:
+        conn.execute(
+            "DELETE FROM notification_outbox WHERE delivery_key=?", (delivery_key,)
+        )
+
+
+def quarantine_lead(
+    conn: sqlite3.Connection,
+    lead_id: int,
+    event_id: int | None,
+    channel: str,
+    delivery_class: str,
+    reason: str,
+) -> str:
+    """Durably set a lead aside when its card cannot be built at all.
+
+    The renderers raise before any Slack call, so no reservation exists to finalize —
+    which meant the picker chose the same unrenderable lead on every tick, crashed, and
+    silenced the product permanently while writing nothing anywhere. Recording the
+    failure as an outbox row makes the existing exclusion do the work AND leaves an
+    operator-visible trace of what was dropped and why.
+    """
+    delivery_key = f"{channel}:lead:{lead_id}:event:{event_id or 'projection'}"
+    now = _now()
+    with conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO notification_outbox
+                 (delivery_key,event_id,lead_id,audience,delivery_class,payload_json,
+                  state,attempts,available_at,created_at,updated_at,last_error)
+               VALUES (?,?,?,?,?,?, 'unrenderable',0,?,?,?,?)""",
+            (
+                delivery_key,
+                event_id,
+                lead_id,
+                channel,
+                delivery_class,
+                "{}",
+                now,
+                now,
+                now,
+                reason[:500],
+            ),
+        )
+    return delivery_key
+
+
+def blocked_notifications(
+    conn: sqlite3.Connection, channel: str = ""
+) -> list[sqlite3.Row]:
+    """Leads set aside and never delivered — the operator-visible failure surface.
+
+    Every non-delivered outbox row is a lead permanently excluded from the pool. With no
+    way to list them, silent inventory loss looks identical to a quiet week.
+    """
+    sql = """SELECT o.id, o.delivery_key, o.lead_id, o.audience, o.state, o.last_error,
+                    o.created_at, o.updated_at, l.entity_name, l.state AS lead_state
+             FROM notification_outbox o
+             LEFT JOIN leads l ON l.id = o.lead_id
+             WHERE o.state != 'delivered'"""
+    params: tuple[str, ...] = ()
+    if channel:
+        sql += " AND o.audience=?"
+        params = (channel,)
+    return list(conn.execute(sql + " ORDER BY o.created_at DESC, o.id DESC", params))
 
 
 def find_post_by_ts(

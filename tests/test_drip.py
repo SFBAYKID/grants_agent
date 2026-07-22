@@ -364,7 +364,7 @@ def test_bulletin_uses_opportunity_title(tmp_path: Path) -> None:
         end="2026-08-04",
         title="FY26 School Violence Prevention Program",
     )
-    row = db.bulletin_candidates(conn)[0]
+    row = db.bulletin_candidates(conn, "C1")[0]
     text, style = drip.build_bulletin(row)
     assert "FY26 School Violence Prevention Program" in text
     assert (
@@ -389,7 +389,7 @@ def test_rfp_alert_is_short_human_and_actionable(tmp_path: Path) -> None:
     """The RFP alert names the entity, the subject, the deadline, and Chase's CTA."""
     conn = db.connect(tmp_path / "t.db")
     _mk_rfp(conn)
-    row = db.rfp_candidates(conn)[0]
+    row = db.rfp_candidates(conn, "C1")[0]
     text, style = drip.build_rfp_alert(row)
     assert style == "rfp-open"
     assert text.startswith("City of Kemah has an open RFP for security cameras")
@@ -401,7 +401,7 @@ def test_rfp_alert_names_cameras_and_access_control(tmp_path: Path) -> None:
     """A dual-scope RFP is described as both."""
     conn = db.connect(tmp_path / "t.db")
     _mk_rfp(conn, title="Access Control and Video Surveillance Camera System RFP")
-    text, _ = drip.build_rfp_alert(db.rfp_candidates(conn)[0])
+    text, _ = drip.build_rfp_alert(db.rfp_candidates(conn, "C1")[0])
     assert "security cameras and access control" in text
 
 
@@ -465,7 +465,7 @@ def test_needs_testing_event_cannot_enter_proactive_notifications(
         (lead_id,),
     )
     conn.commit()
-    assert db.nugget_candidates(conn) == []
+    assert db.nugget_candidates(conn, "C1") == []
     assert drip.pick(conn, "C1") is None
 
 
@@ -568,7 +568,7 @@ def test_california_opportunity_can_become_bulletin(tmp_path: Path) -> None:
         end="2026-08-04",
         title="School Security Grant",
     )
-    row = db.bulletin_candidates(conn)[0]
+    row = db.bulletin_candidates(conn, "C1")[0]
     text, style = drip.build_bulletin(row)
     assert text == "School Security Grant is listed as open through 2026-08-04."
     assert style == "bulletin-open"
@@ -787,7 +787,7 @@ def test_backfilled_gold_award_still_reaches_the_daily_card(tmp_path: Path) -> N
     assert conn.execute(
         "SELECT suppressed FROM funding_events"
     ).fetchone()["suppressed"] == 1, "fixture must reproduce the suppressed shape"
-    assert len(db.nugget_candidates(conn)) == 1
+    assert len(db.nugget_candidates(conn, "C1")) == 1
     kind, row = drip.pick(conn, "C1")
     assert kind == "nugget"
     assert row["entity_name"] == "Montebello Unified School District"
@@ -811,7 +811,7 @@ def test_nugget_never_repeats_an_already_posted_lead(tmp_path: Path) -> None:
     db.record_post(conn, "nugget", lead_id, "C1", "1.0", "award-brief")
     conn.execute("UPDATE leads SET status='new' WHERE id=?", (lead_id,))
     conn.commit()
-    assert db.nugget_candidates(conn) == []
+    assert db.nugget_candidates(conn, "C1") == []
 
 
 def test_sibling_rfps_do_not_render_as_the_same_card(tmp_path: Path) -> None:
@@ -833,7 +833,7 @@ def test_sibling_rfps_do_not_render_as_the_same_card(tmp_path: Path) -> None:
             title="SCI Pine Grove - Control Room, Security Cameras and Other Facility "
                   "Upgrades - Plumbing Construction *REBID*",
             url="https://starbridge.ai/rfp/sci-pine-grove-plumbing")
-    rendered = {drip.build_rfp_alert(row)[0] for row in db.rfp_candidates(conn)}
+    rendered = {drip.build_rfp_alert(row)[0] for row in db.rfp_candidates(conn, "C1")}
     assert len(rendered) == 2, f"cards are indistinguishable: {rendered}"
     # The DISCRIMINATING words must survive shortening, not just the shared prefix.
     assert any("HVAC" in text for text in rendered), rendered
@@ -846,7 +846,7 @@ def test_rfp_card_stays_one_readable_sentence(tmp_path: Path) -> None:
     _mk_rfp(conn, iid="LONG", title=(
         "Video Surveillance Camera Systems and Related Electronic Security "
         "Infrastructure Replacement Program for Multiple Municipal Facilities"))
-    text, _ = drip.build_rfp_alert(db.rfp_candidates(conn)[0])
+    text, _ = drip.build_rfp_alert(db.rfp_candidates(conn, "C1")[0])
     assert "…" in text and text.endswith("Anybody want to talk?")
     assert len(text) < 260
     assert "  " not in text
@@ -888,7 +888,7 @@ def test_award_card_spells_out_a_state_beyond_the_original_five(
     _mk_lead(conn, iid="TX1", start="2025-10-10", end="2028-09-30")
     conn.execute("UPDATE leads SET state='TX' WHERE source_item_id='TX1'")
     conn.commit()
-    text, _ = drip.build_nugget(db.nugget_candidates(conn)[0])
+    text, _ = drip.build_nugget(db.nugget_candidates(conn, "C1")[0])
     assert "in Texas has a verified" in text
 
 
@@ -943,7 +943,7 @@ def test_amountless_gold_lead_cannot_wedge_the_drip(tmp_path: Path) -> None:
              backfill=True)
     conn.execute("UPDATE leads SET lead_grade='gold' WHERE source_item_id='NOAMT'")
     conn.commit()
-    assert db.nugget_candidates(conn) == []
+    assert db.nugget_candidates(conn, "C1") == []
 
 
 def test_urgent_card_still_waits_for_the_band_to_open(tmp_path: Path) -> None:

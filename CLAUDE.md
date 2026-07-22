@@ -159,8 +159,12 @@ affect Chase's other projects.
   inverted band collapses to a single slot rather than silencing the card. `in_window()` is
   UNCHANGED (still 7am ET–5pm PT) and now only acts as the outer guard. Urgent/exceptional cards
   bypass the slot. Simulated: Mon 11:24, Tue 10:14, Wed 10:04, Thu 11:01, Fri 10:09 PT.
-- `verified` 2026-07-22 TWO CRITICAL DEFECTS found by architectural-critic review of the day's work,
-  both REPRODUCED against a real DB before fixing, both now fixed with tests proven to fail first.
+- `verified` 2026-07-22 TWO CRITICAL DEFECTS found by architectural-critic review, both REPRODUCED
+  against a real DB. CORRECTION (Chase, 2026-07-22): an earlier version of this entry said "both now
+  fixed" — that OVERCLAIMED. `85295d7` closed one member of the wedge CLASS (the reserved-but-
+  unconfirmed path) and left another live: the renderers raise BEFORE any reservation exists, so
+  nothing recorded the failure and the same lead was re-picked every tick. Both halves are fixed as
+  of the follow-up commit below. Rule 1 applies to status claims as much as to lead data.
   (C1) PERMANENT SILENT WEDGE: an ambiguous Slack send (5xx/ratelimit/timeout) leaves
   `notification_outbox` in state 'unknown' and is deliberately never retried — but the lead stayed
   `status='new'`, absent from `posts`, and still the winner of `_best_nugget`'s deterministic `max()`
@@ -188,6 +192,28 @@ affect Chase's other projects.
   mid-title bid number; (H6) no missed-slot backstop, so a 90-min outage costs the day; (M1) the
   posts-exclusion is global, so a playground post burns a production lead; (M2) no `last_seen`
   staleness filter; (M3) `salesforce_followups` bypasses drip's caps and uses UTC day boundaries.
+- `verified` 2026-07-22 SIX BLOCKERS from Chase's review of `85295d7`, all fixed before any push:
+  (1) DEFINITIVE Slack failures were classified as ambiguous. `SlackApiError` with HTTP 200
+  (`channel_not_found`, `invalid_auth`, `is_archived`, `msg_too_long`…) means Slack ANSWERED and the
+  message provably did NOT land — but the blanket handler marked it 'unknown', which after the
+  reservation-authoritative change PERMANENTLY consumed the lead. Under a revoked token that silently
+  destroyed 1–2 gold leads per weekday while posting nothing. Now split three ways: systemic errors
+  (channel/token) RELEASE the reservation and halt loudly with no lead consumed; lead-specific errors
+  quarantine as `rejected`; only genuine timeouts/5xx stay `unknown` (a duplicate is worse than a lost
+  lead). (2) RENDER failures now quarantine durably via `db.quarantine_lead` instead of crashing the
+  tick forever, and `cli drip-blocked` makes every set-aside lead visible — silent loss previously
+  looked identical to a quiet week. (3) BOTH candidate exclusions are now audience-scoped, so a
+  playground reservation can no longer consume production inventory. (4) `territory` now matches
+  constant-state sources EXACTLY (`webs`, `oregonbuys`, `sam.gov`, `ca-grants-portal`) and only
+  namespaced ones by prefix — `startswith` would have trusted a future `webs-inferred`.
+  (5) UNDATED awards are no longer GOLD (`scoring.py`). GOLD means "just got funding"; granting it on
+  the ABSENCE of a date graded on absent evidence and asserted a recency the source cannot support
+  (rule 1). This governs the ~347 undated `ca-grants-award` rows — still searchable and exportable as
+  SILVER, just not served as proactive GOLD. (6) this file's overclaim, corrected above.
+- `verified` 2026-07-22 DEPLOYMENT BASELINE CORRECTION (Chase): production runs `264b0e2`, NOT
+  `15263d2` — the 2026-07-22 deploy was verified with a bot restart. So the gold unblock, territory
+  tagging and H1/H2 are ALREADY LIVE, and the pending deploy is TWO commits, not six. An earlier
+  claim here and in the critic review said otherwise; that was wrong.
 - `verified` 2026-07-22 FLOOD BUG found by production-ops-guardian review of `264b0e2` AND FIXED
   (`grant_watch/slack/drip.py`, `db_engagement.py`). `record_post` runs AFTER
   `chat_postMessage`; if it raised (full disk — prod is at 97% — a lock, or a CHECK violation) the
