@@ -12,7 +12,7 @@ import requests
 from grant_watch import db, persequor_client
 from grant_watch.enrich.finder import verify_on_page
 from grant_watch.enrich.salesforce import SFMatch, distinctive_term
-from grant_watch.models import Lead, LeadGrade, RawItem
+from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem
 
 PAGE = """# Castle Rock School District — Staff Directory
 Superintendent: Dr. Jane Doe — jdoe@crschools.org — (360) 555-0100
@@ -101,6 +101,10 @@ def _lead_row(tmp_path: Path) -> tuple[sqlite3.Connection, sqlite3.Row]:
                 end="2028-09-30",
                 url="https://x.gov/a",
                 raw={},
+                # Production's usaspending poller sets this; omitting it made the
+                # fixture a `record_observed` row pretending to be an award.
+                event_type=FundingEventType.AWARD_OBLIGATED,
+                event_date="2025-10-10",
             ),
             grade=LeadGrade.GOLD,
         ),

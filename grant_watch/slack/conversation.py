@@ -171,8 +171,11 @@ enrollment or a reliable city field for non-school entities.
 DATE TRUTH RULES (non-negotiable):
 - discovered = when Grant first imported the record; never call it awarded/received.
 - opportunity_open/opportunity_close = Grants.gov application-window dates.
-- solicitation_posted/response_due = SILVER RFP dates.
-- spend_start/spend_end = GOLD award spending-window dates.
+- solicitation_posted/response_due = a SOLICITATION's (RFP) dates.
+- spend_start/spend_end = an AWARD's spending-window dates.
+- Date meaning follows the RECORD KIND (its funding event), never the grade. Grade is
+  only priority: a SILVER lead can be an award and a GOLD lead can be a solicitation.
+  Never call an award a solicitation, and never call a spend window a response deadline.
 - An unknown award-event date can never support "just," "recently," "landed," or
   "just received." Describe only the verified award record and its spend window.
 - The database does NOT store a verified funds-received date. If asked who

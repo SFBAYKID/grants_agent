@@ -141,9 +141,15 @@ def quarantine_lead(
     return delivery_key
 
 
-def _channel_guard_key(channel: str) -> str:
-    """The reserved delivery_key holding a channel-level block or backoff."""
-    return f"channel-guard:{channel}"
+def _channel_guard_key(channel: str, state: str = "blocked") -> str:
+    """The reserved delivery_key for one channel's guard OF ONE FAILURE CLASS.
+
+    Systemic blocks and rate-limit backoffs get SEPARATE rows. Sharing one row let a
+    30-second 429 overwrite an 8-hour systemic block AND inflate its consecutive-failure
+    counter — two unrelated failure classes corrupting each other's escalation.
+    """
+    suffix = "backoff" if state == "backoff" else "blocked"
+    return f"channel-guard:{suffix}:{channel}"
 
 
 def set_channel_guard(
@@ -155,10 +161,12 @@ def set_channel_guard(
 ) -> None:
     """Record a channel-wide condition that must stop the drip for this audience.
 
-    `state='blocked'` is a persistent operator-cleared stop, used when Slack tells us
-    the CHANNEL or the CREDENTIALS are wrong (`channel_not_found`, `invalid_auth`, …).
-    Retrying cannot help, and every retry previously burned a lead. `state='backoff'`
-    is self-clearing at `available_at`, used for rate limiting.
+    Both states are TIME BOUNDED and expire at `available_at`; neither waits on a human.
+    `state='blocked'` follows a systemic Slack failure (`channel_not_found`,
+    `invalid_auth`, …) and escalates 1h→2h→4h→8h, because retrying cannot help and every
+    retry previously burned a lead. `state='backoff'` holds for Slack's Retry-After.
+    They occupy SEPARATE rows so a short rate-limit cannot overwrite or shorten a long
+    systemic block. `cli drip-unblock` only resumes sooner than the expiry.
 
     Stored as a `notification_outbox` row with a NULL `lead_id`, so it is invisible to
     the candidate exclusions AND to `delivery_attempts_today` (both require
@@ -175,6 +183,7 @@ def set_channel_guard(
     if state not in {"blocked", "backoff"}:
         raise ValueError(f"unsupported channel guard state '{state}'")
     now = _now()
+    key = _channel_guard_key(channel, state)
     with conn:
         conn.execute(
             """INSERT INTO notification_outbox
@@ -186,7 +195,7 @@ def set_channel_guard(
                  updated_at=excluded.updated_at, last_error=excluded.last_error,
                  attempts=notification_outbox.attempts+1""",
             (
-                _channel_guard_key(channel),
+                key,
                 channel,
                 state,
                 available_at or now,
@@ -208,14 +217,22 @@ def channel_guard(conn: sqlite3.Connection, channel: str) -> sqlite3.Row | None:
     Reads must not mutate. Clearing a stale row belongs on an explicitly writable path
     (`clear_channel_guard`, called after a successful post or by `cli drip-unblock`).
     """
+    now = _now()
     return conn.execute(
         """SELECT * FROM notification_outbox
-           WHERE delivery_key=? AND available_at > ?""",
-        (_channel_guard_key(channel), _now()),
+           WHERE delivery_key IN (?,?) AND available_at > ?
+           ORDER BY available_at DESC LIMIT 1""",
+        (
+            _channel_guard_key(channel, "blocked"),
+            _channel_guard_key(channel, "backoff"),
+            now,
+        ),
     ).fetchone()
 
 
-def channel_guard_any(conn: sqlite3.Connection, channel: str) -> sqlite3.Row | None:
+def channel_guard_any(
+    conn: sqlite3.Connection, channel: str, state: str = "blocked"
+) -> sqlite3.Row | None:
     """Return the channel's guard row REGARDLESS of expiry. Pure read.
 
     `channel_guard` filters to active guards; this one is for the write path, which
@@ -224,7 +241,7 @@ def channel_guard_any(conn: sqlite3.Connection, channel: str) -> sqlite3.Row | N
     """
     return conn.execute(
         "SELECT * FROM notification_outbox WHERE delivery_key=?",
-        (_channel_guard_key(channel),),
+        (_channel_guard_key(channel, state),),
     ).fetchone()
 
 
@@ -232,8 +249,11 @@ def clear_channel_guard(conn: sqlite3.Connection, channel: str) -> bool:
     """Remove a channel guard. Returns whether one was present."""
     with conn:
         cur = conn.execute(
-            "DELETE FROM notification_outbox WHERE delivery_key=?",
-            (_channel_guard_key(channel),),
+            "DELETE FROM notification_outbox WHERE delivery_key IN (?,?)",
+            (
+                _channel_guard_key(channel, "blocked"),
+                _channel_guard_key(channel, "backoff"),
+            ),
         )
     return cur.rowcount > 0
 
@@ -247,7 +267,8 @@ def blocked_notifications(
     way to list them, silent inventory loss looks identical to a quiet week.
     """
     sql = """SELECT o.id, o.delivery_key, o.lead_id, o.audience, o.state, o.last_error,
-                    o.created_at, o.updated_at, l.entity_name, l.state AS lead_state
+                    o.available_at, o.created_at, o.updated_at,
+                    l.entity_name, l.state AS lead_state
              FROM notification_outbox o
              LEFT JOIN leads l ON l.id = o.lead_id
              WHERE o.state != 'delivered'"""

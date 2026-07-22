@@ -13,6 +13,8 @@ create-only.
 from __future__ import annotations
 
 import re
+
+from ..record_semantics import RecordKind, semantics_for
 import sqlite3
 import uuid
 from collections.abc import Callable
@@ -69,14 +71,32 @@ def _amount_text(row: sqlite3.Row) -> str:
 
 
 def _grant_summary(row: sqlite3.Row) -> str:
-    """One honest sentence describing the grant behind this record."""
+    """One honest sentence describing the record behind this Salesforce note.
+
+    Wording follows the record kind, never the grade. This note is CREATE-ONLY and
+    permanent: describing a solicitation's response deadline as an award's spend window
+    would write a false fact into the CRM the reps trust, with no way to correct it.
+    """
     program = str(row["program"] or "unlabeled program")
-    window = f"{row['funds_start'] or 'unknown'} to {row['funds_end'] or 'unknown'}"
+    meaning = semantics_for(row)
     source = str(row["detail_url"] or "not provided")
-    return (
-        f"{_amount_text(row)} {program} grant; spend window {window}. "
-        f"Grant source {source}."
-    )
+    window = f"{row['funds_start'] or 'unknown'} to {row['funds_end'] or 'unknown'}"
+    if meaning.asserts_award:
+        return (
+            f"{_amount_text(row)} {program} grant; spend window {window}. "
+            f"Grant source {source}."
+        )
+    if meaning.kind is RecordKind.SOLICITATION:
+        return (
+            f"{program} solicitation; response due "
+            f"{row['funds_end'] or 'unknown'}. Source {source}."
+        )
+    if meaning.kind is RecordKind.FUNDING_OPPORTUNITY:
+        return (
+            f"{program} funding opportunity; applications {window}. "
+            f"Source {source}."
+        )
+    return f"{program} public funding record; dates unverified. Source {source}."
 
 
 _MONTHS = (
@@ -100,7 +120,14 @@ def _month_year(value: object) -> str:
 
 
 def _spend_window(row: sqlite3.Row) -> str:
-    """Human 'spend window Oct 2025 – Sep 2028' clause, or '' when unknown."""
+    """Human 'spend window Oct 2025 – Sep 2028' clause, or '' when unverifiable.
+
+    Returns '' unless the record IS an award — a solicitation has no spend window, and
+    labelling its response deadline as one is a permanent false CRM fact.
+    """
+    meaning = semantics_for(row)
+    if not meaning.asserts_award:
+        return ""
     start, end = _month_year(row["funds_start"]), _month_year(row["funds_end"])
     if start and end:
         return f"spend window {start} – {end}"
@@ -113,7 +140,8 @@ def _spend_window(row: sqlite3.Row) -> str:
 
 def _grant_headline(row: sqlite3.Row) -> str:
     """Compact 'SVPP · $500,000 · spend window Oct 2025 – Sep 2028' summary line."""
-    parts = [str(row["program"] or "grant"), _amount_text(row)]
+    meaning = semantics_for(row)
+    parts = [str(row["program"] or meaning.noun), _amount_text(row)]
     window = _spend_window(row)
     if window:
         parts.append(window)
@@ -556,9 +584,10 @@ def prepare_contact_record(
     from .. import db
 
     validate_action_context(workspace, channel, thread_ts, requester)
-    lead = conn.execute(
-        "SELECT * FROM leads WHERE id=?", (int(lead_id),)
-    ).fetchone()
+    # JOINED, not a bare `leads` row: the note and headline derive their wording from
+    # `current_event_type` (record_semantics), and a bare row would degrade every real
+    # award to "dates unverified" in a permanent, create-only CRM record.
+    lead = db.get_lead(conn, int(lead_id))
     if lead is None:
         raise ValueError(f"unknown or stale Grant lead {lead_id}")
     _rerun_guard(conn, int(lead_id))

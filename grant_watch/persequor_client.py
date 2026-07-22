@@ -29,6 +29,7 @@ from typing import TypedDict
 import requests
 
 from .presentation import display_entity_name, strip_leading_honorifics
+from .record_semantics import semantics_for
 
 REPS_PATH = Path(__file__).resolve().parent.parent / "config" / "reps.json"
 DEFAULT_API = "http://127.0.0.1:8002"
@@ -48,6 +49,7 @@ class OutreachBrief(TypedDict):
     amount_usd: int | None
     window_start: str | None
     window_end: str | None
+    window_meaning: str  # what those dates MEAN: spend window / response deadline / …
     source_url: str | None
     requested_by_slack: str
     send_as: str
@@ -76,44 +78,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _event_type(row: sqlite3.Row) -> str:
-    """Read `current_event_type`, tolerating a row that was not joined to its event.
-
-    Both production callers pass a `db.get_lead` row, which joins `funding_events`. A
-    caller that passes a bare `leads` row gets "" and therefore the conservative
-    wording — never a crash, and never a claim the row cannot support. Deliberately NOT
-    a fallback to `lead_grade`: that inference is the bug this replaced.
-    """
-    try:
-        return str(row["current_event_type"] or "")
-    except (IndexError, KeyError):
-        return ""
-
-
 def _angle(row: sqlite3.Row) -> str:
     """Describe only the funding state the canonical lead projection proves.
 
-    Derived from the EVENT TYPE, never from `lead_grade`. Grade encodes how good a lead
-    is; event type encodes what actually happened — and the two came apart on
-    2026-07-22, when undated California awards were correctly regraded GOLD→SILVER.
-    Under the old grade-driven wording every one of those ~351 districts would have been
-    described to Persequor as having "published a solicitation", with its award
-    SPEND-WINDOW end relabelled a "response deadline". Both false, in an email to a
-    school administrator — Constitution rule 1 on the one path that reaches a stranger.
-    `search_presentation.grade_phrases()` already learned this; this function had not.
+    Delegates to `record_semantics`, which derives meaning from `current_event_type`
+    and never from `lead_grade`. Grade is a priority signal; it cannot say what
+    happened. See that module's header for the incident this prevents.
     """
-    event_type = _event_type(row)
-    if event_type == "rfp_posted":
-        return "published solicitation with a response window in the source record"
-    if event_type in {"award_announced", "award_obligated"}:
-        return "recorded funding award with a spend window in the source record"
-    if event_type == "application_window_opened":
-        return (
-            "published funding opportunity; application dates are in the source record"
-        )
-    # Unknown or missing event type: assert nothing about awards, solicitations, or
-    # deadlines. A vague-but-true angle is always preferable to a confident wrong one.
-    return "public funding signal; confirm status and fit before outreach"
+    return semantics_for(row).angle
 
 
 def rep_email_for(slack_id: str) -> str | None:
@@ -185,6 +157,7 @@ def build_brief(
             f"[TEST MODE — send to {test_email} only; {real_desc}] " + notes
         ).strip()
 
+    _meaning = semantics_for(row)
     return {
         "schema": "outreach-request.v1",
         "request_id": request_id or f"grant-{row['id']}-{uuid.uuid4().hex[:12]}",
@@ -193,8 +166,12 @@ def build_brief(
         "state": row["state"] or "",
         "program": row["program"] or "",
         "amount_usd": int(round(row["amount"])) if row["amount"] else None,
-        "window_start": row["funds_start"] or None,
-        "window_end": row["funds_end"] or None,
+        # The window fields ship ONLY when the record kind gives them a stateable
+        # meaning. Previously the preview omitted a date the payload still sent, so the
+        # draft a human approved and the brief Persequor wrote from disagreed.
+        "window_start": (row["funds_start"] or None) if _meaning.asserts_dates else None,
+        "window_end": (row["funds_end"] or None) if _meaning.asserts_dates else None,
+        "window_meaning": _meaning.window_noun or "unknown",
         "source_url": row["current_event_source_url"] or row["detail_url"] or None,
         "requested_by_slack": requested_by_slack,
         "send_as": send_as,
@@ -203,7 +180,7 @@ def build_brief(
         "contact_title": real_title or None,
         "angle": _angle(row),
         "rep_notes": notes or None,
-        "expires_at": row["funds_end"] or None,  # critic M4: no stale-facts sends
+        "expires_at": (row["funds_end"] or None) if _meaning.asserts_dates else None,
         # WHERE the conversation lives — so Persequor renders its approval card as a
         # reply IN Grant's lead thread, not loose in the channel (Chase, 2026-07-14).
         "slack_channel": slack_channel,

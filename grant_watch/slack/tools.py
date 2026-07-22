@@ -253,9 +253,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "name": "search_leads",
         "description": "Read-only search of Grant's indexed database. Date meanings are "
         "strict: discovered is Grant's import date; opportunity_open/close "
-        "is Grants.gov; solicitation_posted/response_due is an RFP; "
-        "spend_start/end is a GOLD award's spend window. Award received "
-        "dates are not stored and must never be inferred.",
+        "is a funding opportunity; solicitation_posted/response_due is a "
+        "SOLICITATION (RFP); spend_start/end is an AWARD's spend window. "
+        "Date meaning follows the record kind, NEVER the grade — a silver "
+        "lead can be an award. Award received dates are not stored and must "
+        "never be inferred.",
         "input_schema": {
             "type": "object",
             "properties": {

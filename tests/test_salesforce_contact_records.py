@@ -14,7 +14,7 @@ from grant_watch.enrich import salesforce
 from grant_watch.enrich import salesforce_campaign_gateway as gateway_mod
 from grant_watch.enrich import salesforce_campaigns as campaigns
 from grant_watch.enrich import salesforce_contact_records as records
-from grant_watch.models import Lead, LeadGrade, RawItem
+from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem
 
 LEAD_SF_ID = "00Q000000000777"
 ACCOUNT_ID = "001000000000001"
@@ -112,6 +112,10 @@ def _lead_row(
                 end="2027-12-31",
                 url=f"https://source.test/{item_id}",
                 raw={},
+                # A "security award" fixture must carry an AWARD event. Without it this
+                # was a `record_observed` row asserting an award's spend window.
+                event_type=FundingEventType.AWARD_OBLIGATED,
+                event_date="2026-01-05",
             ),
             grade=LeadGrade.GOLD,
         ),

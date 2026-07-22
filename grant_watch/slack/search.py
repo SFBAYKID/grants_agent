@@ -77,6 +77,9 @@ _SEARCH_CTE = """WITH searchable_leads AS (
 )"""
 
 
+from ..record_semantics import semantics_for  # noqa: E402
+
+
 class RecordKind(str, Enum):
     """Canonical record meanings exposed to Slack search."""
 
@@ -331,14 +334,7 @@ def _date_clause(
 
 def _record_kind_for_row(row: sqlite3.Row) -> str:
     """Derive display/export meaning from the evidence-backed current event."""
-    event_type = str(row["current_event_type"] or "")
-    if event_type in {"award_announced", "award_obligated"}:
-        return RecordKind.AWARD.value
-    if event_type == "application_window_opened":
-        return RecordKind.FUNDING_OPPORTUNITY.value
-    if event_type == "rfp_posted":
-        return RecordKind.SOLICITATION.value
-    return "watch"
+    return semantics_for(row).kind.value
 
 
 def _export_kind(raw: str | bool) -> str:

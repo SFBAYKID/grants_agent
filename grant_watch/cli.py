@@ -180,16 +180,16 @@ def cmd_drip(force: bool, dry_run: bool) -> int:
 
 # Drip outcomes that mean "a human should look at this". Everything else — a skip for
 # the cap, the slot, or an empty pool — is a normal tick.
-FAILING_DRIP_OUTCOMES = ("unknown:", "blocked:", "error:")
+FAILING_DRIP_OUTCOMES = ("unknown:", "blocked:", "error:", "quarantined:")
 
 
 def cmd_drip_unblock(channel: str) -> int:
     """Clear a channel-level block after an operator has fixed Slack.
 
     A systemic Slack failure (`channel_not_found`, `invalid_auth`, …) blocks the channel
-    deliberately, because retrying every 30 minutes cannot help and used to consume a
-    lead each time. Resuming is a human decision, so it lives here rather than being
-    time-based."""
+    for an escalating 1h-8h period, because retrying every 30 minutes cannot help and
+    used to consume a lead each time. The guard expires on its own; this command only
+    resumes SOONER, once an operator knows Slack is fixed."""
     conn = db.connect()
     target = channel or primary_channel_id()
     if not target:

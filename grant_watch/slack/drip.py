@@ -531,6 +531,36 @@ def _systemic_backoff_minutes(attempts: int) -> int:
     )
 
 
+def _log_lead_quarantine(channel: str, lead_id: int, kind: str, reason: str) -> None:
+    """One structured line whenever a real lead is permanently set aside.
+
+    A quarantine destroys inventory just as surely as a channel block stops it, and it
+    used to report as a routine `skip:` with exit 0 — indistinguishable from a quiet
+    day. Same treatment as a block: structured line, and a non-zero exit via
+    `cli.FAILING_DRIP_OUTCOMES`.
+    """
+    print(
+        f"[drip][CRITICAL] lead_quarantined audience={channel} lead_id={lead_id} "
+        f"kind={kind} reason={reason}",
+        file=sys.stderr,
+    )
+
+
+def _incident_lapsed(prior: sqlite3.Row, now: datetime) -> bool:
+    """Whether a prior guard is stale enough to count as a FINISHED incident.
+
+    A guard is only cleared by a successful post, so a quiet stretch (empty pool, cap
+    spent, weekend) can leave an expired row behind indefinitely. Treat anything last
+    touched longer ago than the maximum backoff as a closed incident so the next failure
+    escalates from the beginning rather than inheriting a months-old count.
+    """
+    try:
+        last = datetime.fromisoformat(str(prior["updated_at"]))
+    except (TypeError, ValueError):
+        return True
+    return (now - last) > timedelta(minutes=_SYSTEMIC_BACKOFF_MAX_MINUTES)
+
+
 def _log_channel_block(
     channel: str, code: str, until: str, attempts: int, first_failure: str
 ) -> None:
@@ -641,9 +671,10 @@ def run_drip(
             kind,
             str(exc),
         )
+        _log_lead_quarantine(channel, int(row["id"]), kind, f"unrenderable: {exc}")
         return (
-            f"skip: lead #{row['id']} cannot be rendered as a {kind} card ({exc}); "
-            "quarantined and visible in `cli drip-blocked`"
+            f"quarantined: lead #{row['id']} cannot be rendered as a {kind} card "
+            f"({exc}); set aside and visible in `cli drip-blocked`"
         )
     # Hand the card to the rep who owns that state, then carry the source. Both lines
     # are separate blocks so the opening sentence still reads as one short human line.
@@ -706,11 +737,19 @@ def run_drip(
             # is made; a success clears the guard, a repeat renews it — and no lead is
             # consumed either way.
             db.release_notification(conn, delivery_key)
-            prior = db.channel_guard_any(conn, channel)
-            attempts = (int(prior["attempts"]) + 1) if prior is not None else 1
+            prior = db.channel_guard_any(conn, channel, "blocked")
+            now_iso = now.isoformat(timespec="seconds")
+            # A NEW incident starts fresh. Without this, a guard left behind by an
+            # outage months ago (never cleared, because clearing needs a successful
+            # post and the pool may simply have been empty) made an unrelated first
+            # failure inherit its count and jump straight to an 8-hour block.
+            continuing = prior is not None and not _incident_lapsed(prior, now)
+            attempts = (int(prior["attempts"]) + 1) if continuing else 1
             minutes = _systemic_backoff_minutes(attempts)
             until = (now + timedelta(minutes=minutes)).isoformat(timespec="seconds")
-            first_failure = str(prior["created_at"]) if prior is not None else until
+            # The FIRST line of an incident previously reported first_failure as the
+            # future unblock time — the one line an operator greps for was the wrong one.
+            first_failure = str(prior["created_at"]) if continuing else now_iso
             db.set_channel_guard(conn, channel, "blocked", code, available_at=until)
             _log_channel_block(channel, code, until, attempts, first_failure)
             return (
@@ -720,9 +759,10 @@ def run_drip(
             )
         if code in _CONTENT_SLACK_ERRORS:
             db.finish_notification(conn, delivery_key, "rejected", error=code)
+            _log_lead_quarantine(channel, int(row["id"]), kind, f"rejected: {code}")
             return (
-                f"skip: Slack rejected this card ({code}); lead #{row['id']} "
-                "quarantined and visible in `cli drip-blocked`"
+                f"quarantined: Slack rejected this card ({code}); lead #{row['id']} "
+                "set aside and visible in `cli drip-blocked`"
             )
         # UNRECOGNIZED code. We do not know what went wrong, and not knowing is not
         # evidence that the lead is unusable — so it must NOT be quarantined. Release it

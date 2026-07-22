@@ -10,6 +10,8 @@ honest") that pin a URL to THE award being shown whenever the source allows.
 from __future__ import annotations
 
 import re
+
+from ..record_semantics import semantics_for
 import sqlite3
 import urllib.parse
 
@@ -18,22 +20,12 @@ def window_label(row: sqlite3.Row) -> str:
     """Describe stored dates according to the row's verified record meaning."""
     start = row["funds_start"] or "?"
     end = row["funds_end"] or "?"
-    event_type = str(row["current_event_type"] or "")
-    event_date = str(row["current_event_occurred_on"] or "")
-    if event_type in {"award_announced", "award_obligated"}:
-        prefix = f"award event {event_date}; " if event_date else ""
-        return f"{prefix}spend window {start} through {end}"
-    if event_type == "application_window_opened":
-        return f"applications open {start}; close {end}"
-    if event_type == "rfp_posted":
-        return f"posted {event_date or start}; response due {end}"
-    if row["lead_grade"] == "gold":
-        return f"spend window {start} through {end}"
-    if row["source"] == "grants.gov":
-        return f"applications open {start}; close {end}"
-    if row["lead_grade"] == "silver":
-        return f"posted {start}; response due {end}"
-    return f"recorded window {start} through {end}"
+    # Meaning comes from the EVENT, never the grade. The grade fallbacks that used to
+    # live here rendered a silver AWARD as "posted …; response due …" — a false claim in
+    # every export's date_context column and every Slack search line.
+    return semantics_for(row).date_context(
+        start, end, str(row["current_event_occurred_on"] or "")
+    )
 
 
 # California's portal stores one dataset URL for every award row; the datastore
@@ -111,14 +103,7 @@ def record_link(row: sqlite3.Row) -> str:
 
 def entity_role_for_row(row: sqlite3.Row) -> str:
     """Distinguish a funding/posting agency from an actual award recipient."""
-    event_type = str(row["current_event_type"] or "")
-    if event_type == "application_window_opened":
-        return "funding agency"
-    if event_type == "rfp_posted":
-        return "posting organization"
-    if event_type in {"award_announced", "award_obligated"}:
-        return "award recipient"
-    return "organization"
+    return semantics_for(row).entity_role
 
 
 def contact_suffix(cell: list[object]) -> str:

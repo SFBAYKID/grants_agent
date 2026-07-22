@@ -160,7 +160,9 @@ def test_lead_specific_rejection_is_quarantined_not_released(tmp_path: Path) -> 
     conn = db.connect(tmp_path / "t.db")
     _mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
     outcome = drip.run_drip(_RejectingClient("msg_too_long"), "C1", conn, force=True)
-    assert outcome.startswith("skip:") and "msg_too_long" in outcome
+    # "quarantined:", not "skip:" — a destroyed lead must not read as a routine tick,
+    # and cli.FAILING_DRIP_OUTCOMES turns this into a non-zero exit.
+    assert outcome.startswith("quarantined:") and "msg_too_long" in outcome
     assert conn.execute(
         "SELECT state FROM notification_outbox"
     ).fetchone()["state"] == "rejected"
@@ -196,7 +198,7 @@ def test_unrenderable_lead_is_quarantined_and_the_next_one_posts(tmp_path: Path)
     conn.commit()
     client = _SlackClient()
     first = drip.run_drip(client, "C1", conn, force=True)
-    assert first.startswith("skip:") and "cannot be rendered" in first
+    assert first.startswith("quarantined:") and "cannot be rendered" in first
     assert client.calls == 0
     assert conn.execute(
         "SELECT state FROM notification_outbox"
@@ -355,6 +357,7 @@ def test_cmd_drip_exit_code_follows_the_real_outcome(
     assert outcome_of("blocked: channel is blocked (invalid_auth)") == 1
     assert outcome_of("unknown: Slack delivery could not be confirmed") == 1
     assert outcome_of("error: unrecognized code") == 1
+    assert outcome_of("quarantined: lead #4 cannot be rendered") == 1
     assert outcome_of("posted nugget (award-brief) for lead #1: X") == 0
     assert outcome_of("skip: daily cap reached (1)") == 0
 
@@ -368,7 +371,7 @@ def test_expired_guard_is_ignored_without_being_deleted(tmp_path: Path) -> None:
                          available_at="2000-01-01T00:00:00+00:00")
     assert db.channel_guard(conn, "C1") is None  # expired -> ignored by the query
     # ...but still present. Clearing belongs on an explicitly writable path.
-    assert db.channel_guard_any(conn, "C1") is not None
+    assert db.channel_guard_any(conn, "C1", "backoff") is not None
 
 
 def test_dry_run_leaves_the_database_unchanged_with_an_expired_guard(
@@ -437,3 +440,34 @@ def test_a_successful_post_clears_the_guard(tmp_path: Path) -> None:
                          available_at="2000-01-01T00:00:00+00:00")
     assert drip.run_drip(_SlackClient(), "C1", conn, force=True).startswith("posted")
     assert db.channel_guard_any(conn, "C1") is None
+
+
+def test_drip_blocked_renders_guards_and_leads_together(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """C-1 REGRESSION. `cli drip-blocked` crashed with IndexError the moment a guard
+    existed — `available_at` was missing from the projection while the renderer printed
+    it. The operator's only window into an outage failed during the outage, and the
+    crash also aborted before the quarantined-lead section, hiding those too.
+    Untested code: `cmd_drip_blocked` previously had zero coverage."""
+    from grant_watch import cli
+
+    path = tmp_path / "t.db"
+    conn = db.connect(path)
+    lead_id = _mk_lead(conn, iid="Q1", entity="Quarantined District",
+                       start="2025-10-10", end="2028-09-30", backfill=True)
+    db.quarantine_lead(conn, lead_id, None, "C1", "nugget", "unrenderable: no entity")
+    db.set_channel_guard(conn, "C1", "blocked", "invalid_auth",
+                         available_at="2099-01-01T00:00:00+00:00")
+    conn.close()
+    original = db.connect_readonly
+    db.connect_readonly = lambda *a, **k: db.connect(path)  # type: ignore[assignment]
+    try:
+        assert cli.cmd_drip_blocked() == 0
+    finally:
+        db.connect_readonly = original  # type: ignore[assignment]
+    out = capsys.readouterr().out
+    assert "CHANNEL GUARD" in out and "invalid_auth" in out
+    assert "holds_until=2099-01-01T00:00:00+00:00" in out
+    assert "drip-unblock" in out  # the remedy is named
+    assert "Quarantined District" in out, "a guard hid the quarantined leads"

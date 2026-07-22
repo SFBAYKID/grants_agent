@@ -192,6 +192,36 @@ affect Chase's other projects.
   mid-title bid number; (H6) no missed-slot backstop, so a 90-min outage costs the day; (M1) the
   posts-exclusion is global, so a playground post burns a production lead; (M2) no `last_seen`
   staleness filter; (M3) `salesforce_followups` bypasses drip's caps and uses UTC day boundaries.
+- `verified` 2026-07-22 THE ARCHITECTURAL FIX Chase ordered after the third review: record meaning was
+  derived INDEPENDENTLY in five places, two of them from `lead_grade`. Patching copies was producing
+  one new defect per round. Now there is ONE typed helper — `grant_watch/record_semantics.py` —
+  holding `RecordKind` + a frozen `RecordSemantics` per kind, derived ONLY from `current_event_type`.
+  **The rule: GRADE decides PRIORITY; EVENT TYPE decides WHAT HAPPENED. Never the reverse.**
+  All five consumers route through it: search/export `window_label` + `entity_role_for_row` +
+  `_record_kind_for_row`; the Persequor preview AND payload (from the SAME object, so the draft a
+  human approves can no longer disagree with the brief that writes the email — `build_brief` now also
+  ships an explicit `window_meaning` and omits window dates entirely when the kind cannot give them a
+  meaning); the model's own instructions in `conversation.py`/`tools.py`, which had been TEACHING the
+  false grade→date equation; and the permanent create-only Salesforce headline + note, whose lead row
+  is now JOINED (`db.get_lead`) rather than a bare `SELECT * FROM leads` that silently degraded every
+  real award. `record_observed` (migration 6's backfill shape) asserts nothing at all.
+  Also fixed this round: `cli drip-blocked` crashed on any guard (C-1, above); the conservative draft
+  branch LEAKED raw source keys (`seed:svpp_csv`) into outbound email; systemic blocks and 429
+  backoffs now use SEPARATE guard rows so a 30-second rate limit cannot overwrite an 8-hour block or
+  inflate its counter; a lapsed incident resets the escalation instead of inheriting a months-old
+  count; `first_failure` is the actual failure time, not the future unblock time; quarantines return
+  `quarantined:` (non-zero exit) with a structured `[drip][CRITICAL] lead_quarantined …` line instead
+  of reading as a routine `skip:`; stale comments describing the deleted operator-cleared semantics
+  are gone.
+  Cross-consumer truth tests in `tests/test_record_semantics.py` were PROVEN to fail against the
+  grade-driven behavior (4 failures) before being accepted, and the `drip-blocked` test was proven to
+  fail against the old projection. THREE test fixtures were found building "awards" with the default
+  `record_observed` event — the same fixture-realism defect that let the RFP-title bug ship — and now
+  set an explicit event type.
+  `needs-testing`: how many PRODUCTION rows land in the unknown branch. All 403 local leads carry
+  `record_observed`; if prod is similar, drafts for real awards became materially vaguer and the
+  remedy is an evidence-based backfill, NOT looser wording. Gated behind Chase's read-only production
+  aggregate — do not infer prod from the local DB, and do not backfill without that evidence.
 - `verified` 2026-07-22 C1/C2/H2/H1 from the second architectural-critic review, all fixed:
   **C1 (worst — a false claim in an OUTBOUND EMAIL).** `persequor_client._angle` and
   `slack/persequor.compose_draft` derived wording from `lead_grade`, not the event. When undated CA
@@ -212,9 +242,14 @@ affect Chase's other projects.
   capped at 8h, persisting blocked_until / error code / audience / first + latest failure / consecutive
   periods. Reads and dry-runs never mutate or clear it; after expiry exactly ONE attempt is made; a
   confirmed delivery clears it on the writable path; continued systemic failure renews it without
-  consuming a lead. `cmd_drip` exits non-zero while blocked, `cli drip-blocked` shows guards
-  SEPARATELY from leads (they previously printed as "lead #None"), and one structured
+  consuming a lead. `cmd_drip` exits non-zero while blocked, and one structured
   `[drip][CRITICAL] channel_blocked …` line is emitted per block period.
+  **CORRECTION (Chase, 2026-07-22):** the original version of this entry claimed as `verified` that
+  `cli drip-blocked` "shows guards SEPARATELY from leads". It did not — it CRASHED with `IndexError`
+  whenever a guard existed, because `available_at` was missing from the projection while the renderer
+  printed it. That claim was never executed. Labelling unrun behavior `verified` is exactly the
+  failure rule 1 exists to prevent, and it was in the file that is supposed to be the honest record.
+  Fixed and now genuinely `verified` by a test proven to fail against the old projection.
   NOT claimed: an independent external alert. No MAILTO is set on the droplet, no mail transport has
   been proven, reporting a Slack outage through Slack is not a report, and a keepalive grep is not an
   external alarm. Real alerting is separate, undone work.
