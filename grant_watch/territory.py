@@ -102,8 +102,8 @@ def owner_for_state(state: object) -> str | None:
 # Only sources whose state is a FACT may tag a human. For these, `state` is either the
 # API query filter the rows were requested under (usaspending) or a constant the poller
 # hardcodes because the source covers exactly one state (WEBS=WA, OregonBuys=OR,
-# SAM=WA place-of-performance, CA portal=CA). Anything not listed here is treated as
-# inferred and posts untagged.
+# CA portal=CA). Anything not listed here — including anything merely ASSUMED — is
+# treated as inferred and posts untagged.
 #
 # The excluded case is real and live: `rfp_aggregator._row_state` derives a state by
 # searching the row's prose for five state NAMES, so "Oregon City Schools, Ohio" reads
@@ -117,10 +117,17 @@ def owner_for_state(state: object) -> str | None:
 # `ca-grants-award:` hardcodes "CA".
 VERIFIED_STATE_SOURCE_PREFIXES: tuple[str, ...] = (
     "usaspending:",
-    "usaspending-subaward:",  # `assumed`: the recipient_locations filter is believed to
-    # bind the sub-recipient under subawards=true; not evidenced in code or a cited doc.
     "ca-grants-award:",
 )
+# DELIBERATELY ABSENT, and they must stay absent until someone evidences them:
+#   `usaspending-subaward:` — whether USAspending applies `recipient_locations` to the
+#       SUB-recipient (rather than the prime) when `subawards=true` is not established
+#       in our code and no doc is cited. NSGP subrecipients being in-state is a program
+#       expectation, not evidence.
+#   `sam.gov` — sam_gov.py's comment claims its hardcoded "WA" means place-of-
+#       performance, but the code just sends `"state": "WA"` with nothing citing SAM's
+#       semantics.
+# An ASSUMED provenance must fail closed: those sources post untagged until proven.
 # Constant-state sources: the whole source name is fixed, so these must match EXACTLY.
 # Prefix-matching them would trust a future `webs-national` or `sam.gov-scraped` purely
 # because of how it was named — the failure this allowlist exists to prevent.
@@ -129,7 +136,6 @@ VERIFIED_STATE_SOURCE_NAMES: frozenset[str] = frozenset(
         "ca-grants-portal",  # hardcodes "CA"
         "webs",  # hardcodes "WA"
         "oregonbuys",  # hardcodes "OR"
-        "sam.gov",  # hardcodes "WA"; `assumed` to mean place-of-performance
     }
 )
 
@@ -137,11 +143,12 @@ VERIFIED_STATE_SOURCE_NAMES: frozenset[str] = frozenset(
 def state_is_verified(source: object) -> bool:
     """Whether this source's `state` is evidence rather than inference.
 
-    NOTE none of the four constant-state names can currently produce a proactive card —
-    `rfp_candidates` hardcodes `source='rfp'`, `nugget_candidates` requires an award
-    event, and `bulletin_candidates` hardcodes grants.gov/ca-grants-portal. They are
-    listed so the classification stays complete as those queries change, not because
-    they fire today.
+    `ca-grants-portal` DOES reach production today — `bulletin_candidates` selects it
+    by name, so a California bulletin can and does carry a tag. (An earlier version of
+    this docstring claimed no constant-state source could post; that was wrong.)
+    `webs` and `oregonbuys` cannot currently produce a card, because `rfp_candidates`
+    hardcodes `source='rfp'` and `nugget_candidates` requires an award event; they are
+    classified anyway so the mapping stays complete as those queries change.
     """
     name = str(source or "")
     return name in VERIFIED_STATE_SOURCE_NAMES or name.startswith(

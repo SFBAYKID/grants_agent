@@ -145,8 +145,14 @@ def test_systemic_slack_rejection_releases_the_lead(tmp_path: Path) -> None:
     client = _RejectingClient("channel_not_found")
     outcome = drip.run_drip(client, "C1", conn, force=True)
     assert outcome.startswith("halt:") and "channel_not_found" in outcome
-    assert conn.execute("SELECT COUNT(*) FROM notification_outbox").fetchone()[0] == 0
+    # No LEAD-bearing row survives — the lead went back in the pool untouched.
+    assert conn.execute(
+        "SELECT COUNT(*) FROM notification_outbox WHERE lead_id IS NOT NULL"
+    ).fetchone()[0] == 0
     assert len(db.nugget_candidates(conn, "C1")) == 1, "a good lead was consumed"
+    # ...and the channel is now blocked so later ticks stop instead of repeating.
+    guard = db.channel_guard(conn, "C1")
+    assert guard is not None and guard["state"] == "blocked"
 
 
 def test_lead_specific_rejection_is_quarantined_not_released(tmp_path: Path) -> None:
@@ -222,3 +228,112 @@ def test_allowlist_uses_exact_match_for_constant_state_sources() -> None:
     # Namespaced sources still match by prefix, because the suffix legitimately varies.
     assert territory.state_is_verified("usaspending:16.710")
     assert territory.state_is_verified("ca-grants-award:2023-2024")
+
+
+# --------------------------------- channel guards, unknown codes, 429, dry-run honesty
+class _RateLimitedClient:
+    """Slack answering 429 with a Retry-After header."""
+
+    def __init__(self, retry_after: str = "45") -> None:
+        """Record the Retry-After value this client will answer with."""
+        self.retry_after, self.calls = retry_after, 0
+
+    def chat_postMessage(self, **kwargs: object) -> dict[str, str]:  # noqa: N802
+        """Raise the way slack_sdk does when rate-limited."""
+        self.calls += 1
+        response = _FakeResponse("ratelimited")
+        response.status_code = 429
+        response.headers = {"Retry-After": self.retry_after}
+        raise SlackApiError("ratelimited", response)
+
+
+def test_systemic_failure_blocks_the_channel_for_later_ticks(tmp_path: Path) -> None:
+    """A wrong channel or dead token must stop the drip, not fail identically every 30
+    minutes. Each repeat previously consumed a lead; now the first one blocks."""
+    conn = db.connect(tmp_path / "t.db")
+    for index in range(3):
+        _mk_lead(conn, iid=f"G{index}", entity=f"District {index}",
+                 amount=500_000.0 - index, start="2025-10-10", end="2028-09-30",
+                 backfill=True)
+    client = _RejectingClient("invalid_auth")
+    assert drip.run_drip(client, "C1", conn, force=True).startswith("halt:")
+    # Later ticks must not even attempt a post (force=False = a real cron tick).
+    for _ in range(3):
+        outcome = drip.run_drip(client, "C1", conn, force=False)
+        assert outcome.startswith("blocked:"), outcome
+    assert client.calls == 1, "blocked channel still called Slack"
+    assert len(db.nugget_candidates(conn, "C1")) == 3, "leads were consumed while blocked"
+    # An operator clears it explicitly; nothing time-based resumes a bad token.
+    assert db.clear_channel_guard(conn, "C1") is True
+    assert db.channel_guard(conn, "C1") is None
+
+
+def test_unknown_slack_error_code_releases_rather_than_quarantines(
+    tmp_path: Path,
+) -> None:
+    """Not knowing what went wrong is NOT evidence the lead is unusable. Only
+    explicitly allowlisted content errors may destroy inventory."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    outcome = drip.run_drip(_RejectingClient("some_new_slack_error"), "C1", conn,
+                            force=True)
+    assert outcome.startswith("error:") and "released, not quarantined" in outcome
+    assert conn.execute(
+        "SELECT COUNT(*) FROM notification_outbox WHERE lead_id IS NOT NULL"
+    ).fetchone()[0] == 0
+    assert len(db.nugget_candidates(conn, "C1")) == 1
+    assert db.channel_guard(conn, "C1") is None  # unknown != systemic
+
+
+def test_rate_limit_backs_off_without_consuming_a_lead(tmp_path: Path) -> None:
+    """429 is neither ambiguous nor this lead's fault. Respect Retry-After."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    client = _RateLimitedClient(retry_after="45")
+    outcome = drip.run_drip(client, "C1", conn, force=True)
+    assert outcome.startswith("backoff:") and "45s" in outcome
+    assert len(db.nugget_candidates(conn, "C1")) == 1, "a lead was consumed by a 429"
+    guard = db.channel_guard(conn, "C1")
+    assert guard is not None and guard["state"] == "backoff"
+    # A real tick holds rather than hammering the API.
+    assert drip.run_drip(client, "C1", conn, force=False).startswith("backoff:")
+    assert client.calls == 1
+
+
+def test_lapsed_backoff_clears_itself(tmp_path: Path) -> None:
+    """Unlike a block, a backoff is time-based and needs no operator."""
+    conn = db.connect(tmp_path / "t.db")
+    db.set_channel_guard(conn, "C1", "backoff", "ratelimited",
+                         available_at="2000-01-01T00:00:00+00:00")
+    assert db.channel_guard(conn, "C1") is None
+
+
+def test_dry_run_does_not_claim_a_quarantine_happened(tmp_path: Path) -> None:
+    """--dry-run writes NOTHING (CLAUDE.md), so it must not report that it did."""
+    conn = db.connect(tmp_path / "t.db")
+    bad = _mk_lead(conn, iid="BAD", start="2025-10-10", end="2028-09-30", backfill=True)
+    conn.execute("UPDATE leads SET entity_name='***' WHERE id=?", (bad,))
+    conn.commit()
+    outcome = drip.run_drip(None, "C1", conn, force=True, dry_run=True)
+    assert outcome.startswith("[dry-run]") and "WOULD quarantine" in outcome
+    assert conn.execute("SELECT COUNT(*) FROM notification_outbox").fetchone()[0] == 0
+
+
+def test_assumed_provenance_sources_fail_closed() -> None:
+    """`usaspending-subaward:` and `sam.gov` state semantics are ASSUMED, not evidenced,
+    so they must post untagged until someone proves them."""
+    assert not territory.state_is_verified("usaspending-subaward:97.008")
+    assert not territory.state_is_verified("sam.gov")
+    assert territory.mention_line("WA", "sam.gov") == ""
+    # ca-grants-portal DOES reach production via bulletin_candidates and stays verified.
+    assert territory.state_is_verified("ca-grants-portal")
+
+
+def test_failing_outcomes_return_nonzero_cli_status() -> None:
+    """A tick a human must look at cannot exit 0 — cron would swallow it."""
+    from grant_watch import cli
+
+    for outcome in ("unknown: …", "halt: …", "blocked: …", "error: …"):
+        assert outcome.startswith(cli.FAILING_DRIP_OUTCOMES), outcome
+    for outcome in ("skip: daily cap reached (1)", "posted nugget", "backoff: holding"):
+        assert not outcome.startswith(cli.FAILING_DRIP_OUTCOMES), outcome

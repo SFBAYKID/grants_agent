@@ -477,9 +477,9 @@ def pick(
     return None
 
 
-# Slack errors that describe the CHANNEL or the CREDENTIALS, not this particular card.
-# Retrying the same lead is pointless and consuming it is destructive, so the lead is
-# released and the failure is reported loudly instead.
+# Slack errors describing the CHANNEL or the CREDENTIALS, not this particular card.
+# Retrying cannot help and consuming a lead per attempt is destructive, so the lead is
+# released AND the channel is blocked until an operator clears it.
 _SYSTEMIC_SLACK_ERRORS = frozenset(
     {
         "channel_not_found",
@@ -491,9 +491,42 @@ _SYSTEMIC_SLACK_ERRORS = frozenset(
         "token_expired",
         "no_permission",
         "org_login_required",
-        "ratelimited",
+        "restricted_action",
     }
 )
+
+# Errors that are genuinely about THIS card's content — the only category permitted to
+# quarantine a lead. Deliberately an allowlist: an unrecognized code must never cost a
+# real lead, because "we do not know what went wrong" is not evidence that the lead is
+# unusable (Chase, 2026-07-22). Anything unlisted releases the lead instead.
+_CONTENT_SLACK_ERRORS = frozenset(
+    {
+        "msg_too_long",
+        "invalid_blocks",
+        "invalid_block_part",
+        "blocks_too_long",
+        "invalid_attachments",
+        "no_text",
+    }
+)
+
+
+_DEFAULT_RETRY_AFTER = 60  # Slack's documented minimum when the header is absent
+
+
+def _retry_after_seconds(exc: SlackApiError) -> int:
+    """Read Slack's Retry-After header, clamped to something a 30-min cron can honour.
+
+    Missing or unparseable headers fall back to a conservative default rather than
+    retrying immediately — the point of a backoff is to stop hammering the API.
+    """
+    headers = getattr(exc.response, "headers", None) or {}
+    raw = headers.get("Retry-After") or headers.get("retry-after") or ""
+    try:
+        seconds = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return _DEFAULT_RETRY_AFTER
+    return max(1, min(seconds, 3600))
 
 
 def _ambiguous(
@@ -521,6 +554,19 @@ def run_drip(
 ) -> str:
     """One cron tick: maybe post one thing. Returns a human-readable outcome."""
     now = datetime.now(timezone.utc)
+    # A channel-level guard stops the tick before anything else. `blocked` means Slack
+    # told us the channel or token is wrong and only an operator can clear it; without
+    # this, every 30-minute tick failed identically and (before the release fix) ate a
+    # lead each time. `backoff` self-clears once Slack's Retry-After has elapsed.
+    guard = db.channel_guard(conn, channel)
+    if guard is not None and not force:
+        state, reason = str(guard["state"]), str(guard["last_error"] or "")
+        if state == "blocked":
+            return (
+                f"blocked: this channel is blocked ({reason}); no post attempted. "
+                "Clear it with `cli drip-unblock` once Slack is fixed"
+            )
+        return f"backoff: holding until {guard['available_at']} ({reason})"
     choice = pick(conn, channel, now.date())
     if choice is None:
         return "skip: nothing new worth saying"
@@ -546,15 +592,19 @@ def run_drip(
         # product went silent permanently while writing nothing anywhere. Quarantine the
         # lead durably so the candidate exclusion skips it AND `cli drip-blocked` can
         # show a human what was set aside.
-        if not dry_run:
-            db.quarantine_lead(
-                conn,
-                int(row["id"]),
-                int(row["current_event_id"]) if row["current_event_id"] else None,
-                channel,
-                kind,
-                str(exc),
+        if dry_run:
+            return (
+                f"[dry-run] lead #{row['id']} cannot be rendered as a {kind} card "
+                f"({exc}); WOULD quarantine it (nothing was written)"
             )
+        db.quarantine_lead(
+            conn,
+            int(row["id"]),
+            int(row["current_event_id"]) if row["current_event_id"] else None,
+            channel,
+            kind,
+            str(exc),
+        )
         return (
             f"skip: lead #{row['id']} cannot be rendered as a {kind} card ({exc}); "
             "quarantined and visible in `cli drip-blocked`"
@@ -591,30 +641,52 @@ def run_drip(
             unfurl_media=False,
         )
     except SlackApiError as exc:
+        status = getattr(exc.response, "status_code", None)
+        # RATE LIMITED. Not ambiguous and not this lead's fault: Slack is telling us to
+        # wait. Release the lead and persist a backoff so later ticks honour Retry-After
+        # instead of hammering the API and burning inventory one card per tick.
+        if status == 429:
+            db.release_notification(conn, delivery_key)
+            retry_after = _retry_after_seconds(exc)
+            until = (now + timedelta(seconds=retry_after)).isoformat(timespec="seconds")
+            db.set_channel_guard(
+                conn, channel, "backoff", f"ratelimited; retry after {retry_after}s",
+                available_at=until,
+            )
+            return (
+                f"backoff: Slack rate-limited this channel; holding {retry_after}s "
+                "(no lead consumed)"
+            )
         # Slack ANSWERED and refused. HTTP 200 with an `error` payload means the message
-        # provably did not land, which is the opposite of ambiguous. Treating it as
-        # ambiguous consumed a real lead per attempt: under a revoked token or a wrong
-        # channel id that silently destroyed 1-2 gold leads every weekday while posting
-        # nothing at all, because the reservation is what the caps and the candidate
-        # exclusion both key off.
-        if getattr(exc.response, "status_code", None) != 200:
+        # provably did not land — the opposite of ambiguous. Treating it as ambiguous
+        # consumed a real lead per attempt.
+        if status != 200:
             return _ambiguous(conn, delivery_key, exc)
         code = str(exc.response.get("error") or "unknown_error")
         if code in _SYSTEMIC_SLACK_ERRORS:
-            # Nothing about THIS lead is wrong — the channel or the token is. Put the
-            # lead straight back in the pool so a misconfiguration cannot eat inventory,
-            # and say so loudly; every later tick will fail the same way until it is
-            # fixed, which is the correct, visible behavior.
+            # The channel or the token is wrong, not this lead. Release it, then BLOCK
+            # the channel so later cron ticks stop instead of failing identically every
+            # 30 minutes. Only an operator (`cli drip-unblock`) resumes it.
             db.release_notification(conn, delivery_key)
+            db.set_channel_guard(conn, channel, "blocked", code)
             return (
-                f"halt: Slack rejected the post for this channel ({code}); no lead was "
-                "consumed. Fix the channel or token — every tick will fail until then"
+                f"halt: Slack rejected posting to this channel ({code}); no lead was "
+                "consumed and the channel is now blocked. Fix it, then "
+                "`cli drip-unblock`"
             )
-        # Lead-specific refusal (e.g. msg_too_long): quarantine durably and visibly.
-        db.finish_notification(conn, delivery_key, "rejected", error=code)
+        if code in _CONTENT_SLACK_ERRORS:
+            db.finish_notification(conn, delivery_key, "rejected", error=code)
+            return (
+                f"skip: Slack rejected this card ({code}); lead #{row['id']} "
+                "quarantined and visible in `cli drip-blocked`"
+            )
+        # UNRECOGNIZED code. We do not know what went wrong, and not knowing is not
+        # evidence that the lead is unusable — so it must NOT be quarantined. Release it
+        # and report loudly; a real lead is worth more than a tidy error path.
+        db.release_notification(conn, delivery_key)
         return (
-            f"skip: Slack rejected this card ({code}); lead #{row['id']} quarantined "
-            "and visible in `cli drip-blocked`"
+            f"error: Slack refused this post with an unrecognized code ({code}); "
+            f"lead #{row['id']} was released, not quarantined. Needs a human"
         )
     except Exception as exc:  # noqa: BLE001 — timeout is ambiguous; never blind-retry
         return _ambiguous(conn, delivery_key, exc)

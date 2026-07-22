@@ -192,6 +192,24 @@ affect Chase's other projects.
   mid-title bid number; (H6) no missed-slot backstop, so a 90-min outage costs the day; (M1) the
   posts-exclusion is global, so a playground post burns a production lead; (M2) no `last_seen`
   staleness filter; (M3) `salesforce_followups` bypasses drip's caps and uses UTC day boundaries.
+- `verified` 2026-07-22 SIX FURTHER BLOCKERS from Chase's review of `74e8d59`, all fixed:
+  (1) A systemic Slack failure now creates a PERSISTENT channel block (`db.set_channel_guard`,
+  stored as a NULL-lead_id `notification_outbox` row), releases the lead, returns a non-zero CLI
+  status, and stops every later tick until `cli drip-unblock` clears it — previously each 30-min tick
+  failed identically and, before the release fix, consumed a lead every time. (2) An UNRECOGNIZED
+  HTTP-200 Slack code no longer quarantines: only an explicit `_CONTENT_SLACK_ERRORS` allowlist may
+  destroy inventory, because "we don't know what went wrong" is not evidence the lead is unusable.
+  Unknown codes RELEASE the lead and report loudly. (3) HTTP 429 is no longer 'unknown' and no longer
+  consumes a lead — it releases, reads `Retry-After`, and persists a self-clearing `backoff` guard.
+  (4) `--dry-run` now says "WOULD quarantine" and writes nothing, instead of claiming a quarantine
+  that never happened. (5) `usaspending-subaward:` and `sam.gov` are REMOVED from the verified-state
+  allowlist — their state semantics are `assumed`, never evidenced, and an assumed provenance must
+  fail closed. (6) the false comment claiming no constant-state source can post is corrected:
+  `ca-grants-portal` reaches production through `bulletin_candidates`.
+  New failure tests cover repeated systemic ticks, unknown codes, 429 + lapsed backoff, dry-run
+  honesty, CLI exit status, and assumed-source tagging. `db.py` crossed the 1000-line cap and was
+  split: `db_delivery.py` now owns reservations, quarantines and channel guards, re-exported from
+  `db.py` so every `db.<name>` call site is unchanged.
 - `verified` 2026-07-22 SIX BLOCKERS from Chase's review of `85295d7`, all fixed before any push:
   (1) DEFINITIVE Slack failures were classified as ambiguous. `SlackApiError` with HTTP 200
   (`channel_not_found`, `invalid_auth`, `is_archived`, `msg_too_long`…) means Slack ANSWERED and the

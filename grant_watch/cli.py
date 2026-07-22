@@ -6,6 +6,7 @@ Usage (from the repo root, venv active):
     python -m grant_watch.cli status
     python -m grant_watch.cli drip [--force] [--dry-run]   # drip tick (30-min cron target)
     python -m grant_watch.cli drip-blocked                 # leads set aside, never delivered
+    python -m grant_watch.cli drip-unblock [--channel ID]  # clear a channel-level block
     python -m grant_watch.cli outreach-retry [--dry-run]
     python -m grant_watch.cli salesforce-sync [--limit N] [--dry-run]
     python -m grant_watch.cli salesforce-followups [--dry-run] [--smoke]
@@ -171,7 +172,34 @@ def cmd_drip(force: bool, dry_run: bool) -> int:
     conn = db.connect_readonly() if dry_run else db.connect()
     outcome = drip_mod.run_drip(client, channel, conn, force=force, dry_run=dry_run)
     print(f"drip: {outcome}")
-    return 1 if outcome.startswith("unknown:") else 0
+    # Non-zero for every outcome a human needs to look at, so cron surfaces it rather
+    # than the failure reading as a routine tick. `blocked:` in particular repeats every
+    # 30 minutes until an operator clears it and must never look like success.
+    return 1 if outcome.startswith(FAILING_DRIP_OUTCOMES) else 0
+
+
+# Drip outcomes that mean "a human should look at this". Everything else — a skip for
+# the cap, the slot, or an empty pool — is a normal tick.
+FAILING_DRIP_OUTCOMES = ("unknown:", "halt:", "blocked:", "error:")
+
+
+def cmd_drip_unblock(channel: str) -> int:
+    """Clear a channel-level block after an operator has fixed Slack.
+
+    A systemic Slack failure (`channel_not_found`, `invalid_auth`, …) blocks the channel
+    deliberately, because retrying every 30 minutes cannot help and used to consume a
+    lead each time. Resuming is a human decision, so it lives here rather than being
+    time-based."""
+    conn = db.connect()
+    target = channel or primary_channel_id()
+    if not target:
+        print("no channel given and SLACK_CHANNEL_ID is not set", file=sys.stderr)
+        return 1
+    if db.clear_channel_guard(conn, target):
+        print(f"cleared the block on {target}; the next tick will post normally")
+        return 0
+    print(f"no block was set on {target}")
+    return 0
 
 
 def cmd_drip_blocked() -> int:
@@ -288,6 +316,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("seed", help="seed leads from the verified SVPP CSV")
     sub.add_parser("status", help="lead counts by source and grade")
     sub.add_parser("drip-blocked", help="list leads set aside and never delivered")
+    p_unblock = sub.add_parser("drip-unblock", help="clear a channel-level drip block")
+    p_unblock.add_argument(
+        "--channel", default="", help="channel id (defaults to the primary channel)"
+    )
     p_drip = sub.add_parser("drip", help="one drip tick (maybe post one nugget)")
     p_drip.add_argument(
         "--force",
@@ -349,6 +381,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_seed()
     if args.command == "drip-blocked":
         return cmd_drip_blocked()
+    if args.command == "drip-unblock":
+        return cmd_drip_unblock(args.channel)
     if args.command == "drip":
         return cmd_drip(args.force, args.dry_run)
     if args.command == "outreach-retry":
