@@ -32,6 +32,32 @@ confirm the CODE on disk (grep a known new symbol), not just the revision file. 
 
 **Proven full-tree rsync recipe (2026-07-16: 3d653c6 → 25513bc; re-proven 2026-07-17: 25513bc → 9db96d0, 9db96d0 → 36d2470, 36d2470 → 6ea70f2, 6ea70f2 → c714b01, and c714b01 → 50acadd, and 2026-07-17 ed261ff → e6df182 = 14 files [15 delta minus `.env.example`, which the `.env.*` exclude correctly skips], zero deletions each time; Chase-approved, all verified):**
 
+**2026-07-22 15263d2 → 264b0e2 (8-file, all verified) — code + a 2-key `.env` append, no migration:**
+Second add-shaped deploy; the f4d6237→15263d2 entry below is the template and it held exactly.
+`git diff --name-status` listed 13 paths, 5 were `.claude/agent-memory/*` (excluded) ⇒ deployable
+delta = 8: 6 mods `<fcst....` (CLAUDE.md, db_engagement.py, presentation.py, slack/drip.py,
+tests/test_drip.py, tests/test_salesforce_contact_records.py) + **2 ADDS `<f+++++++`**
+(`grant_watch/territory.py`, `tests/test_territory.py`, both verified ABSENT beforehand). `-cain
+--delete` preview = 0 deleting lines ⇒ real run with plain `-cai`. `find -cnewer` = exactly the 8;
+all 8 remote sha256 == the 264b0e2 blobs. `.env`(1784571508)/`run_bot.sh`(1784192756)/
+`grant_watch.db`(1784729302) mtimes unchanged by the rsync. Restart: OLDPID 515819 (== the PID this
+file recorded for the 15263d2 deploy ⇒ no out-of-band restart) dead in 1s → single NEWPID 1859872,
+Bolt pair, NO_TRACEBACK, PID_COUNT=1. crontab still 4 lines (NOT touched — the new slot logic is
+app-side); schema_migrations MAX still 13.
+- **Import smoke should assert REMOVED symbols too, not just new ones.** This commit deleted
+  `drip.POST_PROBABILITY` and `drip.DAILY_AIM`; asserting `not hasattr(drip, …)` proves the file on
+  disk is the NEW one, which a "does the new function exist" check alone cannot (a half-applied or
+  stale-cached file could satisfy both). Cheap, and it caught nothing here only because the deploy
+  was clean.
+- **Backup shape used (reusable):** DB as a set (`.db`/`-wal`/`-shm` → `~/grant_watch.db.bak.<UTC>`)
+  + `PRAGMA integrity_check` on the COPY (not the live file) to prove the backup is restorable, not
+  merely present + `cp` of `.deployed_revision` → `~/.deployed_revision.bak.<UTC>` + a ~30KB
+  `tar.gz` of just the files about to be overwritten. Git is the real rollback source for tracked
+  files, so rolling back = re-rsync the old commit AND `rm` the two added files.
+- **DISK IS AT 97% (46G/48G used, ~1.6G free) on the shared droplet root as of 2026-07-22.** The
+  ~28MB backup fit easily, but this is droplet-wide (`/dev/vda1 /`), NOT just the grants tenant, so
+  the guardian cannot fix it — it is Chase's admin call. Flag it before any large operation.
+
 **2026-07-21 f4d6237 → 15263d2 (4-file, all verified) — FIRST deploy that ADDS new files:**
 Every prior entry here was "ALL modifications, zero add/delete", so this is the shape to copy when a
 commit introduces modules. `db.py` crossed the 1000-line cap and was split, so the delta was 2 mods

@@ -159,6 +159,26 @@ affect Chase's other projects.
   inverted band collapses to a single slot rather than silencing the card. `in_window()` is
   UNCHANGED (still 7am ET–5pm PT) and now only acts as the outer guard. Urgent/exceptional cards
   bypass the slot. Simulated: Mon 11:24, Tue 10:14, Wed 10:04, Thu 11:01, Fri 10:09 PT.
+- `verified` 2026-07-22 FLOOD BUG found by production-ops-guardian review of `264b0e2` AND FIXED
+  (`grant_watch/slack/drip.py`, `db_engagement.py`). `record_post` runs AFTER
+  `chat_postMessage`; if it raised (full disk — prod is at 97% — a lock, or a CHECK violation) the
+  card was in Slack but `posts` had no row. EVERY cap in `pacing_ok` counted `posts` alone, so the
+  next tick read zero and skipped the daily cap, the absolute cap AND the min-gap rule, while
+  `mark_surfaced` still excluded the sent lead — so `pick()` returned the NEXT of the 544 and posted
+  it, once per 30-min tick until the window closed. Up to 13 cards in an afternoon, each @mentioning
+  a rep. FIX: `pacing_ok` now counts `max(posts, notification_outbox reservations)` and takes the gap
+  from the latest of either. Reservations are written BEFORE the Slack call, so they cannot be
+  missing for a delivered message — the fail-closed signal. Regression test
+  `test_cap_holds_when_recording_a_confirmed_send_fails` was PROVEN to fail against the old
+  posts-only logic ("cap went blind... eligible") before being confirmed green.
+  Same review, two more fixes: (a) `nugget_candidates` now requires `amount > 0` — `_award_facts`
+  raises without one and `cli.cmd_drip` has no handler, so an amountless gold lead would crash every
+  tick forever, never be surfaced, and stay permanently silent; (b) `urgent` no longer bypasses the
+  slot entirely — it may skip the day's random target but not the band OPEN, because it was
+  reopening the 04:00 PT front-loading the slot design exists to remove.
+  RULED OUT by evidence: the reviewer's deterministic `posts.kind` CHECK trigger. Prod posts 18/19/20
+  are `kind='rfp'`, which the pre-migration-13 CHECK (`'nugget','bulletin'`) would have rejected —
+  so migration 13's four-kind CHECK is demonstrably live.
 - `verified` 2026-07-22 CORRECTION — the 2026-07-21 "probable poller capture bug" claim above the
   gold backlog was WRONG and is retracted. Queried live against the public USASpending API this
   session: **27 of 27** FY25 SVPP (`16.071`) awards across CA/PA/TX/WA return

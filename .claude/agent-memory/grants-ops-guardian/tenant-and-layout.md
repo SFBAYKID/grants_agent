@@ -75,4 +75,15 @@ Verified live 2026-07-14 over the scoped grants SSH (`-i ~/.ssh/grants_droplet -
   non-secret, fine in history) → verify `wc -l` delta==1, `grep -c '^KEY=1'`==1, `grep -c '^KEY='`==1
   (no dup), and PRE-IMAGE proof `head -c <presize> .env | sha256` == pre sha (proves existing bytes
   untouched), plus a `cut -d= -f1` key-NAME diff showing exactly one added line. Never print values.
+- Drip slot band (added to droplet `.env` 2026-07-22, Chase-authorized, NON-secret):
+  `DRIP_SLOT_START_PT=10:30`, `DRIP_SLOT_END_PT=11:00` — the Pacific band the single daily card
+  may land in (read by `drip.slot_band()`; unset falls back to the code defaults 10:00–11:30).
+  Appended with the same secret-safe append-only recipe as `RFP_DISCOVERY_ENABLED` above
+  (pre-image `head -c <presize> | sha256` proof + key-NAME diff + dup guard). Changing the band is
+  an `.env`-only edit — **no deploy and no crontab change**, and the bot/cron re-read `.env` per
+  process, though the long-lived bot needs a restart. Beware the tick-quantization trap in
+  [[drip-slot-band-vs-cron-granularity]]. `GRANT_TERRITORY_OWNERS` is NOT set, so
+  `territory.DEFAULT_TERRITORY_OWNERS` (CA/OR/PA/TX/WA only) applies — measured 2026-07-22,
+  369 of the 544 gold candidates sit in a mapped state and **175 would post with no @mention**
+  (by design: `territory.py` never guesses a Slack id). Adding states is an `.env` edit too.
 - Salesforce SANDBOX-write config on droplet `.env` (as of 2026-07-17): `SALESFORCE_CAMPAIGN_WRITES_ENABLED=1`, `SALESFORCE_WRITE_EXPECT_SANDBOX=1`, and `SALESFORCE_WRITE_ORG_ID=<18-char 00D… org id>` (value never logged). The last two were added 2026-07-17 by surgical two-key copy from the laptop `.env` — Chase-approved for that specific run. This did NOT change the "never sync `.env`" rule; any future Salesforce-config change still needs Chase's explicit per-run approval. Secret-safe edit recipe that worked: deliver the value into a mode-600 `~/grants_agent/.orgval.tmp` via ssh STDIN (never argv), `awk` reads it via `getline` into a mode-600 temp `.env`, guard on `diff added==N removed==0` + key counts before atomic `mv`, EXIT-trap scrubs the temp, backup at `~/.env.bak.<UTCstamp>` (cp -a, 600). Verify the LIVE bot loaded it with `tr '\0' '\n' < /proc/<pid>/environ | grep -Ec '^KEY=..*'` (count only).

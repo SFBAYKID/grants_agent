@@ -124,6 +124,40 @@ def posts_today(
     )
 
 
+def delivery_attempts_today(
+    conn: sqlite3.Connection, channel: str, now_utc: datetime | None = None
+) -> list[sqlite3.Row]:
+    """Today's proactive delivery RESERVATIONS for one channel, Pacific.
+
+    The fail-closed counterpart to `posts_today`. `reserve_notification` writes its row
+    BEFORE the Slack call, whereas `record_post` writes AFTER it — so if the post
+    succeeds and the bookkeeping then fails (full disk, lock, CHECK violation), `posts`
+    has no row while the outbox does.
+
+    That gap is not theoretical: every cap in `drip.pacing_ok` is derived from a count
+    of today's posts, so a single missing `posts` row makes the daily cap, the absolute
+    cap AND the minimum-gap rule all read zero. The next tick would then post again, and
+    the one after that, walking down the 544-lead pool one card every 30 minutes until
+    the window closed. Counting reservations too means a confirmed send is remembered
+    even when recording it failed.
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+    local_date = now_utc.astimezone(ZoneInfo("America/Los_Angeles")).date()
+    start_local = datetime.combine(
+        local_date, time.min, tzinfo=ZoneInfo("America/Los_Angeles")
+    )
+    start_utc = start_local.astimezone(timezone.utc)
+    end_utc = (start_local + timedelta(days=1)).astimezone(timezone.utc)
+    return list(
+        conn.execute(
+            """SELECT * FROM notification_outbox
+               WHERE audience=? AND created_at>=? AND created_at<?
+               ORDER BY created_at, id""",
+            (channel, start_utc.isoformat(), end_utc.isoformat()),
+        )
+    )
+
+
 def nugget_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Unsurfaced GOLD leads eligible for a drip nugget.
 
@@ -146,6 +180,14 @@ def nugget_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     to 'new' whenever a new unsuppressed event lands, which would otherwise re-open an
     already-posted lead for a second card — the exact repeat-in-the-channel class of bug
     Chase reported on 2026-07-22.
+
+    The `amount > 0` filter is a WEDGE GUARD, not a quality rule. `drip._award_facts`
+    raises on a missing or non-positive amount, and `cli.cmd_drip` has no handler, so an
+    amountless gold lead reaching the top of `_best_nugget` would crash the tick before
+    anything is posted or marked surfaced — and then be picked again, identically, on
+    every tick forever. Silent, permanent, and indistinguishable from the outage this
+    query was just changed to fix. `scoring.grade` should never mint such a lead, but
+    the renderer's precondition belongs in the query that feeds it.
     """
     return list(
         conn.execute(
@@ -155,6 +197,7 @@ def nugget_candidates(conn: sqlite3.Connection) -> list[sqlite3.Row]:
             WHERE l.lead_grade='gold' AND l.status='new'
               AND e.verification_status='verified'
               AND e.event_type IN ('award_announced','award_obligated')
+              AND l.amount IS NOT NULL AND l.amount > 0
               AND l.id NOT IN (SELECT lead_id FROM posts WHERE lead_id IS NOT NULL)"""
         )
     )

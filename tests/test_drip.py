@@ -882,3 +882,70 @@ def test_award_card_spells_out_a_state_beyond_the_original_five(
     conn.commit()
     text, _ = drip.build_nugget(db.nugget_candidates(conn)[0])
     assert "in Texas has a verified" in text
+
+
+# --------------------------------------------- cap must survive a bookkeeping failure
+def test_cap_holds_when_recording_a_confirmed_send_fails(tmp_path: Path) -> None:
+    """THE FLOOD REGRESSION (found in review of 264b0e2, 2026-07-22).
+
+    `record_post` runs AFTER chat_postMessage. If it raises — full disk, lock, a CHECK
+    violation — the message is in Slack but `posts` has no row. Every cap in pacing_ok
+    used to be counted from `posts` alone, so the next tick read zero posts and skipped
+    the daily cap, the absolute cap AND the min-gap rule. `mark_surfaced` still excluded
+    the sent lead, so pick() simply returned the NEXT of 544 and posted it, once every
+    30 minutes until the window closed — up to 13 cards, each pinging a rep's phone.
+
+    The reservation in notification_outbox is written BEFORE the Slack call, so it is
+    the one signal that cannot be missing for a delivered message.
+    """
+    conn = db.connect(tmp_path / "t.db")
+    for index in range(4):
+        _mk_lead(conn, iid=f"G{index}", entity=f"District {index}",
+                 start="2025-10-10", end="2028-09-30", backfill=True)
+    client = _SlackClient()
+    real_record_post = db.record_post
+
+    def exploding_record_post(*args: object, **kwargs: object) -> int:
+        """Simulate the disk filling up between the send and the bookkeeping."""
+        raise sqlite3.OperationalError("database or disk is full")
+
+    db.record_post = exploding_record_post  # type: ignore[assignment]
+    try:
+        first = drip.run_drip(client, "C1", conn, force=True)
+        assert first.startswith("posted") and "recording it hit" in first
+        assert client.calls == 1
+        assert conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0] == 0
+        # The reservation survived even though the posts row did not.
+        assert len(db.delivery_attempts_today(conn, "C1")) == 1
+        # A LATER tick (past the gap, past the slot) must still refuse.
+        later = datetime.now(timezone.utc) + timedelta(hours=3)
+        go, reason = drip.pacing_ok(conn, "C1", later)
+        assert not go, f"cap went blind after a failed record_post: {reason}"
+        assert "cap" in reason
+    finally:
+        db.record_post = real_record_post  # type: ignore[assignment]
+    assert client.calls == 1, "a second card was posted after a bookkeeping failure"
+
+
+def test_amountless_gold_lead_cannot_wedge_the_drip(tmp_path: Path) -> None:
+    """`_award_facts` raises without a positive amount and cmd_drip has no handler, so
+    such a lead would crash every tick forever while never being marked surfaced."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="NOAMT", amount=None, start="2025-10-10", end="2028-09-30",
+             backfill=True)
+    conn.execute("UPDATE leads SET lead_grade='gold' WHERE source_item_id='NOAMT'")
+    conn.commit()
+    assert db.nugget_candidates(conn) == []
+
+
+def test_urgent_card_still_waits_for_the_band_to_open(tmp_path: Path) -> None:
+    """Urgent may skip the day's random target, but not the workday. Without this floor
+    an exceptional award posted at the first 04:00 PT tick — the exact front-loading the
+    slot design removed."""
+    conn = db.connect(tmp_path / "t.db")
+    dawn = datetime(2026, 7, 22, 11, 0, tzinfo=timezone.utc)  # 04:00 PT
+    go, reason = drip.pacing_ok(conn, "C1", dawn, urgent=True)
+    assert not go and "holding until" in reason
+    noon = datetime(2026, 7, 22, 19, 0, tzinfo=timezone.utc)  # 12:00 PT
+    go, _ = drip.pacing_ok(conn, "C1", noon, urgent=True)
+    assert go

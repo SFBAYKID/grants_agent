@@ -859,6 +859,7 @@ def mark_slack_event_reviewed(conn: sqlite3.Connection, event_id: str) -> bool:
 # Re-exported here so `db.<name>` stays the single persistence entry point for callers.
 from .db_engagement import (  # noqa: E402  (facade re-export, must follow definitions)
     bulletin_candidates,
+    delivery_attempts_today,
     engagement_stats,
     nugget_candidates,
     posts_today,
@@ -870,6 +871,7 @@ from .db_engagement import (  # noqa: E402  (facade re-export, must follow defin
 
 __all__ = [
     "bulletin_candidates",
+    "delivery_attempts_today",
     "engagement_stats",
     "nugget_candidates",
     "posts_today",

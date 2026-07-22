@@ -13,7 +13,9 @@
 - [ContentNote link bug](salesforce-contentnote-link-bug.md) — create_content_note inserts the note but its link-lookup SOQL 400s in monarchdev, leaving the note unattached; note.Id already == ContentDocumentId; auto author-link gotcha
 - [Stop means stop](coordinator-stop-is-stop.md) — a classifier block or coordinator stop halts the whole mutating effort; never finish the goal via an alternate allowed path
 - [Salesforce connection test](salesforce-connection-test.md) — read-only recipe for which org the droplet creds hit (prod vs sandbox); verify_write_scope is read-only; EXPECT_SANDBOX=1 is the fail-closed prod-write guard
-- [Drip pacing + daily cap](drip-pacing-and-cap.md) — ONE card/day by design (DAILY_CAP=1, the `(N)` is the cap not the count); tick-audit + read-only DB recipes; gold backlog suppressed so RFP supply is the real constraint
+- [Drip pacing + daily cap](drip-pacing-and-cap.md) — ONE card/day (DAILY_CAP=1, `(N)` is the cap not the count); slot model replaced the coin flip 2026-07-22; gold pool now OPEN (544)
+- [Drip slot vs cron granularity](drip-slot-band-vs-cron-granularity.md) — a ≤30-min band on a `*/30` cron collapses to one clock time: 10:30–11:00 posts at 11:00 PT on 19 of 20 weekdays
 - [Identical RFP card text](identical-rfp-card-text.md) — a "repeated" Slack card can be 2 different leads; build_rfp_alert prints entity+keyword+due only, never the title
 - [RFP dedup key drift](rfp-dedup-key-drift.md) — dup RFP leads = 6-token→full-title KEY migration (not case); recompute-key proof; orphan gold RFP #9534; gold backlog has no usable award dates
+- [Disk footprint + cruft](disk-footprint-and-cruft.md) — tenant is 7.7G (~17%) of a 97%-full disk; 29 duplicate .venv = 86% of it; no log rotation; check `df -i` too
 - [Grant Slack event flow](grant-slack-event-flow.md) — both app_mention+message handlers exist; slack_event_receipts has no event-type col; message-handler receipt is gated by thread-ownership; private channels need message.groups/groups:history

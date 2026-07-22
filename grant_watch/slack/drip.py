@@ -311,27 +311,49 @@ def pacing_ok(
     now_utc: datetime,
     urgent: bool = False,
 ) -> tuple[bool, str]:
-    """Cap + gap + today's slot (window handled separately so each rule tests cleanly)."""
-    today = db.posts_today(conn, channel, now_utc)
-    if len(today) >= ABSOLUTE_CAP:
+    """Cap + gap + today's slot (window handled separately so each rule tests cleanly).
+
+    Counts are taken from BOTH `posts` (written after the Slack call) and the delivery
+    reservations in `notification_outbox` (written before it), and the larger of the two
+    wins. Deriving the caps from `posts` alone made every one of them read zero whenever
+    a confirmed send failed to record — and a zero count means no daily cap, no absolute
+    cap, and no minimum gap, so the next tick posts again. See
+    `db.delivery_attempts_today`. Reservations are the fail-closed signal: they cannot be
+    missing for a message that reached Slack.
+    """
+    posts = db.posts_today(conn, channel, now_utc)
+    attempts = db.delivery_attempts_today(conn, channel, now_utc)
+    count = max(len(posts), len(attempts))
+    if count >= ABSOLUTE_CAP:
         return False, f"absolute daily cap reached ({ABSOLUTE_CAP})"
-    if len(today) >= DAILY_CAP and not urgent:
+    if count >= DAILY_CAP and not urgent:
         return False, f"daily cap reached ({DAILY_CAP})"
-    if len(today) >= DAILY_CAP and any(bool(post["urgent"]) for post in today):
+    if count >= DAILY_CAP and any(bool(post["urgent"]) for post in posts):
         return False, "daily cap reached; exceptional slot already used"
-    if today:
-        last = datetime.fromisoformat(today[-1]["posted_at"])
+    # Gap is measured from the most recent evidence of EITHER kind, so an unrecorded
+    # send still holds the line for MIN_GAP_MINUTES.
+    stamps = [str(p["posted_at"]) for p in posts if p["posted_at"]]
+    stamps += [str(a["created_at"]) for a in attempts if a["created_at"]]
+    if stamps:
+        last = datetime.fromisoformat(max(stamps))
         gap_min = (now_utc - last).total_seconds() / 60
         if gap_min < MIN_GAP_MINUTES:
             return (
                 False,
                 f"only {gap_min:.0f}m since last post (min {MIN_GAP_MINUTES}m)",
             )
-    if not urgent:
-        now_pt = now_utc.astimezone(PT)
-        target = daily_slot(now_pt.date(), channel)
-        if now_pt.time() < target:
-            return False, f"holding for today's {target:%H:%M} PT slot"
+    now_pt = now_utc.astimezone(PT)
+    if urgent:
+        # An emergency may skip the day's random target, but NOT the start of the band.
+        # Without this floor `urgent` reopened the 04:00 PT front-loading that the slot
+        # design exists to prevent — a rep's phone at 4 AM is not a better outcome.
+        opens = slot_band()[0]
+        if now_pt.time() < opens:
+            return False, f"urgent, but holding until the {opens:%H:%M} PT open"
+        return True, "eligible"
+    target = daily_slot(now_pt.date(), channel)
+    if now_pt.time() < target:
+        return False, f"holding for today's {target:%H:%M} PT slot"
     return True, "eligible"
 
 

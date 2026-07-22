@@ -8,9 +8,19 @@ metadata:
 **Grant posts at most ONE drip card per weekday by design. "Only one lead today" is
 almost never a bug.** Verified read-only on the droplet 2026-07-20 (revision f4d6237).
 
+**PACING MODEL CHANGED 2026-07-22 (commit 264b0e2, deployed): the per-tick coin flip is
+GONE.** `DAILY_AIM` and `POST_PROBABILITY` no longer exist — do not look for them, and
+do not describe drip as "random per tick". `pacing_ok()` now holds until **today's slot**,
+one target time per (date, channel) drawn inside `DRIP_SLOT_START_PT`–`DRIP_SLOT_END_PT`
+(Pacific, `.env`-tunable, defaults 10:00–11:30; live droplet value is 10:30–11:00). The
+skip line to expect before the slot is `skip: holding for today's HH:MM PT slot`.
+`should_post`/`pacing_ok`/`run_drip` also LOST their `rng` parameter. Because the cron is
+`*/30`, a ≤30-min band collapses to one clock time — see
+[[drip-slot-band-vs-cron-granularity]].
+
 `grant_watch/slack/drip.py`:
-- `DAILY_AIM = 1`, `DAILY_CAP = 1`, `ABSOLUTE_CAP = 2` (the daily card + at most one
-  `urgent` emergency card), `MIN_GAP_MINUTES = 90`, `POST_PROBABILITY = 0.45`.
+- `DAILY_CAP = 1`, `ABSOLUTE_CAP = 2` (the daily card + at most one
+  `urgent` emergency card), `MIN_GAP_MINUTES = 90`.
 - The `(N)` in the log line `drip: skip: daily cap reached (N)` is the **cap constant**,
   not the number posted today. Do not read `(1)` as "1 post so far".
 - `in_window()` = `et.weekday() < 5 and et.hour >= 7 and pt.hour < 17`. Cron runs
@@ -67,7 +77,21 @@ Watch this: the cap is 1/day, so supply of 3 is only ~3 days of runway.
 case" — that was WRONG (I inferred it from truncated poll-log lines). The real mechanism is
 a dedup-key format migration. See [[rfp-dedup-key-drift]].
 
-## 2026-07-22 refresh (read-only, revision 15263d2) — the RFP pool is now EMPTY
+## 2026-07-22 LATE refresh (revision 264b0e2 deployed) — the gold pool is OPEN, supply solved
+
+**The two snapshots below are now HISTORY.** Commit 264b0e2 deleted `AND e.suppressed=0`
+from `nugget_candidates` (Chase: "gold is what we should really be serving users each
+day") and added `AND l.id NOT IN (SELECT lead_id FROM posts …)`. Verified live on the
+droplet immediately after deploy: **`nugget_candidates` = 544** (the identical query with
+the old `suppressed=0` filter still returns **0** — proof the suppression flag was the
+sole gag). Funnel: 638 gold → 546 gold+`status='new'` → 546 still after the verified and
+`award_*` filters → **544** after excluding the 2 leads already in `posts`. So "~546" is
+the pool and 544 is the postable count; the 2-lead gap is the new anti-repeat guard
+working, not a loss. State mix of the 544: CA 354, AZ 22, IL 15, KY 14, AR 13, MO 12,
+OK 10, WI/MI 8, TX/AL 7. `rfp_candidates` is still 0, but that no longer starves drip —
+the ladder now stops at the gold rung. At 1 card/day, 544 candidates ≈ 2 years of runway.
+
+## 2026-07-22 refresh (read-only, revision 15263d2) — HISTORICAL, superseded by the section above
 
 `nugget_candidates` still **0**, and the reason hardened: **638/638 gold leads have
 `suppressed=1, backfill=1`** — not one exception (whole-table: 1050 events non-suppressed,
