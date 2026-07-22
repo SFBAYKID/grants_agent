@@ -17,5 +17,5 @@
 - [Drip slot vs cron granularity](drip-slot-band-vs-cron-granularity.md) — a ≤30-min band on a `*/30` cron collapses to one clock time: 10:30–11:00 posts at 11:00 PT on 19 of 20 weekdays
 - [Identical RFP card text](identical-rfp-card-text.md) — a "repeated" Slack card can be 2 different leads; build_rfp_alert prints entity+keyword+due only, never the title
 - [RFP dedup key drift](rfp-dedup-key-drift.md) — dup RFP leads = 6-token→full-title KEY migration (not case); recompute-key proof; orphan gold RFP #9534; gold backlog has no usable award dates
-- [Disk footprint + cruft](disk-footprint-and-cruft.md) — tenant is 7.7G (~17%) of a 97%-full disk; 29 duplicate .venv = 86% of it; no log rotation; check `df -i` too
+- [Disk footprint + cruft](disk-footprint-and-cruft.md) — 26 snapshot venvs purged 2026-07-22 (home 7.7G→1.9G, / 95%→83%); safe-purge recipe; `du -b` under-predicts df; no log rotation
 - [Grant Slack event flow](grant-slack-event-flow.md) — both app_mention+message handlers exist; slack_event_receipts has no event-type col; message-handler receipt is gated by thread-ownership; private channels need message.groups/groups:history

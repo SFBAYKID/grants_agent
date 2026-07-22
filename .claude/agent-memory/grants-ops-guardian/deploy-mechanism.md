@@ -352,8 +352,35 @@ never trust "no migration error" alone as proof a migration ran. See [[migration
 - Store the FULL 40-char hash in `.deployed_revision` (existing convention).
 - Verify after sync, before restart: `.env`/db/run_bot.sh mtimes unchanged, sha256 of a changed file matches local, `.venv/bin/python -c "import grant_watch.slack.grant"` OK.
 
-**Prior surgical-deploy recipe (used 2026-07-14 to go 3f35a26 → 604069d, all verified):**
-1. Backup full tree first: `cp -a ~/grants_agent ~/.grants_agent.previous.pre-<currentfullhash>` (Chase's convention = name the backup after the CURRENT/outgoing hash; NOTE the older `.previous.pre-3f35a269` backup was named after the *incoming* hash — the two conventions differ, so read a backup's own `.deployed_revision` to know what it holds). Disk is 48G/`/`, ~20G free, repo ~131M incl `.venv` — a full copy is <1% of free space.
+**RETIRED — DO NOT USE. Full-tree `cp -a` deployment backup (used 2026-07-14 → 2026-07-16).**
+
+Do not perform step 1 below, and do not reintroduce any equivalent. It produced 28
+`.grants_agent.previous.pre-*` snapshots totalling ~7 GiB in three days, on a 48 GiB shared disk that
+reached 97% full on 2026-07-22. It **contributed** that ~7 GiB; it did not cause the whole incident —
+the grants tenant was ~17% of used space and ~33 GiB sat in `/srv` outside guardian scope. Its stated
+premise ("~20G free") was false by 2026-07-22, when free space was 1.6–2.6 GiB.
+
+The copied `.venv` is NOT a reproducible environment. It is a relocated copy whose `pyvenv.cfg` still
+points at a build path that no longer exists, and there is no dependency lock anywhere on the box —
+`requirements.txt` is 11 unpinned `>=` lines against a ~50-package environment. Treat a copied venv as
+a best-effort rollback aid, never as a rebuildable or reproducible artifact.
+
+**Routine deployment backups must never include `.venv` or `.env`.** `.venv` is bulk that no lock file
+can currently reproduce; `.env` copies scatter live production credentials across the filesystem
+(23 such copies existed on 2026-07-22). Use instead, every time:
+  - the DB as a verified SET — `.db` + `-wal` + `-shm` → `~/grant_watch.db.bak.<UTC>`, with
+    `PRAGMA integrity_check` run against the COPY to prove it is restorable, not merely present;
+  - a copy of `.deployed_revision`;
+  - a `tar.gz` containing ONLY the tracked files about to be overwritten (~30 KB in practice).
+Git is the rollback source for tracked files.
+
+**Keep the two designated dependency-rollback virtualenvs** — `.grants_agent.previous.pre-264e0a7b…`
+and `.grants_agent.previous.pre-bdea1cd3…` — until a complete production dependency lock exists
+(`pip freeze` of the live venv, committed). Until then they are the only record of a working
+dependency set. Retiring them is a separate decision, gated on that lock.
+
+*Historical record of the retired recipe follows; steps 2–5 remain current.*
+1. ~~Backup full tree first: `cp -a ~/grants_agent ~/.grants_agent.previous.pre-<currentfullhash>`~~ **RETIRED — see above.** (Naming note, kept because it is needed to read the EXISTING snapshots: Chase's convention names the backup after the CURRENT/outgoing hash, but the older `.previous.pre-3f35a269` backup was named after the *incoming* hash — the two conventions differ, so read a backup's own `.deployed_revision` to know what it holds.)
 2. Sync ONLY the changed files, drift-proof, from the laptop: `git archive --format=tar <target> -- "${(@f)$(git diff --name-only <deployed>..<target>)}" | ssh <scoped> 'tar -xvf - -C /home/grantwatch/grants_agent'`. Touches only those paths; never `.env`/`.venv`/`.db`/`secrets/`. (zsh: MUST split the file list with `${(@f)...}` — unquoted `$FILES` does not word-split in zsh.)
 3. Deps: `.venv/bin/python -m pip install -r requirements.txt` (pip wrapper broken — use `python -m pip`).
 4. `printf '%s\n' '<targetfullhash>' > .deployed_revision`.
