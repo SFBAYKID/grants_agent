@@ -146,8 +146,19 @@ affect Chase's other projects.
   Pacific team logs on, with nothing left for the rest of the day. Monday's landed 04:30 PT. Proposed
   fix (not yet approved): open the window at 08:00 PT. Chase has decided the cap STAYS at 1/day.
   CONFIRMED against prod cron.log 2026-07-22: the last three cards landed 04:30 / 04:00 / 05:00 PT,
-  each followed by 24–26 consecutive `skip: daily cap reached (1)` ticks. Chase reviewed this on
-  2026-07-22 and chose to LEAVE THE WINDOW AS IS — do not change `in_window()` without asking again.
+  each followed by 24–26 consecutive `skip: daily cap reached (1)` ticks.
+- `verified` 2026-07-22 drip TIMING FIXED (Chase approved the design, then asked to try ~10:45 PT).
+  Root cause was the flat `POST_PROBABILITY=0.45` roll on every 30-min tick from 04:00 PT: per-tick
+  rolling front-loads and CANNOT be tuned to land late. Replaced with a per-day SLOT — one target
+  time drawn inside a Pacific band, seeded by `(date, channel)` so every tick of a day agrees on it
+  (a per-tick reroll would move the goalpost and bring the front-loading straight back). The card
+  posts at the first tick at/after the target. `POST_PROBABILITY`/`DAILY_AIM` and the `rng` argument
+  to `pacing_ok`/`should_post`/`run_drip` are GONE (rule 5, no dead code). Band defaults to
+  10:00–11:30 PT and is env-tunable WITHOUT a deploy via `DRIP_SLOT_START_PT` / `DRIP_SLOT_END_PT`
+  ("HH:MM", Pacific) — an unset var is silent, a malformed one warns once and falls back, and an
+  inverted band collapses to a single slot rather than silencing the card. `in_window()` is
+  UNCHANGED (still 7am ET–5pm PT) and now only acts as the outer guard. Urgent/exceptional cards
+  bypass the slot. Simulated: Mon 11:24, Tue 10:14, Wed 10:04, Thu 11:01, Fri 10:09 PT.
 - `verified` 2026-07-22 CORRECTION — the 2026-07-21 "probable poller capture bug" claim above the
   gold backlog was WRONG and is retracted. Queried live against the public USASpending API this
   session: **27 of 27** FY25 SVPP (`16.071`) awards across CA/PA/TX/WA return

@@ -4,9 +4,8 @@ mode is tested by contract: bad output degrades to an honest 'didn't parse')."""
 
 from __future__ import annotations
 
-import random
 import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -153,9 +152,7 @@ def test_daily_cap_blocks(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     for i in range(drip.DAILY_CAP):
         db.record_post(conn, "nugget", None, "C1", f"111.{i}", "s")
-    go, reason = drip.pacing_ok(
-        conn, "C1", datetime.now(timezone.utc), random.Random(1)
-    )
+    go, reason = drip.pacing_ok(conn, "C1", datetime.now(timezone.utc))
     assert not go and "cap" in reason
 
 
@@ -172,21 +169,65 @@ def test_min_gap_blocks(tmp_path: Path) -> None:
     conn.commit()
     now = datetime.now(timezone.utc)
     # urgent bypasses the 1/day cap but still respects the 90-minute gap
-    go, reason = drip.pacing_ok(conn, "C1", now, random.Random(1), urgent=True)
+    go, reason = drip.pacing_ok(conn, "C1", now, urgent=True)
     assert not go and "since last post" in reason
 
 
-def test_jitter_skip_when_rng_high(tmp_path: Path) -> None:
-    """Verify jitter skip when rng high."""
+def test_tick_before_todays_slot_holds(tmp_path: Path) -> None:
+    """A tick earlier than today's target time waits — this is what stops 4 AM cards."""
     conn = db.connect(tmp_path / "t.db")
+    # 13:00 UTC = 06:00 PT, before any slot in the 10:00-11:30 PT band.
+    early = datetime(2026, 7, 22, 13, 0, tzinfo=timezone.utc)
+    go, reason = drip.pacing_ok(conn, "C1", early)
+    assert not go and "slot" in reason
 
-    class AlwaysHigh(random.Random):
-        def random(self) -> float:  # forces the jitter branch deterministically
-            """Provide test-local behavior for random."""
-            return 0.99
 
-    go, reason = drip.pacing_ok(conn, "C1", datetime.now(timezone.utc), AlwaysHigh())
-    assert not go and "jitter" in reason
+def test_tick_after_todays_slot_posts(tmp_path: Path) -> None:
+    """Once the target time passes, the card is eligible."""
+    conn = db.connect(tmp_path / "t.db")
+    # 20:00 UTC = 13:00 PT, after the whole band.
+    late = datetime(2026, 7, 22, 20, 0, tzinfo=timezone.utc)
+    go, reason = drip.pacing_ok(conn, "C1", late)
+    assert go and reason == "eligible"
+
+
+def test_daily_slot_is_stable_within_a_day_and_moves_between_days() -> None:
+    """Every tick of one day must agree on the target, or the goalpost re-randomizes
+    each 30 minutes and the front-loading this replaced comes straight back."""
+    day = date(2026, 7, 22)
+    assert drip.daily_slot(day, "C1") == drip.daily_slot(day, "C1")
+    week = {drip.daily_slot(date(2026, 7, d), "C1") for d in range(20, 25)}
+    assert len(week) > 1, "slot never varies; the card would land at a fixed time"
+
+
+def test_daily_slot_always_lands_inside_the_configured_band() -> None:
+    """Across a year of dates the slot never escapes the band."""
+    start, end = drip.slot_band()
+    for day in (date(2026, 1, 1) + timedelta(days=n) for n in range(0, 365, 7)):
+        assert start <= drip.daily_slot(day, "C1") <= end
+
+
+def test_slot_band_is_env_tunable_without_a_deploy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chase wants to try ~10:45 PT and re-tune after watching engagement."""
+    monkeypatch.setenv("DRIP_SLOT_START_PT", "10:45")
+    monkeypatch.setenv("DRIP_SLOT_END_PT", "11:15")
+    assert drip.slot_band() == (time(10, 45), time(11, 15))
+    assert time(10, 45) <= drip.daily_slot(date(2026, 7, 22), "C1") <= time(11, 15)
+
+
+@pytest.mark.parametrize(
+    ("start", "end"), [("garbage", "11:30"), ("10:00", "oops"), ("13:00", "09:00")]
+)
+def test_malformed_or_inverted_band_still_yields_a_usable_slot(
+    start: str, end: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bad env value must never silence the daily card entirely."""
+    monkeypatch.setenv("DRIP_SLOT_START_PT", start)
+    monkeypatch.setenv("DRIP_SLOT_END_PT", end)
+    slot = drip.daily_slot(date(2026, 7, 22), "C1")
+    assert isinstance(slot, time)
 
 
 def test_force_bypasses_everything(tmp_path: Path) -> None:
@@ -196,7 +237,6 @@ def test_force_bypasses_everything(tmp_path: Path) -> None:
         conn,
         "C1",
         datetime(2026, 7, 11, 3, 0, tzinfo=timezone.utc),
-        random.Random(1),
         force=True,
     )
     assert go and reason == "forced"

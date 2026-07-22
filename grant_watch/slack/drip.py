@@ -18,17 +18,21 @@ so it lands as a notification on one person's phone instead of as channel wallpa
 
 Run via cron every ~30 min; each tick decides for itself whether to speak:
   in the window? (Mon-Fri, 7:00 America/New_York through 17:00 America/Los_Angeles)
-  under the daily cap? past the min gap? and a random skip so timing feels human.
+  under the daily cap? past the min gap? and past TODAY'S SLOT — one target time
+  drawn per day inside a configurable Pacific work-hours band, so the single card
+  lands while the team is actually online instead of at 4 AM (see DEFAULT_SLOT_*).
 Details and source links are available only after a human replies in the thread.
 """
 
 from __future__ import annotations
 
+import math
+import os
 import random
 import re
 import sqlite3
-import math
-from datetime import date, datetime, timedelta, timezone
+import sys
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from slack_sdk import WebClient
@@ -60,16 +64,25 @@ _BULLETIN_OFFTOPIC_RE = re.compile(
 # Chase (2026-07-18): ONE card a day is plenty — too many and people tune out. The
 # single daily card is the best opportunity available (platinum > gold award > RFP),
 # so it reads as varied without being random. Emergencies (urgent) may add ONE more.
-DAILY_AIM = 1  # normal target: one best-of-the-day card
 DAILY_CAP = 1  # normal hard cap; only an urgent/emergency card exceeds it
 ABSOLUTE_CAP = 2  # the daily card plus at most one emergency
 MIN_GAP_MINUTES = 90  # never two posts closer than this
-POST_PROBABILITY = 0.45  # per-eligible-tick chance — the "sporadic" in the spec
 BULLETIN_MAX_PER_DAY = 1
 PLATINUM_DAYS = 7  # a security grant awarded within ~a week — the cream (buy imminent)
 
 ET = ZoneInfo("America/New_York")
 PT = ZoneInfo("America/Los_Angeles")
+
+# The daily slot band, Pacific. Chase 2026-07-22: the old design rolled a flat 45%
+# chance on every 30-minute tick starting at 4:00 AM PT, which front-loaded the single
+# daily card so hard it was ~95% spent before 6 AM — verified in production, where the
+# last three cards landed 04:30 / 04:00 / 05:00 PT to an empty office. Rolling per tick
+# cannot be tuned into landing late; the fix is to choose ONE target time per day inside
+# a work-hours band and post at the first tick after it. Still sporadic day to day
+# (9:12, 8:34, 10:47…), but never before the team is at their desks.
+# Env-tunable so the band can move without a deploy — Chase wants to try ~10:45 PT.
+DEFAULT_SLOT_START_PT = "10:00"
+DEFAULT_SLOT_END_PT = "11:30"
 
 
 def in_window(now_utc: datetime) -> bool:
@@ -77,6 +90,55 @@ def in_window(now_utc: datetime) -> bool:
     coast-to-coast business day, opening on the East Coast and closing on the West."""
     et, pt = now_utc.astimezone(ET), now_utc.astimezone(PT)
     return et.weekday() < 5 and et.hour >= 7 and pt.hour < 17
+
+
+def _parse_slot_time(raw: str, fallback: str) -> time:
+    """Parse an 'HH:MM' band edge, falling back rather than crashing the cron tick.
+
+    An UNSET variable is the normal case and is silent — warning on it would write two
+    lines to cron.log on all 28 ticks a day and bury the outcomes that matter. Only a
+    value someone actually typed, and typed wrong, is worth reporting.
+    """
+    configured = raw.strip()
+    if configured:
+        try:
+            hour, _, minute = configured.partition(":")
+            return time(int(hour), int(minute))
+        except ValueError:
+            print(
+                f"[drip] ignoring malformed slot time {raw!r}; using {fallback}",
+                file=sys.stderr,
+            )
+    hour, _, minute = fallback.partition(":")
+    return time(int(hour), int(minute))
+
+
+def slot_band() -> tuple[time, time]:
+    """Return the configured Pacific band the daily card may land in.
+
+    `DRIP_SLOT_START_PT` / `DRIP_SLOT_END_PT` ("HH:MM", Pacific) tune this without a
+    deploy. An inverted or malformed band collapses to a single start-time slot rather
+    than raising — a bad env value must not silence the daily card entirely.
+    """
+    start = _parse_slot_time(
+        os.environ.get("DRIP_SLOT_START_PT", ""), DEFAULT_SLOT_START_PT
+    )
+    end = _parse_slot_time(os.environ.get("DRIP_SLOT_END_PT", ""), DEFAULT_SLOT_END_PT)
+    return (start, start) if end < start else (start, end)
+
+
+def daily_slot(local_date: date, channel: str) -> time:
+    """The single Pacific target time today's card may post at or after.
+
+    Seeded by (date, channel) so EVERY tick of a given day computes the SAME target —
+    a per-tick roll would re-randomize the goalpost every 30 minutes and reintroduce
+    exactly the front-loading this replaced. Varies day to day, so it still reads human.
+    """
+    start, end = slot_band()
+    span = (end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)
+    offset = random.Random(f"{local_date.isoformat()}:{channel}").randint(0, span)
+    minutes = start.hour * 60 + start.minute + offset
+    return time(minutes // 60, minutes % 60)
 
 
 def _fmt_amount(amount: float | None) -> str:
@@ -247,10 +309,9 @@ def pacing_ok(
     conn: sqlite3.Connection,
     channel: str,
     now_utc: datetime,
-    rng: random.Random,
     urgent: bool = False,
 ) -> tuple[bool, str]:
-    """Cap + gap + jitter (window handled separately so each rule tests cleanly)."""
+    """Cap + gap + today's slot (window handled separately so each rule tests cleanly)."""
     today = db.posts_today(conn, channel, now_utc)
     if len(today) >= ABSOLUTE_CAP:
         return False, f"absolute daily cap reached ({ABSOLUTE_CAP})"
@@ -266,9 +327,11 @@ def pacing_ok(
                 False,
                 f"only {gap_min:.0f}m since last post (min {MIN_GAP_MINUTES}m)",
             )
-    probability = POST_PROBABILITY if len(today) < DAILY_AIM else 0.25
-    if not urgent and rng.random() > probability:
-        return False, "jitter skip (keeps timing feeling human)"
+    if not urgent:
+        now_pt = now_utc.astimezone(PT)
+        target = daily_slot(now_pt.date(), channel)
+        if now_pt.time() < target:
+            return False, f"holding for today's {target:%H:%M} PT slot"
     return True, "eligible"
 
 
@@ -276,7 +339,6 @@ def should_post(
     conn: sqlite3.Connection,
     channel: str,
     now_utc: datetime,
-    rng: random.Random,
     force: bool = False,
     urgent: bool = False,
 ) -> tuple[bool, str]:
@@ -285,7 +347,7 @@ def should_post(
         return True, "forced"
     if not in_window(now_utc):
         return False, "outside Mon-Fri 7am ET – 5pm PT window"
-    return pacing_ok(conn, channel, now_utc, rng, urgent=urgent)
+    return pacing_ok(conn, channel, now_utc, urgent=urgent)
 
 
 def _is_exceptional(row: sqlite3.Row, today: date) -> bool:
@@ -378,10 +440,8 @@ def run_drip(
     conn: sqlite3.Connection,
     force: bool = False,
     dry_run: bool = False,
-    rng: random.Random | None = None,
 ) -> str:
     """One cron tick: maybe post one thing. Returns a human-readable outcome."""
-    rng = rng or random.Random()
     now = datetime.now(timezone.utc)
     choice = pick(conn, channel, now.date())
     if choice is None:
@@ -389,7 +449,7 @@ def run_drip(
     kind, row = choice
     # A platinum (or exceptional gold) award may take the rare emergency second slot.
     urgent = kind in ("platinum", "nugget") and _is_exceptional(row, now.date())
-    go, reason = should_post(conn, channel, now, rng, force=force, urgent=urgent)
+    go, reason = should_post(conn, channel, now, force=force, urgent=urgent)
     if not go:
         return f"skip: {reason}"
     if kind == "platinum":
