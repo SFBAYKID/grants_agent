@@ -179,8 +179,8 @@ affect Chase's other projects.
   Slack directory, never inferred from a name. An unmapped state posts with NO mention rather than a
   guessed one. `GRANT_TERRITORY_OWNERS="PA=U…,CA=U…"` overrides without a deploy; a set-but-malformed
   value yields no tags rather than silently reverting to the built-in reps.
-  **OPEN:** Chase asked for "Carrie Hilgus"; no such account exists in the workspace and Kerry
-  Hilligus (kerry@monarchconnected.com) is the only phonetic match — confirm before this deploys.
+  Chase's original note said "Carrie Hilgus"; no such account exists. He CONFIRMED 2026-07-22 that
+  the correct person is **Kerry Hilligus** (`U01E908206M`, kerry@monarchconnected.com) — resolved.
   `grant_watch/presentation.py:state_display_name` now covers all 50 states + DC; drip previously
   knew only 5, so a real Texas award rendered "in TX".
 - `verified` 2026-07-21: `python -m pytest tests -q` passed 642 tests (71 skipped live-marked); health
