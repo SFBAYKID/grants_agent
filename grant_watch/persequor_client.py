@@ -76,18 +76,43 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _event_type(row: sqlite3.Row) -> str:
+    """Read `current_event_type`, tolerating a row that was not joined to its event.
+
+    Both production callers pass a `db.get_lead` row, which joins `funding_events`. A
+    caller that passes a bare `leads` row gets "" and therefore the conservative
+    wording — never a crash, and never a claim the row cannot support. Deliberately NOT
+    a fallback to `lead_grade`: that inference is the bug this replaced.
+    """
+    try:
+        return str(row["current_event_type"] or "")
+    except (IndexError, KeyError):
+        return ""
+
+
 def _angle(row: sqlite3.Row) -> str:
-    """Describe only the funding state the canonical lead projection proves."""
-    source = str(row["source"] or "")
-    grade = str(row["lead_grade"] or "")
-    if source == "grants.gov":
+    """Describe only the funding state the canonical lead projection proves.
+
+    Derived from the EVENT TYPE, never from `lead_grade`. Grade encodes how good a lead
+    is; event type encodes what actually happened — and the two came apart on
+    2026-07-22, when undated California awards were correctly regraded GOLD→SILVER.
+    Under the old grade-driven wording every one of those ~351 districts would have been
+    described to Persequor as having "published a solicitation", with its award
+    SPEND-WINDOW end relabelled a "response deadline". Both false, in an email to a
+    school administrator — Constitution rule 1 on the one path that reaches a stranger.
+    `search_presentation.grade_phrases()` already learned this; this function had not.
+    """
+    event_type = _event_type(row)
+    if event_type == "rfp_posted":
+        return "published solicitation with a response window in the source record"
+    if event_type in {"award_announced", "award_obligated"}:
+        return "recorded funding award with a spend window in the source record"
+    if event_type == "application_window_opened":
         return (
             "published funding opportunity; application dates are in the source record"
         )
-    if grade == "silver":
-        return "published solicitation with a response window in the source record"
-    if grade == "gold":
-        return "recorded award with a currently open spend window"
+    # Unknown or missing event type: assert nothing about awards, solicitations, or
+    # deadlines. A vague-but-true angle is always preferable to a confident wrong one.
     return "public funding signal; confirm status and fit before outreach"
 
 

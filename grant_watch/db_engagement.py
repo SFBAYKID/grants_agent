@@ -140,6 +140,11 @@ def delivery_attempts_today(
     the one after that, walking down the 544-lead pool one card every 30 minutes until
     the window closed. Counting reservations too means a confirmed send is remembered
     even when recording it failed.
+
+    `lead_id IS NOT NULL` is load-bearing, not tidiness: channel-guard rows live in this
+    same table with a NULL lead_id, and without the filter a guard counted as a
+    delivery — verified to produce `daily cap reached (1)` with zero posts and zero
+    reservations, silently spending the day's only card.
     """
     now_utc = now_utc or datetime.now(timezone.utc)
     local_date = now_utc.astimezone(ZoneInfo("America/Los_Angeles")).date()
@@ -151,7 +156,8 @@ def delivery_attempts_today(
     return list(
         conn.execute(
             """SELECT * FROM notification_outbox
-               WHERE audience=? AND created_at>=? AND created_at<?
+               WHERE audience=? AND lead_id IS NOT NULL
+                 AND created_at>=? AND created_at<?
                ORDER BY created_at, id""",
             (channel, start_utc.isoformat(), end_utc.isoformat()),
         )

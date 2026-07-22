@@ -513,6 +513,42 @@ _CONTENT_SLACK_ERRORS = frozenset(
 
 _DEFAULT_RETRY_AFTER = 60  # Slack's documented minimum when the header is absent
 
+# A systemic Slack failure blocks the channel for a BOUNDED period, not forever. A
+# permanent block would simply trade one silent wedge for another: the only alarm this
+# system has is a non-zero exit and a line in cron.log, and the droplet crontab has no
+# MAILTO and redirects everything with `>>`, so nothing reads either. Bounded means the
+# product self-heals the moment Slack does. Escalating means a genuine outage is not
+# hammered every 30 minutes: 1h, 2h, 4h, then 8h.
+_SYSTEMIC_BACKOFF_BASE_MINUTES = 60
+_SYSTEMIC_BACKOFF_MAX_MINUTES = 480
+
+
+def _systemic_backoff_minutes(attempts: int) -> int:
+    """Escalating, capped backoff for consecutive systemic failures."""
+    exponent = max(0, min(attempts - 1, 8))
+    return min(
+        _SYSTEMIC_BACKOFF_BASE_MINUTES * (2**exponent), _SYSTEMIC_BACKOFF_MAX_MINUTES
+    )
+
+
+def _log_channel_block(
+    channel: str, code: str, until: str, attempts: int, first_failure: str
+) -> None:
+    """Emit ONE structured critical line per block period, to stderr (cron.log).
+
+    Deliberately not a Slack message: the thing that failed IS Slack, so reporting a
+    Slack outage through the same credential and channel is not a report. Deliberately
+    not MAILTO either — no working mail transport has been proven on that box. This is
+    an honest local record; a genuinely independent external alert is separate work and
+    is NOT claimed here.
+    """
+    print(
+        f"[drip][CRITICAL] channel_blocked audience={channel} error={code} "
+        f"blocked_until={until} consecutive_periods={attempts} "
+        f"first_failure={first_failure}",
+        file=sys.stderr,
+    )
+
 
 def _retry_after_seconds(exc: SlackApiError) -> int:
     """Read Slack's Retry-After header, clamped to something a 30-min cron can honour.
@@ -664,15 +700,23 @@ def run_drip(
             return _ambiguous(conn, delivery_key, exc)
         code = str(exc.response.get("error") or "unknown_error")
         if code in _SYSTEMIC_SLACK_ERRORS:
-            # The channel or the token is wrong, not this lead. Release it, then BLOCK
-            # the channel so later cron ticks stop instead of failing identically every
-            # 30 minutes. Only an operator (`cli drip-unblock`) resumes it.
+            # The channel or the token is wrong, not this lead. Release the lead, then
+            # block the channel for a BOUNDED, escalating period so later ticks neither
+            # hammer Slack nor go silent forever. After it expires exactly one attempt
+            # is made; a success clears the guard, a repeat renews it — and no lead is
+            # consumed either way.
             db.release_notification(conn, delivery_key)
-            db.set_channel_guard(conn, channel, "blocked", code)
+            prior = db.channel_guard_any(conn, channel)
+            attempts = (int(prior["attempts"]) + 1) if prior is not None else 1
+            minutes = _systemic_backoff_minutes(attempts)
+            until = (now + timedelta(minutes=minutes)).isoformat(timespec="seconds")
+            first_failure = str(prior["created_at"]) if prior is not None else until
+            db.set_channel_guard(conn, channel, "blocked", code, available_at=until)
+            _log_channel_block(channel, code, until, attempts, first_failure)
             return (
-                f"halt: Slack rejected posting to this channel ({code}); no lead was "
-                "consumed and the channel is now blocked. Fix it, then "
-                "`cli drip-unblock`"
+                f"blocked: Slack rejected posting to this channel ({code}); no lead was "
+                f"consumed. Holding {minutes}m until {until}; `cli drip-unblock` "
+                "resumes sooner once Slack is fixed"
             )
         if code in _CONTENT_SLACK_ERRORS:
             db.finish_notification(conn, delivery_key, "rejected", error=code)
@@ -708,6 +752,9 @@ def run_drip(
         )
         db.finish_notification(conn, delivery_key, "delivered", slack_ts=resp["ts"])
         db.mark_surfaced(conn, [int(row["id"])])
+        # A confirmed delivery proves the channel and token work again, so retire any
+        # guard. This is the normal WRITABLE path — reads never clear a guard.
+        db.clear_channel_guard(conn, channel)
     except Exception as exc:  # noqa: BLE001 — never crash the tick after a confirmed send
         try:
             db.finish_notification(conn, delivery_key, "delivered", slack_ts=resp["ts"])

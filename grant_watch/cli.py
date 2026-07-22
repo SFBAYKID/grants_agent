@@ -180,7 +180,7 @@ def cmd_drip(force: bool, dry_run: bool) -> int:
 
 # Drip outcomes that mean "a human should look at this". Everything else — a skip for
 # the cap, the slot, or an empty pool — is a normal tick.
-FAILING_DRIP_OUTCOMES = ("unknown:", "halt:", "blocked:", "error:")
+FAILING_DRIP_OUTCOMES = ("unknown:", "blocked:", "error:")
 
 
 def cmd_drip_unblock(channel: str) -> int:
@@ -211,11 +211,29 @@ def cmd_drip_blocked() -> int:
     """
     conn = db.connect_readonly()
     rows = db.blocked_notifications(conn)
+    # Channel guards live in the same table with a NULL lead_id. Reporting them as
+    # leads printed "lead #None … (unknown entity)" — presenting an outage as a phantom
+    # lost lead, and never naming the remedy.
+    guards = [r for r in rows if r["lead_id"] is None]
+    leads = [r for r in rows if r["lead_id"] is not None]
     if not rows:
         print("no blocked notifications: every reserved delivery was confirmed")
         return 0
-    print(f"{len(rows)} lead(s) set aside and never delivered:\n")
-    for row in rows:
+    if guards:
+        print(f"{len(guards)} CHANNEL GUARD(S) ACTIVE OR RECENT:\n")
+        for row in guards:
+            print(
+                f"  channel {row['audience']}  [{row['state']}]  "
+                f"reason={row['last_error'] or 'unrecorded'}\n"
+                f"      first_failure={row['created_at']}  latest={row['updated_at']}  "
+                f"holds_until={row['available_at']}\n"
+                f"      -> resume early with: cli drip-unblock --channel "
+                f"{row['audience']}"
+            )
+        print()
+    if leads:
+        print(f"{len(leads)} lead(s) set aside and never delivered:\n")
+    for row in leads:
         entity = row["entity_name"] or "(unknown entity)"
         reason = row["last_error"] or "no reason recorded"
         print(

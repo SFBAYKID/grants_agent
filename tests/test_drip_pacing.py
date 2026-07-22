@@ -8,7 +8,7 @@ against a real database before it was fixed — none is speculative.
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 
 import pytest
@@ -144,7 +144,7 @@ def test_systemic_slack_rejection_releases_the_lead(tmp_path: Path) -> None:
     _mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
     client = _RejectingClient("channel_not_found")
     outcome = drip.run_drip(client, "C1", conn, force=True)
-    assert outcome.startswith("halt:") and "channel_not_found" in outcome
+    assert outcome.startswith("blocked:") and "channel_not_found" in outcome
     # No LEAD-bearing row survives — the lead went back in the pool untouched.
     assert conn.execute(
         "SELECT COUNT(*) FROM notification_outbox WHERE lead_id IS NOT NULL"
@@ -256,14 +256,18 @@ def test_systemic_failure_blocks_the_channel_for_later_ticks(tmp_path: Path) -> 
                  amount=500_000.0 - index, start="2025-10-10", end="2028-09-30",
                  backfill=True)
     client = _RejectingClient("invalid_auth")
-    assert drip.run_drip(client, "C1", conn, force=True).startswith("halt:")
+    assert drip.run_drip(client, "C1", conn, force=True).startswith("blocked:")
     # Later ticks must not even attempt a post (force=False = a real cron tick).
     for _ in range(3):
         outcome = drip.run_drip(client, "C1", conn, force=False)
         assert outcome.startswith("blocked:"), outcome
     assert client.calls == 1, "blocked channel still called Slack"
     assert len(db.nugget_candidates(conn, "C1")) == 3, "leads were consumed while blocked"
-    # An operator clears it explicitly; nothing time-based resumes a bad token.
+    # The guard is time-BOUNDED, not permanent — a forever-block just trades one silent
+    # wedge for another. An operator may still clear it early.
+    guard = db.channel_guard(conn, "C1")
+    assert guard is not None and guard["state"] == "blocked"
+    assert str(guard["available_at"]) > str(guard["created_at"])
     assert db.clear_channel_guard(conn, "C1") is True
     assert db.channel_guard(conn, "C1") is None
 
@@ -329,11 +333,107 @@ def test_assumed_provenance_sources_fail_closed() -> None:
     assert territory.state_is_verified("ca-grants-portal")
 
 
-def test_failing_outcomes_return_nonzero_cli_status() -> None:
-    """A tick a human must look at cannot exit 0 — cron would swallow it."""
+def test_cmd_drip_exit_code_follows_the_real_outcome(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """FUNCTIONAL replacement for a tautology. The old test asserted the constant
+    against itself — it never called cmd_drip, never checked an exit code, and would
+    have stayed green if a prefix were renamed while cron went green forever."""
     from grant_watch import cli
 
-    for outcome in ("unknown: …", "halt: …", "blocked: …", "error: …"):
-        assert outcome.startswith(cli.FAILING_DRIP_OUTCOMES), outcome
-    for outcome in ("skip: daily cap reached (1)", "posted nugget", "backoff: holding"):
-        assert not outcome.startswith(cli.FAILING_DRIP_OUTCOMES), outcome
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "C1")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-not-used-dry-run")
+    monkeypatch.setattr(db, "connect_readonly", lambda *a, **k: db.connect(tmp_path / "t.db"))
+
+    def outcome_of(text: str) -> int:
+        """Drive cmd_drip with a mocked run_drip and return its exit code."""
+        monkeypatch.setattr(
+            "grant_watch.slack.drip.run_drip", lambda *a, **k: text
+        )
+        return cli.cmd_drip(force=False, dry_run=True)
+
+    assert outcome_of("blocked: channel is blocked (invalid_auth)") == 1
+    assert outcome_of("unknown: Slack delivery could not be confirmed") == 1
+    assert outcome_of("error: unrecognized code") == 1
+    assert outcome_of("posted nugget (award-brief) for lead #1: X") == 0
+    assert outcome_of("skip: daily cap reached (1)") == 0
+
+
+def test_expired_guard_is_ignored_without_being_deleted(tmp_path: Path) -> None:
+    """C2 — `channel_guard` must be a PURE READ. It previously self-healed with a
+    DELETE, which crashed `--dry-run` on the read-only connection cmd_drip opens, and
+    on a writable connection silently wrote during a dry run."""
+    conn = db.connect(tmp_path / "t.db")
+    db.set_channel_guard(conn, "C1", "backoff", "ratelimited",
+                         available_at="2000-01-01T00:00:00+00:00")
+    assert db.channel_guard(conn, "C1") is None  # expired -> ignored by the query
+    # ...but still present. Clearing belongs on an explicitly writable path.
+    assert db.channel_guard_any(conn, "C1") is not None
+
+
+def test_dry_run_leaves_the_database_unchanged_with_an_expired_guard(
+    tmp_path: Path,
+) -> None:
+    """C2 regression: a dry run must write NOTHING, even when a guard has lapsed."""
+    path = tmp_path / "t.db"
+    conn = db.connect(path)
+    _mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    db.set_channel_guard(conn, "C1", "backoff", "ratelimited",
+                         available_at="2000-01-01T00:00:00+00:00")
+    before = [tuple(r) for r in conn.execute("SELECT * FROM notification_outbox")]
+    outcome = drip.run_drip(None, "C1", conn, force=True, dry_run=True)
+    assert outcome.startswith("[dry-run]")
+    after = [tuple(r) for r in conn.execute("SELECT * FROM notification_outbox")]
+    assert after == before, "dry-run mutated notification_outbox"
+
+
+def test_dry_run_survives_a_readonly_connection_with_an_expired_guard(
+    tmp_path: Path,
+) -> None:
+    """The documented dry-run entrypoint opens `connect_readonly`. A lapsed guard used
+    to raise `attempt to write a readonly database` there."""
+    path = tmp_path / "t.db"
+    writable = db.connect(path)
+    _mk_lead(writable, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    db.set_channel_guard(writable, "C1", "backoff", "ratelimited",
+                         available_at="2000-01-01T00:00:00+00:00")
+    writable.close()
+    readonly = db.connect_readonly(path)
+    outcome = drip.run_drip(None, "C1", readonly, force=True, dry_run=True)
+    assert outcome.startswith("[dry-run]"), outcome
+
+
+def test_channel_guard_never_counts_as_a_delivery_or_consumes_the_cap(
+    tmp_path: Path,
+) -> None:
+    """H2 — guard rows share `notification_outbox` with real reservations. Counting one
+    produced `daily cap reached (1)` with ZERO posts and ZERO reservations, silently
+    spending the day's only card."""
+    conn = db.connect(tmp_path / "t.db")
+    db.set_channel_guard(conn, "C1", "backoff", "ratelimited",
+                         available_at="2099-01-01T00:00:00+00:00")
+    assert conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0] == 0
+    assert db.delivery_attempts_today(conn, "C1") == []
+    go, reason = drip.pacing_ok(conn, "C1", datetime(2026, 7, 22, 20, 0,
+                                                     tzinfo=timezone.utc))
+    assert go, f"a channel guard consumed the daily cap: {reason}"
+
+
+def test_backoff_escalates_and_stays_capped() -> None:
+    """Bounded AND escalating: a real outage must not be hammered every 30 minutes,
+    and must not be blocked forever either."""
+    assert drip._systemic_backoff_minutes(1) == 60
+    assert drip._systemic_backoff_minutes(2) == 120
+    assert drip._systemic_backoff_minutes(3) == 240
+    assert drip._systemic_backoff_minutes(9) == drip._systemic_backoff_minutes(4) == 480
+
+
+def test_a_successful_post_clears_the_guard(tmp_path: Path) -> None:
+    """Recovery is automatic on the writable path: a confirmed delivery proves the
+    channel works again."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    db.set_channel_guard(conn, "C1", "blocked", "invalid_auth",
+                         available_at="2000-01-01T00:00:00+00:00")
+    assert drip.run_drip(_SlackClient(), "C1", conn, force=True).startswith("posted")
+    assert db.channel_guard_any(conn, "C1") is None

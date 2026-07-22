@@ -85,9 +85,10 @@ def _seeded_conn(tmp_path: Path) -> sqlite3.Connection:
 def test_draft_is_honest(tmp_path: Path) -> None:
     """Verify draft is honest."""
     conn = _seeded_conn(tmp_path)
-    row = conn.execute(
-        "SELECT * FROM leads WHERE entity_name LIKE 'Castle%'"
-    ).fetchone()
+    lead_id = conn.execute(
+        "SELECT id FROM leads WHERE entity_name LIKE 'Castle%'"
+    ).fetchone()["id"]
+    row = db.get_lead(conn, lead_id)  # the joined shape production actually passes
     draft = persequor.compose_draft(row)
     assert "Monarch Connected" in draft  # sender identified
     assert "unsubscribe" in draft  # opt-out present
@@ -97,14 +98,51 @@ def test_draft_is_honest(tmp_path: Path) -> None:
     assert "Congratulations" not in draft  # record existence != relationship
 
 
-def test_silver_draft_describes_solicitation_not_award(tmp_path: Path) -> None:
-    """An RFP fallback never congratulates the issuer for receiving an award."""
+def test_silver_rfp_draft_describes_a_solicitation(tmp_path: Path) -> None:
+    """A SILVER lead whose event is an RFP is a solicitation — wording follows the
+    event, and this case happens to agree with the old grade-driven wording."""
     conn = _seeded_conn(tmp_path)
-    row = conn.execute("SELECT * FROM leads WHERE lead_grade='silver'").fetchone()
-    draft = persequor.compose_draft(row)
+    lead_id = conn.execute(
+        """SELECT l.id FROM leads l JOIN funding_events e ON e.id=l.current_event_id
+           WHERE l.lead_grade='silver' AND e.event_type='rfp_posted'"""
+    ).fetchone()["id"]
+    draft = persequor.compose_draft(db.get_lead(conn, lead_id))
     assert "solicitation" in draft
     assert "response deadline" in draft
     assert "award" not in draft.lower()
+
+
+def test_silver_award_draft_never_calls_an_award_a_solicitation(
+    tmp_path: Path,
+) -> None:
+    """THE C1 REGRESSION. A SILVER lead whose event is an AWARD must still be described
+    as an award. The old wording keyed off `lead_grade`, so when ~351 undated California
+    awards were regraded GOLD->SILVER on 2026-07-22 every one of them would have been
+    described to a school administrator as having "published a solicitation", with the
+    award's SPEND-WINDOW end relabelled a "response deadline". Two false claims, in a
+    real email."""
+    conn = _seeded_conn(tmp_path)
+    lead_id = conn.execute(
+        """SELECT l.id FROM leads l JOIN funding_events e ON e.id=l.current_event_id
+           WHERE e.event_type IN ('award_announced','award_obligated') LIMIT 1"""
+    ).fetchone()["id"]
+    conn.execute("UPDATE leads SET lead_grade='silver' WHERE id=?", (lead_id,))
+    conn.commit()
+    draft = persequor.compose_draft(db.get_lead(conn, lead_id))
+    assert "solicitation" not in draft.lower(), draft
+    assert "response deadline" not in draft.lower(), draft
+    assert "spend window" in draft.lower(), draft
+
+
+def test_draft_without_a_joined_event_claims_nothing(tmp_path: Path) -> None:
+    """A bare `leads` row degrades to wording that asserts no award, no solicitation
+    and no deadline — never a crash, and never an inference from the grade."""
+    conn = _seeded_conn(tmp_path)
+    row = conn.execute("SELECT * FROM leads LIMIT 1").fetchone()
+    draft = persequor.compose_draft(row)
+    assert "solicitation" not in draft.lower()
+    assert "deadline" not in draft.lower()
+    assert "spend window" not in draft.lower()
 
 
 def test_bad_lead_reason_lands_in_status_note(tmp_path: Path) -> None:

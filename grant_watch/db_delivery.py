@@ -161,8 +161,16 @@ def set_channel_guard(
     is self-clearing at `available_at`, used for rate limiting.
 
     Stored as a `notification_outbox` row with a NULL `lead_id`, so it is invisible to
-    the candidate exclusions (which all require `lead_id IS NOT NULL`) but visible to
-    `blocked_notifications` and therefore to `cli drip-blocked`.
+    the candidate exclusions AND to `delivery_attempts_today` (both require
+    `lead_id IS NOT NULL`) but visible to `blocked_notifications` and `cli drip-blocked`.
+    A guard must never read as a delivery: counting one consumed the daily cap with zero
+    posts and zero reservations.
+
+    The row carries the whole block period: `available_at` is blocked_until,
+    `last_error` the Slack code, `audience` the channel, `created_at` the FIRST failure,
+    `updated_at` the latest, and `attempts` how many consecutive periods have elapsed.
+    `created_at` is deliberately preserved across renewals so the age of an outage stays
+    readable.
     """
     if state not in {"blocked", "backoff"}:
         raise ValueError(f"unsupported channel guard state '{state}'")
@@ -172,7 +180,7 @@ def set_channel_guard(
             """INSERT INTO notification_outbox
                  (delivery_key,event_id,lead_id,audience,delivery_class,payload_json,
                   state,attempts,available_at,created_at,updated_at,last_error)
-               VALUES (?,NULL,NULL,?,'channel-guard','{}',?,0,?,?,?,?)
+               VALUES (?,NULL,NULL,?,'channel-guard','{}',?,1,?,?,?,?)
                ON CONFLICT(delivery_key) DO UPDATE SET
                  state=excluded.state, available_at=excluded.available_at,
                  updated_at=excluded.updated_at, last_error=excluded.last_error,
@@ -190,17 +198,34 @@ def set_channel_guard(
 
 
 def channel_guard(conn: sqlite3.Connection, channel: str) -> sqlite3.Row | None:
-    """Return an ACTIVE channel guard, or None. A lapsed backoff clears itself."""
-    row = conn.execute(
+    """Return an ACTIVE (unexpired) channel guard, or None. PURE READ — never writes.
+
+    An expired guard is filtered out by the QUERY; it is not deleted here. The earlier
+    version self-healed with a DELETE, which broke `--dry-run` two ways at once: on the
+    read-only connection `cmd_drip` opens it raised `attempt to write a readonly
+    database`, and on a writable connection it silently deleted a row during a dry run —
+    which CLAUDE.md rule 8 forbids and cli.py's own docstring promises never happens.
+    Reads must not mutate. Clearing a stale row belongs on an explicitly writable path
+    (`clear_channel_guard`, called after a successful post or by `cli drip-unblock`).
+    """
+    return conn.execute(
+        """SELECT * FROM notification_outbox
+           WHERE delivery_key=? AND available_at > ?""",
+        (_channel_guard_key(channel), _now()),
+    ).fetchone()
+
+
+def channel_guard_any(conn: sqlite3.Connection, channel: str) -> sqlite3.Row | None:
+    """Return the channel's guard row REGARDLESS of expiry. Pure read.
+
+    `channel_guard` filters to active guards; this one is for the write path, which
+    needs the expired row's `attempts` and original `created_at` to escalate a backoff
+    and to keep the age of an ongoing outage readable.
+    """
+    return conn.execute(
         "SELECT * FROM notification_outbox WHERE delivery_key=?",
         (_channel_guard_key(channel),),
     ).fetchone()
-    if row is None:
-        return None
-    if str(row["state"]) == "backoff" and str(row["available_at"] or "") <= _now():
-        clear_channel_guard(conn, channel)
-        return None
-    return row
 
 
 def clear_channel_guard(conn: sqlite3.Connection, channel: str) -> bool:

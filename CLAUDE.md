@@ -192,6 +192,34 @@ affect Chase's other projects.
   mid-title bid number; (H6) no missed-slot backstop, so a 90-min outage costs the day; (M1) the
   posts-exclusion is global, so a playground post burns a production lead; (M2) no `last_seen`
   staleness filter; (M3) `salesforce_followups` bypasses drip's caps and uses UTC day boundaries.
+- `verified` 2026-07-22 C1/C2/H2/H1 from the second architectural-critic review, all fixed:
+  **C1 (worst — a false claim in an OUTBOUND EMAIL).** `persequor_client._angle` and
+  `slack/persequor.compose_draft` derived wording from `lead_grade`, not the event. When undated CA
+  AWARDS were regraded GOLD→SILVER, all ~351 would have been described to a school administrator as
+  having "published a solicitation", with the award's SPEND-WINDOW end relabelled a "response
+  deadline". Both now derive from `current_event_type` (`rfp_posted` → solicitation;
+  `award_*` → award + spend window; `application_window_opened` → opportunity; UNKNOWN → wording that
+  claims no award, no solicitation and no deadline). A row lacking the joined event degrades to the
+  conservative branch — never a crash, and NEVER an inference from grade. The test that DEFENDED the
+  old behavior is replaced by separate silver-award and silver-RFP tests.
+  **C2.** `db.channel_guard` is now a PURE READ — an expired guard is filtered out by the query, not
+  deleted. It previously self-healed with a DELETE, which crashed `--dry-run` on the read-only
+  connection `cmd_drip` opens AND silently wrote during a dry run on a writable one (rule 8).
+  **H2.** `delivery_attempts_today` now requires `lead_id IS NOT NULL`. Channel-guard rows share the
+  outbox table with a NULL lead_id, and one counted as a delivery — verified to produce `daily cap
+  reached (1)` with zero posts and zero reservations.
+  **H1.** The permanent block is replaced by a BOUNDED, escalating, channel-scoped guard: 1h→2h→4h,
+  capped at 8h, persisting blocked_until / error code / audience / first + latest failure / consecutive
+  periods. Reads and dry-runs never mutate or clear it; after expiry exactly ONE attempt is made; a
+  confirmed delivery clears it on the writable path; continued systemic failure renews it without
+  consuming a lead. `cmd_drip` exits non-zero while blocked, `cli drip-blocked` shows guards
+  SEPARATELY from leads (they previously printed as "lead #None"), and one structured
+  `[drip][CRITICAL] channel_blocked …` line is emitted per block period.
+  NOT claimed: an independent external alert. No MAILTO is set on the droplet, no mail transport has
+  been proven, reporting a Slack outage through Slack is not a report, and a keepalive grep is not an
+  external alarm. Real alerting is separate, undone work.
+  The tautological exit-status test is replaced by one that drives `cmd_drip` with mocked outcomes and
+  asserts the actual exit code.
 - `verified` 2026-07-22 SIX FURTHER BLOCKERS from Chase's review of `74e8d59`, all fixed:
   (1) A systemic Slack failure now creates a PERSISTENT channel block (`db.set_channel_guard`,
   stored as a NULL-lead_id `notification_outbox` row), releases the lead, returns a non-zero CLI

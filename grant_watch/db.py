@@ -806,6 +806,7 @@ def mark_slack_event_reviewed(conn: sqlite3.Connection, event_id: str) -> bool:
 from .db_delivery import (  # noqa: E402  (facade re-export, must follow definitions)
     blocked_notifications,
     channel_guard,
+    channel_guard_any,
     clear_channel_guard,
     finish_notification,
     quarantine_lead,
@@ -829,6 +830,7 @@ __all__ = [
     "blocked_notifications",
     "bulletin_candidates",
     "channel_guard",
+    "channel_guard_any",
     "clear_channel_guard",
     "finish_notification",
     "quarantine_lead",
