@@ -62,3 +62,30 @@ def migration_24_atomic_proactive_daily_slots(conn: sqlite3.Connection) -> None:
              PRIMARY KEY(audience,local_date)
            )"""
     )
+
+
+def migration_25_typed_provenance_and_card_mode(conn: sqlite3.Connection) -> None:
+    """Freeze WHY the website + contact email were trusted, and the card's mode.
+
+    ``official_website_provenance`` and ``contact_domain_binding`` record the typed,
+    non-heuristic reason each was accepted (NCES / approved directory / verified org
+    page; org-site / authoritative-directory) so an audit can prove a card never
+    trusted a name guess. ``card_mode`` distinguishes a draft-ready card from a
+    Salesforce research-needed card, which must not offer an active draft action.
+    All three are nullable so the (empty in production) rich tables upgrade cleanly.
+    """
+    if "official_website_provenance" not in _column_names(
+        conn, "rich_card_snapshot_truth"
+    ):
+        conn.execute(
+            "ALTER TABLE rich_card_snapshot_truth "
+            "ADD COLUMN official_website_provenance TEXT"
+        )
+    if "contact_domain_binding" not in _column_names(
+        conn, "rich_card_snapshot_truth"
+    ):
+        conn.execute(
+            "ALTER TABLE rich_card_snapshot_truth ADD COLUMN contact_domain_binding TEXT"
+        )
+    if "card_mode" not in _column_names(conn, "rich_card_snapshots"):
+        conn.execute("ALTER TABLE rich_card_snapshots ADD COLUMN card_mode TEXT")

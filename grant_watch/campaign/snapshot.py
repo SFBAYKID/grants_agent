@@ -38,6 +38,7 @@ class SnapshotDraft:
     event_evidence_hash: str
     event_source_locator: str
     tier: str
+    card_mode: str  # policy.CardMode value: 'draft_ready' | 'research_needed'
     entity_name: str
     entity_kind: str
     entity_kind_provenance: str
@@ -52,6 +53,8 @@ class SnapshotDraft:
     award_url: str
     official_website: str
     official_website_evidence_url: str
+    official_website_provenance: str  # policy.WebsiteProvenance value (frozen truth)
+    contact_domain_binding: str  # policy.ContactBinding value (frozen truth)
     contact_evidence_id: str
     contact_evidence_hash: str
     contact_name: str
@@ -140,7 +143,7 @@ def freeze(
         inserted = conn.execute(
             """INSERT OR IGNORE INTO rich_card_snapshots
                  (id,policy_version,audience,dedup_key,lead_id,event_id,observation_id,
-                  run_id,source_item_id,tier,entity_name,entity_kind,
+                  run_id,source_item_id,tier,card_mode,entity_name,entity_kind,
                   entity_kind_provenance,state,state_provenance,program,amount,
                   award_date,award_date_precision,spend_window_start,spend_window_end,
                   award_url,official_website,contact_evidence_id,contact_evidence_hash,contact_name,
@@ -152,7 +155,7 @@ def freeze(
                   slack_user_id,fallback_text,render_inputs_json,created_at,expires_at,
                   state_updated_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                       ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 snapshot_id,
                 POLICY_VERSION,
@@ -164,6 +167,7 @@ def freeze(
                 draft.run_id,
                 draft.source_item_id,
                 draft.tier,
+                draft.card_mode,
                 draft.entity_name,
                 draft.entity_kind,
                 draft.entity_kind_provenance,
@@ -214,8 +218,9 @@ def freeze(
             """INSERT OR IGNORE INTO rich_card_snapshot_truth
                  (snapshot_id,award_dedup_key,source_name,event_type,event_amount,
                   event_verification_status,event_evidence_excerpt,event_evidence_hash,
-                  event_source_locator,official_website_evidence_url)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                  event_source_locator,official_website_evidence_url,
+                  official_website_provenance,contact_domain_binding)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 row["id"],
                 stable_key,
@@ -227,6 +232,8 @@ def freeze(
                 draft.event_evidence_hash,
                 draft.event_source_locator,
                 draft.official_website_evidence_url,
+                draft.official_website_provenance,
+                draft.contact_domain_binding,
             ),
         )
     return _from_row(row), inserted.rowcount == 1
