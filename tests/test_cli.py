@@ -131,6 +131,36 @@ def test_rich_flag_dispatches_only_when_explicitly_enabled(
     assert cli.cmd_drip(force=True, dry_run=True) == 0
 
 
+def test_rich_flag_off_never_enters_the_rich_delivery_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Feature-off equivalence: with the flag unset, cmd_drip uses the legacy drip and
+    never touches rich delivery (so evaluate/freeze/render are unreachable)."""
+    from grant_watch.campaign import delivery
+    from grant_watch.slack import drip
+
+    sentinel = _readonly_only(monkeypatch)
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANTS")
+    monkeypatch.delenv("GRANT_RICH_CARD_ENABLED", raising=False)
+    monkeypatch.setattr(
+        delivery,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("rich delivery entered while the flag was OFF")
+        ),
+    )
+    monkeypatch.setattr(
+        drip,
+        "run_drip",
+        lambda client, channel, conn, **_kwargs: (
+            "[dry-run] legacy"
+            if conn is sentinel and channel == "CGRANTS"
+            else "unexpected"
+        ),
+    )
+    assert cli.cmd_drip(force=True, dry_run=True) == 0
+
+
 def test_rich_prepare_defaults_to_no_http_readonly_preview(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

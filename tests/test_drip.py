@@ -936,8 +936,11 @@ def test_cap_holds_when_recording_a_confirmed_send_fails(
         assert first.startswith("posted") and "recording it hit" in first
         assert client.calls == 1
         assert conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0] == 0
-        # The reservation survived even though the posts row did not.
-        assert len(db.delivery_attempts_today(conn, "C1")) == 1
+        # The reservation survived even though the posts row did not. Pass the pinned
+        # Pacific day explicitly: without it this counts against the wall-clock day and
+        # silently mismatched the pinned reservation once the date rolled to 07-23.
+        pinned_day = datetime(2026, 7, 22, 18, 30, tzinfo=timezone.utc)  # 11:30 AM PT
+        assert len(db.delivery_attempts_today(conn, "C1", pinned_day)) == 1
         # A later tick on the SAME Pacific day, past the slot, must be held by the CAP
         # (not the slot) — proving the reservation-counted cap did not go blind.
         later = datetime(2026, 7, 22, 21, 0, tzinfo=timezone.utc)  # 2:00 PM PT, same day

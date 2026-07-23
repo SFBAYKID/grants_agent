@@ -17,11 +17,11 @@ import pytest
 from grant_watch import db, migrations
 
 
-def test_fresh_database_reaches_v24_with_all_rich_tables(tmp_path: Path) -> None:
-    """A brand-new database applies every migration through 24."""
+def test_fresh_database_reaches_v25_with_all_rich_tables(tmp_path: Path) -> None:
+    """A brand-new database applies every migration through 25."""
     conn = db.connect(tmp_path / "fresh.db")
     assert (
-        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 24
+        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 25
     )
     for table in (
         "rich_card_snapshots",
@@ -56,7 +56,12 @@ def test_fresh_database_reaches_v24_with_all_rich_tables(tmp_path: Path) -> None
         "contact_evidence_hash",
         "sf_activity_owner_email",
         "source_item_id",
+        "card_mode",
     } <= {r[1] for r in conn.execute("PRAGMA table_info(rich_card_snapshots)")}
+    assert {
+        "official_website_provenance",
+        "contact_domain_binding",
+    } <= {r[1] for r in conn.execute("PRAGMA table_info(rich_card_snapshot_truth)")}
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
@@ -91,14 +96,14 @@ def _at_v13(path: Path) -> sqlite3.Connection:
 def test_upgrade_from_each_supported_historical_schema(
     tmp_path: Path, version: int
 ) -> None:
-    """Every ledger version that existed upgrades to v24 with integrity intact."""
+    """Every ledger version that existed upgrades to v25 with integrity intact."""
     path = tmp_path / f"v{version}.db"
     historical = _at_version(path, version)
     historical.close()
     upgraded = db.connect(path)
     assert (
         upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-        == 24
+        == 25
     )
     assert upgraded.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
@@ -127,7 +132,7 @@ def test_v13_upgrade_preserves_posts_ids_and_engagement(tmp_path: Path) -> None:
     upgraded = db.connect(path)
     assert (
         upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-        == 24
+        == 25
     )
     assert (
         upgraded.execute("SELECT kind FROM posts WHERE id=42").fetchone()[0] == "nugget"

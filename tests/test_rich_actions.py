@@ -39,6 +39,32 @@ def _posted(path: Path) -> tuple[sqlite3.Connection, sqlite3.Row]:
     return conn, post
 
 
+def _posted_research(path: Path) -> tuple[sqlite3.Connection, sqlite3.Row]:
+    """Create one delivered RESEARCH-NEEDED snapshot: a fresh but ambiguous CRM match
+    (found, but no single exact Account) posts a card with no active draft action."""
+    conn = _eligible_conn(path)
+    conn.execute("UPDATE salesforce_lookup_state SET status='found'")
+    for record_id in ("00Q1", "00Q2"):
+        conn.execute(
+            """INSERT INTO salesforce_matches
+                 (lead_id,sobject,record_id,name,link,confidence,checked_at)
+               VALUES (1,'Lead',?,?,?, 'high','2026-07-22T17:30:00+00:00')""",
+            (record_id, f"Lead {record_id}", f"https://sf.test/lead/{record_id}"),
+        )
+    conn.commit()
+    outcome = delivery.run(
+        FakeSlack(conn),
+        "CGRANTS",
+        conn,
+        channel_members=frozenset({"U01DFJWQQJ3"}),
+        force=True,
+        now=READY,
+    )
+    assert outcome.startswith("posted rich_award")
+    post = conn.execute("SELECT * FROM posts").fetchone()
+    return conn, post
+
+
 def _kwargs(post: sqlite3.Row) -> dict[str, object]:
     """Return one valid action context for the fixture post."""
     return {
@@ -49,6 +75,28 @@ def _kwargs(post: sqlite3.Row) -> dict[str, object]:
         "requester_is_member": True,
         "nonce": "action-event-1",
     }
+
+
+def test_research_needed_card_refuses_a_draft_request(tmp_path: Path) -> None:
+    """A draft request on an ambiguous-CRM research card is refused server-side, even
+    though the button is never rendered — no Persequor brief is ever submitted."""
+    conn, post = _posted_research(tmp_path / "research.db")
+    assert conn.execute("SELECT card_mode FROM rich_card_snapshots").fetchone()[0] == (
+        "research_needed"
+    )
+    submitted: list[object] = []
+
+    def submit(*_args: object) -> tuple[str, str]:
+        """Must never be reached for a research-needed card."""
+        submitted.append(object())
+        return "submitted", "should not happen"
+
+    result = actions.request_draft(
+        conn, str(post["snapshot_id"]), submitter=submit, **_kwargs(post)
+    )
+    assert result.state == "blocked_research"
+    assert submitted == []
+    assert conn.execute("SELECT COUNT(*) FROM rich_card_actions").fetchone()[0] == 0
 
 
 def test_draft_persists_before_one_submit_and_uses_exact_wire_contract(

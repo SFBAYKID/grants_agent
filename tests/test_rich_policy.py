@@ -13,7 +13,13 @@ from datetime import date, datetime, timezone
 import pytest
 
 from grant_watch.campaign import policy
-from grant_watch.campaign.policy import CandidateEvidence, Reason
+from grant_watch.campaign.policy import (
+    CandidateEvidence,
+    CardMode,
+    ContactBinding,
+    Reason,
+    WebsiteProvenance,
+)
 
 TODAY = date(2026, 7, 22)
 
@@ -35,14 +41,17 @@ def _valid(**over: object) -> CandidateEvidence:
         last_confirmed_run_complete=True,
         entity_kind="school_district",
         entity_kind_provenance="nces",
+        nces_id="0622710",
         state_verified=True,
         award_url_safe=True,
         official_website="https://montebelloschools.net",
-        official_website_verified=True,
+        org_profile_found=True,
+        org_profile_evidence_url="https://montebelloschools.net/contact",
+        nces_website="",
         contact_status="verified",
         contact_type="named_direct",
         contact_email="jdoe@montebelloschools.net",
-        contact_official_domain="montebelloschools.net",
+        contact_evidence_url="https://montebelloschools.net/staff",
         contact_last_verified_at="2026-07-10",
         contact_expires_at="2026-08-10T00:00:00+00:00",
         contact_evidence_url_safe=True,
@@ -105,13 +114,15 @@ def test_recent_award_without_program_fit_stays_gold() -> None:
         ("state_verified", False, Reason.STATE_PROVENANCE),
         ("award_url_safe", False, Reason.AWARD_URL_UNSAFE),
         ("official_website", "", Reason.NO_WEBSITE),
-        ("official_website_verified", False, Reason.WEBSITE_UNVERIFIED),
+        # A reviewed directory host is never an org's own site → no provenance.
+        ("official_website", "https://cde.ca.gov", Reason.WEBSITE_UNVERIFIED),
         ("contact_status", "not_found", Reason.CONTACT_MISSING),
         ("contact_type", "", Reason.CONTACT_MISSING),
         ("contact_last_verified_at", "2026-05-01", Reason.CONTACT_STALE),
         ("contact_expires_at", "2026-07-22T11:59:59+00:00", Reason.CONTACT_STALE),
         ("contact_evidence_url_safe", False, Reason.CONTACT_URL_UNSAFE),
-        ("crm_state", "ambiguous", Reason.CRM_UNSAFE),
+        # Ambiguous is NOT here — it is eligible as a research-needed card (below).
+        ("crm_state", "partial", Reason.CRM_UNSAFE),
         ("crm_state", "unavailable", Reason.CRM_UNSAFE),
         ("crm_checked_at", "2026-07-20T23:59:59+00:00", Reason.CRM_UNSAFE),
     ],
@@ -127,17 +138,21 @@ def test_each_rule_rejects_with_its_reason(
 def test_personal_mailbox_is_rejected_even_on_an_official_domain_field() -> None:
     """A gmail address is rejected for this campaign regardless of the page it's on."""
     result = policy.evaluate(
-        _valid(contact_email="principal@gmail.com", contact_official_domain="gmail.com")
+        _valid(
+            contact_email="principal@gmail.com",
+            contact_evidence_url="https://montebelloschools.net/staff",
+        )
     )
     assert not result.eligible and result.reason is Reason.CONTACT_PERSONAL
 
 
-def test_email_domain_must_match_the_official_domain() -> None:
-    """A verified email whose domain isn't the org's official domain is rejected."""
+def test_email_not_bound_to_the_organization_is_rejected() -> None:
+    """A verified email that is neither on the org's site nor in an exact authoritative
+    record is rejected — the scrape page alone never binds it (critic C1)."""
     result = policy.evaluate(
         _valid(
             contact_email="jdoe@some-other-vendor.com",
-            contact_official_domain="montebelloschools.net",
+            contact_evidence_url="https://cde.ca.gov/schooldirectory/details?cdscode=1",
         )
     )
     assert not result.eligible and result.reason is Reason.CONTACT_DOMAIN
@@ -176,3 +191,193 @@ def test_city_is_modelled_but_deferred_not_unsupported() -> None:
     assert "city" in policy.SUPPORTED_ENTITY_KINDS
     assert "city" not in policy.QUALIFYING_ENTITY_KINDS
     assert policy.evaluate(_valid(entity_kind="city")).reason is Reason.KIND_DEFERRED
+
+
+# --- Change 1: contact email bound to the ORGANIZATION, not the scrape page ----------
+
+
+def test_email_matching_verified_org_website_is_eligible() -> None:
+    """Chase's corrected test: an email whose domain matches the verified organization
+    website is eligible, even when the email was verified on an authoritative directory
+    page (cde.ca.gov) whose host differs from the email's."""
+    result = policy.evaluate(
+        _valid(
+            contact_email="eevans@montebelloschools.net",
+            contact_evidence_url="https://cde.ca.gov/schooldirectory/details?cdscode=19",
+        )
+    )
+    assert result.eligible
+    assert result.contact_binding is ContactBinding.ORG_SITE
+
+
+def test_email_on_a_subdomain_of_the_org_website_is_eligible() -> None:
+    """A district mail subdomain (sd.<district>) still binds to the organization."""
+    result = policy.evaluate(
+        _valid(contact_email="eevans@sd.montebelloschools.net")
+    )
+    assert result.eligible and result.contact_binding is ContactBinding.ORG_SITE
+
+
+def test_email_in_exact_nces_record_binds_without_org_site_match() -> None:
+    """An email verbatim in an EXACT, id-bound NCES record binds even when its domain
+    is not the org website — the exact-id URL provides the organization binding."""
+    result = policy.evaluate(
+        _valid(
+            contact_email="jdoe@somedistrict.org",
+            contact_evidence_url="https://nces.ed.gov/ccd/districtsearch/district_detail.asp?ID=0622710",
+        )
+    )
+    assert result.eligible
+    assert result.contact_binding is ContactBinding.AUTHORITATIVE_DIRECTORY
+
+
+def test_authoritative_directory_binding_requires_the_exact_lead_id() -> None:
+    """A reviewed-directory page that does NOT carry this lead's exact id cannot bind —
+    a name match is never enough (fail-closed)."""
+    result = policy.evaluate(
+        _valid(
+            contact_email="jdoe@somedistrict.org",
+            contact_evidence_url="https://nces.ed.gov/ccd/districtsearch/district_detail.asp?ID=9999999",
+        )
+    )
+    assert not result.eligible and result.reason is Reason.CONTACT_DOMAIN
+
+
+def test_cde_directory_cannot_exact_bind_today_without_a_stored_code() -> None:
+    """We store no CA CDS code, so a cde.ca.gov record cannot exact-bind an off-site
+    email — it stays rejected rather than trusting the directory host loosely."""
+    result = policy.evaluate(
+        _valid(
+            contact_email="jdoe@somedistrict.org",
+            contact_evidence_url="https://cde.ca.gov/schooldirectory/details?cdscode=19",
+        )
+    )
+    assert not result.eligible and result.reason is Reason.CONTACT_DOMAIN
+
+
+def test_authoritative_directory_rejects_a_substring_id_collision() -> None:
+    """Critic H1: this lead's id `062271` must NOT bind another district's exact record
+    `?ID=0622710` — the id is matched as a whole token, never a substring."""
+    result = policy.evaluate(
+        _valid(
+            nces_id="062271",
+            contact_email="jdoe@somedistrict.org",
+            contact_evidence_url="https://nces.ed.gov/ccd/districtsearch/district_detail.asp?ID=0622710",
+        )
+    )
+    assert not result.eligible and result.reason is Reason.CONTACT_DOMAIN
+
+
+def test_authoritative_directory_rejects_id_embedded_in_a_path_token() -> None:
+    """The exact id embedded inside a larger path token (`fake0622710`) does not bind."""
+    result = policy.evaluate(
+        _valid(
+            contact_email="jdoe@somedistrict.org",
+            contact_evidence_url="https://nces.ed.gov/ccd/schoolsearch/fake0622710",
+        )
+    )
+    assert not result.eligible and result.reason is Reason.CONTACT_DOMAIN
+
+
+def test_authoritative_directory_ignores_non_id_query_values() -> None:
+    """The exact id must be a real query value/segment, not a substring of another param;
+    the actual `ID` param here is a different district, so it must not bind."""
+    result = policy.evaluate(
+        _valid(
+            contact_email="jdoe@somedistrict.org",
+            contact_evidence_url="https://nces.ed.gov/ccd/x?other=90622710X&ID=9999999",
+        )
+    )
+    assert not result.eligible and result.reason is Reason.CONTACT_DOMAIN
+
+
+def test_bare_public_suffix_email_never_binds_an_org_website() -> None:
+    """Critic M1: an email at a bare label/public suffix (`admin@net`) cannot bind a
+    `.net` organization website — `_same_site` requires a dotted label on both sides."""
+    result = policy.evaluate(_valid(contact_email="admin@net"))
+    assert not result.eligible and result.reason is Reason.CONTACT_DOMAIN
+
+
+def test_lookalike_suffix_domain_does_not_bind() -> None:
+    """`evilmontebelloschools.net` must never bind `montebelloschools.net` — the
+    parent/child test anchors on a leading dot, so a shared suffix is not enough."""
+    result = policy.evaluate(
+        _valid(
+            contact_email="jdoe@evilmontebelloschools.net",
+            contact_evidence_url="https://montebelloschools.net/staff",
+        )
+    )
+    assert not result.eligible and result.reason is Reason.CONTACT_DOMAIN
+
+
+# --- Change 2: typed, non-heuristic website provenance -------------------------------
+
+
+def test_contact_verified_on_org_page_supplies_website_provenance() -> None:
+    """A verified contact on the org's OWN domain establishes the website even when the
+    separate org-profile scrape failed (the real Bartlett ISD case)."""
+    result = policy.evaluate(
+        _valid(
+            org_profile_found=False,
+            org_profile_evidence_url="",
+            contact_email="mhauk@montebelloschools.net",
+            contact_evidence_url="https://montebelloschools.net/staff",
+        )
+    )
+    assert result.eligible
+    assert result.website_provenance is WebsiteProvenance.VERIFIED_ORG_PAGE
+
+
+def test_nces_published_website_is_accepted_provenance() -> None:
+    """An exact NCES-published official site is accepted website provenance."""
+    result = policy.evaluate(
+        _valid(
+            org_profile_found=False,
+            org_profile_evidence_url="",
+            contact_evidence_url="https://cde.ca.gov/schooldirectory/details?cdscode=19",
+            nces_website="https://montebelloschools.net",
+        )
+    )
+    assert result.eligible
+    assert result.website_provenance is WebsiteProvenance.NCES
+
+
+def test_directory_host_is_never_the_org_website_even_with_a_contact_on_it() -> None:
+    """A directory host (cde.ca.gov) is never an org's own site: a contact verified on
+    it cannot promote it to the website (the Fairfax safety)."""
+    result = policy.evaluate(
+        _valid(
+            official_website="https://cde.ca.gov",
+            org_profile_found=False,
+            org_profile_evidence_url="",
+            contact_evidence_url="https://cde.ca.gov/schooldirectory/details?cdscode=15",
+        )
+    )
+    assert not result.eligible and result.reason is Reason.WEBSITE_UNVERIFIED
+
+
+# --- Change 3: Salesforce ambiguity is a research-needed card, never a hard reject ----
+
+
+def test_ambiguous_fresh_crm_is_research_needed_not_rejected() -> None:
+    """Fresh-but-ambiguous CRM is eligible as a research-needed card."""
+    result = policy.evaluate(_valid(crm_state="ambiguous"))
+    assert result.eligible and result.reason is Reason.ELIGIBLE
+    assert result.card_mode is CardMode.RESEARCH_NEEDED
+
+
+def test_exact_match_and_no_match_are_draft_ready() -> None:
+    """Exact match and complete no-match remain draft-ready."""
+    assert policy.evaluate(_valid()).card_mode is CardMode.DRAFT_READY
+    assert (
+        policy.evaluate(_valid(crm_state="complete_no_match")).card_mode
+        is CardMode.DRAFT_READY
+    )
+
+
+def test_ambiguous_but_stale_crm_is_ineligible() -> None:
+    """Ambiguity does not excuse staleness: a stale ambiguous lookup is ineligible."""
+    result = policy.evaluate(
+        _valid(crm_state="ambiguous", crm_checked_at="2026-07-20T23:59:59+00:00")
+    )
+    assert not result.eligible and result.reason is Reason.CRM_UNSAFE

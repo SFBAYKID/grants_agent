@@ -114,6 +114,75 @@ affect Chase's other projects.
 
 ## Current status (2026-07-21)
 
+- `verified` 2026-07-23 RICH-CARD GATE LOOSENING (Chase approved Changes 1 & 2 with
+  revisions + a narrowed Change 3 after the 14-candidate audit). Local only, flag OFF
+  (`GRANT_RICH_CARD_ENABLED` default false), NO deploy/enable/prod-write/live-post.
+  Migration 25 freezes typed provenance (`rich_card_snapshot_truth.official_website_
+  provenance` + `contact_domain_binding`, `rich_card_snapshots.card_mode`). See design
+  §16. **Change 1**: contact email binds to the ORGANIZATION, not the scrape page
+  (`policy.contact_binding` → `org_site` when the email domain matches the verified org
+  website incl. a parent/subdomain, or `authoritative_directory` when verbatim in an
+  EXACT, id-bound record on a human-reviewed host allowlist `REVIEWED_DIRECTORY_HOSTS`
+  = nces.ed.gov, cde.ca.gov). Exact binding only — nces.ed.gov needs the lead's nces_id
+  in the URL; cde.ca.gov cannot exact-bind (no stored CDS code) and stays rejected. No
+  suffix heuristics. **Change 2**: typed `policy.website_provenance` (`nces` /
+  `authoritative_directory` / `verified_org_page` / `none`), frozen with its evidence
+  locator; a reviewed-directory host is NEVER an org's own site (the Fairfax safety);
+  `verified_org_page` fires from an org-site scrape OR a verbatim-verified contact on
+  that domain (the Bartlett fix). `nces`/`authoritative_directory` are modelled +
+  fixture-tested but INERT until that source is wired — not claimed live. **Change 3
+  (narrowed)**: exact/complete-no-match stay draft-ready; fresh `ambiguous` → a
+  `research_needed` card ("Possible Salesforce matches—review before outreach", NO
+  relationship/net-new claim, TERRITORY routing only with every CRM binding dropped so a
+  single-account/multi-opp ambiguity can't leak an owner, NO active Persequor button, and
+  `actions.request_draft` refuses it server-side); partial/unavailable/stale/missing
+  remain ineligible. Event wording exact ("Federal funds obligated"/"Award announced",
+  never "Awarded"); double-period fixed; audit output redacts email local parts; removed
+  dead `card.exact_award_url`/`official_site_evidenced`. Non-negotiables held: award
+  truth, personal-mailbox rejection (regression-tested), contact freshness, Persequor
+  safety. `python -m pytest tests -q` = 919 passed / 71 skipped; ruff + vulture + health
+  clean; largest touched file 485 lines.
+- `verified` 2026-07-23 RERUN of the same 14 on a DISPOSABLE copy of prod_preview.db with
+  REAL authorized enrichment (Firecrawl + Claude + read-only Salesforce), both audiences,
+  emails redacted. Under the new policy: PRODUCTION 5 eligible (was 0) — 1 draft-ready
+  (#7789 Bartlett ISD, no-match CRM, website via verified contact page) + 4 research-needed
+  (#231 Birmingham, #232 Montebello, #235 Valle Lindo, #241 Golden Eagle; all ambiguous
+  CRM, all territory-routed). PLAYGROUND 4 eligible (#231 & #7782 excluded — already in
+  that audience's post history). The 3 originally-over-narrow leads (235 org-site subdomain
+  bind, 241 org-site, 7789 contact-establishes-site) are now eligible — Changes 1 & 2
+  validated on live data. SAFETY validated: #234 Fairfax REJECTED website_provenance_missing
+  because its "website" is the cde.ca.gov directory, not its own site. Remaining rejects
+  are genuine: 7 contact_missing (no verifiable contact) + 2 website_provenance_missing.
+  `assumed` replenishment: ~5 eligible now ≈ one business week at 1 card/weekday; near-term
+  replenishment is LOW without enriching more of the 563 gold leads (most lack an NCES id
+  or a verifiable contact) — the 14 were a pre-characterized NCES+dated+open-window subset,
+  not a rate. NOTE: my first two rerun attempts were HARNESS artifacts, both caught and
+  corrected — (1) `.env` not loaded from the background cwd (false all-website_missing);
+  (2) `now` captured before enrichment, so SF `checked_at` read as a future timestamp and
+  the freshness guard correctly rejected it (false all-CRM_UNSAFE). The policy was right
+  both times; re-evaluating with a correct clock produced the numbers above. Frame this as
+  a **production-audience simulation on a disposable production-data copy**, NOT production
+  output.
+- `verified` 2026-07-23 architectural-critic READ-ONLY review of the complete uncommitted
+  diff (Chase-ordered, ten focus areas). Verdict: 9/10 properties hold against running
+  code — ambiguous-CRM owner-drop is airtight (nulled before routing), the research-card
+  draft refusal is server-side on the frozen `card_mode`, migration 25 is forward-only /
+  nullable / rollback-inert with matching freeze() placeholder counts, complete-no-match is
+  freshness-gated, feature-OFF dispatch is unchanged, and the report is counts-only (no PII).
+  Two findings resolved before commit: **H1** — `_authoritative_exact` matched the NCES id
+  by SUBSTRING (`in`), so `062271` could bind another district's `?ID=0622710`; now matched
+  as a whole query value / path segment (was INERT — no runtime source feeds that path —
+  so never Critical, but fixed + adversarially tested). **M1** — `_same_site` now requires a
+  dotted label on both sides so a bare public suffix (`net`) cannot bind. **H2 (honesty,
+  not a code bug)** — the "non-heuristic provenance" claim OVERSTATED: the website-to-awardee
+  tie still rests on `finder._looks_official` (a name-token anchor); corrected the claim in
+  `policy.website_provenance`'s docstring, design §16, and here — it is non-heuristic AT THE
+  POLICY LAYER given that anchor, not end-to-end. RESIDUAL, documented not closed: a
+  multi-label public suffix (`k12.ca.us`) can still `_same_site`-match, but a real contact
+  email at a bare public suffix must still pass finder's on-page verification (critic-rated
+  Low); full PSL is out of scope. All 4 simulated research cards routed to a mapped
+  territory rep (none unassigned). `pytest` 925 passed / 71 skipped; ruff + health clean.
+
 - `verified` 2026-07-20 PRODUCTION CUTOVER (guardian + read-only API): Grant is LIVE on the
   production channel `C01DGT9D11D` (monarch-cloud-team-vekada, `is_member:true`), running `15263d2`
   with migration 13 applied. Salesforce is PRODUCTION — read verified live, `verify_write_scope`

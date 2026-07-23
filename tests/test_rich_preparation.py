@@ -10,8 +10,47 @@ from grant_watch import db
 from grant_watch.campaign import report
 from grant_watch.campaign.policy import Reason
 from grant_watch.campaign.preparation import _fresh_activity, review_candidates
+from grant_watch.campaign.routing import RoutingReason
 
 NOW = datetime(2026, 7, 22, 18, 0, tzinfo=timezone.utc)
+
+
+def _make_ambiguous(conn: sqlite3.Connection, *, with_owned_account: bool) -> None:
+    """Turn the eligible fixture's CRM into an ambiguous 'found' result.
+
+    Two shapes: no single Account (all Lead matches), and — the dangerous one — a
+    SINGLE owned Account with MULTIPLE open Opportunities, which still resolves to
+    ambiguous but carries a real Account owner that must never leak into routing."""
+    conn.execute("UPDATE salesforce_lookup_state SET status='found'")
+    if with_owned_account:
+        # A REAL roster owner (Brett) who is a channel member: without the research
+        # guard, the Account owner out-prioritizes territory and would win the route.
+        conn.execute(
+            """INSERT INTO salesforce_matches
+                 (lead_id,sobject,record_id,name,link,confidence,account_id,is_closed,
+                  owner_id,owner_email,checked_at)
+               VALUES (1,'Account','001A','Acct','https://sf.test/a','high',NULL,0,
+                       'U08C1NBH875','brett@monarchconnected.com',
+                       '2026-07-22T17:30:00+00:00')"""
+        )
+        for opp in ("006A", "006B"):
+            conn.execute(
+                """INSERT INTO salesforce_matches
+                     (lead_id,sobject,record_id,name,link,confidence,account_id,
+                      is_closed,checked_at)
+                   VALUES (1,'Opportunity',?,?,?, 'high','001A',0,
+                           '2026-07-22T17:30:00+00:00')""",
+                (opp, f"Opp {opp}", f"https://sf.test/o/{opp}"),
+            )
+    else:
+        for rid in ("00Q1", "00Q2"):
+            conn.execute(
+                """INSERT INTO salesforce_matches
+                     (lead_id,sobject,record_id,name,link,confidence,checked_at)
+                   VALUES (1,'Lead',?,?,?, 'high','2026-07-22T17:30:00+00:00')""",
+                (rid, f"Lead {rid}", f"https://sf.test/l/{rid}"),
+            )
+    conn.commit()
 
 
 def _eligible_conn(path: Path) -> sqlite3.Connection:
@@ -90,6 +129,48 @@ def test_complete_persisted_evidence_builds_one_routed_draft(tmp_path: Path) -> 
     assert draft.route.slack_user_id == "U01DFJWQQJ3"
     assert draft.contact_evidence_id == "contact-1"
     assert "jon@montebello.k12.ca.us" in draft.fallback_text
+
+
+def test_ambiguous_crm_builds_a_research_card_routed_by_territory(
+    tmp_path: Path,
+) -> None:
+    """A fresh but ambiguous CRM lookup is eligible as a research-needed card: territory
+    routing, the review banner, and no relationship/net-new claim."""
+    conn = _eligible_conn(tmp_path / "amb.db")
+    _make_ambiguous(conn, with_owned_account=False)
+    reviews = review_candidates(conn, "CGRANTS", frozenset({"U01DFJWQQJ3"}), now=NOW)
+    assert len(reviews) == 1 and reviews[0].reason is Reason.ELIGIBLE
+    draft = reviews[0].draft
+    assert draft is not None
+    assert draft.card_mode == "research_needed"
+    assert draft.route.reason is RoutingReason.TERRITORY
+    assert draft.route.slack_user_id == "U01DFJWQQJ3"
+    assert draft.sf_display_text == "Possible Salesforce matches—review before outreach."
+    assert draft.sf_account_id == "" and draft.sf_open_link == ""
+    assert "net-new" not in draft.fallback_text.lower()
+
+
+def test_ambiguous_owned_account_never_leaks_its_owner_into_routing(
+    tmp_path: Path,
+) -> None:
+    """The dangerous ambiguous shape — a single OWNED Account with multiple open
+    Opportunities — must route by territory, never to that Account's Salesforce owner."""
+    conn = _eligible_conn(tmp_path / "amb-owned.db")
+    _make_ambiguous(conn, with_owned_account=True)
+    reviews = review_candidates(
+        conn,
+        "CGRANTS",
+        # Both the territory rep AND the (wrong) account owner are channel members, so a
+        # leak would actually route to the owner if the guard were missing.
+        frozenset({"U01DFJWQQJ3", "U08C1NBH875"}),
+        now=NOW,
+    )
+    draft = reviews[0].draft
+    assert draft is not None
+    assert draft.card_mode == "research_needed"
+    assert draft.route.reason is RoutingReason.TERRITORY
+    assert draft.route.slack_user_id == "U01DFJWQQJ3"
+    assert draft.sf_account_id == ""
 
 
 def test_card_amount_and_event_meaning_come_from_exact_event(tmp_path: Path) -> None:

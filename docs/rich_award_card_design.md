@@ -377,3 +377,53 @@ an ad-hoc query. It must measure every REAL readiness requirement (award, freshn
 a completed run, org-kind provenance, contact, CRM, links, routing) — never approximate
 from today's incomplete schema. Built here (`campaign/report.py` + `cli rich-shadow`),
 authorized-to-run separately.
+
+## 16. Gate-loosening amendments (Chase, 2026-07-23) — after the 14-candidate audit
+
+A read-only audit of the 14 award+NCES candidates found every card rejected — some for
+genuine uncertainty, three for over-narrow rules. Chase approved Changes 1 & 2 with
+revisions and a narrowed Change 3. Migration 25 freezes the new typed provenance.
+Feature stays flag-OFF. Award truth, personal-email rejection, contact freshness, and
+Persequor safety remain non-negotiable through all three.
+
+**Change 1 — contact email bound to the ORGANIZATION, not the scrape page**
+(`policy.contact_binding`). A non-personal email qualifies iff EITHER (`org_site`) its
+domain matches the verified organization website (exact or a direct parent/subdomain), OR
+(`authoritative_directory`) it appears verbatim in an EXACT, id-bound record on a
+human-reviewed directory host (`policy.REVIEWED_DIRECTORY_HOSTS`). Exact binding, not a
+name match: an `nces.ed.gov` URL must carry the lead's `nces_id`; a state directory whose
+code we do not store (CA CDS) cannot bind and stays rejected — fail-closed. The typed
+result is frozen (`rich_card_snapshot_truth.contact_domain_binding`). This is the fix for
+Valle Lindo / Golden Eagle (email on the org site, verified via `cde.ca.gov`).
+
+**Change 2 — typed website provenance** (`policy.website_provenance`, frozen as
+`official_website_provenance` + its evidence locator). A reviewed-directory host is NEVER
+an org's own site (the Fairfax safety). Accepted kinds: `nces` (exact NCES-published
+site — modelled but inert until that source is wired), `verified_org_page` (an org-profile
+scrape on the org's own domain, OR a verbatim-verified contact whose evidence page is on
+that domain — the Bartlett fix), and `authoritative_directory` (directory-published site;
+also not yet sourced). **Honesty scope (critic H2, 2026-07-23):** the POLICY layer never
+re-guesses from a name, but the tie between the website value and the specific awardee
+still rests on the enrichment anchor (`finder._looks_official`, a name-token match) that
+set `leads.org_website`; `verified_org_page`-via-contact rests on that SAME anchor, not a
+stronger one. A true independent org-identity check would require the not-yet-wired exact
+NCES-published site. This is non-heuristic *at the policy layer given that anchor*, not
+end-to-end. **Change 1's `authoritative_directory` binding matches the NCES id as a whole
+query value or path segment — never a substring** (critic H1: `in` would let `062271`
+bind another district's `?ID=0622710`), and `_same_site` requires a dotted label on both
+sides so a bare public suffix (`net`) can never bind (critic M1).
+
+**Change 3 (narrowed) — Salesforce ambiguity is a research-needed card, never draft-ready
+and never a hard reject.** `exact_match` / `complete_no_match` (fresh) stay draft-ready.
+A fresh `ambiguous` lookup produces a `research_needed` card: it shows "Possible
+Salesforce matches—review before outreach", makes NO relationship/net-new claim, routes by
+TERRITORY only (every exact CRM binding is dropped, so a single-account/multi-opportunity
+ambiguity cannot leak an owner mention), renders NO active Persequor draft button, and
+`actions.request_draft` refuses it server-side. `partial` / `unavailable` / `stale` /
+missing remain ineligible for the initial live campaign. `card_mode` is frozen on the
+snapshot; the shadow report splits `draft_ready_count` / `research_needed_count`.
+
+**Also:** event wording is exact — "Federal funds obligated" (`award_obligated`), "Award
+announced" (`award_announced`); an obligation is never relabelled "Awarded". The
+Salesforce fallback line renders exactly one period. Audit/report output redacts email
+local parts. Removed dead `card.exact_award_url` / `card.official_site_evidenced`.

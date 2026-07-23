@@ -35,6 +35,38 @@ def test_gold_card_has_accessible_truthful_sections_and_actions() -> None:
     assert "remaining" not in encoded.lower()
 
 
+def test_research_needed_card_offers_no_active_draft_action() -> None:
+    """An ambiguous-CRM research card must NOT render the Persequor draft button, must
+    show the ambiguity banner, and must claim no relationship/net-new (Chase 2026-07-23)."""
+    rendered = card.render(
+        _snapshot(
+            card_mode="research_needed",
+            sf_display_text="Possible Salesforce matches—review before outreach.",
+            route=Route(RoutingReason.TERRITORY, "U01DFJWQQJ3"),
+        )
+    )
+    encoded = str(rendered.blocks)
+    assert "Ask Persequor to draft" not in encoded
+    assert "Not relevant" in encoded
+    assert "resolve it before drafting outreach" in encoded
+    assert "Possible Salesforce matches—review before outreach" in rendered.text
+    assert "territory owner" in encoded  # never "relationship owner"
+    assert "relationship owner" not in encoded
+    assert "net-new" not in rendered.text.lower()
+    assert (
+        "Resolve the Salesforce match before drafting outreach" in rendered.text
+    )
+
+
+def test_draft_ready_salesforce_line_has_no_double_period() -> None:
+    """The Salesforce fallback line renders exactly one period, never '…present..'."""
+    rendered = card.render(
+        _snapshot(sf_display_text="Exact Account match. Open Opportunity present.")
+    )
+    assert "present.." not in rendered.text
+    assert "Exact Account match. Open Opportunity present." in rendered.text
+
+
 def test_platinum_and_unassigned_routes_render_honestly() -> None:
     """Presentation tier and nationwide unassigned state are explicit, never guessed."""
     rendered = card.render(
@@ -113,20 +145,21 @@ def test_month_precision_never_invents_the_first_day() -> None:
     rendered = card.render(
         _snapshot(award_date="2026-06-01", award_date_precision="month")
     )
-    assert "Obligation date: June 2026" in rendered.text
+    assert "Federal funds obligated: June 2026" in rendered.text
     assert "June 1, 2026" not in rendered.text
     assert "June 1, 2026" not in str(rendered.blocks)
 
 
 def test_event_date_label_distinguishes_obligation_from_announcement() -> None:
-    """The card labels the exact frozen event semantics rather than generic award date."""
+    """The card labels the exact frozen event semantics: an obligation is 'Federal funds
+    obligated' and an announcement is 'Award announced' — never a bare 'Awarded'."""
     obligated = card.render(_snapshot(event_type="award_obligated"))
     announced = card.render(_snapshot(event_type="award_announced"))
-    assert "Obligation date" in str(obligated.blocks)
-    assert "Obligation date:" in obligated.text
-    assert "received" not in obligated.text
-    assert "Award announcement date" in str(announced.blocks)
-    assert "Award announcement date:" in announced.text
+    assert "Federal funds obligated" in str(obligated.blocks)
+    assert "Federal funds obligated:" in obligated.text
+    assert "Awarded" not in obligated.text
+    assert "Award announced" in str(announced.blocks)
+    assert "Award announced:" in announced.text
 
 
 def test_context_link_element_respects_aggregate_limit() -> None:
