@@ -893,8 +893,17 @@ def test_award_card_spells_out_a_state_beyond_the_original_five(
 
 
 # --------------------------------------------- cap must survive a bookkeeping failure
-def test_cap_holds_when_recording_a_confirmed_send_fails(tmp_path: Path) -> None:
+def test_cap_holds_when_recording_a_confirmed_send_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """THE FLOOD REGRESSION (found in review of 264b0e2, 2026-07-22).
+
+    The clock is PINNED (reservation stamp + the later tick both on one fixed Pacific
+    weekday, past the slot) so this deterministically exercises the CAP branch. With a
+    wall-clock `now + 3h`, a run late in the PT evening crossed the Pacific-day boundary,
+    so the later tick landed on the next day, `delivery_attempts_today` saw zero, and the
+    SLOT gate — not the cap — held the line. The flood is still prevented either way, but
+    the test must exercise the cap it claims to (found during handoff review 2026-07-23).
 
     `record_post` runs AFTER chat_postMessage. If it raises — full disk, lock, a CHECK
     violation — the message is in Slack but `posts` has no row. Every cap in pacing_ok
@@ -906,6 +915,10 @@ def test_cap_holds_when_recording_a_confirmed_send_fails(tmp_path: Path) -> None
     The reservation in notification_outbox is written BEFORE the Slack call, so it is
     the one signal that cannot be missing for a delivered message.
     """
+    # Pin the reservation stamp to a fixed Pacific weekday (11:00 AM PT).
+    from grant_watch import db_delivery
+
+    monkeypatch.setattr(db_delivery, "_now", lambda: "2026-07-22T18:00:00+00:00")
     conn = db.connect(tmp_path / "t.db")
     for index in range(4):
         _mk_lead(conn, iid=f"G{index}", entity=f"District {index}",
@@ -925,11 +938,12 @@ def test_cap_holds_when_recording_a_confirmed_send_fails(tmp_path: Path) -> None
         assert conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0] == 0
         # The reservation survived even though the posts row did not.
         assert len(db.delivery_attempts_today(conn, "C1")) == 1
-        # A LATER tick (past the gap, past the slot) must still refuse.
-        later = datetime.now(timezone.utc) + timedelta(hours=3)
+        # A later tick on the SAME Pacific day, past the slot, must be held by the CAP
+        # (not the slot) — proving the reservation-counted cap did not go blind.
+        later = datetime(2026, 7, 22, 21, 0, tzinfo=timezone.utc)  # 2:00 PM PT, same day
         go, reason = drip.pacing_ok(conn, "C1", later)
         assert not go, f"cap went blind after a failed record_post: {reason}"
-        assert "cap" in reason
+        assert "cap" in reason, reason
     finally:
         db.record_post = real_record_post  # type: ignore[assignment]
     assert client.calls == 1, "a second card was posted after a bookkeeping failure"
