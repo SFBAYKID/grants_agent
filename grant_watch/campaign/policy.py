@@ -32,7 +32,9 @@ PLATINUM_DAYS = 7  # a verified award within a week is the platinum presentation
 # on a weekday-only poll (critic M1).
 OBSERVATION_FRESH_DAYS = 6
 CONTACT_FRESH_DAYS = 30  # a verified public contact re-checked within this window
-ACTIVITY_FRESH_DAYS = 30  # a completed Salesforce call within this window may route/label
+ACTIVITY_FRESH_DAYS = (
+    30  # a completed Salesforce call within this window may route/label
+)
 CRM_FRESH_HOURS = 24  # reuse the deployed CRM-snapshot freshness window
 
 # Amounts an obligated award figure may NEVER be labelled as.
@@ -60,10 +62,27 @@ CONTACT_TYPES = ("named_direct", "official_general")
 # appears on an official page (spec E).
 PERSONAL_EMAIL_DOMAINS = frozenset(
     {
-        "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "hotmail.com",
-        "outlook.com", "live.com", "msn.com", "aol.com", "icloud.com", "me.com",
-        "mac.com", "proton.me", "protonmail.com", "gmx.com", "zoho.com",
-        "comcast.net", "att.net", "verizon.net", "sbcglobal.net", "cox.net",
+        "gmail.com",
+        "googlemail.com",
+        "yahoo.com",
+        "ymail.com",
+        "hotmail.com",
+        "outlook.com",
+        "live.com",
+        "msn.com",
+        "aol.com",
+        "icloud.com",
+        "me.com",
+        "mac.com",
+        "proton.me",
+        "protonmail.com",
+        "gmx.com",
+        "zoho.com",
+        "comcast.net",
+        "att.net",
+        "verizon.net",
+        "sbcglobal.net",
+        "cox.net",
     }
 )
 
@@ -110,6 +129,7 @@ class CandidateEvidence:
     amount: float | None
     award_date: str  # ISO; "" when absent
     award_date_precision: str  # 'day' | 'month' | 'unknown'
+    spend_window_start: str  # ISO; "" when absent
     spend_window_end: str  # ISO; "" when absent
     last_confirmed_at: str  # ISO from a COMPLETE run; "" when never confirmed
     last_confirmed_run_complete: bool
@@ -128,6 +148,7 @@ class CandidateEvidence:
     crm_checked_at: str  # ISO
     # a marker set by the caller for tests; real callers pass date.today()
     today: date = field(default_factory=lambda: datetime.now(timezone.utc).date())
+    now_utc: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass(frozen=True)
@@ -155,6 +176,31 @@ def _days_since(iso: str, today: date) -> int | None:
     return (today - d).days if d is not None else None
 
 
+def _parse_datetime(iso: str) -> datetime | None:
+    """Parse one ISO timestamp as UTC; a bare date begins at midnight UTC."""
+    if not iso:
+        return None
+    try:
+        parsed = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = datetime.combine(date.fromisoformat(iso[:10]), datetime.min.time())
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _twelve_month_cutoff(today: date) -> date:
+    """Return the same calendar date one year ago, handling leap day explicitly."""
+    years = AWARD_MAX_MONTHS // 12
+    try:
+        return today.replace(year=today.year - years)
+    except ValueError:
+        return today.replace(year=today.year - years, day=28)
+
+
 def evaluate(c: CandidateEvidence) -> Eligibility:
     """Judge one candidate. Returns the FIRST failing reason (order = cheapest/most
     fundamental first) so the shadow report attributes a single clear cause per reject."""
@@ -174,11 +220,16 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
         return Eligibility(False, Reason.AWARD_DATE_MISSING, "")
     if awarded > c.today:
         return Eligibility(False, Reason.AWARD_DATE_FUTURE, "")
-    if (c.today - awarded).days > AWARD_MAX_MONTHS * 31:
+    if awarded < _twelve_month_cutoff(c.today):
         return Eligibility(False, Reason.AWARD_TOO_OLD, "")
 
+    window_start = _parse_date(c.spend_window_start)
     window_end = _parse_date(c.spend_window_end)
-    if window_end is None or window_end < c.today:
+    if (
+        window_start is None
+        or window_end is None
+        or not (window_start <= c.today <= window_end)
+    ):
         return Eligibility(False, Reason.WINDOW_CLOSED, "")
 
     # --- freshness: re-confirmed by a COMPLETE successful run (A1) ----------------
@@ -213,26 +264,28 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
     contact_days = _days_since(c.contact_last_verified_at, c.today)
     if contact_days is None or contact_days > CONTACT_FRESH_DAYS:
         return Eligibility(False, Reason.CONTACT_STALE, "")
-    email_domain = c.contact_email.rsplit("@", 1)[-1].lower() if "@" in c.contact_email else ""
+    email_domain = (
+        c.contact_email.rsplit("@", 1)[-1].lower() if "@" in c.contact_email else ""
+    )
     if email_domain in PERSONAL_EMAIL_DOMAINS:
         return Eligibility(False, Reason.CONTACT_PERSONAL, "")
     if not email_domain or email_domain != c.contact_official_domain.lower():
         return Eligibility(False, Reason.CONTACT_DOMAIN, "")
 
     # --- Salesforce: fresh AND complete ------------------------------------------
-    crm_hours = _days_since(c.crm_checked_at, c.today)
+    crm_checked = _parse_datetime(c.crm_checked_at)
+    policy_now = c.now_utc.astimezone(timezone.utc)
     if (
         c.crm_state not in SAFE_CRM_STATES
-        or crm_hours is None
-        or crm_hours > (CRM_FRESH_HOURS / 24 + 1)  # generous day-granular staleness gate
+        or crm_checked is None
+        or crm_checked > policy_now
+        or (policy_now - crm_checked).total_seconds() > CRM_FRESH_HOURS * 3600
     ):
         return Eligibility(False, Reason.CRM_UNSAFE, "")
 
     # --- eligible: gold, or platinum if a very fresh physical-security award ------
     days_since_award = (c.today - awarded).days
     tier = (
-        "platinum"
-        if days_since_award <= PLATINUM_DAYS and c.program_fit_ok
-        else "gold"
+        "platinum" if days_since_award <= PLATINUM_DAYS and c.program_fit_ok else "gold"
     )
     return Eligibility(True, Reason.ELIGIBLE, tier)

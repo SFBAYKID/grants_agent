@@ -8,7 +8,7 @@ pure function judged against constructed evidence, exactly as the design require
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -28,6 +28,7 @@ def _valid(**over: object) -> CandidateEvidence:
         amount=500_000.0,
         award_date="2026-06-01",
         award_date_precision="day",
+        spend_window_start="2025-10-10",
         spend_window_end="2028-09-30",
         last_confirmed_at="2026-07-20",
         last_confirmed_run_complete=True,
@@ -43,8 +44,9 @@ def _valid(**over: object) -> CandidateEvidence:
         contact_last_verified_at="2026-07-10",
         program_fit_ok=True,
         crm_state="exact_match",
-        crm_checked_at="2026-07-22",
+        crm_checked_at="2026-07-22T12:00:00+00:00",
         today=TODAY,
+        now_utc=datetime(2026, 7, 22, 12, tzinfo=timezone.utc),
     )
     return replace(base, **over)  # type: ignore[arg-type]
 
@@ -52,7 +54,9 @@ def _valid(**over: object) -> CandidateEvidence:
 def test_valid_gold_school_district_is_eligible() -> None:
     """Provide test-local behavior for valid gold school district is eligible."""
     result = policy.evaluate(_valid())
-    assert result.eligible and result.reason is Reason.ELIGIBLE and result.tier == "gold"
+    assert (
+        result.eligible and result.reason is Reason.ELIGIBLE and result.tier == "gold"
+    )
 
 
 def test_fresh_physical_security_award_within_7_days_is_platinum() -> None:
@@ -81,6 +85,8 @@ def test_recent_award_without_program_fit_stays_gold() -> None:
         ("award_date_precision", "unknown", Reason.AWARD_DATE_MISSING),
         ("award_date", "2027-01-01", Reason.AWARD_DATE_FUTURE),
         ("award_date", "2024-01-01", Reason.AWARD_TOO_OLD),
+        ("spend_window_start", "", Reason.WINDOW_CLOSED),
+        ("spend_window_start", "2026-08-01", Reason.WINDOW_CLOSED),
         ("spend_window_end", "", Reason.WINDOW_CLOSED),
         ("spend_window_end", "2026-01-01", Reason.WINDOW_CLOSED),
         ("last_confirmed_run_complete", False, Reason.STALE_OBSERVATION),
@@ -98,7 +104,7 @@ def test_recent_award_without_program_fit_stays_gold() -> None:
         ("contact_last_verified_at", "2026-05-01", Reason.CONTACT_STALE),
         ("crm_state", "ambiguous", Reason.CRM_UNSAFE),
         ("crm_state", "unavailable", Reason.CRM_UNSAFE),
-        ("crm_checked_at", "2026-07-01", Reason.CRM_UNSAFE),
+        ("crm_checked_at", "2026-07-20T23:59:59+00:00", Reason.CRM_UNSAFE),
     ],
 )
 def test_each_rule_rejects_with_its_reason(
@@ -130,8 +136,29 @@ def test_email_domain_must_match_the_official_domain() -> None:
 
 def test_school_qualifies_like_a_district() -> None:
     """A single school (not just a district) qualifies with evidenced kind."""
-    result = policy.evaluate(_valid(entity_kind="school", entity_kind_provenance="nces"))
+    result = policy.evaluate(
+        _valid(entity_kind="school", entity_kind_provenance="nces")
+    )
     assert result.eligible
+
+
+def test_exact_twelve_month_boundary_is_inclusive() -> None:
+    """An award exactly one calendar year old remains eligible."""
+    assert policy.evaluate(_valid(award_date="2025-07-22")).eligible
+
+
+def test_one_day_beyond_twelve_month_boundary_is_rejected() -> None:
+    """Calendar-month policy does not silently become a 372-day window."""
+    result = policy.evaluate(_valid(award_date="2025-07-21"))
+    assert result.reason is Reason.AWARD_TOO_OLD
+
+
+def test_crm_freshness_is_hour_precise() -> None:
+    """A CRM lookup older than 24 hours is stale even on the adjacent date."""
+    fresh = policy.evaluate(_valid(crm_checked_at="2026-07-21T12:00:00+00:00"))
+    stale = policy.evaluate(_valid(crm_checked_at="2026-07-21T11:59:59+00:00"))
+    assert fresh.eligible
+    assert stale.reason is Reason.CRM_UNSAFE
 
 
 def test_city_is_modelled_but_deferred_not_unsupported() -> None:
