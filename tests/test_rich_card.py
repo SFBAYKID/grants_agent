@@ -113,9 +113,20 @@ def test_month_precision_never_invents_the_first_day() -> None:
     rendered = card.render(
         _snapshot(award_date="2026-06-01", award_date_precision="month")
     )
-    assert "in June 2026" in rendered.text
+    assert "Obligation date: June 2026" in rendered.text
     assert "June 1, 2026" not in rendered.text
     assert "June 1, 2026" not in str(rendered.blocks)
+
+
+def test_event_date_label_distinguishes_obligation_from_announcement() -> None:
+    """The card labels the exact frozen event semantics rather than generic award date."""
+    obligated = card.render(_snapshot(event_type="award_obligated"))
+    announced = card.render(_snapshot(event_type="award_announced"))
+    assert "Obligation date" in str(obligated.blocks)
+    assert "Obligation date:" in obligated.text
+    assert "received" not in obligated.text
+    assert "Award announcement date" in str(announced.blocks)
+    assert "Award announcement date:" in announced.text
 
 
 def test_context_link_element_respects_aggregate_limit() -> None:

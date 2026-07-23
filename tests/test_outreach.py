@@ -211,6 +211,45 @@ def test_brief_live_mode_requires_verified_contact(
     )
 
 
+def test_brief_never_fabricates_unknown_entity_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pinned wire key remains present while an unknown type stays empty."""
+    monkeypatch.setenv("OUTREACH_TEST_EMAIL", "chase@monarchconnected.com")
+    conn, _row = _lead_row(tmp_path)
+    conn.execute("UPDATE leads SET entity_type=NULL WHERE id=1")
+    conn.commit()
+    row = db.get_lead(conn, 1)
+    assert row is not None
+    brief = persequor_client.build_brief(
+        row, None, "U01DPJVURHU", "chase@monarchconnected.com"
+    )
+    assert brief is not None
+    assert brief["entity_type"] == ""
+    assert set(brief) == {
+        "schema",
+        "request_id",
+        "entity",
+        "entity_type",
+        "state",
+        "program",
+        "amount_usd",
+        "window_start",
+        "window_end",
+        "source_url",
+        "requested_by_slack",
+        "send_as",
+        "contact_name",
+        "contact_email",
+        "contact_title",
+        "angle",
+        "rep_notes",
+        "expires_at",
+        "slack_channel",
+        "slack_thread_ts",
+    }
+
+
 def test_submit_persists_before_post_and_reports_unreachable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -278,6 +317,7 @@ def test_retry_rejects_expired_frozen_evidence_without_http(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A queued draft cannot outlive its frozen contact/spend-window evidence."""
+    monkeypatch.setenv("OUTREACH_TEST_EMAIL", "chase@monarchconnected.com")
     conn, row = _lead_row(tmp_path)
     brief = persequor_client.build_brief(
         row, None, "U01DPJVURHU", "chase@monarchconnected.com"

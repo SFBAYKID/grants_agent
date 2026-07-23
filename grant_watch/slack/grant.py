@@ -987,7 +987,6 @@ def main() -> None:
             "(comma-separated to serve several, e.g. production plus playground)"
         )
     app = create_app()
-    # Spinners are only ever posted to the primary channel, so sweep just that one.
     swept = sweep_orphaned_spinners(app.client, primary_channel_id())
     if swept:
         print(f"Finalized {swept} orphaned progress message(s) from a prior run.")

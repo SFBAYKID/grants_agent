@@ -41,17 +41,18 @@ def execute(
     ).fetchone()
     if prior is not None and prior["state"] == "completed":
         raise CompletedPaidCall("this paid preparation operation already completed")
-    if prior is not None and prior["state"] == "in_flight":
+    if prior is not None and prior["state"] in {"in_flight", "indeterminate"}:
         if not retry_indeterminate:
             raise IndeterminatePaidCall(
                 "prior paid operation is indeterminate; explicit retry required"
             )
-        with conn:
-            conn.execute(
-                """UPDATE paid_enrichment_attempts
-                   SET state='indeterminate',finished_at=? WHERE id=?""",
-                (datetime.now(timezone.utc).isoformat(), prior["id"]),
-            )
+        if prior["state"] == "in_flight":
+            with conn:
+                conn.execute(
+                    """UPDATE paid_enrichment_attempts
+                       SET state='indeterminate',finished_at=? WHERE id=?""",
+                    (datetime.now(timezone.utc).isoformat(), prior["id"]),
+                )
     attempt_no = int(prior["attempt_no"]) + 1 if prior is not None else 1
     attempt_id = uuid.uuid4().hex
     started = datetime.now(timezone.utc).isoformat()
@@ -65,10 +66,13 @@ def execute(
     try:
         result = work()
     except Exception as exc:
+        # Once the callback begins, a timeout cannot prove whether a paid provider
+        # accepted the request. Preserve that ambiguity and require an explicit
+        # operator retry rather than silently spending again on the next run.
         with conn:
             conn.execute(
                 """UPDATE paid_enrichment_attempts
-                   SET state='failed',finished_at=?,error=? WHERE id=?""",
+                   SET state='indeterminate',finished_at=?,error=? WHERE id=?""",
                 (
                     datetime.now(timezone.utc).isoformat(),
                     type(exc).__name__,

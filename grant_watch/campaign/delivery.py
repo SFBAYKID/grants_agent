@@ -172,6 +172,9 @@ def run(
                 conn, delivery_key, "unrenderable", error=type(exc).__name__
             )
         return "quarantined: rich card could not be rendered; no Slack call attempted"
+    slot_key = f"rich-slot:{channel}:{stable_key}"
+    if not pacing.reserve_daily_slot(conn, channel, at, "rich_award", slot_key):
+        return "skip: daily cap reached (1)"
     delivery_key = db.reserve_notification(
         conn,
         frozen.draft.lead_id,
@@ -183,6 +186,7 @@ def run(
         stable_delivery_key=stable_key,
     )
     if delivery_key is None:
+        pacing.release_daily_slot(conn, slot_key)
         return "skip: this rich-card delivery is already reserved"
     if client is None:
         db.finish_notification(conn, delivery_key, "unknown", error="missing_client")
@@ -198,6 +202,7 @@ def run(
     except SlackApiError as exc:
         if getattr(exc.response, "status_code", None) == 429:
             db.release_notification(conn, delivery_key)
+            pacing.release_daily_slot(conn, slot_key)
             until = (at + timedelta(minutes=1)).isoformat()
             db.set_channel_guard(
                 conn, channel, "backoff", "ratelimited", available_at=until
@@ -207,6 +212,7 @@ def run(
             code = str(exc.response.get("error") or "unknown_error")
             if code in _SYSTEMIC_SLACK_ERRORS:
                 db.release_notification(conn, delivery_key)
+                pacing.release_daily_slot(conn, slot_key)
                 until = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
                 db.set_channel_guard(conn, channel, "blocked", code, available_at=until)
                 return (
@@ -216,6 +222,7 @@ def run(
                 db.finish_notification(conn, delivery_key, "rejected", error=code)
                 return f"quarantined: Slack rejected this rich card ({code})"
             db.release_notification(conn, delivery_key)
+            pacing.release_daily_slot(conn, slot_key)
             return "error: Slack rejected the rich card; reservation released"
         db.finish_notification(conn, delivery_key, "unknown", error=type(exc).__name__)
         return "unknown: Slack delivery could not be confirmed; no retry"

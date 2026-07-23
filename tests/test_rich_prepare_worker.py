@@ -98,7 +98,36 @@ def test_source_outage_preserves_prior_contact_evidence(tmp_path: Path) -> None:
     )
     assert (
         conn.execute("SELECT state FROM paid_enrichment_attempts").fetchone()[0]
-        == "failed"
+        == "indeterminate"
+    )
+
+
+def test_paid_timeout_requires_explicit_retry(tmp_path: Path) -> None:
+    """A callback timeout stays indeterminate and never retries on the next run."""
+    conn = _eligible_conn(tmp_path / "timeout.db")
+    calls = 0
+
+    def timeout() -> str:
+        """Model an exception after a provider might have accepted the request."""
+        nonlocal calls
+        calls += 1
+        raise TimeoutError("provider result unknown")
+
+    with pytest.raises(TimeoutError):
+        paid_calls.execute(conn, 1, "contact_refresh", "req-timeout", timeout)
+    with pytest.raises(paid_calls.IndeterminatePaidCall):
+        paid_calls.execute(conn, 1, "contact_refresh", "req-timeout", timeout)
+    assert calls == 1
+    assert (
+        paid_calls.execute(
+            conn,
+            1,
+            "contact_refresh",
+            "req-timeout",
+            lambda: "operator-retried",
+            retry_indeterminate=True,
+        )
+        == "operator-retried"
     )
 
 

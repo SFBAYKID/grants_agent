@@ -276,12 +276,21 @@ def run(
         if not smoke and not in_window(current):
             return "skip: outside business hours"
         delivery_key = f"sf-followup:{candidate.campaign_member_id}:{POLICY_VERSION}"
+        from ..campaign import pacing, rich_card_enabled
+
+        rich_enabled = rich_card_enabled()
+        slot_key = f"followup-slot:{channel}:{delivery_key}"
+        if rich_enabled:
+            if _used_slots(conn, channel, current) >= 1:
+                return "skip: absolute daily cap reached (1)"
+            if not pacing.reserve_daily_slot(
+                conn, channel, current, "salesforce_followup", slot_key
+            ):
+                return "skip: absolute daily cap reached (1)"
         conn.execute("BEGIN IMMEDIATE")
         try:
-            from ..campaign import rich_card_enabled
-
-            shared_cap = 1 if rich_card_enabled() else ABSOLUTE_CAP
-            if _used_slots(conn, channel, current) >= shared_cap:
+            shared_cap = 1 if rich_enabled else ABSOLUTE_CAP
+            if not rich_enabled and _used_slots(conn, channel, current) >= shared_cap:
                 conn.rollback()
                 return f"skip: absolute daily cap reached ({shared_cap})"
             inserted = conn.execute(
@@ -306,8 +315,12 @@ def run(
             conn.commit()
         except Exception:
             conn.rollback()
+            if rich_enabled:
+                pacing.release_daily_slot(conn, slot_key)
             raise
         if inserted != 1:
+            if rich_enabled:
+                pacing.release_daily_slot(conn, slot_key)
             continue
         assert client is not None
         try:

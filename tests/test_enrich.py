@@ -246,6 +246,25 @@ def test_finder_raises_unreachable_when_no_page_is_readable(
         finder.find_contact("Castle Rock School District", "WA")
 
 
+def test_general_mailbox_reverification_keeps_outage_distinct_from_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed evidence-page read raises unavailable instead of saying removed."""
+    monkeypatch.setattr(finder, "_fc_headers", lambda: {})
+
+    def timeout(*_args: object, **_kwargs: object) -> object:
+        """Model an evidence-page request whose result is unavailable."""
+        raise requests.Timeout("offline")
+
+    monkeypatch.setattr(finder.requests, "post", timeout)
+    with pytest.raises(SourceUnreachable):
+        finder.reverify_general_mailbox(
+            "security@crschools.org",
+            "https://crschools.org/contact",
+            "crschools.org",
+        )
+
+
 def test_finder_returns_none_when_pages_read_but_nothing_verifiable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

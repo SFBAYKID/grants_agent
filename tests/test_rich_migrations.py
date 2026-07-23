@@ -1,4 +1,4 @@
-"""Migrations 14-22 for the rich award-card campaign: fresh apply, historical upgrade,
+"""Migrations 14-24 for the rich award-card campaign: fresh apply, historical upgrade,
 data preservation through the posts rebuild, and rollback inertness.
 
 The rich card MUST write a posts row (thread attribution runs through the posts table),
@@ -17,11 +17,11 @@ import pytest
 from grant_watch import db, migrations
 
 
-def test_fresh_database_reaches_v23_with_all_rich_tables(tmp_path: Path) -> None:
-    """A brand-new database applies every migration through 23."""
+def test_fresh_database_reaches_v24_with_all_rich_tables(tmp_path: Path) -> None:
+    """A brand-new database applies every migration through 24."""
     conn = db.connect(tmp_path / "fresh.db")
     assert (
-        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 23
+        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 24
     )
     for table in (
         "rich_card_snapshots",
@@ -31,6 +31,7 @@ def test_fresh_database_reaches_v23_with_all_rich_tables(tmp_path: Path) -> None
         "organization_kind_evidence",
         "paid_enrichment_attempts",
         "rich_card_snapshot_truth",
+        "proactive_daily_slots",
     ):
         assert conn.execute(
             "SELECT name FROM sqlite_master WHERE name=?", (table,)
@@ -90,14 +91,14 @@ def _at_v13(path: Path) -> sqlite3.Connection:
 def test_upgrade_from_each_supported_historical_schema(
     tmp_path: Path, version: int
 ) -> None:
-    """Every ledger version that existed upgrades to v23 with integrity intact."""
+    """Every ledger version that existed upgrades to v24 with integrity intact."""
     path = tmp_path / f"v{version}.db"
     historical = _at_version(path, version)
     historical.close()
     upgraded = db.connect(path)
     assert (
         upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-        == 23
+        == 24
     )
     assert upgraded.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
@@ -126,7 +127,7 @@ def test_v13_upgrade_preserves_posts_ids_and_engagement(tmp_path: Path) -> None:
     upgraded = db.connect(path)
     assert (
         upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-        == 23
+        == 24
     )
     assert (
         upgraded.execute("SELECT kind FROM posts WHERE id=42").fetchone()[0] == "nugget"

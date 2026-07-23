@@ -47,3 +47,18 @@ def migration_23_rich_snapshot_truth_and_retry_link(
         conn.execute(
             "ALTER TABLE rich_card_actions ADD COLUMN outreach_request_id TEXT"
         )
+
+
+def migration_24_atomic_proactive_daily_slots(conn: sqlite3.Connection) -> None:
+    """Serialize rich-card and future follow-up claims under one Pacific-day cap."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS proactive_daily_slots (
+             audience TEXT NOT NULL,
+             local_date TEXT NOT NULL,
+             delivery_kind TEXT NOT NULL
+               CHECK(delivery_kind IN ('rich_award','salesforce_followup')),
+             delivery_key TEXT NOT NULL UNIQUE,
+             reserved_at TIMESTAMP NOT NULL,
+             PRIMARY KEY(audience,local_date)
+           )"""
+    )

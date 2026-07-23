@@ -121,10 +121,13 @@ def _award_date(value: str, precision: str) -> str:
     return _date(value)
 
 
-def _award_when(value: str, precision: str) -> str:
-    """Return a grammatical, precision-safe award-date phrase."""
-    preposition = "in" if precision == "month" else "on"
-    return f"{preposition} {_award_date(value, precision)}"
+def _event_date_label(event_type: str) -> str:
+    """Label the evidenced event date without collapsing obligation into announcement."""
+    return (
+        "Obligation date"
+        if event_type == "award_obligated"
+        else "Award announcement date"
+    )
 
 
 def fallback_text(draft: SnapshotDraft) -> str:
@@ -148,8 +151,9 @@ def fallback_text(draft: SnapshotDraft) -> str:
     )
     text = (
         f"{tier}: {safe_text(draft.entity_name, 180)} in {safe_text(draft.state, 2)} "
-        f"received a verified {_money(draft.amount)} {safe_text(draft.program, 120)} "
-        f"funding award {_award_when(draft.award_date, draft.award_date_precision)}. "
+        f"has a verified {_money(draft.amount)} {safe_text(draft.program, 120)} "
+        f"funding award. {_event_date_label(draft.event_type)}: "
+        f"{_award_date(draft.award_date, draft.award_date_precision)}. "
         f"Spend window: {_date(draft.spend_window_start)} "
         f"through {_date(draft.spend_window_end)}. {route}{crm} {contact} "
         "Actions: Ask Persequor to draft; Not relevant."
@@ -174,7 +178,8 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
     award = (
         f"*{safe_text(draft.entity_name, 180)}* · {safe_text(draft.state, 2)}\n"
         f"Verified {_money(draft.amount)} {safe_text(draft.program, 120)} funding award\n"
-        f"*Award date:* {_award_date(draft.award_date, draft.award_date_precision)}"
+        f"*{_event_date_label(draft.event_type)}:* "
+        f"{_award_date(draft.award_date, draft.award_date_precision)}"
     )
     blocks: list[dict[str, Any]] = [
         {

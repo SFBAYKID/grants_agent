@@ -277,9 +277,10 @@ to the pre-existing drip unchanged.
   events for NCES-linked districts qualify; precision-safe dates, open spend window,
   completed-run freshness, state/kind provenance, safe links, fresh official contact,
   and fresh complete CRM state are mandatory. No RFP/bulletin fallback exists.
-- Migrations 14–23 add completed-run confirmation, rich post/snapshot/action/contact
+- Migrations 14–24 add completed-run confirmation, rich post/snapshot/action/contact
   state, exact Salesforce owner/activity evidence, forward organization-kind evidence, and
-  durable paid-enrichment attempts. Historical migrations are unchanged.
+  durable paid-enrichment attempts, and one atomic cross-worker daily-slot claim.
+  Historical migrations are unchanged.
 - `prepare_worker.py` bounds pre-window contact/activity work. Contact discovery commits
   `in_flight` before possibly paid HTTP and refuses silent restart retry; dry-run makes
   no HTTP call or write. `preparation.py`/`report.py` join persisted evidence and produce

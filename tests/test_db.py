@@ -134,7 +134,7 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
     ]
     # 13 (not 10): the "widen post kinds" migration is numbered above the droplet's
     # divergent 10-12 lineage so it is never masked as already-applied (see migrations.py).
-    # 14-22 add the rich award-card campaign schema (forward-only after 13).
+    # 14-24 add the rich award-card campaign schema (forward-only after 13).
     assert versions == [
         1,
         2,
@@ -155,6 +155,8 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
         20,
         21,
         22,
+        23,
+        24,
     ]
     crm_tables = {
         row[0]

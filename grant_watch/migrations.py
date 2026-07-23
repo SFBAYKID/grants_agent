@@ -12,7 +12,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from .migrations_rich import migration_23_rich_snapshot_truth_and_retry_link
+from .migrations_rich import (
+    migration_23_rich_snapshot_truth_and_retry_link,
+    migration_24_atomic_proactive_daily_slots,
+)
 
 
 @dataclass(frozen=True)
@@ -930,6 +933,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         23,
         "exact rich snapshot truth and outreach retry link",
         migration_23_rich_snapshot_truth_and_retry_link,
+    ),
+    Migration(
+        24,
+        "atomic shared proactive daily slots",
+        migration_24_atomic_proactive_daily_slots,
     ),
 )
 

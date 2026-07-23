@@ -47,11 +47,11 @@ loses the fabricated `school_district` fallback and gains snapshot-bound intake.
 
 ## 2. Migrations (forward-only, after v13; never reuse 10–12; never edit history)
 
-Implemented versions **14–23**: completed-run freshness; widened rich post kind and
+Implemented versions **14–24**: completed-run freshness; widened rich post kind and
 nullable snapshot links; immutable snapshot/action/contact tables; exact Salesforce
 owner/completed-call evidence; reviewed-kind and paid-attempt state; contact hash; and
-the v23 exact-event truth companion plus queued-outreach action link. Historical
-migrations remain unchanged.
+the v23 exact-event truth companion plus queued-outreach action link; and the v24
+atomic cross-worker daily-slot claim. Historical migrations remain unchanged.
 
 Each preparation snapshot freezes one exact evidence version. Its v23 truth row carries
 the source-qualified stable award key, event type and amount, verification/evidence
@@ -126,13 +126,17 @@ checked ts, evidence/error state). Do NOT import/invoke the Campaign writer.
 
 ## 6. Preparation worker (`campaign/preparation.py`, bounded)
 
-Refreshes the top-N candidates' contact + CRM + activity evidence BEFORE the delivery
-window, so Slack delivery and button handlers do **no** slow/paid work. State machine
-per candidate: `pending → preparing → ready | ineligible | error`. Any possibly-paid
+Refreshes the top-N candidates' contact and completed-call activity evidence BEFORE the
+delivery window, so Slack delivery and button handlers do **no** slow/paid work. The
+separate read-only `salesforce-sync` command remains responsible for Account/Opportunity
+lookup freshness. Preparation reports bounded per-candidate outcomes rather than
+persisting a second mutable state machine. Any possibly-paid
 call (Firecrawl/LinkedIn) writes an `in_flight` row **before** the HTTP request; a
 restart finding `in_flight` does NOT silently retry the indeterminate paid request — it
 requires an explicit `--retry-indeterminate`, mirroring `source_discovery_models`. Dry-
-run: no network/db. Shadow: prepares local evidence/state, no Slack/Persequor/SF writes.
+run: no network/db. `rich-shadow` reads persisted evidence only and writes nothing;
+`rich-prepare --execute` may refresh and persist local evidence but never posts or writes
+Salesforce/Persequor.
 
 ---
 
@@ -140,9 +144,9 @@ run: no network/db. Shadow: prepares local evidence/state, no Slack/Persequor/SF
 
 One proactive-message cap per weekday (reuse `DAILY_CAP=1`). **Remove the urgent/
 exceptional second-post path** for the rich campaign. Keep deterministic per-day
-slotting; default band ~10:00–11:00 PT; add a named configurable hard cutoff
-`RICH_HARD_CUTOFF_PT` (recommended 11:30) after which a missed card waits a day.
-Follow-up reminders stay default-off and share the cap. State diversity across posting
+slotting; default band 10:00–10:45 PT with a fixed 11:00 PT hard cutoff, after which a
+missed card waits a day. Follow-up reminders stay default-off and atomically share the
+same persisted daily slot when rich delivery is enabled. State diversity across posting
 days is already deployed (`_best_nugget` cooldown via `db.recent_post_states`); the rich
 selector reuses it: prefer a state ≠ most recent, deterministic fallback for one
 remaining state, score order preserved within a state, deterministic (state, lead-id)

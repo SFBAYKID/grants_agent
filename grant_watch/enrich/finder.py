@@ -231,7 +231,7 @@ def reverify_general_mailbox(
     page_host = _host(evidence_url)
     if not _same_site(page_host, official_domain.lower().removeprefix("www.")):
         return False
-    page = _scrape(evidence_url)
+    page = _scrape(evidence_url, raise_on_failure=True)
     return bool(page) and email.lower() in page.lower()
 
 
@@ -348,8 +348,8 @@ def _search(query: str, limit: int = 5) -> list[dict[str, Any]]:
     return resp.json().get("data", [])
 
 
-def _scrape(url: str) -> str:
-    """One page -> markdown text ('' on failure — a failed scrape is not evidence).
+def _scrape(url: str, *, raise_on_failure: bool = False) -> str:
+    """Return one page's markdown while optionally preserving unavailable separately.
 
     onlyMainContent=false so the page FOOTER is kept: an org's street address,
     general mailbox, and phone almost always live in the footer / "Contact Us"
@@ -364,8 +364,15 @@ def _scrape(url: str) -> str:
             timeout=60,
         )
         resp.raise_for_status()
-        return (resp.json().get("data") or {}).get("markdown") or ""
-    except requests.RequestException:
+        markdown = (resp.json().get("data") or {}).get("markdown") or ""
+        if raise_on_failure and not markdown.strip():
+            raise SourceUnreachable(
+                "official evidence page returned no readable content"
+            )
+        return markdown
+    except requests.RequestException as exc:
+        if raise_on_failure:
+            raise SourceUnreachable("official evidence page could not be read") from exc
         return ""
 
 

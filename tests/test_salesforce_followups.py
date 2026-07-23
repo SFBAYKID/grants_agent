@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from grant_watch import db
+from grant_watch.campaign import pacing
 from grant_watch.slack import salesforce_followups as followups
 
 
@@ -197,3 +198,20 @@ def test_shared_cap_counts_rich_unknown_using_pacific_day(tmp_path: Path) -> Non
     )
     conn.commit()
     assert followups._used_slots(conn, "C", now) == 1
+
+
+def test_followup_claims_atomic_rich_campaign_slot(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    """When rich mode is enabled, a follow-up owns the shared cross-worker slot."""
+    monkeypatch.setenv("GRANT_RICH_CARD_ENABLED", "1")
+    conn, _ = _eligible(tmp_path)
+    _reader(monkeypatch)
+    now = datetime(2026, 7, 22, 17, 30, tzinfo=timezone.utc)
+    outcome = followups.run(FakeSlack(), "C", conn, smoke=True, now=now)
+    assert outcome.startswith("posted follow-up")
+    slot = conn.execute("SELECT * FROM proactive_daily_slots").fetchone()
+    assert slot["delivery_kind"] == "salesforce_followup"
+    assert pacing.reserve_daily_slot(
+        conn, "C", now, "rich_award", "competing-rich"
+    ) is False

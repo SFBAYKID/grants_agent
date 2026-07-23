@@ -161,7 +161,9 @@ def build_brief(
         "schema": "outreach-request.v1",
         "request_id": request_id or f"grant-{row['id']}-{uuid.uuid4().hex[:12]}",
         "entity": display_entity_name(row["entity_name"]),
-        "entity_type": row["entity_type"] or "school_district",
+        # Preserve unknown as unknown. A plausible default here becomes an outbound
+        # factual claim once Persequor drafts the message.
+        "entity_type": str(row["entity_type"] or "").strip(),
         "state": row["state"] or "",
         "program": row["program"] or "",
         # Gated on the record kind, NOT merely on presence. Persequor is an LLM

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Barrier
 from typing import Any
 
 from slack_sdk.errors import SlackApiError
@@ -63,6 +65,7 @@ def test_pacing_hard_cutoff_and_weekday_slot() -> None:
     conn.executescript(
         "CREATE TABLE posts(id INTEGER,channel TEXT,posted_at TEXT);"
         "CREATE TABLE notification_outbox(id INTEGER,lead_id INTEGER,audience TEXT,created_at TEXT);"
+        "CREATE TABLE proactive_daily_slots(audience TEXT,local_date TEXT,delivery_kind TEXT,delivery_key TEXT,reserved_at TEXT);"
     )
     before = datetime(2026, 7, 22, 16, 0, tzinfo=timezone.utc)  # 09:00 PT
     at_cutoff = datetime(2026, 7, 22, 18, 0, tzinfo=timezone.utc)  # 11:00 PT
@@ -81,6 +84,7 @@ def test_force_never_bypasses_one_message_daily_cap() -> None:
     conn.executescript(
         "CREATE TABLE posts(id INTEGER,channel TEXT,posted_at TEXT);"
         "CREATE TABLE notification_outbox(id INTEGER,lead_id INTEGER,audience TEXT,created_at TEXT);"
+        "CREATE TABLE proactive_daily_slots(audience TEXT,local_date TEXT,delivery_kind TEXT,delivery_key TEXT,reserved_at TEXT);"
     )
     conn.execute("INSERT INTO posts VALUES (1,'C','2026-07-22T17:00:00+00:00')")
     assert pacing.should_post(conn, "C", READY, force=True) == (
@@ -96,6 +100,48 @@ def test_dst_conversion_keeps_local_pacific_band() -> None:
     for slot in (summer, winter):
         assert slot.hour == 10 and 0 <= slot.minute <= 45
         assert slot.astimezone(pacing.ET).hour == 13
+
+
+def test_dst_transition_dates_keep_pacific_and_eastern_slot_alignment() -> None:
+    """Spring-forward and fall-back dates preserve the 10 PT / 13 ET band."""
+    transition_instants = (
+        datetime(2026, 3, 8, 17, tzinfo=timezone.utc),
+        datetime(2026, 11, 1, 18, tzinfo=timezone.utc),
+    )
+    for instant in transition_instants:
+        slot = pacing.daily_slot("C", instant)
+        assert slot.hour == 10 and slot.astimezone(pacing.ET).hour == 13
+
+
+def test_rich_and_followup_claim_one_daily_slot_atomically(tmp_path: Path) -> None:
+    """Concurrent delivery types cannot both reserve the same channel/PT day."""
+    path = tmp_path / "atomic-cap.db"
+    conn = db.connect(path)
+    conn.close()
+    barrier = Barrier(2)
+
+    def claim(kind: str) -> bool:
+        """Open an independent worker connection and race one slot insertion."""
+        worker = sqlite3.connect(path, timeout=5)
+        try:
+            barrier.wait()
+            return pacing.reserve_daily_slot(
+                worker, "CGRANTS", READY, kind, f"{kind}-delivery"
+            )
+        finally:
+            worker.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(claim, ("rich_award", "salesforce_followup")))
+    check = sqlite3.connect(path)
+    try:
+        assert sorted(results) == [False, True]
+        assert (
+            check.execute("SELECT COUNT(*) FROM proactive_daily_slots").fetchone()[0]
+            == 1
+        )
+    finally:
+        check.close()
 
 
 def test_dry_run_is_write_free_and_calls_no_slack(tmp_path: Path) -> None:
@@ -158,6 +204,7 @@ def test_ambiguous_send_is_never_blind_retried(tmp_path: Path) -> None:
     assert (
         conn.execute("SELECT state FROM notification_outbox").fetchone()[0] == "unknown"
     )
+    assert conn.execute("SELECT COUNT(*) FROM proactive_daily_slots").fetchone()[0] == 1
     second_client = FakeSlack(conn)
     second = delivery.run(second_client, "CGRANTS", conn, force=True, now=READY)
     assert second.startswith("skip:")
@@ -192,6 +239,7 @@ def test_systemic_slack_rejection_blocks_channel_without_consuming_lead(
         ).fetchone()[0]
         == 0
     )
+    assert conn.execute("SELECT COUNT(*) FROM proactive_daily_slots").fetchone()[0] == 0
     second = delivery.run(FakeSlack(conn), "CGRANTS", conn, force=True, now=READY)
     assert second.startswith("blocked:")
 

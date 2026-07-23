@@ -464,7 +464,7 @@ affect Chase's other projects.
   record remains in the sandbox; this does not verify Campaign or production writes.
 - `verified` offline 2026-07-22 on `review/rich-award-card-campaign-20260723`: the rich
   award-card layer is implemented behind `GRANT_RICH_CARD_ENABLED=0` with migrations
-  14–23, strict evidence policy, durable possibly-paid preparation, exact owner routing,
+  14–24, strict evidence policy, durable possibly-paid preparation, exact owner routing,
   versioned immutable snapshots, precision-safe Block Kit, one-card pacing,
   reservation-before-Slack, snapshot-bound Persequor/feedback actions, and frozen-only
   thread evidence. No live Slack,

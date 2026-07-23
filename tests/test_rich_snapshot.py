@@ -7,6 +7,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from grant_watch import db
 from grant_watch.campaign.routing import Route, RoutingReason
 from grant_watch.campaign.snapshot import SnapshotDraft, freeze, lead_context, load
@@ -134,6 +136,22 @@ def test_exact_same_evidence_reuses_one_snapshot(tmp_path: Path) -> None:
     assert created is True and created_again is False and second.id == first.id
 
 
+def test_truth_insert_failure_rolls_back_snapshot_atomically(tmp_path: Path) -> None:
+    """A crash/failure cannot leave a snapshot without its exact truth companion."""
+    conn = _conn(tmp_path / "truth-atomic.db")
+    conn.execute(
+        """CREATE TRIGGER fail_rich_truth BEFORE INSERT ON rich_card_snapshot_truth
+           BEGIN SELECT RAISE(ABORT,'simulated truth failure'); END"""
+    )
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        freeze(conn, _draft())
+    assert conn.execute("SELECT COUNT(*) FROM rich_card_snapshots").fetchone()[0] == 0
+    assert (
+        conn.execute("SELECT COUNT(*) FROM rich_card_snapshot_truth").fetchone()[0] == 0
+    )
+
+
 def test_award_identity_is_source_qualified(tmp_path: Path) -> None:
     """Equal source ids from independent systems cannot collide."""
     conn = _conn(tmp_path / "source.db")
@@ -151,7 +169,9 @@ def test_same_award_may_be_frozen_for_a_distinct_audience(tmp_path: Path) -> Non
     assert second.id != first.id
 
 
-def test_month_precision_thread_context_contains_no_invented_day(tmp_path: Path) -> None:
+def test_month_precision_thread_context_contains_no_invented_day(
+    tmp_path: Path,
+) -> None:
     """Frozen conversation facts expose only YYYY-MM for month-level evidence."""
     conn = _conn(tmp_path / "month.db")
     frozen, _ = freeze(

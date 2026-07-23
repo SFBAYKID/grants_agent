@@ -205,12 +205,11 @@ def freeze(
                 created_at,
             ),
         )
-    row = conn.execute(
-        "SELECT * FROM rich_card_snapshots WHERE dedup_key=? AND audience=?",
-        (key, draft.audience),
-    ).fetchone()
-    assert row is not None
-    with conn:
+        row = conn.execute(
+            "SELECT * FROM rich_card_snapshots WHERE dedup_key=? AND audience=?",
+            (key, draft.audience),
+        ).fetchone()
+        assert row is not None
         conn.execute(
             """INSERT OR IGNORE INTO rich_card_snapshot_truth
                  (snapshot_id,award_dedup_key,source_name,event_type,event_amount,

@@ -26,6 +26,50 @@ def daily_slot(channel: str, now_utc: datetime) -> datetime:
     return datetime.combine(local.date(), time(10, minute), tzinfo=PT)
 
 
+def reserve_daily_slot(
+    conn: sqlite3.Connection,
+    channel: str,
+    now_utc: datetime,
+    delivery_kind: str,
+    delivery_key: str,
+) -> bool:
+    """Atomically claim the channel's single Pacific-day proactive delivery slot."""
+    local_date = now_utc.astimezone(PT).date().isoformat()
+    with conn:
+        inserted = conn.execute(
+            """INSERT OR IGNORE INTO proactive_daily_slots
+                 (audience,local_date,delivery_kind,delivery_key,reserved_at)
+               VALUES (?,?,?,?,?)""",
+            (
+                channel,
+                local_date,
+                delivery_kind,
+                delivery_key,
+                now_utc.isoformat(),
+            ),
+        ).rowcount
+    return inserted == 1
+
+
+def release_daily_slot(conn: sqlite3.Connection, delivery_key: str) -> None:
+    """Release a slot only when it is proven that no Slack post was attempted."""
+    with conn:
+        conn.execute(
+            "DELETE FROM proactive_daily_slots WHERE delivery_key=?", (delivery_key,)
+        )
+
+
+def _daily_slot_count(conn: sqlite3.Connection, channel: str, now_utc: datetime) -> int:
+    """Return whether this Pacific day already has an atomic proactive claim."""
+    local_date = now_utc.astimezone(PT).date().isoformat()
+    row = conn.execute(
+        """SELECT COUNT(*) FROM proactive_daily_slots
+           WHERE audience=? AND local_date=?""",
+        (channel, local_date),
+    ).fetchone()
+    return int(row[0])
+
+
 def should_post(
     conn: sqlite3.Connection,
     channel: str,
@@ -37,6 +81,7 @@ def should_post(
     count = max(
         len(db.posts_today(conn, channel, now_utc)),
         len(db.delivery_attempts_today(conn, channel, now_utc)),
+        _daily_slot_count(conn, channel, now_utc),
     )
     if count >= 1:
         return False, "daily cap reached (1)"

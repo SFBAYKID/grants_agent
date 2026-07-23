@@ -36,20 +36,26 @@ def test_complete_run_advances_confirmation_for_seen_leads(tmp_path: Path) -> No
     lid = _lead(conn, "A1")
     run_id = db.begin_run(conn, "usaspending:16.071", "2026-07-22T00:00:00+00:00")
     # while pending, freshness is NOT advanced
-    assert conn.execute(
-        "SELECT last_confirmed_at FROM leads WHERE id=?", (lid,)
-    ).fetchone()[0] is None
+    assert (
+        conn.execute(
+            "SELECT last_confirmed_at FROM leads WHERE id=?", (lid,)
+        ).fetchone()[0]
+        is None
+    )
     db.complete_run(
-        conn, run_id, RunStats(source="usaspending:16.071", items_seen=1),
+        conn,
+        run_id,
+        RunStats(source="usaspending:16.071", items_seen=1),
         [("usaspending:16.071", "A1")],
     )
     row = conn.execute(
         "SELECT last_confirmed_run_id, last_confirmed_at FROM leads WHERE id=?", (lid,)
     ).fetchone()
     assert row["last_confirmed_run_id"] == run_id and row["last_confirmed_at"]
-    assert conn.execute(
-        "SELECT state FROM runs WHERE id=?", (run_id,)
-    ).fetchone()[0] == "complete"
+    assert (
+        conn.execute("SELECT state FROM runs WHERE id=?", (run_id,)).fetchone()[0]
+        == "complete"
+    )
 
 
 def test_failed_run_never_advances_confirmation(tmp_path: Path) -> None:
@@ -58,15 +64,20 @@ def test_failed_run_never_advances_confirmation(tmp_path: Path) -> None:
     lid = _lead(conn, "A1")
     run_id = db.begin_run(conn, "usaspending:16.071", "2026-07-22T00:00:00+00:00")
     db.fail_run(
-        conn, run_id,
+        conn,
+        run_id,
         RunStats(source="usaspending:16.071", complete=False, error_code="HTTPError"),
     )
-    assert conn.execute(
-        "SELECT last_confirmed_at FROM leads WHERE id=?", (lid,)
-    ).fetchone()[0] is None
-    assert conn.execute(
-        "SELECT state FROM runs WHERE id=?", (run_id,)
-    ).fetchone()[0] == "failed"
+    assert (
+        conn.execute(
+            "SELECT last_confirmed_at FROM leads WHERE id=?", (lid,)
+        ).fetchone()[0]
+        is None
+    )
+    assert (
+        conn.execute("SELECT state FROM runs WHERE id=?", (run_id,)).fetchone()[0]
+        == "failed"
+    )
 
 
 def test_dry_run_poll_writes_no_runs_and_no_confirmation(tmp_path: Path) -> None:
@@ -81,9 +92,12 @@ def test_dry_run_poll_writes_no_runs_and_no_confirmation(tmp_path: Path) -> None
     cli.cmd_poll(only_source="nonexistent-source-xyz", dry_run=True)
     conn = db.connect(path)
     assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
-    assert conn.execute(
-        "SELECT last_confirmed_at FROM leads WHERE source_item_id='A1'"
-    ).fetchone()[0] is None
+    assert (
+        conn.execute(
+            "SELECT last_confirmed_at FROM leads WHERE source_item_id='A1'"
+        ).fetchone()[0]
+        is None
+    )
 
 
 def test_reconfirmation_by_a_later_complete_run_advances_freshness(
@@ -94,14 +108,16 @@ def test_reconfirmation_by_a_later_complete_run_advances_freshness(
     conn = db.connect(tmp_path / "t.db")
     lid = _lead(conn, "A1")
     r1 = db.begin_run(conn, "usaspending:16.071", "2026-07-20T00:00:00+00:00")
-    db.complete_run(conn, r1, RunStats(source="usaspending:16.071"),
-                    [("usaspending:16.071", "A1")])
+    db.complete_run(
+        conn, r1, RunStats(source="usaspending:16.071"), [("usaspending:16.071", "A1")]
+    )
     first = conn.execute(
         "SELECT last_confirmed_run_id FROM leads WHERE id=?", (lid,)
     ).fetchone()[0]
     r2 = db.begin_run(conn, "usaspending:16.071", "2026-07-22T00:00:00+00:00")
-    db.complete_run(conn, r2, RunStats(source="usaspending:16.071"),
-                    [("usaspending:16.071", "A1")])
+    db.complete_run(
+        conn, r2, RunStats(source="usaspending:16.071"), [("usaspending:16.071", "A1")]
+    )
     second = conn.execute(
         "SELECT last_confirmed_run_id FROM leads WHERE id=?", (lid,)
     ).fetchone()[0]
