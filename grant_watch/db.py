@@ -310,6 +310,76 @@ def log_run(conn: sqlite3.Connection, started: str, stats: RunStats) -> None:
     conn.commit()
 
 
+def begin_run(conn: sqlite3.Connection, source: str, started: str) -> int:
+    """Open a run row in state 'pending' BEFORE processing and return its id.
+
+    The rich-card freshness rule (Chase A1) advances a lead's confirmation only after
+    the run that re-confirmed it is durably marked complete AND successful. That requires
+    the run to have an identity DURING processing, so it is created up front here and
+    resolved by `complete_run`/`fail_run`. A failed/partial/interrupted/dry run never
+    reaches `complete_run`, so it can never advance freshness."""
+    cur = conn.execute(
+        """INSERT INTO runs
+             (started, source, state, items_seen, items_new, errors, complete, error_code)
+           VALUES (?,?, 'pending', 0, 0, '', 0, '')""",
+        (started, source),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def complete_run(
+    conn: sqlite3.Connection,
+    run_id: int,
+    stats: RunStats,
+    confirmed_keys: list[tuple[str, str]],
+) -> None:
+    """Mark a run complete AND advance confirmation freshness for exactly the leads it
+    re-confirmed — in ONE transaction. Call ONLY when `stats.complete` is true.
+
+    `confirmed_keys` is every `(source, source_item_id)` the successful run saw (new AND
+    unchanged), because an unchanged item that is still present in a completed run is
+    precisely what "still fresh" means. `last_confirmed_at` is the completion time, never
+    `observed_at` (first-sighting) or `last_seen`."""
+    now = _now()
+    with conn:
+        conn.execute(
+            """UPDATE runs SET finished=?, state='complete', items_seen=?, items_new=?,
+                     errors=?, complete=1, error_code=? WHERE id=?""",
+            (
+                now,
+                stats.items_seen,
+                stats.items_new,
+                stats.errors,
+                stats.error_code,
+                run_id,
+            ),
+        )
+        if confirmed_keys:
+            conn.executemany(
+                """UPDATE leads SET last_confirmed_run_id=?, last_confirmed_at=?
+                   WHERE source=? AND source_item_id=?""",
+                [(run_id, now, src, iid) for src, iid in confirmed_keys],
+            )
+
+
+def fail_run(conn: sqlite3.Connection, run_id: int, stats: RunStats) -> None:
+    """Mark a run failed/partial. NEVER advances confirmation freshness (Chase A1)."""
+    with conn:
+        conn.execute(
+            """UPDATE runs SET finished=?, state='failed', items_seen=?, items_new=?,
+                     errors=?, complete=0, error_code=? WHERE id=?""",
+            (
+                _now(),
+                stats.items_seen,
+                stats.items_new,
+                stats.errors,
+                stats.error_code,
+                run_id,
+            ),
+        )
+
+
 def acquire_poll_lock(
     conn: sqlite3.Connection, name: str, owner: str, stale_hours: int = 2
 ) -> bool:

@@ -99,6 +99,10 @@ def cmd_poll(only_source: str | None, dry_run: bool) -> int:
                 continue
             selected += 1
             stats = RunStats(source=name)
+            # Open the run BEFORE processing so confirmation freshness can bind to it,
+            # but advance freshness ONLY on a durably-complete success (Chase A1).
+            run_id = db.begin_run(conn, name, started) if conn is not None else None
+            confirmed_keys: list[tuple[str, str]] = []
             try:
                 items = poll_fn()
                 stats.items_seen = len(items)
@@ -115,14 +119,20 @@ def cmd_poll(only_source: str | None, dry_run: bool) -> int:
                             f"  NEW {lead.grade.value.upper():6s} [{item.source}] "
                             f"{item.entity}{amt} — {item.title[:70]}{fresh}"
                         )
+                    # Every item SEEN in this run (new or unchanged) is a candidate for
+                    # confirmation, applied only if the run completes successfully.
+                    confirmed_keys.append((item.source, str(item.item_id)))
             except Exception as exc:  # continue other sources, but fail the command
                 stats.errors = _redact_error(exc)
                 stats.complete = False
                 stats.error_code = type(exc).__name__
                 errors += 1
                 print(f"[{name}] ERROR: {stats.errors}", file=sys.stderr)
-            if conn is not None:
-                db.log_run(conn, started, stats)
+            if conn is not None and run_id is not None:
+                if stats.complete:
+                    db.complete_run(conn, run_id, stats, confirmed_keys)
+                else:
+                    db.fail_run(conn, run_id, stats)
             print(
                 f"[{name}] {stats.items_seen} items, {stats.items_new} new"
                 f"{' (dry-run: nothing written)' if dry_run else ''}"
