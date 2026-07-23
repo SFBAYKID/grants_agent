@@ -370,3 +370,36 @@ that production aggregate under separate Chase authorization + `grants-ops-guard
 exactly as the gold-backlog surfacing question was gated. If production mirrors local
 (≈0 award events, or ≈195 same-day CA SVPP rows), the feature is a no-op or a monotonous
 CA drip and the premise must be revisited before enable.
+
+---
+
+## 15. Chase amendments (2026-07-23) — authoritative over §14 where they overlap
+
+**A1 — freshness advances ONLY after a durably complete, successful run.** `runs` gains
+`state` (`pending`|`complete`|`failed`). `cmd_poll` INSERTs a run row up front (state
+`pending`) and holds its `run_id`; while processing it records which lead ids were
+confirmed (seen) under that run WITHOUT advancing freshness; ONLY after the run is
+transactionally marked `complete` AND `stats.complete` is true does it stamp
+`leads.last_confirmed_run_id/last_confirmed_at` for exactly those leads, in the same
+transaction as the completion mark. A failed / partial / interrupted / `--dry-run` run
+NEVER advances confirmation freshness. `OBSERVATION_FRESH_DAYS` reads `last_confirmed_at`
+and requires the confirming run's `state='complete'`.
+
+**A2 — `Not relevant` uses an explicit audited `not_relevant` state, NOT `dead`.**
+`leads.status='not_relevant'` (evidence preserved, not declared dead) + the audience/card
+suppression row (`rich_card_actions`) + a typed `outcome_events` row. Legacy candidate
+queries already require `status='new'`, so both the plain drip and a rolled-back
+`264b0e2` exclude it without falsely killing the evidence, which stays available for
+on-demand search/inspection. Supersedes C5's `status='dead'`.
+
+**A3 — v1 scope is evidenced schools and school districts.** `entity_kind` keeps `city`
+in the schema and the policy model, but city qualification is DEFERRED: the predicate
+rejects a `city` candidate with an explicit "city-kind provenance deferred" reason until
+a non-heuristic runtime city-kind source exists. Schools/districts qualify via `source`
+or exact `nces` provenance (`leads.nces_id`).
+
+**A4 — the later gate is a guardian-run SHADOW REPORT using the implemented policy**, not
+an ad-hoc query. It must measure every REAL readiness requirement (award, freshness from
+a completed run, org-kind provenance, contact, CRM, links, routing) — never approximate
+from today's incomplete schema. Built here (`campaign/report.py` + `cli rich-review
+--shadow`), authorized-to-run separately.
