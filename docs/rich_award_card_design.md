@@ -1,13 +1,13 @@
-# Rich proactive award-card campaign — design (pre-implementation)
+# Rich proactive award-card campaign — reviewed design and local implementation
 
-Status: **design, needs-testing** (nothing built or enabled). This is the design the
-architectural-critic reviews before any code, per the campaign spec (2026-07-23). It
-extends — never replaces — the deployed drip. Base branch: `review/rich-award-card-
-campaign-20260723` from `99c0240`. Constitution (`CLAUDE.md`) and `architectural.md`
-govern; where this doc and those disagree, they win.
+Status: **implemented locally, feature OFF, production needs-testing**. The design was
+reviewed before code; its modules, migrations, offline tests, and CLI now exist on
+`review/rich-award-card-campaign-20260723`. It extends—never replaces—the deployed
+flag-off drip. Constitution (`CLAUDE.md`) and `architectural.md` govern.
 
-Default posture: the rich campaign is **OFF**. `--dry-run` writes nothing; shadow mode
-prepares local state only; enabled delivery is NOT authorized by this task.
+Default posture: the rich campaign is **OFF**. `--dry-run` writes nothing; `rich-shadow`
+is read-only; `rich-prepare` performs no HTTP/write unless `--execute` is explicit.
+Enabled delivery remains separately authorized.
 
 ---
 
@@ -401,5 +401,5 @@ or exact `nces` provenance (`leads.nces_id`).
 **A4 — the later gate is a guardian-run SHADOW REPORT using the implemented policy**, not
 an ad-hoc query. It must measure every REAL readiness requirement (award, freshness from
 a completed run, org-kind provenance, contact, CRM, links, routing) — never approximate
-from today's incomplete schema. Built here (`campaign/report.py` + `cli rich-review
---shadow`), authorized-to-run separately.
+from today's incomplete schema. Built here (`campaign/report.py` + `cli rich-shadow`),
+authorized-to-run separately.

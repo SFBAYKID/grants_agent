@@ -85,8 +85,9 @@ def _record_id(proposed_json: str, salesforce_id: str) -> tuple[str, str]:
     return sobject, record_id
 
 
-def candidates(conn: sqlite3.Connection, grace_days: int = DEFAULT_GRACE_BUSINESS_DAYS
-               ) -> list[FollowupCandidate]:
+def candidates(
+    conn: sqlite3.Connection, grace_days: int = DEFAULT_GRACE_BUSINESS_DAYS
+) -> list[FollowupCandidate]:
     """Return only memberships whose Campaign and member writes Grant completed."""
     rows = conn.execute(
         """SELECT i.id,i.campaign_member_id,i.proposed_json,i.salesforce_id,
@@ -102,19 +103,29 @@ def candidates(conn: sqlite3.Connection, grace_days: int = DEFAULT_GRACE_BUSINES
                   SELECT 1 FROM crm_actions c
                    WHERE c.action_type='create_campaign' AND c.state='complete'
                      AND c.campaign_id=a.campaign_id)
-            ORDER BY a.committed_at,i.id""").fetchall()
+            ORDER BY a.committed_at,i.id"""
+    ).fetchall()
     result: list[FollowupCandidate] = []
     for row in rows:
         try:
             sobject, record_id = _record_id(
-                str(row["proposed_json"]), str(row["salesforce_id"] or ""))
+                str(row["proposed_json"]), str(row["salesforce_id"] or "")
+            )
             joined = _parse_utc(str(row["committed_at"]))
         except (ValueError, TypeError, json.JSONDecodeError):
             continue
-        result.append(FollowupCandidate(
-            int(row["id"]), str(row["campaign_member_id"]), str(row["campaign_id"]),
-            sobject, record_id, str(row["entity_name"] or "this organization"),
-            joined, add_business_days(joined, grace_days)))
+        result.append(
+            FollowupCandidate(
+                int(row["id"]),
+                str(row["campaign_member_id"]),
+                str(row["campaign_id"]),
+                sobject,
+                record_id,
+                str(row["entity_name"] or "this organization"),
+                joined,
+                add_business_days(joined, grace_days),
+            )
+        )
     return result
 
 
@@ -139,34 +150,46 @@ def inspect_activity(candidate: FollowupCandidate, now: datetime) -> ActivityRes
     member_id = candidate.campaign_member_id.replace("'", "")
     try:
         members, _ = readonly_soql(
-            "SELECT Id,HasResponded FROM CampaignMember "
-            f"WHERE Id='{member_id}' LIMIT 1")
+            f"SELECT Id,HasResponded FROM CampaignMember WHERE Id='{member_id}' LIMIT 1"
+        )
         targets, _ = readonly_soql(
             f"SELECT Id,LastActivityDate FROM {candidate.target_sobject} "
-            f"WHERE Id='{record_id}' LIMIT 1")
+            f"WHERE Id='{record_id}' LIMIT 1"
+        )
         tasks, _ = readonly_soql(
             "SELECT Id,IsClosed,ActivityDate,CompletedDateTime FROM Task "
-            f"WHERE WhoId='{record_id}'")
+            f"WHERE WhoId='{record_id}'"
+        )
         events, _ = readonly_soql(
-            "SELECT Id,EndDateTime FROM Event "
-            f"WHERE WhoId='{record_id}'")
+            f"SELECT Id,EndDateTime FROM Event WHERE WhoId='{record_id}'"
+        )
     except Exception as exc:  # noqa: BLE001 — outages must suppress Slack
         return ActivityResult("unknown", error=type(exc).__name__)
     if len(members) != 1 or len(targets) != 1:
         return ActivityResult("unknown", error="record_missing_or_ambiguous")
     if bool(members[0].get("HasResponded")):
-        return ActivityResult("activity", "campaign_response", str(members[0].get("Id") or ""))
+        return ActivityResult(
+            "activity", "campaign_response", str(members[0].get("Id") or "")
+        )
     for task in tasks:
         happened = _sf_datetime(task, "CompletedDateTime", "ActivityDate")
         if bool(task.get("IsClosed")) and happened and happened >= candidate.joined_at:
-            return ActivityResult("activity", "task", str(task.get("Id") or ""), happened.isoformat())
+            return ActivityResult(
+                "activity", "task", str(task.get("Id") or ""), happened.isoformat()
+            )
     for event in events:
         happened = _sf_datetime(event, "EndDateTime")
         if happened and candidate.joined_at <= happened <= now:
-            return ActivityResult("activity", "event", str(event.get("Id") or ""), happened.isoformat())
+            return ActivityResult(
+                "activity", "event", str(event.get("Id") or ""), happened.isoformat()
+            )
     last_activity = _sf_datetime(targets[0], "LastActivityDate")
     if last_activity and last_activity.date() >= candidate.joined_at.date():
-        return ActivityResult("activity", "activity_date_only", evidence_at=last_activity.date().isoformat())
+        return ActivityResult(
+            "activity",
+            "activity_date_only",
+            evidence_at=last_activity.date().isoformat(),
+        )
     return ActivityResult("none")
 
 
@@ -182,13 +205,21 @@ def _used_slots(conn: sqlite3.Connection, channel: str, now: datetime) -> int:
     followups = conn.execute(
         """SELECT COUNT(*) FROM salesforce_followup_state
             WHERE state IN ('sending','delivered','unknown')
-              AND checked_at>=?""", (start,)).fetchone()[0]
+              AND checked_at>=?""",
+        (start,),
+    ).fetchone()[0]
     return len(db.posts_today(conn, channel, now)) + int(followups)
 
 
-def run(client: WebClient | None, channel: str, conn: sqlite3.Connection,
-        dry_run: bool = False, smoke: bool = False,
-        now: datetime | None = None, grace_days: int = DEFAULT_GRACE_BUSINESS_DAYS) -> str:
+def run(
+    client: WebClient | None,
+    channel: str,
+    conn: sqlite3.Connection,
+    dry_run: bool = False,
+    smoke: bool = False,
+    now: datetime | None = None,
+    grace_days: int = DEFAULT_GRACE_BUSINESS_DAYS,
+) -> str:
     """Evaluate candidates and deliver at most one deduplicated Slack reminder."""
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     for candidate in candidates(conn, grace_days):
@@ -196,7 +227,8 @@ def run(client: WebClient | None, channel: str, conn: sqlite3.Connection,
             continue
         existing = conn.execute(
             "SELECT state FROM salesforce_followup_state WHERE campaign_member_id=?",
-            (candidate.campaign_member_id,)).fetchone()
+            (candidate.campaign_member_id,),
+        ).fetchone()
         if existing is not None:
             continue
         activity = inspect_activity(candidate, current)
@@ -209,12 +241,25 @@ def run(client: WebClient | None, channel: str, conn: sqlite3.Connection,
                             target_record_id,joined_at,due_at,policy_version,state,evidence_kind,
                             evidence_id,evidence_at,checked_at,last_error)
                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (candidate.campaign_member_id,candidate.item_id,candidate.campaign_id,
-                         candidate.target_sobject,candidate.target_record_id,
-                         candidate.joined_at.isoformat(),candidate.due_at.isoformat(),POLICY_VERSION,
-                         "activity_seen" if activity.status == "activity" else "unknown",
-                         activity.evidence_kind or None,activity.evidence_id or None,
-                         activity.evidence_at or None,current.isoformat(),activity.error or None))
+                        (
+                            candidate.campaign_member_id,
+                            candidate.item_id,
+                            candidate.campaign_id,
+                            candidate.target_sobject,
+                            candidate.target_record_id,
+                            candidate.joined_at.isoformat(),
+                            candidate.due_at.isoformat(),
+                            POLICY_VERSION,
+                            "activity_seen"
+                            if activity.status == "activity"
+                            else "unknown",
+                            activity.evidence_kind or None,
+                            activity.evidence_id or None,
+                            activity.evidence_at or None,
+                            current.isoformat(),
+                            activity.error or None,
+                        ),
+                    )
             continue
         text = build_message(candidate)
         if dry_run:
@@ -224,18 +269,31 @@ def run(client: WebClient | None, channel: str, conn: sqlite3.Connection,
         delivery_key = f"sf-followup:{candidate.campaign_member_id}:{POLICY_VERSION}"
         conn.execute("BEGIN IMMEDIATE")
         try:
-            if _used_slots(conn, channel, current) >= ABSOLUTE_CAP:
+            from ..campaign import rich_card_enabled
+
+            shared_cap = 1 if rich_card_enabled() else ABSOLUTE_CAP
+            if _used_slots(conn, channel, current) >= shared_cap:
                 conn.rollback()
-                return f"skip: absolute daily cap reached ({ABSOLUTE_CAP})"
+                return f"skip: absolute daily cap reached ({shared_cap})"
             inserted = conn.execute(
                 """INSERT OR IGNORE INTO salesforce_followup_state
                    (campaign_member_id,crm_action_item_id,campaign_id,target_sobject,
                     target_record_id,joined_at,due_at,policy_version,state,checked_at,delivery_key)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                (candidate.campaign_member_id,candidate.item_id,candidate.campaign_id,
-                 candidate.target_sobject,candidate.target_record_id,
-                 candidate.joined_at.isoformat(),candidate.due_at.isoformat(),POLICY_VERSION,
-                 "sending",current.isoformat(),delivery_key)).rowcount
+                (
+                    candidate.campaign_member_id,
+                    candidate.item_id,
+                    candidate.campaign_id,
+                    candidate.target_sobject,
+                    candidate.target_record_id,
+                    candidate.joined_at.isoformat(),
+                    candidate.due_at.isoformat(),
+                    POLICY_VERSION,
+                    "sending",
+                    current.isoformat(),
+                    delivery_key,
+                ),
+            ).rowcount
             conn.commit()
         except Exception:
             conn.rollback()
@@ -249,24 +307,40 @@ def run(client: WebClient | None, channel: str, conn: sqlite3.Connection,
             bot_user = str(identity.get("user_id") or "Grant")
             if not workspace:
                 raise RuntimeError("Slack workspace identity unavailable")
-            response = client.chat_postMessage(channel=channel, text=text, mrkdwn=False,
-                                               unfurl_links=False, unfurl_media=False)
+            response = client.chat_postMessage(
+                channel=channel,
+                text=text,
+                mrkdwn=False,
+                unfurl_links=False,
+                unfurl_media=False,
+            )
             db.register_conversation_thread(
-                conn, workspace, channel, str(response["ts"]), bot_user)
+                conn, workspace, channel, str(response["ts"]), bot_user
+            )
         except Exception as exc:  # noqa: BLE001 — ambiguous sends are never retried
             with conn:
                 conn.execute(
                     """UPDATE salesforce_followup_state
                        SET state='unknown',last_error=?,checked_at=?
                        WHERE campaign_member_id=?""",
-                    (type(exc).__name__,current.isoformat(),candidate.campaign_member_id))
+                    (
+                        type(exc).__name__,
+                        current.isoformat(),
+                        candidate.campaign_member_id,
+                    ),
+                )
             return "unknown: Slack delivery could not be confirmed; no automatic retry"
         with conn:
             conn.execute(
                 """UPDATE salesforce_followup_state
                    SET state='delivered',slack_ts=?,delivered_at=?,checked_at=?
                    WHERE campaign_member_id=?""",
-                (str(response["ts"]),current.isoformat(),current.isoformat(),
-                 candidate.campaign_member_id))
+                (
+                    str(response["ts"]),
+                    current.isoformat(),
+                    current.isoformat(),
+                    candidate.campaign_member_id,
+                ),
+            )
         return f"posted follow-up reminder for Campaign Member {candidate.campaign_member_id}"
     return "skip: no untouched Grant-created Campaign Members are due"

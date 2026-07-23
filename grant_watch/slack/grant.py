@@ -8,8 +8,8 @@ posts — no @ needed there; @Grant works too and routes to the same brain. Mess
 mentioning @Persequor are ignored (that's their conversation). Friendly always; no
 inline backticks anywhere (Slack renders them red, and red text is banned).
 
-There are no slash commands, menus, DMs, or buttons on initial alerts. Humans use
-natural language after @Grant or in the thread under Grant's proactive message.
+There are no slash commands, menus, or DMs. Legacy alerts use threads; the feature-off
+rich campaign also registers its explicit draft/feedback buttons here.
 """
 
 from __future__ import annotations
@@ -41,9 +41,7 @@ class SlackFileClient(Protocol):
         ...
 
 
-# Per-thread locks serialize long turns without dropping the second human message.
-# Slack event identity itself is persisted in ``slack_event_receipts`` so restarts and
-# redelivery cannot duplicate tool calls or external actions.
+# Per-thread locks serialize turns; persisted receipts make restarts/redelivery safe.
 _dedup_lock = threading.Lock()
 _thread_locks: WeakValueDictionary[str, threading.Lock] = WeakValueDictionary()
 
@@ -309,70 +307,9 @@ def create_app() -> App:
                 "Salesforce was not changed by this click.",
             )
 
-    # ---------------------------------------------------------- rich-card actions
-    def _rich_action_context(
-        body: dict[str, Any], client: WebClient
-    ) -> tuple[str, str, str, str, bool]:
-        """Extract and re-verify the common rich-card action context."""
-        user = str((body.get("user") or {}).get("id") or "")
-        channel = str((body.get("channel") or {}).get("id") or "")
-        return (
-            _workspace_id(body),
-            channel,
-            _interaction_thread_ts(body),
-            user,
-            _active_human_channel_member(client, user, channel),
-        )
+    from . import proactive_actions
 
-    @app.action("rich_persequor_draft")
-    def rich_persequor_draft(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
-        """Request one human-reviewed Persequor draft from frozen card facts."""
-        ack()
-        from ..campaign import actions
-
-        snapshot_id = str((body.get("actions") or [{}])[0].get("value") or "")
-        workspace, channel, thread_ts, user, member = _rich_action_context(body, client)
-        nonce = str(body.get("action_ts") or body.get("trigger_id") or "")
-        try:
-            result = actions.request_draft(
-                db.connect(),
-                snapshot_id,
-                workspace=workspace,
-                channel=channel,
-                thread_ts=thread_ts,
-                requester=user,
-                requester_is_member=member,
-                nonce=nonce,
-            )
-        except (PermissionError, ValueError) as exc:
-            _thread_reply(client, body, f"No draft was requested: {str(exc)}.")
-            return
-        _thread_reply(client, body, result.message)
-
-    @app.action("rich_not_relevant")
-    def rich_not_relevant(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
-        """Record deduplicated not-relevant feedback for this frozen card."""
-        ack()
-        from ..campaign import actions
-
-        snapshot_id = str((body.get("actions") or [{}])[0].get("value") or "")
-        workspace, channel, thread_ts, user, member = _rich_action_context(body, client)
-        nonce = str(body.get("action_ts") or body.get("trigger_id") or "")
-        try:
-            result = actions.mark_not_relevant(
-                db.connect(),
-                snapshot_id,
-                workspace=workspace,
-                channel=channel,
-                thread_ts=thread_ts,
-                requester=user,
-                requester_is_member=member,
-                nonce=nonce,
-            )
-        except (PermissionError, ValueError) as exc:
-            _thread_reply(client, body, f"Nothing was changed: {str(exc)}.")
-            return
-        _thread_reply(client, body, result.message)
+    proactive_actions.register(app)
 
     # ---------------------------------------------------------------- conversation
     bot_user_id: str = app.client.auth_test()["user_id"]

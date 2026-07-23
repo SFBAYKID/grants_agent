@@ -85,6 +85,7 @@ def test_drip_dry_run_uses_readonly_database(monkeypatch: pytest.MonkeyPatch) ->
 
     sentinel = _readonly_only(monkeypatch)
     monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANTS")
+    monkeypatch.delenv("GRANT_RICH_CARD_ENABLED", raising=False)
 
     def fake_drip(
         client: object,
@@ -100,6 +101,51 @@ def test_drip_dry_run_uses_readonly_database(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(drip, "run_drip", fake_drip)
     assert cli.cmd_drip(force=True, dry_run=True) == 0
+
+
+def test_rich_flag_dispatches_only_when_explicitly_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OFF preserves legacy dispatch; explicit ON selects the isolated rich path."""
+    from grant_watch.campaign import delivery
+    from grant_watch.slack import drip
+
+    sentinel = _readonly_only(monkeypatch)
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANTS")
+    monkeypatch.setenv("GRANT_RICH_CARD_ENABLED", "1")
+    monkeypatch.setattr(
+        drip,
+        "run_drip",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("rich flag called legacy drip")
+        ),
+    )
+
+    def rich_run(client, channel, conn, **kwargs):  # type: ignore[no-untyped-def]
+        assert client is None and channel == "CGRANTS" and conn is sentinel
+        assert kwargs["dry_run"] is True and kwargs["force"] is True
+        return "[dry-run] rich safe"
+
+    monkeypatch.setattr(delivery, "run", rich_run)
+    assert cli.cmd_drip(force=True, dry_run=True) == 0
+
+
+def test_rich_prepare_defaults_to_no_http_readonly_preview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The preparation CLI requires --execute before reads/writes beyond SQLite."""
+    from grant_watch.campaign import prepare_worker
+
+    sentinel = _readonly_only(monkeypatch)
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANTS")
+
+    def preview(conn, audience, **kwargs):  # type: ignore[no-untyped-def]
+        assert conn is sentinel and audience == "CGRANTS"
+        assert kwargs["dry_run"] is True
+        return prepare_worker.PreparationSummary(2, 0, 0, 0, 0, 0, 0)
+
+    monkeypatch.setattr(prepare_worker, "run", preview)
+    assert cli.cmd_rich_prepare(2, False, False) == 0
 
 
 def test_outreach_retry_dry_run_uses_readonly_database(

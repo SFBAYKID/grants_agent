@@ -267,6 +267,48 @@ or *"No record found — this is net-new."* This turns a raw lead into an action
 
 ---
 
+## 5.2 Rich award-card campaign (implemented locally, feature OFF)
+
+`grant_watch/campaign/` is a separate product layer selected only when
+`GRANT_RICH_CARD_ENABLED` is explicitly truthy. OFF remains the default and dispatches
+to the pre-existing drip unchanged.
+
+- `policy.py` is the pure fail-closed eligibility predicate. Only verified Gold award
+  events for evidenced schools/districts qualify; exact dates, open spend window,
+  completed-run freshness, state/kind provenance, safe links, fresh official contact,
+  and fresh complete CRM state are mandatory. No RFP/bulletin fallback exists.
+- Migrations 14–22 add completed-run confirmation, rich post/snapshot/action/contact
+  state, exact Salesforce owner/activity evidence, organization-kind evidence, and
+  durable paid-enrichment attempts. Historical migrations are unchanged.
+- `prepare_worker.py` bounds pre-window contact/activity work. Contact discovery commits
+  `in_flight` before possibly paid HTTP and refuses silent restart retry; dry-run makes
+  no HTTP call or write. `preparation.py`/`report.py` join persisted evidence and produce
+  deterministic PII-free shadow counts.
+- `snapshot.py` freezes event, run, organization, contact hash/lifecycle, CRM activity,
+  routing, links, and rendering inputs. Stable award identity plus audience prevents
+  reposts independently of policy version or mutable event surrogate IDs.
+- `routing.py` uses completed-call owner, Account owner, open-Opportunity owner, then
+  verified territory. Salesforce email maps exactly through the approved roster and
+  channel membership. Nationwide unmapped states remain eligible and explicitly
+  unassigned; no owner is guessed.
+- `card.py` controls Block Kit and fallback rendering. Untrusted text/URLs are bounded
+  and hardened; buttons contain only opaque snapshot IDs; unfurls stay disabled.
+- `delivery.py` applies one weekday 10:00–10:45 Pacific slot and an 11:00 hard cutoff,
+  freezes and reserves before Slack, never blind-retries ambiguity, and writes one
+  snapshot-linked `posts` row. Follow-up reminders use the same one-message cap while
+  the feature is enabled.
+- `actions.py` rechecks workspace/channel/thread/roster/contact freshness, persists
+  before Persequor, keeps the exact existing `outreach-request.v1` wire keys, and
+  deduplicates retries/double-clicks. Thread replies load snapshot context rather than
+  `leads.current_event_id`. `Not relevant` writes typed feedback and the legacy-visible
+  `not_relevant` status.
+
+Local commands: `rich-prepare` is preview-only unless `--execute` is explicit;
+`rich-shadow` is a read-only deterministic report; ordinary `drip --dry-run` remains
+write-free. No command here changes cron or enables the flag.
+
+---
+
 ## 6. Deployment & tenant isolation (the security boundary)
 
 Production runs on a **DigitalOcean droplet that is multi-tenant** — it also hosts unrelated tenants

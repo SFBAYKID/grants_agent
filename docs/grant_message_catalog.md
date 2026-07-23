@@ -13,6 +13,24 @@ source link; no internal identifiers or emoji in alerts; short paragraphs.
 
 ## PROACTIVE — Grant initiates (weekday cron, 05:00–17:30 PT)
 
+### 0. Rich verified award card — feature flag OFF  (kind `rich_award`)
+- **Status:** implemented and fixture-tested locally; `GRANT_RICH_CARD_ENABLED` defaults
+  OFF. Not deployed, scheduled, production-validated, or authorized for live Slack.
+- **Fires only when:** a Gold verified award for an evidenced school/district has an
+  exact recent award date, positive finite amount, currently open spend window, recent
+  completed source run, safe exact award URL, official site, fresh public official
+  contact, and fresh complete CRM result. Otherwise it posts nothing.
+- **Pacing:** one card maximum per weekday, deterministic 10:00–10:45 Pacific slot,
+  hard 11:00 cutoff, no urgent second card. It shares the cap with follow-up reminders.
+- **Card:** GOLD/PLATINUM header; exact owner mention or explicit unassigned territory;
+  award/spend-window facts; typed Salesforce context; evidenced contact; separately
+  labelled official/contact/Salesforce/award links; `Ask Persequor to draft` and
+  `Not relevant` buttons. All actions resolve the immutable posted snapshot.
+- **Safety:** controlled Block Kit, complete fallback text, no arbitrary unfurls, no PII
+  in button values, reservation before Slack, and no retry of ambiguous sends.
+
+The remaining messages below describe the existing flag-OFF legacy behavior.
+
 ### 1. Award nugget — the core "good news" alert  (style `award-brief`)
 - **Fires when:** an unsurfaced GOLD lead has a *verified* award event
   (announced/obligated). Backfilled/imported awards are deliberately suppressed,

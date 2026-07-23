@@ -6,10 +6,11 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 
 ## What Grant does
 
-1. **Individual proactive alerts.** Grant never posts multi-lead digests. A paced cron surfaces at most
-   one ranked lead or lower-priority funding bulletin per notification, with strict daily caps. The
-   first message is exactly one short factual sentence: no link, buttons, menu, Salesforce context,
-   call to action, or extra formatting.
+1. **Individual proactive alerts.** Grant never posts multi-lead digests. With the rich-card feature
+   OFF (the default), the existing award/RFP/bulletin ladder is unchanged. The implemented-but-OFF
+   rich path instead permits at most one fully evidenced school/district award card per weekday,
+   with Block Kit, fresh public contact, typed read-only CRM context, accurate links, exact/unassigned
+   routing, and safe draft/feedback buttons. It never fills the slot with an RFP or bulletin.
 2. **Natural engagement.** A human replies in the alert thread for details, or types `@Grant` followed
    by a question in the configured channel. Replies and reactions feed the reward system; Grant does
    not use slash commands, DMs, or help/status menus.
@@ -72,6 +73,10 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
   `grant_watch/google_sheets.py`.
 - **Talking to Persequor:** Grant submits a draft-only request to Persequor. Persequor
   creates the Gmail draft; nothing is sent by Grant or by intake acceptance.
+- **Rich campaign modules:** `grant_watch/campaign/` owns strict policy, bounded preparation,
+  durable possibly-paid-call state, exact routing, immutable snapshots, Block Kit, delivery,
+  shadow reporting, and actions. `rich-prepare` previews by default; `rich-shadow` is write-free.
+  `GRANT_RICH_CARD_ENABLED` remains OFF until separately approved production shadow validation.
 - **Google Sheets export (Grant-owned):** email is Persequor's domain; data export is Grant's. Grant
   creates each export as a Sheet in the "Grant Exports" shared drive using its own service account
   (`GOOGLE_SA_KEY_PATH`, `GRANT_EXPORTS_DRIVE_ID`), writes rows with `valueInputOption=RAW` so no cell
@@ -99,6 +104,11 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
   returned a `wss://` URL. If scopes change later, edit via the app's App Manifest page and reinstall.
 
 ## Status
+
+- Rich award-card campaign: `verified` offline with fixtures/fakes for policy, migrations,
+  preparation, activity evidence, routing, snapshots, Block Kit, pacing, delivery ambiguity,
+  action replay, Persequor wire keys, and frozen thread context. It is OFF and not deployed;
+  production readiness/card volume/live Slack rendering remain `needs-testing` through the guardian.
 
 - Slack app and core bot: `verified` live (provisioned, installed, Socket Mode connected).
 - Removal of the live `/grant` command, DM subscription/scopes, and `chat:write.public` is

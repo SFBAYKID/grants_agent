@@ -1,17 +1,17 @@
-# Proactive prompts — roadmap of what Grant COULD say (proposals)
+# Proactive prompts — implemented, gated, and proposed work
 
 Chase's copilot vision: Grant shouldn't just answer — it should *notice* things and
-offer the next action, unprompted. Today Grant proactively posts only the bare award
-nugget, the program bulletin, and (built, unscheduled) the follow-up nudge. This is a
-menu of RICHER proactive prompts to build, each labeled with status and rough effort.
-Nothing here is built yet — these are proposals for Chase to pick from.
+offer the next action, unprompted. The legacy flag-off path posts the bare award/RFP/
+bulletin ladder. A rich award-card campaign is implemented locally behind
+`GRANT_RICH_CARD_ENABLED=0`; it is not enabled, merged, deployed, scheduled, or shadow-
+validated against production. The remaining entries are proposals.
 
 Every proposal keeps the honesty invariants: real evidence only, a source link on
 every funding claim, human approval before any write/email, no fabricated contacts.
 
 ---
 
-## A. Upgrade the award nugget into an actionable card  `proposed · medium`
+## A. Upgrade the award nugget into an actionable card  `implemented locally · OFF`
 Today: `Commerce ISD in TX has a verified $500,000 SVPP funding award. Source: …`
 Proposed: chain discovery → contact → offer, in one card:
 > **Peoria Unified School District (AZ)** just landed a verified **$500,000 SVPP**
@@ -20,9 +20,13 @@ Proposed: chain discovery → contact → offer, in one card:
 > Want me to add her to Salesforce, or draft an intro about cameras & access control?
 > *Source: usaspending.gov/award/…*
 
-- Runs contact enrichment when a nugget is picked (bounded, cached).
-- If no verified contact: "I couldn't confirm a contact yet — want me to dig?"
-- This is the single highest-value upgrade and matches Chase's example verbatim.
+- Preparation runs before the delivery window, never inside Slack send/click handling.
+- The card is silent unless every award, run, kind/state, link, contact, CRM, and routing
+  evidence rule passes. No RFP/bulletin fallback exists on the rich path.
+- One immutable snapshot binds Block Kit, thread answers, feedback, and Persequor.
+- `rich-prepare` defaults to a no-HTTP/no-write preview; `rich-shadow` is DB-read-only.
+- Production viability and presentation remain `needs-testing` in a separately approved
+  five-business-day guardian-run shadow review.
 
 ## B. "Contact found" nudge  `proposed · small`
 After enrichment lands a verified contact on a surfaced lead:
@@ -65,7 +69,7 @@ When a fresh award matches an existing Salesforce account:
 ---
 
 ## Recommended build order
-1. **A** (actionable nugget) — the core of the copilot feel, Chase's own example.
+1. **A** (actionable nugget) — run the separately approved shadow validation; keep OFF.
 2. **E** (backlog digest) — unlocks 855 stranded leads honestly.
 3. **F** (schedule the follow-up nudge) — already built, just wire the cron.
 4. **C/D** (deadline watch + weekly digest) — recurring proactive value.

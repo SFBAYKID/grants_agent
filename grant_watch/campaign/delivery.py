@@ -125,7 +125,23 @@ def run(
     ).fetchone()
     if prior is not None:
         return "skip: this stable award/audience delivery already exists"
-    rendered = card.render(frozen)
+    try:
+        rendered = card.render(frozen)
+    except Exception as exc:  # noqa: BLE001 - permanently quarantine bad render input
+        delivery_key = db.reserve_notification(
+            conn,
+            frozen.draft.lead_id,
+            frozen.draft.event_id,
+            channel,
+            "rich_award",
+            {},
+            snapshot_id=frozen.id,
+        )
+        if delivery_key is not None:
+            db.finish_notification(
+                conn, delivery_key, "unrenderable", error=type(exc).__name__
+            )
+        return "quarantined: rich card could not be rendered; no Slack call attempted"
     delivery_key = db.reserve_notification(
         conn,
         frozen.draft.lead_id,
@@ -172,6 +188,17 @@ def run(
         )
         db.finish_notification(conn, delivery_key, "delivered", slack_ts=slack_ts)
         db.mark_surfaced(conn, [frozen.draft.lead_id])
+        post = conn.execute(
+            "SELECT id FROM posts WHERE snapshot_id=?", (frozen.id,)
+        ).fetchone()
+        db.record_outcome(
+            conn,
+            frozen.draft.lead_id,
+            int(post["id"]) if post else None,
+            frozen.draft.route.slack_user_id or "unassigned",
+            "proactive_card_delivered",
+            f"rich-delivery:{frozen.id}",
+        )
     except Exception as exc:  # noqa: BLE001 - Slack already accepted the message
         try:
             db.finish_notification(conn, delivery_key, "delivered", slack_ts=slack_ts)
