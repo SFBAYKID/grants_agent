@@ -44,7 +44,7 @@ def _authorized_snapshot(
 ) -> FrozenSnapshot:
     """Validate workspace/channel/thread/requester and return the posted snapshot."""
     expected_workspace = os.environ.get("SLACK_WORKSPACE_ID", "").strip()
-    if not workspace or (expected_workspace and workspace != expected_workspace):
+    if not expected_workspace or workspace != expected_workspace:
         raise PermissionError("workspace could not be verified")
     if (
         not requester
@@ -168,22 +168,6 @@ def request_draft(
         requester_is_member=requester_is_member,
     )
     if not _fresh_contact(conn, snapshot, at):
-        with conn:
-            conn.execute(
-                """INSERT OR IGNORE INTO rich_card_actions
-                     (id,snapshot_id,action,nonce,requester_slack,state,detail,
-                      created_at,updated_at)
-                   VALUES (?,?, 'draft',?,?, 'blocked_expired',?,?,?)""",
-                (
-                    uuid.uuid4().hex,
-                    snapshot_id,
-                    nonce,
-                    requester,
-                    "contact evidence expired or was removed",
-                    at.isoformat(),
-                    at.isoformat(),
-                ),
-            )
         return ActionResult(
             "blocked_expired",
             "The verified contact expired or was removed; no draft was requested.",
@@ -195,28 +179,41 @@ def request_draft(
     if existing is not None:
         if existing["requester_slack"] != requester:
             return ActionResult("rejected", "Another rep already requested this draft.")
-        return ActionResult(
-            str(existing["state"]), "This draft request was already handled."
-        )
-    action_id = uuid.uuid4().hex
-    with conn:
-        conn.execute(
-            """INSERT INTO rich_card_actions
-                 (id,snapshot_id,action,nonce,requester_slack,state,created_at,updated_at)
-               VALUES (?,?, 'draft',?,?, 'requested',?,?)""",
-            (action_id, snapshot_id, nonce, requester, at.isoformat(), at.isoformat()),
-        )
+        if existing["state"] != "requested":
+            return ActionResult(
+                str(existing["state"]), "This draft request was already handled."
+            )
+        # A crash may occur after action reservation but before the Persequor
+        # outbox is created. Re-enter the idempotent submitter with the same brief.
+        action_id = str(existing["id"])
+    else:
+        action_id = uuid.uuid4().hex
+        with conn:
+            conn.execute(
+                """INSERT INTO rich_card_actions
+                     (id,snapshot_id,action,nonce,requester_slack,state,created_at,updated_at)
+                   VALUES (?,?, 'draft',?,?, 'requested',?,?)""",
+                (
+                    action_id,
+                    snapshot_id,
+                    nonce,
+                    requester,
+                    at.isoformat(),
+                    at.isoformat(),
+                ),
+            )
     post = conn.execute(
         "SELECT id FROM posts WHERE snapshot_id=?", (snapshot_id,)
     ).fetchone()
-    db.record_outcome(
-        conn,
-        snapshot.draft.lead_id,
-        int(post["id"]) if post else None,
-        requester,
-        "persequor_draft_requested",
-        f"rich-action:{action_id}:requested",
-    )
+    if existing is None:
+        db.record_outcome(
+            conn,
+            snapshot.draft.lead_id,
+            int(post["id"]) if post else None,
+            requester,
+            "persequor_draft_requested",
+            f"rich-action:{action_id}:requested",
+        )
     state, message = submitter(
         conn,
         snapshot.draft.lead_id,

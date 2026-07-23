@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,7 +15,13 @@ from tests.test_rich_delivery import FakeSlack, READY
 from tests.test_rich_preparation import _eligible_conn
 
 
-def _posted(path: Path):  # type: ignore[no-untyped-def]
+@pytest.fixture(autouse=True)
+def _workspace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configure the exact workspace identity required by every action."""
+    monkeypatch.setenv("SLACK_WORKSPACE_ID", "TWORKSPACE")
+
+
+def _posted(path: Path) -> tuple[sqlite3.Connection, sqlite3.Row]:
     """Create one locally delivered snapshot/post using fake Slack."""
     conn = _eligible_conn(path)
     outcome = delivery.run(
@@ -30,7 +37,7 @@ def _posted(path: Path):  # type: ignore[no-untyped-def]
     return conn, post
 
 
-def _kwargs(post):  # type: ignore[no-untyped-def]
+def _kwargs(post: sqlite3.Row) -> dict[str, object]:
     """Return one valid action context for the fixture post."""
     return {
         "workspace": "TWORKSPACE",
@@ -50,7 +57,12 @@ def test_draft_persists_before_one_submit_and_uses_exact_wire_contract(
     monkeypatch.delenv("OUTREACH_TEST_EMAIL", raising=False)
     captured: list[persequor_client.OutreachBrief] = []
 
-    def submit(conn_, lead_id, brief):  # type: ignore[no-untyped-def]
+    def submit(
+        conn_: sqlite3.Connection,
+        lead_id: int,
+        brief: persequor_client.OutreachBrief,
+    ) -> tuple[str, str]:
+        """Assert durable reservation and capture the frozen wire payload."""
         assert conn_ is conn and lead_id == 1
         assert (
             conn.execute("SELECT state FROM rich_card_actions").fetchone()[0]
@@ -77,7 +89,8 @@ def test_double_click_and_slack_replay_submit_once(tmp_path: Path) -> None:
     conn, post = _posted(tmp_path / "double.db")
     calls = 0
 
-    def submit(*_args):  # type: ignore[no-untyped-def]
+    def submit(*_args: object) -> tuple[str, str]:
+        """Count fake external submissions."""
         nonlocal calls
         calls += 1
         return "submitted", "accepted"
@@ -127,7 +140,8 @@ def test_expired_or_removed_contact_blocks_without_submit(tmp_path: Path) -> Non
     conn.commit()
     called = False
 
-    def submit(*_args):  # type: ignore[no-untyped-def]
+    def submit(*_args: object) -> tuple[str, str]:
+        """Fail the test if stale contact evidence reaches submission."""
         nonlocal called
         called = True
         return "submitted", "bad"
@@ -141,6 +155,37 @@ def test_expired_or_removed_contact_blocks_without_submit(tmp_path: Path) -> Non
     )
     assert result.state == "blocked_expired"
     assert called is False
+    assert conn.execute("SELECT COUNT(*) FROM rich_card_actions").fetchone()[0] == 0
+
+
+def test_requested_action_resumes_idempotent_submit_after_crash(tmp_path: Path) -> None:
+    """A crash gap before outbox creation remains safely resumable on Slack retry."""
+    conn, post = _posted(tmp_path / "resume.db")
+    now = datetime(2026, 7, 22, 18, 0, tzinfo=timezone.utc).isoformat()
+    conn.execute(
+        """INSERT INTO rich_card_actions
+             (id,snapshot_id,action,nonce,requester_slack,state,created_at,updated_at)
+           VALUES ('reserved',?,'draft','old-event','U01DFJWQQJ3','requested',?,?)""",
+        (post["snapshot_id"], now, now),
+    )
+    conn.commit()
+    calls = 0
+
+    def submit(*_args: object) -> tuple[str, str]:
+        """Resume the stable idempotent submission once."""
+        nonlocal calls
+        calls += 1
+        return "submitted", "accepted"
+
+    result = actions.request_draft(
+        conn,
+        str(post["snapshot_id"]),
+        submitter=submit,
+        **{**_kwargs(post), "nonce": "retry-event"},
+    )
+    assert result.state == "accepted" and calls == 1
+    row = conn.execute("SELECT id,state FROM rich_card_actions").fetchone()
+    assert tuple(row) == ("reserved", "accepted")
 
 
 def test_not_relevant_is_deduplicated_and_legacy_visible(tmp_path: Path) -> None:
@@ -176,7 +221,10 @@ def test_rich_thread_question_uses_frozen_snapshot_not_mutable_lead(
     conn.commit()
     seen: dict[str, object] = {}
 
-    def respond(_text, row, **_kwargs):  # type: ignore[no-untyped-def]
+    def respond(
+        _text: str, row: dict[str, object], **_kwargs: object
+    ) -> dict[str, object]:
+        """Capture the immutable context passed to the offline responder."""
         seen.update(row)
         return {"intent": "question", "reply": "Frozen answer", "files": []}
 
@@ -184,21 +232,26 @@ def test_rich_thread_question_uses_frozen_snapshot_not_mutable_lead(
         """Avoid real spinner calls while preserving handler flow."""
 
         def __init__(self, *_args: object) -> None:
+            """Initialize the no-op status helper."""
             pass
 
         def start(self) -> None:
+            """Start no external status activity."""
             pass
 
         def update(self, _text: str) -> None:
+            """Ignore deterministic status text."""
             pass
 
         def finalize(self, _text: str, _blocks: object = None) -> bool:
+            """Report that the local response finalized."""
             return True
 
     class Client:
         """Return one offline thread history page."""
 
         def conversations_replies(self, **_kwargs: object) -> dict[str, object]:
+            """Return an empty offline Slack thread."""
             return {"messages": []}
 
     monkeypatch.setattr(conversation, "respond", respond)

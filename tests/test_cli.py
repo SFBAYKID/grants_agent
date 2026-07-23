@@ -121,7 +121,8 @@ def test_rich_flag_dispatches_only_when_explicitly_enabled(
         ),
     )
 
-    def rich_run(client, channel, conn, **kwargs):  # type: ignore[no-untyped-def]
+    def rich_run(client: object, channel: str, conn: object, **kwargs: object) -> str:
+        """Return one deterministic fake rich-delivery preview."""
         assert client is None and channel == "CGRANTS" and conn is sentinel
         assert kwargs["dry_run"] is True and kwargs["force"] is True
         return "[dry-run] rich safe"
@@ -139,7 +140,10 @@ def test_rich_prepare_defaults_to_no_http_readonly_preview(
     sentinel = _readonly_only(monkeypatch)
     monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANTS")
 
-    def preview(conn, audience, **kwargs):  # type: ignore[no-untyped-def]
+    def preview(
+        conn: object, audience: str, **kwargs: object
+    ) -> prepare_worker.PreparationSummary:
+        """Return one deterministic preparation summary without I/O."""
         assert conn is sentinel and audience == "CGRANTS"
         assert kwargs["dry_run"] is True
         return prepare_worker.PreparationSummary(2, 0, 0, 0, 0, 0, 0)

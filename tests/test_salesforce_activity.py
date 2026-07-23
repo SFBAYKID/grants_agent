@@ -89,6 +89,7 @@ def test_reader_outage_is_unavailable_not_no_activity(
     """A failed Salesforce read cannot establish absence of activity."""
 
     def unavailable(_query: str) -> tuple[list[dict[str, object]], str]:
+        """Simulate a read-only Salesforce timeout."""
         raise requests.Timeout("offline")
 
     monkeypatch.setattr(salesforce, "readonly_soql", unavailable)

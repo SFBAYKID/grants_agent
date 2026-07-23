@@ -20,6 +20,7 @@ class FakeSlack:
     def __init__(
         self, conn: sqlite3.Connection, error: Exception | None = None
     ) -> None:
+        """Initialize the fake with optional canned Slack failure."""
         self.conn = conn
         self.error = error
         self.calls: list[dict[str, object]] = []

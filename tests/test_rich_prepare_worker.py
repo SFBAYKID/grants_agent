@@ -16,6 +16,7 @@ def test_paid_marker_is_committed_before_callback(tmp_path: Path) -> None:
     conn = _eligible_conn(tmp_path / "paid.db")
 
     def work() -> str:
+        """Assert the durable marker exists before simulated paid work."""
         row = conn.execute(
             "SELECT state FROM paid_enrichment_attempts WHERE request_key='req-1'"
         ).fetchone()
@@ -86,7 +87,8 @@ def test_source_outage_preserves_prior_contact_evidence(tmp_path: Path) -> None:
     conn.execute("UPDATE contact_evidence SET expires_at='2026-07-01T00:00:00+00:00'")
     conn.commit()
 
-    def unavailable(_lead):  # type: ignore[no-untyped-def]
+    def unavailable(_lead: object) -> contact_evidence.ContactFact | None:
+        """Simulate an unavailable official contact page."""
         raise finder.SourceUnreachable("offline")
 
     with pytest.raises(finder.SourceUnreachable):
@@ -105,7 +107,8 @@ def test_worker_preview_does_no_calls_or_writes(tmp_path: Path) -> None:
     conn = _eligible_conn(tmp_path / "preview.db")
     before = conn.total_changes
 
-    def forbidden(_lead):  # type: ignore[no-untyped-def]
+    def forbidden(_lead: object) -> contact_evidence.ContactFact | None:
+        """Fail if preview mode invokes the paid finder."""
         raise AssertionError("preview called paid finder")
 
     summary = prepare_worker.run(
@@ -158,6 +161,7 @@ def test_worker_persists_fake_readonly_activity_for_exact_account(
     def no_call(
         account: str, people: frozenset[str]
     ) -> salesforce_activity.ActivityEvidence:
+        """Return a deterministic exact-account no-call result."""
         assert account == "001000000000001AAA"
         assert people == frozenset({"003000000000001AAA"})
         return salesforce_activity.ActivityEvidence(
