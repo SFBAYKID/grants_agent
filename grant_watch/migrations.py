@@ -794,6 +794,32 @@ def _migration_19_salesforce_activity_evidence(conn: sqlite3.Connection) -> None
     )
 
 
+def _migration_20_complete_rich_snapshot_evidence(conn: sqlite3.Connection) -> None:
+    """Add the remaining frozen evidence needed by thread/action consumers.
+
+    These columns deliberately duplicate display/evidence facts. A rich-card reply
+    must remain truthful after the mutable lead, contact, or CRM projection changes.
+    The not-relevant uniqueness index also collapses Slack retries to one outcome.
+    """
+    for definition in (
+        "source_item_id TEXT",
+        "contact_evidence_id TEXT",
+        "contact_title TEXT",
+        "sf_activity_completed_at TIMESTAMP",
+        "sf_activity_owner_user_id TEXT",
+        "sf_activity_owner_email TEXT",
+        "sf_activity_checked_at TIMESTAMP",
+    ):
+        _add_column(conn, "rich_card_snapshots", definition)
+    _execute_script(
+        conn,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_rich_not_relevant_once
+          ON rich_card_actions(snapshot_id) WHERE action='not_relevant';
+        """,
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "legacy-compatible base", _migration_1_base),
     Migration(2, "truth observations and events", _migration_2_truth_events),
@@ -836,6 +862,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         19,
         "Salesforce owner and completed-call evidence",
         _migration_19_salesforce_activity_evidence,
+    ),
+    Migration(
+        20,
+        "complete immutable rich-card evidence",
+        _migration_20_complete_rich_snapshot_evidence,
     ),
 )
 
