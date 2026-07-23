@@ -13,6 +13,7 @@ from datetime import date
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
 
+from .routing import RoutingReason
 from .snapshot import FrozenSnapshot, SnapshotDraft
 
 MAX_FALLBACK = 4000
@@ -63,11 +64,6 @@ def safe_url(value: object) -> str:
     return raw
 
 
-def exact_award_url(source: str, url: str, locator: str) -> bool:
-    """Recognize an exact source record, not a homepage/dataset/parent award."""
-    return bool(award_record_identity(source, url, locator))
-
-
 def award_record_identity(source: str, url: str, locator: str) -> str:
     """Return the source's stable exact-record identity, or empty when unsupported."""
     safe = safe_url(url)
@@ -81,19 +77,6 @@ def award_record_identity(source: str, url: str, locator: str) -> str:
         return ""
     record_id = path.removeprefix("/award/").split("/", 1)[0].strip()
     return record_id if record_id else ""
-
-
-def official_site_evidenced(website: str, evidence_url: str) -> bool:
-    """Require the persisted website and its evidence page to share an official site."""
-    site = urlsplit(safe_url(website)).hostname or ""
-    evidence = urlsplit(safe_url(evidence_url)).hostname or ""
-    left = site.lower().removeprefix("www.")
-    right = evidence.lower().removeprefix("www.")
-    return bool(
-        left
-        and right
-        and (left == right or left.endswith(f".{right}") or right.endswith(f".{left}"))
-    )
 
 
 def _money(amount: float) -> str:
@@ -122,11 +105,14 @@ def _award_date(value: str, precision: str) -> str:
 
 
 def _event_date_label(event_type: str) -> str:
-    """Label the evidenced event date without collapsing obligation into announcement."""
+    """Label the evidenced event date in the source's exact terms.
+
+    'Federal funds obligated' for an obligation; 'Award announced' for an announcement.
+    An obligation is never collapsed into a bare 'Awarded' (which would overclaim)."""
     return (
-        "Obligation date"
+        "Federal funds obligated"
         if event_type == "award_obligated"
-        else "Award announcement date"
+        else "Award announced"
     )
 
 
@@ -144,10 +130,14 @@ def fallback_text(draft: SnapshotDraft) -> str:
         if draft.contact_name
         else f"Official general mailbox: {safe_text(draft.contact_email, 254)}."
     )
-    crm = (
-        f" Salesforce: {safe_text(draft.sf_display_text, 500)}."
-        if draft.sf_display_text
-        else ""
+    # The display text already ends in a period; strip any trailing dots so the template
+    # adds exactly one (never "…net-new..").
+    crm_text = safe_text(draft.sf_display_text, 500).rstrip(".")
+    crm = f" Salesforce: {crm_text}." if crm_text else ""
+    actions = (
+        "Actions: Not relevant. Resolve the Salesforce match before drafting outreach."
+        if draft.card_mode == "research_needed"
+        else "Actions: Ask Persequor to draft; Not relevant."
     )
     text = (
         f"{tier}: {safe_text(draft.entity_name, 180)} in {safe_text(draft.state, 2)} "
@@ -156,7 +146,7 @@ def fallback_text(draft: SnapshotDraft) -> str:
         f"{_award_date(draft.award_date, draft.award_date_precision)}. "
         f"Spend window: {_date(draft.spend_window_start)} "
         f"through {_date(draft.spend_window_end)}. {route}{crm} {contact} "
-        "Actions: Ask Persequor to draft; Not relevant."
+        f"{actions}"
     )
     return " ".join(text.split())[:MAX_FALLBACK]
 
@@ -170,11 +160,18 @@ def _link(url: str, label: str) -> str:
 def render(snapshot: FrozenSnapshot) -> RenderedCard:
     """Render the frozen snapshot as controlled Block Kit plus accessible text."""
     draft = snapshot.draft
-    route_text = (
-        f"<@{draft.route.slack_user_id}> — relationship/territory owner"
-        if draft.route.slack_user_id
-        else "_Unassigned territory — no verified owner mapped_"
-    )
+    research = draft.card_mode == "research_needed"
+    # Name the routing reason honestly: a Salesforce owner is a relationship; a
+    # territory owner is not. A research-needed card only ever routes by territory.
+    if draft.route.slack_user_id:
+        owner_kind = (
+            "territory owner"
+            if draft.route.reason is RoutingReason.TERRITORY
+            else "relationship owner"
+        )
+        route_text = f"<@{draft.route.slack_user_id}> — {owner_kind}"
+    else:
+        route_text = "_Unassigned territory — no verified owner mapped_"
     award = (
         f"*{safe_text(draft.entity_name, 180)}* · {safe_text(draft.state, 2)}\n"
         f"Verified {_money(draft.amount)} {safe_text(draft.program, 120)} funding award\n"
@@ -256,25 +253,38 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
                 "elements": [{"type": "mrkdwn", "text": valid_links}],
             }
         )
-    blocks.append(
+    if research:
+        # No active draft action until a human resolves the ambiguous Salesforce match.
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": "_Salesforce match is ambiguous — resolve it before drafting outreach._",
+                    }
+                ],
+            }
+        )
+    action_elements: list[dict[str, Any]] = []
+    if not research:
+        action_elements.append(
+            {
+                "type": "button",
+                "action_id": "rich_persequor_draft",
+                "text": {"type": "plain_text", "text": "Ask Persequor to draft"},
+                "value": snapshot.id,
+            }
+        )
+    action_elements.append(
         {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "action_id": "rich_persequor_draft",
-                    "text": {"type": "plain_text", "text": "Ask Persequor to draft"},
-                    "value": snapshot.id,
-                },
-                {
-                    "type": "button",
-                    "action_id": "rich_not_relevant",
-                    "text": {"type": "plain_text", "text": "Not relevant"},
-                    "style": "danger",
-                    "value": snapshot.id,
-                },
-            ],
+            "type": "button",
+            "action_id": "rich_not_relevant",
+            "text": {"type": "plain_text", "text": "Not relevant"},
+            "style": "danger",
+            "value": snapshot.id,
         }
     )
+    blocks.append({"type": "actions", "elements": action_elements})
     text = draft.fallback_text or fallback_text(draft)
     return RenderedCard(text=text[:MAX_FALLBACK], blocks=tuple(blocks))

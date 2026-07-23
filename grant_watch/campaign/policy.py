@@ -19,6 +19,30 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from enum import Enum
 from math import isfinite
+from urllib.parse import parse_qs, urlsplit
+
+
+def _host(url: str) -> str:
+    """Normalized hostname for same-site comparison; '' when unparseable."""
+    try:
+        return (urlsplit(url).hostname or "").lower().removeprefix("www.").rstrip(".")
+    except ValueError:
+        return ""
+
+
+def _same_site(left: str, right: str) -> bool:
+    """Exact host or a direct parent/subdomain relationship — never unrelated hosts.
+
+    Boundary-safe: the parent/child test anchors on a leading dot, so a lookalike suffix
+    (``evilmontebello.net`` vs ``montebello.net``) never matches. Both sides must carry at
+    least one dot, so a bare label or public suffix (``net``) can never bind a real org."""
+    if "." not in left or "." not in right:
+        return False
+    return bool(
+        left
+        and right
+        and (left == right or left.endswith(f".{right}") or right.endswith(f".{left}"))
+    )
 
 # Bump when a rule changes. Stored on the snapshot as PROVENANCE ONLY — never part of a
 # delivery-uniqueness key (that would re-post the eligible backlog on every tightening;
@@ -52,12 +76,60 @@ QUALIFYING_ENTITY_KINDS = ("school", "school_district")  # v1 scope
 # Provenance that may establish an entity kind. Name heuristics alone NEVER qualify.
 VALID_KIND_PROVENANCE = ("source", "nces", "census", "reviewed")
 
-# Salesforce lookup states that are safe (fresh AND complete). Ambiguous/partial/
-# unavailable/stale are NOT here and make the card temporarily ineligible.
+# Salesforce lookup states that back a DRAFT-READY card (fresh AND complete): the rep
+# may ask Persequor to draft immediately. Ambiguous is handled separately as a
+# research-needed card; partial/unavailable/stale/missing are ineligible.
 SAFE_CRM_STATES = ("exact_match", "complete_no_match")
+# Fresh CRM states that back a RESEARCH-NEEDED card: eligible to post, but it must claim
+# no relationship and no net-new, route by territory only, and offer NO draft action
+# until a human resolves the match (Chase, 2026-07-23).
+RESEARCH_CRM_STATES = ("ambiguous",)
+
+# Human-reviewed authoritative government/education directory hosts. A contact email or
+# official website may be TRUSTED from an EXACT, id-bound record on one of these hosts,
+# but such a host is NEVER treated as an organization's own website (it lists many
+# organizations). Allowlist, not a suffix heuristic: an unlisted host is untrusted until
+# a human reviews and adds it.
+REVIEWED_DIRECTORY_HOSTS = frozenset(
+    {
+        "nces.ed.gov",  # federal NCES school/district locator (exact-bindable by NCES id)
+        "cde.ca.gov",  # California Dept. of Education school directory
+    }
+)
 
 # Contact types the card may show.
 CONTACT_TYPES = ("named_direct", "official_general")
+
+
+class WebsiteProvenance(str, Enum):
+    """Typed, non-heuristic reason an official website was trusted (frozen on the card).
+
+    A name match NEVER qualifies. ``authoritative_directory`` (a directory-published
+    official-site field) is modelled but not yet sourced at runtime, so it is inert."""
+
+    NCES = "nces"
+    AUTHORITATIVE_DIRECTORY = "authoritative_directory"
+    VERIFIED_ORG_PAGE = "verified_org_page"
+    NONE = "none"
+
+
+class ContactBinding(str, Enum):
+    """Typed reason a contact email was bound to the ORGANIZATION (frozen on the card).
+
+    ``org_site`` = the email domain matches the verified organization website;
+    ``authoritative_directory`` = the email appears verbatim in an exact, id-bound
+    record on a reviewed directory host. The scrape page alone never binds (critic C1)."""
+
+    ORG_SITE = "org_site"
+    AUTHORITATIVE_DIRECTORY = "authoritative_directory"
+    NONE = "none"
+
+
+class CardMode(str, Enum):
+    """Whether an eligible card may draft immediately or needs Salesforce review first."""
+
+    DRAFT_READY = "draft_ready"
+    RESEARCH_NEEDED = "research_needed"
 
 # Personal / private mailbox providers rejected for this campaign even when the address
 # appears on an official page (spec E).
@@ -113,8 +185,8 @@ class Reason(str, Enum):
     CONTACT_STALE = "contact_evidence_stale"
     CONTACT_URL_UNSAFE = "contact_evidence_url_missing_or_unsafe"
     CONTACT_PERSONAL = "contact_personal_mailbox"
-    CONTACT_DOMAIN = "contact_email_domain_mismatch"
-    CRM_UNSAFE = "crm_ambiguous_partial_unavailable_or_stale"
+    CONTACT_DOMAIN = "contact_email_not_bound_to_organization"
+    CRM_UNSAFE = "crm_partial_unavailable_or_stale"
 
 
 @dataclass(frozen=True)
@@ -140,14 +212,18 @@ class CandidateEvidence:
     last_confirmed_run_complete: bool
     entity_kind: str  # 'school' | 'school_district' | 'city' | ''
     entity_kind_provenance: str  # one of VALID_KIND_PROVENANCE, or ''
+    nces_id: str  # exact federal id; enables authoritative-directory binding
     state_verified: bool
     award_url_safe: bool
     official_website: str
-    official_website_verified: bool
+    # Raw inputs for the TYPED website-provenance decision (never a name heuristic):
+    org_profile_found: bool  # a verbatim org-site scrape succeeded
+    org_profile_evidence_url: str  # the page that scrape verified
+    nces_website: str  # NCES-published official site; '' until that source is wired
     contact_status: str  # 'verified' | ... ; only 'verified' qualifies
     contact_type: str
     contact_email: str
-    contact_official_domain: str
+    contact_evidence_url: str  # the page the email was verified on (host + exact-id)
     contact_last_verified_at: str  # ISO
     contact_expires_at: str  # ISO; explicit lifecycle expiry
     contact_evidence_url_safe: bool
@@ -161,11 +237,97 @@ class CandidateEvidence:
 
 @dataclass(frozen=True)
 class Eligibility:
-    """Result of judging one candidate."""
+    """Result of judging one candidate, plus the typed provenance to freeze on the card."""
 
     eligible: bool
     reason: Reason
     tier: str  # 'gold' | 'platinum' | ''
+    website_provenance: WebsiteProvenance = WebsiteProvenance.NONE
+    contact_binding: ContactBinding = ContactBinding.NONE
+    card_mode: CardMode = CardMode.DRAFT_READY
+
+
+def website_provenance(
+    website: str,
+    *,
+    org_profile_found: bool,
+    org_profile_evidence_url: str,
+    contact_status: str,
+    contact_evidence_url: str,
+    nces_website: str,
+) -> WebsiteProvenance:
+    """Typed reason to trust an official website. The POLICY layer never re-guesses from a
+    name — but honesty note (critic H2, 2026-07-23): the tie between ``website`` and the
+    specific awardee still rests on the enrichment anchor (``finder._looks_official``, a
+    name-token match) that produced ``leads.org_website``; this function only validates the
+    website GIVEN that anchor. It is not an independent org identity check — that would
+    need the (not-yet-wired) exact NCES-published site (``WebsiteProvenance.NCES``).
+
+    A reviewed-directory host is NEVER an organization's own site. Accept only: the exact
+    NCES-published site (inert until that source is wired), or a page verified on the org's
+    OWN domain — an org-profile scrape, or a verbatim-verified contact evidence page on
+    that same domain (the latter covers a good contact whose separate org-profile scrape
+    happened to fail; it rests on the SAME name anchor, not a stronger one)."""
+    site = _host(website)
+    if not site or site in REVIEWED_DIRECTORY_HOSTS:
+        return WebsiteProvenance.NONE
+    if nces_website and _same_site(site, _host(nces_website)):
+        return WebsiteProvenance.NCES
+    if org_profile_found and _same_site(site, _host(org_profile_evidence_url)):
+        return WebsiteProvenance.VERIFIED_ORG_PAGE
+    contact_host = _host(contact_evidence_url)
+    if (
+        contact_status == "verified"
+        and contact_host
+        and contact_host not in REVIEWED_DIRECTORY_HOSTS
+        and _same_site(site, contact_host)
+    ):
+        return WebsiteProvenance.VERIFIED_ORG_PAGE
+    return WebsiteProvenance.NONE
+
+
+def _authoritative_exact(contact_evidence_url: str, nces_id: str) -> bool:
+    """True only for an exact, id-bound record on a reviewed authoritative directory.
+
+    Exact ORGANIZATION binding, not a name match and NOT a substring: the evidence URL
+    must be on a reviewed directory host AND carry this lead's exact authoritative id as a
+    whole query value or path segment. A substring match (``in``) would let one district's
+    id ``062271`` bind another's record ``?ID=0622710`` — the wrong organization. Only the
+    NCES id is captured today, so an ``nces.ed.gov`` record can bind; a state-directory
+    record (e.g. a CA CDS code we do not store) cannot yet and stays closed — fail-closed."""
+    host = _host(contact_evidence_url)
+    identifier = nces_id.strip()
+    if not host or host not in REVIEWED_DIRECTORY_HOSTS or not identifier:
+        return False
+    if host != "nces.ed.gov":
+        return False
+    parsed = urlsplit(contact_evidence_url)
+    tokens: set[str] = set()
+    for values in parse_qs(parsed.query).values():
+        tokens.update(values)
+    tokens.update(segment for segment in parsed.path.split("/") if segment)
+    return identifier in tokens
+
+
+def contact_binding(
+    email: str,
+    website: str,
+    *,
+    contact_evidence_url: str,
+    nces_id: str,
+) -> ContactBinding:
+    """Bind a non-personal contact email to the ORGANIZATION, not the scrape page.
+
+    Personal-mailbox rejection is applied by the caller BEFORE this. An email binds when
+    its domain matches the verified organization website (org-site), or when it appears
+    verbatim in an exact, id-bound record on a reviewed authoritative directory. The page
+    an email was merely scraped from never binds it (critic C1 / Chase 2026-07-23)."""
+    email_host = email.rsplit("@", 1)[-1].lower() if "@" in email else ""
+    if email_host and _same_site(email_host, _host(website)):
+        return ContactBinding.ORG_SITE
+    if _authoritative_exact(contact_evidence_url, nces_id):
+        return ContactBinding.AUTHORITATIVE_DIRECTORY
+    return ContactBinding.NONE
 
 
 def _parse_date(iso: str) -> date | None:
@@ -263,15 +425,23 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
     if not c.state_verified:
         return Eligibility(False, Reason.STATE_PROVENANCE, "")
 
-    # --- links + website ---------------------------------------------------------
+    # --- links + website (typed provenance; never a name heuristic) ---------------
     if not c.award_url_safe:
         return Eligibility(False, Reason.AWARD_URL_UNSAFE, "")
     if not c.official_website:
         return Eligibility(False, Reason.NO_WEBSITE, "")
-    if not c.official_website_verified:
+    provenance = website_provenance(
+        c.official_website,
+        org_profile_found=c.org_profile_found,
+        org_profile_evidence_url=c.org_profile_evidence_url,
+        contact_status=c.contact_status,
+        contact_evidence_url=c.contact_evidence_url,
+        nces_website=c.nces_website,
+    )
+    if provenance is WebsiteProvenance.NONE:
         return Eligibility(False, Reason.WEBSITE_UNVERIFIED, "")
 
-    # --- contact evidence --------------------------------------------------------
+    # --- contact evidence (bound to the ORGANIZATION, not the scrape page) ---------
     if c.contact_status != "verified" or c.contact_type not in CONTACT_TYPES:
         return Eligibility(False, Reason.CONTACT_MISSING, "")
     contact_days = _days_since(c.contact_last_verified_at, c.today)
@@ -292,22 +462,35 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
     )
     if email_domain in PERSONAL_EMAIL_DOMAINS:
         return Eligibility(False, Reason.CONTACT_PERSONAL, "")
-    if not email_domain or email_domain != c.contact_official_domain.lower():
+    binding = contact_binding(
+        c.contact_email,
+        c.official_website,
+        contact_evidence_url=c.contact_evidence_url,
+        nces_id=c.nces_id,
+    )
+    if binding is ContactBinding.NONE:
         return Eligibility(False, Reason.CONTACT_DOMAIN, "")
 
-    # --- Salesforce: fresh AND complete ------------------------------------------
+    # --- Salesforce: exact/no-match draft-ready; ambiguous research-needed ---------
     crm_checked = _parse_datetime(c.crm_checked_at)
-    if (
-        c.crm_state not in SAFE_CRM_STATES
-        or crm_checked is None
-        or crm_checked > policy_now
-        or (policy_now - crm_checked).total_seconds() > CRM_FRESH_HOURS * 3600
-    ):
+    crm_fresh = (
+        crm_checked is not None
+        and crm_checked <= policy_now
+        and (policy_now - crm_checked).total_seconds() <= CRM_FRESH_HOURS * 3600
+    )
+    if c.crm_state in SAFE_CRM_STATES and crm_fresh:
+        mode = CardMode.DRAFT_READY
+    elif c.crm_state in RESEARCH_CRM_STATES and crm_fresh:
+        # Fresh but ambiguous: post a research-needed card (no draft action, no
+        # relationship/net-new claim, territory routing only) — never a hard reject.
+        mode = CardMode.RESEARCH_NEEDED
+    else:
+        # partial, unavailable, missing, or any STALE lookup — ineligible for v1.
         return Eligibility(False, Reason.CRM_UNSAFE, "")
 
-    # --- eligible: gold, or platinum if a very fresh physical-security award ------
+    # --- eligible: gold, or platinum if a very fresh physical-security award -------
     days_since_award = (c.today - awarded).days
     tier = (
         "platinum" if days_since_award <= PLATINUM_DAYS and c.program_fit_ok else "gold"
     )
-    return Eligibility(True, Reason.ELIGIBLE, tier)
+    return Eligibility(True, Reason.ELIGIBLE, tier, provenance, binding, mode)

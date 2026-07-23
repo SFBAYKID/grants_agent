@@ -257,17 +257,17 @@ def _candidate(
         last_confirmed_run_complete=str(row["confirmed_run_state"] or "") == "complete",
         entity_kind=entity_kind,
         entity_kind_provenance=kind_provenance,
+        nces_id=str(row["nces_id"] or ""),
         state_verified=territory.state_is_verified(row["source"]),
         award_url_safe=bool(award_identity),
         official_website=website,
-        official_website_verified=(
-            str(row["org_profile_status"] or "") == "found"
-            and card.official_site_evidenced(website, website_evidence_url)
-        ),
+        org_profile_found=str(row["org_profile_status"] or "") == "found",
+        org_profile_evidence_url=website_evidence_url,
+        nces_website="",  # NCES-published official site not yet captured at runtime
         contact_status=str(contact["status"] if contact else ""),
         contact_type=str(contact["contact_type"] if contact else ""),
         contact_email=str(contact["email"] if contact else ""),
-        contact_official_domain=str(contact["official_domain"] if contact else ""),
+        contact_evidence_url=contact_url,
         contact_last_verified_at=str(contact["last_verified_at"] if contact else ""),
         contact_expires_at=str(contact["expires_at"] if contact else ""),
         contact_evidence_url_safe=bool(contact_url),
@@ -278,6 +278,14 @@ def _candidate(
         today=now.date(),
         now_utc=now,
     )
+    eligibility = policy.evaluate(evidence)
+    research = eligibility.card_mode is policy.CardMode.RESEARCH_NEEDED
+    # A research-needed (ambiguous CRM) card must assert no relationship and route by
+    # TERRITORY only — never to a Salesforce owner. Drop every exact CRM binding so an
+    # ambiguous single-account/multi-opportunity result cannot leak an owner mention.
+    if research:
+        account = opportunity = activity = None
+        people = frozenset()
     call_owner = OwnerEvidence(
         str(activity["owner_user_id"] or "") if activity else "",
         str(activity["owner_email"] or "") if activity else "",
@@ -330,7 +338,13 @@ def _candidate(
             and contact_expiry > now
             and evidence.contact_evidence_url_safe
             and email_domain not in policy.PERSONAL_EMAIL_DOMAINS
-            and email_domain == evidence.contact_official_domain.lower()
+            and policy.contact_binding(
+                evidence.contact_email,
+                evidence.official_website,
+                contact_evidence_url=evidence.contact_evidence_url,
+                nces_id=evidence.nces_id,
+            )
+            is not policy.ContactBinding.NONE
         ),
         salesforce=(
             evidence.crm_state in policy.SAFE_CRM_STATES
@@ -345,24 +359,34 @@ def _candidate(
             and confirmed_age is not None
             and confirmed_age <= policy.OBSERVATION_FRESH_DAYS
             and evidence.award_url_safe
-            and evidence.official_website_verified
+            and policy.website_provenance(
+                evidence.official_website,
+                org_profile_found=evidence.org_profile_found,
+                org_profile_evidence_url=evidence.org_profile_evidence_url,
+                contact_status=evidence.contact_status,
+                contact_evidence_url=evidence.contact_evidence_url,
+                nces_website=evidence.nces_website,
+            )
+            is not policy.WebsiteProvenance.NONE
         ),
         mapped_route=bool(route.slack_user_id),
         unassigned_route=not bool(route.slack_user_id),
     )
-    eligibility = policy.evaluate(evidence)
     if not eligibility.eligible or contact is None:
         return CandidateReview(lead_id, eligibility.reason, readiness=readiness)
-    sf_display = ""
-    if activity is not None:
-        completed = datetime.fromisoformat(
-            str(activity["completed_at"]).replace("Z", "+00:00")
-        )
-        sf_display = f"Exact Account match; completed call recorded {(now - completed).days} days ago."
-    elif account is not None:
-        sf_display = "Exact Account match."
-        if opportunity is not None:
-            sf_display += " Open Opportunity present."
+    if research:
+        sf_display = "Possible Salesforce matches—review before outreach."
+    else:
+        sf_display = ""
+        if activity is not None:
+            completed = datetime.fromisoformat(
+                str(activity["completed_at"]).replace("Z", "+00:00")
+            )
+            sf_display = f"Exact Account match; completed call recorded {(now - completed).days} days ago."
+        elif account is not None:
+            sf_display = "Exact Account match."
+            if opportunity is not None:
+                sf_display += " Open Opportunity present."
     draft = SnapshotDraft(
         audience=audience,
         lead_id=lead_id,
@@ -378,6 +402,7 @@ def _candidate(
         event_evidence_hash=event_hash,
         event_source_locator=event_locator,
         tier=eligibility.tier,
+        card_mode=eligibility.card_mode.value,
         entity_name=str(row["entity_name"]),
         entity_kind=entity_kind,
         entity_kind_provenance=kind_provenance,
@@ -392,6 +417,8 @@ def _candidate(
         award_url=card.safe_url(award_url),
         official_website=website,
         official_website_evidence_url=website_evidence_url,
+        official_website_provenance=eligibility.website_provenance.value,
+        contact_domain_binding=eligibility.contact_binding.value,
         contact_evidence_id=str(contact["id"]),
         contact_evidence_hash=str(contact["evidence_hash"] or ""),
         contact_name=str(contact["name"] or ""),

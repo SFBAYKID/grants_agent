@@ -173,6 +173,14 @@ def request_draft(
         requester=requester,
         requester_is_member=requester_is_member,
     )
+    if snapshot.draft.card_mode == "research_needed":
+        # A research-needed card never renders this button, but refuse defensively in
+        # case a stale/forged action fires: no draft while the CRM match is ambiguous.
+        return ActionResult(
+            "blocked_research",
+            "This card's Salesforce match is ambiguous; a human must resolve it before "
+            "any outreach is drafted. No draft was requested.",
+        )
     if not _fresh_contact(conn, snapshot, at):
         return ActionResult(
             "blocked_expired",
