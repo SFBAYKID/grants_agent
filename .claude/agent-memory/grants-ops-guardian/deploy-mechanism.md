@@ -32,6 +32,38 @@ confirm the CODE on disk (grep a known new symbol), not just the revision file. 
 
 **Proven full-tree rsync recipe (2026-07-16: 3d653c6 → 25513bc; re-proven 2026-07-17: 25513bc → 9db96d0, 9db96d0 → 36d2470, 36d2470 → 6ea70f2, 6ea70f2 → c714b01, and c714b01 → 50acadd, and 2026-07-17 ed261ff → e6df182 = 14 files [15 delta minus `.env.example`, which the `.env.*` exclude correctly skips], zero deletions each time; Chase-approved, all verified):**
 
+**2026-07-23 264b0e2 → 99c0240 (34-file, all verified) — "drip-honesty-and-guards" branch, no migration:**
+Third add-shaped deploy; retained backup method (RETIRED `cp -a` full-tree NOT used). Coordinator's
+"16 changed files" = the `grant_watch/` SUBSET (14 mods + 2 adds); the FULL tracked delta ex `.claude/`
+= **34** (16 grant_watch + CLAUDE.md + 17 tests), 30 mods `<fcst....` + 4 adds `<f+++++++`
+(`grant_watch/record_semantics.py`, `grant_watch/db_delivery.py`, `tests/test_drip_pacing.py`,
+`tests/test_record_semantics.py`). Shipped the full 34 (matches every prior deploy + the literal exclude
+list, which never excludes tests/CLAUDE.md). `git diff 264b0e2..99c0240 -- grant_watch/migrations.py`
+EMPTY ⇒ schema stays 13; verified live `schema_migrations` MAX==13 in the backup COPY AND the live DB.
+`-cain --delete` preview = 0 deletions + exactly the 34; real `-cai`; all 34 remote sha256 == 99c0240
+blobs (full diff empty). `.env`(mtime 1784743135 = the earlier 2026-07-22 slot-band append, OLDER than
+this session ⇒ untouched, and no `.env` line in itemize)/`run_bot.sh`(1784192756, byte-identical to
+memory)/`grant_watch.db`(1784743202, live) preserved. Restart: OLDPID **1859872** (== the PID this file
+recorded for the 264b0e2 deploy ⇒ NO out-of-band restart) dead in 0.5s → single NEWPID **2890642**,
+Bolt pair, TRACEBACK=NO, PID_COUNT=1. crontab UNCHANGED (4 lines).
+- **`/proc/<pid>/exe` resolves to `/usr/bin/python3.12`, NOT the venv path** — that is normal venv→
+  system-interpreter symlink resolution and is NOT a red flag. The authoritative "running the live venv"
+  proofs are `/proc/<pid>/maps` hits under `…/grants_agent/.venv` (43 here, sample = venv site-packages
+  `.so`s) + CMDLINE `.venv/bin/python -u -m grant_watch.slack.grant`. Use those, not `readlink exe`.
+- **New post-deploy checks this branch (reusable):** `cli drip-blocked` reports set-aside/undelivered
+  leads (ran clean, exit 0, showed the ONE pre-existing 'unknown' row — lead #231 Birmingham CCHS,
+  channel C0B02721MNK, reason=KeyError, at 2026-07-16, PRE-DATES this deploy, expected). Channel-guard
+  guard: read-only `SELECT COUNT(*) FROM notification_outbox WHERE delivery_key LIKE 'channel-guard:%'`
+  ⇒ expect 0 (got 0). `OUTREACH_TEST_EMAIL` non-empty in live environ verified boolean-only from
+  `/proc/<pid>/environ` (test-mode ON). `drip --dry-run` at 17:24 PT gave a LEGITIMATE skip
+  ("outside Mon-Fri 7am ET – 5pm PT window" — the 5pm PT close; cron `*/30 4-17` reaches 17:30 but the
+  app window ends 17:00 PT), exit 0, no raise — a window skip is a valid dry-run outcome, not a failure.
+- Backups at STAMP `20260723T001701Z`: DB set `~/grant_watch.db.bak.20260723T001701Z` (+`-wal` 0B
+  checkpointed/+`-shm`), integrity_check on COPY = ok; `~/.deployed_revision.bak.20260723T001701Z`;
+  `~/pre-99c0240-overwritten.20260723T001701Z.tar.gz` (30 members, 141KB). Disk 83%, 8.4G free
+  (post-purge state holds). Reused persisted target-agnostic `deploy_rsync.sh`; wrote fresh
+  remote_phase1/verify/restart/checks helpers per target.
+
 **2026-07-22 15263d2 → 264b0e2 (8-file, all verified) — code + a 2-key `.env` append, no migration:**
 Second add-shaped deploy; the f4d6237→15263d2 entry below is the template and it held exactly.
 `git diff --name-status` listed 13 paths, 5 were `.claude/agent-memory/*` (excluded) ⇒ deployable
