@@ -38,6 +38,7 @@ def _draft(**changes: object) -> SnapshotDraft:
         award_url="https://www.usaspending.gov/award/award-123",
         official_website="https://www.montebello.k12.ca.us",
         contact_evidence_id="contact-1",
+        contact_evidence_hash="contact-hash",
         contact_name="Jon Smith",
         contact_title="IT Director",
         contact_type="named_direct",

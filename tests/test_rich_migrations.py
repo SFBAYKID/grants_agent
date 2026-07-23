@@ -1,4 +1,4 @@
-"""Migrations 14-21 for the rich award-card campaign: fresh apply, historical upgrade,
+"""Migrations 14-22 for the rich award-card campaign: fresh apply, historical upgrade,
 data preservation through the posts rebuild, and rollback inertness.
 
 The rich card MUST write a posts row (thread attribution runs through the posts table),
@@ -15,11 +15,11 @@ from pathlib import Path
 from grant_watch import db
 
 
-def test_fresh_database_reaches_v21_with_all_rich_tables(tmp_path: Path) -> None:
-    """A brand-new database applies every migration through 21."""
+def test_fresh_database_reaches_v22_with_all_rich_tables(tmp_path: Path) -> None:
+    """A brand-new database applies every migration through 22."""
     conn = db.connect(tmp_path / "fresh.db")
     assert (
-        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 21
+        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 22
     )
     for table in (
         "rich_card_snapshots",
@@ -47,19 +47,22 @@ def test_fresh_database_reaches_v21_with_all_rich_tables(tmp_path: Path) -> None
     assert {"owner_id", "owner_email"} <= {
         r[1] for r in conn.execute("PRAGMA table_info(salesforce_matches)")
     }
-    assert {"contact_title", "sf_activity_owner_email", "source_item_id"} <= {
-        r[1] for r in conn.execute("PRAGMA table_info(rich_card_snapshots)")
-    }
+    assert {
+        "contact_title",
+        "contact_evidence_hash",
+        "sf_activity_owner_email",
+        "source_item_id",
+    } <= {r[1] for r in conn.execute("PRAGMA table_info(rich_card_snapshots)")}
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
 def _at_v13(path: Path) -> sqlite3.Connection:
-    """Build a database, then rewind its ledger to v13 so 14-21 are 'pending'."""
+    """Build a database, then rewind its ledger to v13 so 14-22 are 'pending'."""
     conn = db.connect(path)
     conn.execute("DELETE FROM schema_migrations WHERE version > 13")
     conn.commit()
     conn.close()
-    return db.connect(path)  # re-open: applies 14-21 as an upgrade
+    return db.connect(path)  # re-open: applies 14-22 as an upgrade
 
 
 def test_v13_upgrade_preserves_posts_ids_and_engagement(tmp_path: Path) -> None:
@@ -86,7 +89,7 @@ def test_v13_upgrade_preserves_posts_ids_and_engagement(tmp_path: Path) -> None:
     upgraded = _at_v13(path)
     assert (
         upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-        == 21
+        == 22
     )
     assert (
         upgraded.execute("SELECT kind FROM posts WHERE id=42").fetchone()[0] == "nugget"

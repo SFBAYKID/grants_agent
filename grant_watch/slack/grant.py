@@ -187,9 +187,7 @@ def _in_configured_channel(event: dict[str, Any]) -> bool:
     allowed = set(configured_channel_ids())
     item = event.get("item") or {}
     channel = event.get("channel") or item.get("channel")
-    return bool(
-        allowed and channel in allowed and event.get("channel_type") != "im"
-    )
+    return bool(allowed and channel in allowed and event.get("channel_type") != "im")
 
 
 def create_app() -> App:
@@ -247,11 +245,14 @@ def create_app() -> App:
         except TimeoutError:
             # An expired preview must offer the way forward, not a
             # dead end (Chase hit this live, 2026-07-18).
-            _thread_reply(client, body,
-                          "Salesforce was not changed - this approval "
-                          "preview expired before the tap. Ask me again "
-                          "(for example: add Breann Green to Salesforce) "
-                          "and I'll rebuild it with current data.")
+            _thread_reply(
+                client,
+                body,
+                "Salesforce was not changed - this approval "
+                "preview expired before the tap. Ask me again "
+                "(for example: add Breann Green to Salesforce) "
+                "and I'll rebuild it with current data.",
+            )
             return
         except PermissionError as exc:
             _thread_reply(client, body, f"Salesforce was not changed: {str(exc)}")
@@ -307,6 +308,71 @@ def create_app() -> App:
                 "That preview was already handled or belongs to another user; "
                 "Salesforce was not changed by this click.",
             )
+
+    # ---------------------------------------------------------- rich-card actions
+    def _rich_action_context(
+        body: dict[str, Any], client: WebClient
+    ) -> tuple[str, str, str, str, bool]:
+        """Extract and re-verify the common rich-card action context."""
+        user = str((body.get("user") or {}).get("id") or "")
+        channel = str((body.get("channel") or {}).get("id") or "")
+        return (
+            _workspace_id(body),
+            channel,
+            _interaction_thread_ts(body),
+            user,
+            _active_human_channel_member(client, user, channel),
+        )
+
+    @app.action("rich_persequor_draft")
+    def rich_persequor_draft(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
+        """Request one human-reviewed Persequor draft from frozen card facts."""
+        ack()
+        from ..campaign import actions
+
+        snapshot_id = str((body.get("actions") or [{}])[0].get("value") or "")
+        workspace, channel, thread_ts, user, member = _rich_action_context(body, client)
+        nonce = str(body.get("action_ts") or body.get("trigger_id") or "")
+        try:
+            result = actions.request_draft(
+                db.connect(),
+                snapshot_id,
+                workspace=workspace,
+                channel=channel,
+                thread_ts=thread_ts,
+                requester=user,
+                requester_is_member=member,
+                nonce=nonce,
+            )
+        except (PermissionError, ValueError) as exc:
+            _thread_reply(client, body, f"No draft was requested: {str(exc)}.")
+            return
+        _thread_reply(client, body, result.message)
+
+    @app.action("rich_not_relevant")
+    def rich_not_relevant(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
+        """Record deduplicated not-relevant feedback for this frozen card."""
+        ack()
+        from ..campaign import actions
+
+        snapshot_id = str((body.get("actions") or [{}])[0].get("value") or "")
+        workspace, channel, thread_ts, user, member = _rich_action_context(body, client)
+        nonce = str(body.get("action_ts") or body.get("trigger_id") or "")
+        try:
+            result = actions.mark_not_relevant(
+                db.connect(),
+                snapshot_id,
+                workspace=workspace,
+                channel=channel,
+                thread_ts=thread_ts,
+                requester=user,
+                requester_is_member=member,
+                nonce=nonce,
+            )
+        except (PermissionError, ValueError) as exc:
+            _thread_reply(client, body, f"Nothing was changed: {str(exc)}.")
+            return
+        _thread_reply(client, body, result.message)
 
     # ---------------------------------------------------------------- conversation
     bot_user_id: str = app.client.auth_test()["user_id"]
@@ -578,7 +644,14 @@ def _handle_drip_thread(
     user = event["user"]
     text = re.sub(r"<@[^>]+>", "", event.get("text") or "").strip()
     db.record_engagement(conn, int(post["id"]), user, "reply")
-    row = db.get_lead(conn, int(post["lead_id"])) if post["lead_id"] else None
+    frozen = None
+    if post["snapshot_id"]:
+        from ..campaign import snapshot as rich_snapshot
+
+        frozen = rich_snapshot.load(conn, str(post["snapshot_id"]))
+        row = rich_snapshot.lead_context(frozen) if frozen is not None else None
+    else:
+        row = db.get_lead(conn, int(post["lead_id"])) if post["lead_id"] else None
     context = _thread_history(client, event["channel"], post["ts"])
     status = _Status(client, event["channel"], post["ts"])
     status.start()
@@ -601,7 +674,26 @@ def _handle_drip_thread(
     intent, reply, files = out["intent"], out["reply"], out.get("files", [])
     pending_actions = out.get("pending_crm_actions", [])
 
-    if intent == "draft_email" and row is not None:
+    if intent == "draft_email" and frozen is not None:
+        from ..campaign import actions
+
+        try:
+            action_result = actions.request_draft(
+                conn,
+                frozen.id,
+                workspace=workspace,
+                channel=event["channel"],
+                thread_ts=post["ts"],
+                requester=user,
+                requester_is_member=_active_human_channel_member(
+                    client, user, event["channel"]
+                ),
+                nonce=str(event.get("ts") or event.get("event_ts") or ""),
+            )
+            reply = action_result.message
+        except (PermissionError, ValueError) as exc:
+            reply = f"No draft was requested: {str(exc)}."
+    elif intent == "draft_email" and row is not None:
         reply = _request_outreach(
             conn,
             row,
@@ -621,6 +713,25 @@ def _handle_drip_thread(
             "snoozed",
             f"thread:{post['id']}:{event.get('ts', '')}:snoozed",
         )
+    elif intent == "bad_lead" and frozen is not None:
+        from ..campaign import actions
+
+        try:
+            action_result = actions.mark_not_relevant(
+                conn,
+                frozen.id,
+                workspace=workspace,
+                channel=event["channel"],
+                thread_ts=post["ts"],
+                requester=user,
+                requester_is_member=_active_human_channel_member(
+                    client, user, event["channel"]
+                ),
+                nonce=str(event.get("ts") or event.get("event_ts") or ""),
+            )
+            reply = action_result.message
+        except (PermissionError, ValueError) as exc:
+            reply = f"Nothing was changed: {str(exc)}."
     elif intent == "bad_lead" and row is not None:
         db.set_lead_status(
             conn, int(row["id"]), "dead", note=f"bad lead per <@{user}>: {text}"

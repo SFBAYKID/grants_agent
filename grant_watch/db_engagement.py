@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from .db_common import CRM_CONTEXT_SELECT, LEAD_EVENT_SELECT, _now
 
+
 def record_engagement(
     conn: sqlite3.Connection, post_id: int, slack_user: str, kind: str
 ) -> bool:
@@ -50,6 +51,12 @@ _OUTCOME_POINTS = {
     "bad_lead": -8,
     "contacted": 6,
     "campaign_added": 8,
+    "proactive_card_delivered": 0,
+    "persequor_draft_requested": 4,
+    "persequor_intake_accepted": 6,
+    "persequor_intake_rejected": -2,
+    "persequor_intake_unavailable": 0,
+    "not_relevant": -8,
 }
 
 
@@ -164,9 +171,7 @@ def delivery_attempts_today(
     )
 
 
-def recent_post_states(
-    conn: sqlite3.Connection, channel: str, limit: int
-) -> set[str]:
+def recent_post_states(conn: sqlite3.Connection, channel: str, limit: int) -> set[str]:
     """Return the distinct states of the most recent `limit` proactive posts in a channel.
 
     Feeds the drip state-diversity cooldown ([[grant-drip-campaign-direction]]): a state
@@ -186,9 +191,7 @@ def recent_post_states(
     return {str(r[0] or "") for r in rows}
 
 
-def nugget_candidates(
-    conn: sqlite3.Connection, channel: str
-) -> list[sqlite3.Row]:
+def nugget_candidates(conn: sqlite3.Connection, channel: str) -> list[sqlite3.Row]:
     """Unsurfaced GOLD leads eligible for a drip nugget.
 
     NOTE the deliberate absence of `e.suppressed=0` (Chase, 2026-07-22 — "gold is what

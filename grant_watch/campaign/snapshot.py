@@ -47,6 +47,7 @@ class SnapshotDraft:
     award_url: str
     official_website: str
     contact_evidence_id: str
+    contact_evidence_hash: str
     contact_name: str
     contact_title: str
     contact_type: str
@@ -125,7 +126,7 @@ def freeze(
                   run_id,source_item_id,tier,entity_name,entity_kind,
                   entity_kind_provenance,state,state_provenance,program,amount,
                   award_date,award_date_precision,spend_window_start,spend_window_end,
-                  award_url,official_website,contact_evidence_id,contact_name,
+                  award_url,official_website,contact_evidence_id,contact_evidence_hash,contact_name,
                   contact_title,contact_type,contact_email,contact_evidence_url,
                   contact_verified_at,contact_expires_at,sf_lookup_status,sf_account_id,
                   sf_open_opp_id,sf_activity_id,sf_activity_completed_at,
@@ -134,7 +135,7 @@ def freeze(
                   slack_user_id,fallback_text,render_inputs_json,created_at,expires_at,
                   state_updated_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-                       ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 snapshot_id,
                 POLICY_VERSION,
@@ -160,6 +161,7 @@ def freeze(
                 draft.award_url,
                 draft.official_website,
                 draft.contact_evidence_id,
+                draft.contact_evidence_hash,
                 draft.contact_name or None,
                 draft.contact_title or None,
                 draft.contact_type,
@@ -216,3 +218,35 @@ def load(conn: sqlite3.Connection, snapshot_id: str) -> FrozenSnapshot | None:
         "SELECT * FROM rich_card_snapshots WHERE id=?", (snapshot_id,)
     ).fetchone()
     return _from_row(row) if row is not None else None
+
+
+def lead_context(snapshot: FrozenSnapshot) -> dict[str, object]:
+    """Expose only frozen facts in the legacy conversation row shape."""
+    draft = snapshot.draft
+    return {
+        "id": draft.lead_id,
+        "source": draft.state_provenance,
+        "entity_name": draft.entity_name,
+        "entity_type": draft.entity_kind,
+        "state": draft.state,
+        "program": draft.program,
+        "amount": draft.amount,
+        "funds_start": draft.spend_window_start,
+        "funds_end": draft.spend_window_end,
+        "detail_url": draft.award_url,
+        "status": "snapshotted",
+        "lead_grade": "gold",
+        "current_event_id": draft.event_id,
+        "current_event_type": "award_obligated",
+        "current_event_occurred_on": draft.award_date,
+        "current_event_date_precision": draft.award_date_precision,
+        "current_event_verification_status": "verified",
+        "current_event_evidence_excerpt": "Frozen verified award-card evidence.",
+        "current_event_source_url": draft.award_url,
+        "current_event_source_locator": draft.source_item_id,
+        "salesforce_status": draft.sf_lookup_status,
+        "salesforce_opportunity_link": (
+            draft.sf_open_link if draft.sf_open_opp_id else ""
+        ),
+        "salesforce_account_link": draft.sf_open_link,
+    }

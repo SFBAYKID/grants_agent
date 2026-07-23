@@ -861,6 +861,11 @@ def _migration_21_preparation_evidence_and_paid_calls(conn: sqlite3.Connection) 
     )
 
 
+def _migration_22_freeze_contact_evidence_hash(conn: sqlite3.Connection) -> None:
+    """Freeze the immutable contact evidence hash used by click-time vetoes."""
+    _add_column(conn, "rich_card_snapshots", "contact_evidence_hash TEXT")
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "legacy-compatible base", _migration_1_base),
     Migration(2, "truth observations and events", _migration_2_truth_events),
@@ -913,6 +918,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         21,
         "preparation evidence and paid-call state",
         _migration_21_preparation_evidence_and_paid_calls,
+    ),
+    Migration(
+        22,
+        "freeze contact evidence hash",
+        _migration_22_freeze_contact_evidence_hash,
     ),
 )
 

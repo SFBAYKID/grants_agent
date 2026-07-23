@@ -266,6 +266,7 @@ def _candidate(
         award_url=card.safe_url(award_url),
         official_website=website,
         contact_evidence_id=str(contact["id"]),
+        contact_evidence_hash=str(contact["evidence_hash"] or ""),
         contact_name=str(contact["name"] or ""),
         contact_title=str(contact["title"] or ""),
         contact_type=str(contact["contact_type"]),
