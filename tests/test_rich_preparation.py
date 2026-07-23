@@ -67,13 +67,14 @@ def _eligible_conn(path: Path) -> sqlite3.Connection:
              (id,source,source_item_id,lead_grade,entity_name,entity_type,state,program,
               amount,funds_start,funds_end,detail_url,status,canonical_entity_key,
               nces_id,org_website,org_profile_status,last_confirmed_run_id,
-              last_confirmed_at,current_event_id,org_profile_source_url)
+              last_confirmed_at,current_event_id,org_profile_source_url,nces_website)
            VALUES (1,'usaspending:16.071','award-123','gold','Montebello USD','district',
                    'CA','SVPP',500000,'2025-10-10','2028-09-30',
                    'https://www.usaspending.gov/award/award-123','new',
                    'montebello usd|CA','0625260','https://montebello.k12.ca.us','found',
                    4,'2026-07-22T17:05:00+00:00',2,
-                   'https://montebello.k12.ca.us/about')"""
+                   'https://montebello.k12.ca.us/about',
+                   'https://montebello.k12.ca.us')"""
     )
     conn.execute(
         """INSERT INTO source_observations
@@ -171,6 +172,40 @@ def test_ambiguous_owned_account_never_leaks_its_owner_into_routing(
     assert draft.route.reason is RoutingReason.TERRITORY
     assert draft.route.slack_user_id == "U01DFJWQQJ3"
     assert draft.sf_account_id == ""
+
+
+def test_heuristic_website_caps_exact_crm_at_research_but_keeps_owner_routing(
+    tmp_path: Path,
+) -> None:
+    """A clean EXACT Salesforce relationship with a HEURISTIC (non-exact) website is
+    research-needed — it cannot auto-draft — YET keeps its real Account owner routing and
+    account id. The CRM drop must NOT over-broaden beyond the ambiguous case (critic
+    round-2 non-blocking observation, locked in here)."""
+    conn = _eligible_conn(tmp_path / "exact-heuristic.db")
+    # Heuristic website: remove the exact NCES site so provenance is verified_org_page.
+    conn.execute("UPDATE leads SET nces_website=NULL WHERE id=1")
+    # One EXACT Salesforce Account owned by a channel-member rep (Brett).
+    conn.execute("UPDATE salesforce_lookup_state SET status='found'")
+    conn.execute(
+        """INSERT INTO salesforce_matches
+             (lead_id,sobject,record_id,name,link,confidence,account_id,is_closed,
+              owner_id,owner_email,checked_at)
+           VALUES (1,'Account','001EXACT','Acct',
+                   'https://sf.test/lightning/r/Account/001/view','high',NULL,0,
+                   'U08C1NBH875','brett@monarchconnected.com',
+                   '2026-07-22T17:30:00+00:00')"""
+    )
+    conn.commit()
+    reviews = review_candidates(conn, "CGRANTS", frozenset({"U08C1NBH875"}), now=NOW)
+    draft = reviews[0].draft
+    assert draft is not None
+    assert draft.card_mode == "research_needed"  # heuristic website caps it (no auto-draft)
+    assert draft.official_website_provenance == "verified_org_page"
+    assert draft.route.reason is RoutingReason.SF_ACCOUNT_OWNER  # real relationship kept
+    assert draft.route.slack_user_id == "U08C1NBH875"
+    assert draft.sf_account_id == "001EXACT"  # NOT dropped (only the ambiguous path drops)
+    assert draft.sf_open_link  # the account link is preserved
+    assert draft.sf_display_text == "Exact Account match."
 
 
 def test_card_amount_and_event_meaning_come_from_exact_event(tmp_path: Path) -> None:

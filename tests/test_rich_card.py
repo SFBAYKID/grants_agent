@@ -41,6 +41,8 @@ def test_research_needed_card_offers_no_active_draft_action() -> None:
     rendered = card.render(
         _snapshot(
             card_mode="research_needed",
+            sf_lookup_status="ambiguous",
+            official_website_provenance="verified_org_page",
             sf_display_text="Possible Salesforce matches—review before outreach.",
             route=Route(RoutingReason.TERRITORY, "U01DFJWQQJ3"),
         )
@@ -48,14 +50,14 @@ def test_research_needed_card_offers_no_active_draft_action() -> None:
     encoded = str(rendered.blocks)
     assert "Ask Persequor to draft" not in encoded
     assert "Not relevant" in encoded
-    assert "resolve it before drafting outreach" in encoded
+    assert "Confirm before drafting outreach" in encoded
+    assert "the Salesforce match is ambiguous" in encoded
+    assert "inferred from a name match" in encoded  # heuristic website reason
     assert "Possible Salesforce matches—review before outreach" in rendered.text
     assert "territory owner" in encoded  # never "relationship owner"
     assert "relationship owner" not in encoded
     assert "net-new" not in rendered.text.lower()
-    assert (
-        "Resolve the Salesforce match before drafting outreach" in rendered.text
-    )
+    assert "Confirm before drafting outreach" in rendered.text
 
 
 def test_draft_ready_salesforce_line_has_no_double_period() -> None:

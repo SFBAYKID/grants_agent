@@ -46,7 +46,7 @@ def _draft(**changes: object) -> SnapshotDraft:
         award_url="https://www.usaspending.gov/award/award-123",
         official_website="https://www.montebello.k12.ca.us",
         official_website_evidence_url="https://www.montebello.k12.ca.us/about",
-        official_website_provenance="verified_org_page",
+        official_website_provenance="nces",
         contact_domain_binding="org_site",
         contact_evidence_id="contact-1",
         contact_evidence_hash="contact-hash",

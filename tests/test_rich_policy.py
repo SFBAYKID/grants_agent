@@ -366,13 +366,55 @@ def test_ambiguous_fresh_crm_is_research_needed_not_rejected() -> None:
     assert result.card_mode is CardMode.RESEARCH_NEEDED
 
 
-def test_exact_match_and_no_match_are_draft_ready() -> None:
-    """Exact match and complete no-match remain draft-ready."""
-    assert policy.evaluate(_valid()).card_mode is CardMode.DRAFT_READY
+def test_exact_match_and_no_match_are_draft_ready_only_with_proven_website() -> None:
+    """With PROVEN (exact NCES) website ownership, exact-match and complete-no-match CRM
+    are draft-ready."""
+    proven = {"nces_website": "https://montebelloschools.net"}
+    assert policy.evaluate(_valid(**proven)).card_mode is CardMode.DRAFT_READY
     assert (
-        policy.evaluate(_valid(crm_state="complete_no_match")).card_mode
+        policy.evaluate(_valid(crm_state="complete_no_match", **proven)).card_mode
         is CardMode.DRAFT_READY
     )
+
+
+def test_heuristic_website_is_never_draft_ready() -> None:
+    """Critic H2 / Chase 2026-07-23: a card whose website ownership rests on a name
+    heuristic (verified_org_page) is capped at research-needed even with a clean CRM — no
+    auto-draft on an inferred website."""
+    result = policy.evaluate(_valid(crm_state="complete_no_match"))  # no nces_website
+    assert result.eligible
+    assert result.website_provenance is WebsiteProvenance.VERIFIED_ORG_PAGE
+    assert result.card_mode is CardMode.RESEARCH_NEEDED
+
+
+def test_two_districts_under_one_public_suffix_do_not_cross_bind() -> None:
+    """A contact at valle.k12.ca.us must not bind a montebello.k12.ca.us website: they
+    share the public suffix but have DIFFERENT registrable domains (eTLD+1)."""
+    result = policy.evaluate(
+        _valid(
+            official_website="https://montebello.k12.ca.us",
+            nces_website="https://montebello.k12.ca.us",
+            org_profile_evidence_url="https://montebello.k12.ca.us/contact",
+            contact_email="super@valle.k12.ca.us",
+            contact_evidence_url="https://montebello.k12.ca.us/staff",
+        )
+    )
+    assert not result.eligible and result.reason is Reason.CONTACT_DOMAIN
+
+
+def test_bare_multilabel_public_suffix_email_never_binds() -> None:
+    """An email at a bare multi-label public suffix (k12.ca.us) has no registrable domain
+    and cannot bind an organization website — the case a single-dot guard would miss."""
+    result = policy.evaluate(
+        _valid(
+            official_website="https://montebello.k12.ca.us",
+            nces_website="https://montebello.k12.ca.us",
+            org_profile_evidence_url="https://montebello.k12.ca.us/contact",
+            contact_email="admin@k12.ca.us",
+            contact_evidence_url="https://montebello.k12.ca.us/staff",
+        )
+    )
+    assert not result.eligible and result.reason is Reason.CONTACT_DOMAIN
 
 
 def test_ambiguous_but_stale_crm_is_ineligible() -> None:

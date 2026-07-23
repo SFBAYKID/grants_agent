@@ -427,3 +427,31 @@ snapshot; the shadow report splits `draft_ready_count` / `research_needed_count`
 announced" (`award_announced`); an obligation is never relabelled "Awarded". The
 Salesforce fallback line renders exactly one period. Audit/report output redacts email
 local parts. Removed dead `card.exact_award_url` / `card.official_site_evidenced`.
+
+## 17. Draft-ready requires PROVEN website ownership (Chase, 2026-07-23, round 2)
+
+The gate-loosening left a residual safety hole: a card could be **draft-ready** while its
+website (and therefore its contact) ownership rested only on `finder._looks_official`, a
+name-token heuristic — so an auto-drafted email could reach the wrong organization.
+
+**Draft-ready now requires an EXACT organization-to-website evidence binding.**
+`policy.evaluate` sets `CardMode.DRAFT_READY` only when the CRM is draft-safe AND
+`website_provenance ∈ policy.EXACT_WEBSITE_PROVENANCE` (`nces` / `authoritative_directory`
+— exact authoritative records). A `verified_org_page` provenance (the `_looks_official`
+anchor) is NOT proven ownership and caps the card at `research_needed` (no auto-draft),
+even with a clean CRM. Migration 26 adds `leads.nces_website` as the home for the exact
+NCES-published site; **no runtime source populates it yet**, so every current lead is
+research-only (0 draft-ready) — the safe intended state until an authorized authoritative
+fetch is wired. `card._research_note` states the honest reason(s) — ambiguous Salesforce
+and/or "the organization website is inferred from a name match, not an exact record".
+
+**Registrable-domain (eTLD+1) validation** replaces the ad-hoc suffix test in
+`policy._same_site`, using the Public Suffix List via `tldextract` configured OFFLINE
+(`suffix_list_urls=()` — the bundled snapshot, never the network). Two hosts bind only
+when they share one registrable domain: a bare public suffix (`k12.ca.us`, `net`) has none
+and never binds, and two districts under one suffix (`montebello.k12.ca.us` vs
+`valle.k12.ca.us`) have different registrable domains and never cross-bind. Documented
+residual: a PRIVATE shared-hosting domain not in the PSL (`txed.net`) collapses its
+subdomains to one registrable domain; within a single lead the email/website hosts are
+compared and are typically identical, and such a lead can never be draft-ready (its
+website provenance is heuristic), so no auto-draft rests on it.
