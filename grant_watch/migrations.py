@@ -16,6 +16,7 @@ from .migrations_rich import (
     migration_23_rich_snapshot_truth_and_retry_link,
     migration_24_atomic_proactive_daily_slots,
     migration_25_typed_provenance_and_card_mode,
+    migration_26_exact_nces_website,
 )
 
 
@@ -944,6 +945,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         25,
         "typed website/contact provenance and card mode",
         migration_25_typed_provenance_and_card_mode,
+    ),
+    Migration(
+        26,
+        "exact NCES website for draft-ready org binding",
+        migration_26_exact_nces_website,
     ),
 )
 

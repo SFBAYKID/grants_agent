@@ -89,3 +89,16 @@ def migration_25_typed_provenance_and_card_mode(conn: sqlite3.Connection) -> Non
         )
     if "card_mode" not in _column_names(conn, "rich_card_snapshots"):
         conn.execute("ALTER TABLE rich_card_snapshots ADD COLUMN card_mode TEXT")
+
+
+def migration_26_exact_nces_website(conn: sqlite3.Connection) -> None:
+    """Home for the EXACT NCES-published official website — the only org->website evidence
+    that may back a DRAFT-READY card (Chase, 2026-07-23; a heuristic ``_looks_official``
+    website caps a card at research-needed).
+
+    Nullable and forward-only (ADD COLUMN, O(1) metadata change, rollback-inert). NO
+    runtime source populates it yet, so every current lead stays NULL and therefore
+    research-only; a future AUTHORIZED authoritative fetch may set it, lighting up
+    draft-ready cards. Old code that never reads the column is unaffected."""
+    if "nces_website" not in _column_names(conn, "leads"):
+        conn.execute("ALTER TABLE leads ADD COLUMN nces_website TEXT")
