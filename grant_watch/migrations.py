@@ -820,6 +820,47 @@ def _migration_20_complete_rich_snapshot_evidence(conn: sqlite3.Connection) -> N
     )
 
 
+def _migration_21_preparation_evidence_and_paid_calls(conn: sqlite3.Connection) -> None:
+    """Store reviewed organization-kind evidence and paid-call preflight state.
+
+    Runtime kind inference by organization name is intentionally excluded. Paid
+    enrichment attempts are recorded before HTTP; an abandoned ``in_flight`` row is
+    indeterminate and cannot be silently retried after restart.
+    """
+    _execute_script(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS organization_kind_evidence (
+          id TEXT PRIMARY KEY,
+          lead_id INTEGER NOT NULL REFERENCES leads(id),
+          kind TEXT NOT NULL CHECK(kind IN ('school','school_district','city')),
+          provenance TEXT NOT NULL CHECK(provenance IN ('source','nces','census','reviewed')),
+          evidence_ref TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('verified','superseded','removed')),
+          verified_at TIMESTAMP NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_org_kind_lead_status
+          ON organization_kind_evidence(lead_id, status, verified_at DESC);
+
+        CREATE TABLE IF NOT EXISTS paid_enrichment_attempts (
+          id TEXT PRIMARY KEY,
+          lead_id INTEGER NOT NULL REFERENCES leads(id),
+          operation TEXT NOT NULL,
+          request_key TEXT NOT NULL,
+          attempt_no INTEGER NOT NULL,
+          state TEXT NOT NULL
+            CHECK(state IN ('in_flight','completed','failed','indeterminate')),
+          started_at TIMESTAMP NOT NULL,
+          finished_at TIMESTAMP,
+          error TEXT,
+          UNIQUE(request_key, attempt_no)
+        );
+        CREATE INDEX IF NOT EXISTS idx_paid_enrichment_request
+          ON paid_enrichment_attempts(request_key, attempt_no DESC);
+        """,
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "legacy-compatible base", _migration_1_base),
     Migration(2, "truth observations and events", _migration_2_truth_events),
@@ -867,6 +908,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         20,
         "complete immutable rich-card evidence",
         _migration_20_complete_rich_snapshot_evidence,
+    ),
+    Migration(
+        21,
+        "preparation evidence and paid-call state",
+        _migration_21_preparation_evidence_and_paid_calls,
     ),
 )
 

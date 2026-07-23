@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from enum import Enum
+from math import isfinite
 
 # Bump when a rule changes. Stored on the snapshot as PROVENANCE ONLY — never part of a
 # delivery-uniqueness key (that would re-post the eligible backlog on every tightening;
@@ -108,6 +109,7 @@ class Reason(str, Enum):
     NO_WEBSITE = "official_website_missing"
     CONTACT_MISSING = "contact_missing_or_unverified"
     CONTACT_STALE = "contact_evidence_stale"
+    CONTACT_URL_UNSAFE = "contact_evidence_url_missing_or_unsafe"
     CONTACT_PERSONAL = "contact_personal_mailbox"
     CONTACT_DOMAIN = "contact_email_domain_mismatch"
     CRM_UNSAFE = "crm_ambiguous_partial_unavailable_or_stale"
@@ -143,6 +145,8 @@ class CandidateEvidence:
     contact_email: str
     contact_official_domain: str
     contact_last_verified_at: str  # ISO
+    contact_expires_at: str  # ISO; explicit lifecycle expiry
+    contact_evidence_url_safe: bool
     program_fit_ok: bool  # strong physical-security program (for platinum)
     crm_state: str  # 'exact_match' | 'complete_no_match' | 'ambiguous' | ...
     crm_checked_at: str  # ISO
@@ -212,7 +216,7 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
         return Eligibility(False, Reason.NOT_AWARD_EVENT, "")
     if not c.event_verified:
         return Eligibility(False, Reason.UNVERIFIED_EVENT, "")
-    if c.amount is None or not (c.amount > 0) or c.amount != c.amount:  # NaN-safe
+    if c.amount is None or not isfinite(c.amount) or not (c.amount > 0):
         return Eligibility(False, Reason.BAD_AMOUNT, "")
 
     awarded = _parse_date(c.award_date)
@@ -262,8 +266,17 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
     if c.contact_status != "verified" or c.contact_type not in CONTACT_TYPES:
         return Eligibility(False, Reason.CONTACT_MISSING, "")
     contact_days = _days_since(c.contact_last_verified_at, c.today)
-    if contact_days is None or contact_days > CONTACT_FRESH_DAYS:
+    contact_expiry = _parse_datetime(c.contact_expires_at)
+    policy_now = c.now_utc.astimezone(timezone.utc)
+    if (
+        contact_days is None
+        or contact_days > CONTACT_FRESH_DAYS
+        or contact_expiry is None
+        or contact_expiry <= policy_now
+    ):
         return Eligibility(False, Reason.CONTACT_STALE, "")
+    if not c.contact_evidence_url_safe:
+        return Eligibility(False, Reason.CONTACT_URL_UNSAFE, "")
     email_domain = (
         c.contact_email.rsplit("@", 1)[-1].lower() if "@" in c.contact_email else ""
     )
@@ -274,7 +287,6 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
 
     # --- Salesforce: fresh AND complete ------------------------------------------
     crm_checked = _parse_datetime(c.crm_checked_at)
-    policy_now = c.now_utc.astimezone(timezone.utc)
     if (
         c.crm_state not in SAFE_CRM_STATES
         or crm_checked is None

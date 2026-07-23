@@ -1,4 +1,4 @@
-"""Migrations 14-20 for the rich award-card campaign: fresh apply, historical upgrade,
+"""Migrations 14-21 for the rich award-card campaign: fresh apply, historical upgrade,
 data preservation through the posts rebuild, and rollback inertness.
 
 The rich card MUST write a posts row (thread attribution runs through the posts table),
@@ -15,17 +15,19 @@ from pathlib import Path
 from grant_watch import db
 
 
-def test_fresh_database_reaches_v20_with_all_rich_tables(tmp_path: Path) -> None:
-    """A brand-new database applies every migration through 20."""
+def test_fresh_database_reaches_v21_with_all_rich_tables(tmp_path: Path) -> None:
+    """A brand-new database applies every migration through 21."""
     conn = db.connect(tmp_path / "fresh.db")
     assert (
-        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 20
+        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 21
     )
     for table in (
         "rich_card_snapshots",
         "rich_card_actions",
         "contact_evidence",
         "salesforce_activity_snapshots",
+        "organization_kind_evidence",
+        "paid_enrichment_attempts",
     ):
         assert conn.execute(
             "SELECT name FROM sqlite_master WHERE name=?", (table,)
@@ -52,12 +54,12 @@ def test_fresh_database_reaches_v20_with_all_rich_tables(tmp_path: Path) -> None
 
 
 def _at_v13(path: Path) -> sqlite3.Connection:
-    """Build a database, then rewind its ledger to v13 so 14-20 are 'pending'."""
+    """Build a database, then rewind its ledger to v13 so 14-21 are 'pending'."""
     conn = db.connect(path)
     conn.execute("DELETE FROM schema_migrations WHERE version > 13")
     conn.commit()
     conn.close()
-    return db.connect(path)  # re-open: applies 14-20 as an upgrade
+    return db.connect(path)  # re-open: applies 14-21 as an upgrade
 
 
 def test_v13_upgrade_preserves_posts_ids_and_engagement(tmp_path: Path) -> None:
@@ -84,7 +86,7 @@ def test_v13_upgrade_preserves_posts_ids_and_engagement(tmp_path: Path) -> None:
     upgraded = _at_v13(path)
     assert (
         upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-        == 20
+        == 21
     )
     assert (
         upgraded.execute("SELECT kind FROM posts WHERE id=42").fetchone()[0] == "nugget"
