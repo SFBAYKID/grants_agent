@@ -1,4 +1,4 @@
-"""Migrations 14-18 for the rich award-card campaign: fresh apply, historical upgrade,
+"""Migrations 14-19 for the rich award-card campaign: fresh apply, historical upgrade,
 data preservation through the posts rebuild, and rollback inertness.
 
 The rich card MUST write a posts row (thread attribution runs through the posts table),
@@ -15,11 +15,18 @@ from pathlib import Path
 from grant_watch import db
 
 
-def test_fresh_database_reaches_v18_with_all_rich_tables(tmp_path: Path) -> None:
-    """A brand-new database applies every migration through 18."""
+def test_fresh_database_reaches_v19_with_all_rich_tables(tmp_path: Path) -> None:
+    """A brand-new database applies every migration through 19."""
     conn = db.connect(tmp_path / "fresh.db")
-    assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 18
-    for table in ("rich_card_snapshots", "rich_card_actions", "contact_evidence"):
+    assert (
+        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 19
+    )
+    for table in (
+        "rich_card_snapshots",
+        "rich_card_actions",
+        "contact_evidence",
+        "salesforce_activity_snapshots",
+    ):
         assert conn.execute(
             "SELECT name FROM sqlite_master WHERE name=?", (table,)
         ).fetchone(), table
@@ -35,16 +42,19 @@ def test_fresh_database_reaches_v18_with_all_rich_tables(tmp_path: Path) -> None
     assert {"last_confirmed_run_id", "last_confirmed_at"} <= {
         r[1] for r in conn.execute("PRAGMA table_info(leads)")
     }
+    assert {"owner_id", "owner_email"} <= {
+        r[1] for r in conn.execute("PRAGMA table_info(salesforce_matches)")
+    }
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
 def _at_v13(path: Path) -> sqlite3.Connection:
-    """Build a database, then rewind its ledger to v13 so 14-18 are 'pending'."""
+    """Build a database, then rewind its ledger to v13 so 14-19 are 'pending'."""
     conn = db.connect(path)
     conn.execute("DELETE FROM schema_migrations WHERE version > 13")
     conn.commit()
     conn.close()
-    return db.connect(path)  # re-open: applies 14-18 as an upgrade
+    return db.connect(path)  # re-open: applies 14-19 as an upgrade
 
 
 def test_v13_upgrade_preserves_posts_ids_and_engagement(tmp_path: Path) -> None:
@@ -69,11 +79,16 @@ def test_v13_upgrade_preserves_posts_ids_and_engagement(tmp_path: Path) -> None:
     seed.close()
 
     upgraded = _at_v13(path)
-    assert upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 18
-    assert upgraded.execute("SELECT kind FROM posts WHERE id=42").fetchone()[0] == "nugget"
-    assert upgraded.execute(
-        "SELECT post_id FROM engagement"
-    ).fetchone()[0] == 42, "engagement.post_id reference broken by rebuild"
+    assert (
+        upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
+        == 19
+    )
+    assert (
+        upgraded.execute("SELECT kind FROM posts WHERE id=42").fetchone()[0] == "nugget"
+    )
+    assert upgraded.execute("SELECT post_id FROM engagement").fetchone()[0] == 42, (
+        "engagement.post_id reference broken by rebuild"
+    )
     # the widened CHECK now admits the rich kind
     upgraded.execute(
         "INSERT INTO posts (kind, channel, ts) VALUES ('rich_award','C1','2.0')"

@@ -755,6 +755,45 @@ def _migration_18_contact_evidence(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_19_salesforce_activity_evidence(conn: sqlite3.Connection) -> None:
+    """Persist exact Salesforce owner identity and typed completed-call evidence.
+
+    Owner names are display text, not identity. The new scalar fields retain the
+    Salesforce User id/email needed for an exact roster mapping. Activity rows are
+    append-only lookup results so an outage never rewrites an older successful fact;
+    preparation reads only the newest fresh row and fails closed on every other state.
+    """
+    _add_column(conn, "salesforce_matches", "owner_id TEXT")
+    _add_column(conn, "salesforce_matches", "owner_email TEXT")
+    _execute_script(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS salesforce_activity_snapshots (
+          id TEXT PRIMARY KEY,
+          lead_id INTEGER NOT NULL REFERENCES leads(id),
+          status TEXT NOT NULL
+            CHECK(status IN ('verified_call','no_recent_call','unavailable')),
+          activity_id TEXT,
+          activity_type TEXT,
+          completed_at TIMESTAMP,
+          account_id TEXT,
+          person_id TEXT,
+          owner_user_id TEXT,
+          owner_name TEXT,
+          owner_email TEXT,
+          owner_slack_id TEXT,
+          roster_status TEXT NOT NULL
+            CHECK(roster_status IN ('exact','unmapped','not_applicable')),
+          record_link TEXT,
+          checked_at TIMESTAMP NOT NULL,
+          error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_sf_activity_lead_checked
+          ON salesforce_activity_snapshots(lead_id, checked_at DESC);
+        """,
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "legacy-compatible base", _migration_1_base),
     Migration(2, "truth observations and events", _migration_2_truth_events),
@@ -777,9 +816,13 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(9, "organization profile columns", _migration_9_organization_profile),
     # 10-12 are consumed by the droplet's divergent lineage (see _migration_13 docstring);
     # main's next migration is 13 so it is not masked as already-applied on the droplet.
-    Migration(13, "widen post kinds for platinum/rfp drip", _migration_13_widen_post_kinds),
     Migration(
-        14, "run-completion confirmation freshness", _migration_14_run_confirmation_freshness
+        13, "widen post kinds for platinum/rfp drip", _migration_13_widen_post_kinds
+    ),
+    Migration(
+        14,
+        "run-completion confirmation freshness",
+        _migration_14_run_confirmation_freshness,
     ),
     Migration(
         15,
@@ -789,6 +832,11 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(16, "immutable rich card snapshots", _migration_16_rich_card_snapshots),
     Migration(17, "rich card action state", _migration_17_rich_card_actions),
     Migration(18, "forward-only contact evidence", _migration_18_contact_evidence),
+    Migration(
+        19,
+        "Salesforce owner and completed-call evidence",
+        _migration_19_salesforce_activity_evidence,
+    ),
 )
 
 

@@ -69,6 +69,8 @@ class SFMatch:
     account_id: str = ""
     stage: str = ""
     is_closed: bool | None = None
+    owner_id: str = ""
+    owner_email: str = ""
 
 
 @dataclass
@@ -307,7 +309,8 @@ def _query_accounts(entity: str, token: str, instance_url: str) -> list[dict[str
     for term in search_terms(entity):
         sosl = (
             f"FIND {{{term}}} IN ALL FIELDS RETURNING "
-            "Account(Id,Name,BillingState,BillingCity,Website,Phone,Owner.Name LIMIT 20)"
+            "Account(Id,Name,BillingState,BillingCity,Website,Phone,"
+            "Owner.Id,Owner.Name,Owner.Email LIMIT 20)"
         )
         body = _readonly_get("search", {"q": sosl}, token, instance_url)
         for record in body.get("searchRecords") or []:
@@ -321,8 +324,10 @@ def _query_people(entity: str, token: str, instance_url: str) -> list[dict[str, 
     for term in search_terms(entity):
         sosl = (
             f"FIND {{{term}}} IN ALL FIELDS RETURNING "
-            "Lead(Id,Name,Company,State,Website,Phone,Owner.Name LIMIT 20), "
-            "Contact(Id,Name,MailingState,Phone,Owner.Name,Account.Id,Account.Name LIMIT 20)"
+            "Lead(Id,Name,Company,State,Website,Phone,"
+            "Owner.Id,Owner.Name,Owner.Email LIMIT 20), "
+            "Contact(Id,Name,MailingState,Phone,Owner.Id,Owner.Name,Owner.Email,"
+            "Account.Id,Account.Name LIMIT 20)"
         )
         body = _readonly_get("search", {"q": sosl}, token, instance_url)
         for record in body.get("searchRecords") or []:
@@ -336,7 +341,8 @@ def _query_opportunities(
     """Return open Opportunities related to exactly one confirmed Account."""
     safe_id = re.sub(r"[^A-Za-z0-9]", "", account_id)
     soql = (
-        "SELECT Id,Name,Owner.Name,StageName,IsClosed,AccountId,CloseDate "
+        "SELECT Id,Name,Owner.Id,Owner.Name,Owner.Email,"
+        "StageName,IsClosed,AccountId,CloseDate "
         f"FROM Opportunity WHERE AccountId='{safe_id}' AND IsClosed=false "
         "ORDER BY CloseDate ASC LIMIT 20"
     )
@@ -397,7 +403,8 @@ def lookup(
         )
         if confidence is None:
             continue
-        owner = str((record.get("Owner") or {}).get("Name") or "")
+        owner_record = record.get("Owner") or {}
+        owner = str(owner_record.get("Name") or "")
         match = SFMatch(
             sobject="Account",
             record_id=str(record["Id"]),
@@ -408,6 +415,8 @@ def lookup(
             confidence=confidence,
             state=candidate_state,
             website=str(record.get("Website") or ""),
+            owner_id=str(owner_record.get("Id") or ""),
+            owner_email=str(owner_record.get("Email") or ""),
         )
         matches.append(match)
         if confidence == "high":
@@ -437,18 +446,21 @@ def lookup(
         if confidence is None:
             continue
         record_id = str(record.get("Id") or "")
+        owner_record = record.get("Owner") or {}
         matches.append(
             SFMatch(
                 sobject=sobject,
                 record_id=record_id,
                 name=str(record.get("Name") or ""),
                 company=company,
-                owner=str((record.get("Owner") or {}).get("Name") or ""),
+                owner=str(owner_record.get("Name") or ""),
                 link=_link(instance_url, sobject, record_id),
                 confidence=confidence,
                 state=candidate_state,
                 website=str(record.get("Website") or ""),
                 account_id=str(account.get("Id") or ""),
+                owner_id=str(owner_record.get("Id") or ""),
+                owner_email=str(owner_record.get("Email") or ""),
             )
         )
 
@@ -461,18 +473,21 @@ def lookup(
             partial = True
         for opportunity in opportunities:
             record_id = str(opportunity.get("Id") or "")
+            owner_record = opportunity.get("Owner") or {}
             matches.append(
                 SFMatch(
                     sobject="Opportunity",
                     record_id=record_id,
                     name=str(opportunity.get("Name") or ""),
                     company="",
-                    owner=str((opportunity.get("Owner") or {}).get("Name") or ""),
+                    owner=str(owner_record.get("Name") or ""),
                     link=_link(instance_url, "Opportunity", record_id),
                     confidence="high",
                     account_id=account.record_id,
                     stage=str(opportunity.get("StageName") or ""),
                     is_closed=bool(opportunity.get("IsClosed")),
+                    owner_id=str(owner_record.get("Id") or ""),
+                    owner_email=str(owner_record.get("Email") or ""),
                 )
             )
 

@@ -78,8 +78,8 @@ def _persist(
         conn.executemany(
             """INSERT INTO salesforce_matches
                  (lead_id,sobject,record_id,name,company,owner,link,confidence,
-                  account_id,stage,is_closed,checked_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  account_id,stage,is_closed,checked_at,owner_id,owner_email)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             [
                 (
                     lead_id,
@@ -94,6 +94,8 @@ def _persist(
                     match.stage or None,
                     int(match.is_closed) if match.is_closed is not None else None,
                     checked_at,
+                    match.owner_id or None,
+                    match.owner_email or None,
                 )
                 for match in result.matches
             ],

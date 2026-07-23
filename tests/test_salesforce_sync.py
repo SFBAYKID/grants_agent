@@ -61,6 +61,8 @@ def _found() -> salesforce.SFResult:
                 "https://sf.test/lightning/r/Account/001A/view",
                 "high",
                 state="WA",
+                owner_id="005A",
+                owner_email="anthony@monarchconnected.com",
             ),
             salesforce.SFMatch(
                 "Opportunity",
@@ -73,6 +75,8 @@ def _found() -> salesforce.SFResult:
                 account_id="001A",
                 stage="Prospecting",
                 is_closed=False,
+                owner_id="005A",
+                owner_email="anthony@monarchconnected.com",
             ),
         ],
     )
@@ -95,6 +99,8 @@ def test_sync_persists_read_only_account_and_opportunity(
     assert summary == salesforce_sync.SyncSummary(1, 1, 0, 0, 0, 0, 1)
     assert state["status"] == "found" and len(matches) == 2
     assert {row["sobject"] for row in matches} == {"Account", "Opportunity"}
+    assert {row["owner_id"] for row in matches} == {"005A"}
+    assert {row["owner_email"] for row in matches} == {"anthony@monarchconnected.com"}
 
 
 def test_sync_dry_run_writes_nothing(
