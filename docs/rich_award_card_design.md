@@ -257,3 +257,116 @@ compat; no historical edits).
    `99c0240` selection ignores it (they don't read snapshots) — but the v17 `posts.
    snapshot_id` column must have a default so old INSERTs still work.
 5. DST + hard cutoff interaction with the deployed slot-band clamp (04:00–16:30 PT).
+
+---
+
+## 14. Critic resolutions (v2) — supersede the sections above where they conflict
+
+architectural-critic reviewed v1 (`36200b8`) and returned 5 CRITICAL + 6 HIGH findings,
+all grounded in code and this repo's incident history. Resolutions:
+
+**C1 — freshness has no schema under it (`source_observations` has no `run_id`; writes
+are once-only so `observed_at` is first-sighting, not re-confirmation).** RESOLUTION:
+add forward migration **v14a** stamping mutable re-confirmation on the LEAD projection
+(NOT the immutable observation): `leads.last_confirmed_run_id` (FK-less int) and
+`leads.last_confirmed_at`, updated on EVERY poll that sees the item (including the
+`INSERT OR IGNORE` no-op path in `upsert_lead`). `runs` gets a stable `id` if it lacks
+one. `OBSERVATION_FRESH_DAYS` is measured against `last_confirmed_at` from a run whose
+`RunStats.complete` is true — never `last_seen`, never `observed_at`. This is a pipeline
+change (`upsert_lead` + `cmd_poll`), design-level here, and its eligibility predicate is
+UNSATISFIABLE until it lands — so the rich card cannot be built to reference "completed
+run" freshness before this migration exists.
+
+**C2 — dedup on the `event_id` surrogate re-invites the `rfp_item_id` drift incident,
+and `policy_version` in the uniqueness key re-posts the backlog on any policy bump.**
+RESOLUTION: delivery dedup is **policy-independent** and keyed on a STABLE identity —
+`canonical_entity_key(entity,state)` + program + a stable award identity (the source
+award id, e.g. `usaspending` Award ID) + `audience`. `policy_version` stays on the
+snapshot as provenance ONLY, never in the uniqueness key. ADDITIONALLY retain the legacy
+guard the plain drip already relies on: exclude any lead already in `posts`/
+`notification_outbox` for the audience (that is what actually held the line after
+`15263d2`). A content hash is explicitly rejected (a re-keyed lead has identical content
+but must still dedup; field reordering changes the hash).
+
+**C3 — the rich card MUST write a `posts` row (thread attribution goes through
+`find_post_by_ts`), but `posts.kind` CHECK admits only platinum/nugget/rfp/bulletin
+after v13 → a CHECK violation fires AFTER the Slack post lands = the migration-13
+wedge.** RESOLUTION: migration **v14b** rebuilds `posts` with the widened CHECK adding
+`'rich_award'`, using the exact CREATE-copy-DROP-rename recipe as `_migration_13`,
+preserving `id` for `engagement.post_id`. The rich card records `kind='rich_award'`.
+
+**C4 — the snapshot is truth for BUTTONS but not for the THREAD REPLY (the main
+engagement surface). `_handle_drip_thread` answers from `db.get_lead` (mutable) + a live
+`lead_id`-keyed CRM lookup, so "who do I talk to about that award?" can contradict the
+frozen card after a re-grade/re-key/CRM change.** RESOLUTION: §1 is corrected — this is
+NOT a thin change. `_handle_drip_thread` is modified: when `post["snapshot_id"]` is set,
+load the frozen snapshot and answer from its frozen entity/award/contact/SF fields,
+labelled "as of when this card was prepared," rather than re-querying. The frozen SF
+context overrides the live `lead_id`-keyed lookup for a snapshot-backed thread.
+
+**C5 — `Not relevant` suppression must be written where the LEGACY candidate queries and
+a ROLLED-BACK `264b0e2` look, or the plain drip re-posts a rejected lead.** RESOLUTION:
+`Not relevant` writes the `rich_card_actions` row AND sets `leads.status='dead'` with a
+note (the terminal state `nugget_candidates`/`rfp_candidates`/`bulletin_candidates` all
+already exclude via `status='new'`). Rollback test asserts all three legacy queries
+exclude a not-relevant lead.
+
+**H1 — city `entity_kind` has no non-heuristic runtime provenance (usaspending recipient
+name is a bare string; `entity_type` is frequently blank; the Census place universe is a
+research queue, not linked to runtime leads).** RESOLUTION: **scope v1 to school /
+school_district**, whose kind can reach `nces` provenance via `leads.nces_id`. A `city`
+qualifies only through explicit `reviewed` provenance (a separately-reviewed evidence
+row), never a heuristic. The "valid platinum city" happy-path test uses a hand-built
+`reviewed`-provenance fixture and is documented as reviewed-only until a runtime
+city-kind source exists.
+
+**H2 — routing must resolve owners by exact `User.Email`/`Id`, not `Owner.Name` (the only
+field the reader returns today), AND must not tag a rep who is not in the configured
+channel.** RESOLUTION: `salesforce_activity.py` fetches `OwnerId` + `Owner.Email`;
+routing matches `Owner.Email` == exactly one `reps.json` email → Slack id, AND verifies
+that Slack id is a member of the audience channel (reuse the membership check pattern);
+else fall to territory/unassigned. `Owner.Name` is never used for identity.
+
+**H3 — removing `build_brief`'s `school_district` default hits the LIVE legacy outreach
+path (`_request_outreach`), an external pinned-contract change.** RESOLUTION: do NOT
+change the legacy wire shape blind. The RICH path passes a real `entity_type` mapped
+from the snapshot's evidenced `entity_kind` (always populated). The LEGACY path is left
+unchanged in this task; removing its fabricated default is deferred until Persequor is
+confirmed to tolerate a blank `entity_type` (needs separate confirmation — I cannot
+contact Persequor under this task). §9 corrected accordingly.
+
+**H4 — the `in_flight`-before-paid-HTTP discipline must live at the FINDER boundary, not
+just the worker; the legacy thread-draft path pays inside a Slack handler.** RESOLUTION:
+`in_flight` markers are written at the paid boundary (`finder._search`/`_scrape` /
+`linkedin_person`) via a small reservation, so any caller (worker or handler) is
+protected and a restart never blind-retries a paid call. The rich `draft` handler's
+"re-check expiry with NO live enrichment" is a HARD guarantee: it reads frozen snapshot +
+`contact_evidence` only and can never call `find_contact`.
+
+**H5 — a snapshot FK to `funding_events(id)` would wedge the deletion-based data-
+reconciliation procedure (the 2026-07-21 dup fix deleted event rows).** RESOLUTION:
+snapshots store `event_id`/`observation_id`/`run_id` as PLAIN integers WITHOUT an
+enforced FK (the snapshot already copies the facts), so evidence reconciliation is never
+blocked by a frozen card.
+
+**H6 — delivery-time re-validation vs immutability is undefined.** RESOLUTION: at POST
+time the mutable lead is read ONLY as a veto — if the lead is `dead` or the contact
+expired since prep, the card is NOT posted (re-prepare instead); the frozen snapshot is
+never edited, only gated. Mutable state can veto, never supply new card content.
+
+**M-series:** `OBSERVATION_FRESH_DAYS` reconciled to business-day cadence (proposed
+6 calendar days to cover a weekend+holiday); enable-time seam (M2) specified so the rich
+card REPLACES the plain nugget in `pick()` when the flag is on (never both → no double
+card); per-audience "one card/weekday" stated as PER-AUDIENCE with the shared cap; hard
+cutoff uses the same PT-local comparison and clamp as `slot_band()`.
+
+**THE GATING QUESTION I CANNOT ANSWER (critic Q2).** Whether production has ANY leads
+that are verified `award_announced|award_obligated` + dated ≤12mo + spend-window-open +
+evidenced `entity_kind` is a read-only PRODUCTION aggregate this task explicitly forbids.
+The local DB has ZERO verified award events, so the feature is unexercisable against seed
+data (all award-path tests use HAND-BUILT fixtures — never "verified" against seed data).
+Building is authorized and proceeds against fixtures with the flag OFF; ENABLING requires
+that production aggregate under separate Chase authorization + `grants-ops-guardian`,
+exactly as the gold-backlog surfacing question was gated. If production mirrors local
+(≈0 award events, or ≈195 same-day CA SVPP rows), the feature is a no-op or a monotonous
+CA drip and the premise must be revisited before enable.
