@@ -424,24 +424,61 @@ def _is_platinum(row: sqlite3.Row, today: date) -> bool:
     return scoring.PROGRAM_FIT.get(str(row["program"] or "").upper(), 0.0) >= 0.9
 
 
-def _best_nugget(conn: sqlite3.Connection, nuggets: list[sqlite3.Row]) -> sqlite3.Row:
-    """Top award by CRM-link tier then freshness-weighted score."""
-    return max(
-        nuggets,
-        key=lambda r: (
-            2
-            if r["salesforce_opportunity_link"]
-            else 1
-            if r["salesforce_account_link"]
-            else 0,
-            scoring.lead_score(
-                r["program"], r["amount"], r["current_event_occurred_on"] or ""
-            )
-            * scoring.feedback_multiplier(
-                db.program_outcome_points(conn, r["program"] or "")
-            ),
+_STATE_COOLDOWN_CAP = 8  # never suppress more distinct states than this
+
+
+def _nugget_sort_key(conn: sqlite3.Connection, row: sqlite3.Row) -> tuple[float, float]:
+    """Quality ordering for a gold award: CRM-link tier, then freshness-weighted score.
+
+    This is the deterministic within/across-state quality order the diversity rule must
+    preserve — diversity only chooses AMONG equally-eligible states, never reorders
+    quality inside a state.
+    """
+    return (
+        2
+        if row["salesforce_opportunity_link"]
+        else 1
+        if row["salesforce_account_link"]
+        else 0,
+        scoring.lead_score(
+            row["program"], row["amount"], row["current_event_occurred_on"] or ""
+        )
+        * scoring.feedback_multiplier(
+            db.program_outcome_points(conn, row["program"] or "")
         ),
     )
+
+
+def _best_nugget(
+    conn: sqlite3.Connection,
+    nuggets: list[sqlite3.Row],
+    channel: str = "",
+) -> sqlite3.Row:
+    """Top award by quality, with STATE DIVERSITY so insertion order can't cluster.
+
+    Chase's settled campaign direction (2026-07-22, [[grant-drip-campaign-direction]]):
+    the honest gold cohort shares one program (SVPP) and one amount, and the pollers
+    insert state-by-state, so a pure quality sort posts ~3 weeks of one state before the
+    next. Verified in the offline preview against production: without this, the first
+    nine cards were all Arizona.
+
+    The rule is deterministic and preserves quality: prefer a state NOT among the last
+    few posted (an adaptive cooldown, so rotation holds until barely any states remain),
+    and among the preferred states pick the single highest-quality award. If every
+    remaining candidate's state is in the cooldown (near the end of a run), the cooldown
+    is dropped and the top-quality award wins outright — never a stall. Quality ordering
+    WITHIN a state is untouched. `channel=""` disables the cooldown (used where there is
+    no post history to rotate against), giving the original pure-quality behavior.
+    """
+    if channel:
+        distinct_states = {str(n["state"] or "") for n in nuggets}
+        cooldown = min(len(distinct_states) - 1, _STATE_COOLDOWN_CAP)
+        if cooldown > 0:
+            recent = db.recent_post_states(conn, channel, cooldown)
+            preferred = [n for n in nuggets if str(n["state"] or "") not in recent]
+            if preferred:  # fall back to the full set only if every state is on cooldown
+                nuggets = preferred
+    return max(nuggets, key=lambda r: _nugget_sort_key(conn, r))
 
 
 def pick(
@@ -457,9 +494,9 @@ def pick(
     nuggets = db.nugget_candidates(conn, channel)
     platinum = [n for n in nuggets if _is_platinum(n, today)]
     if platinum:
-        return "platinum", _best_nugget(conn, platinum)
+        return "platinum", _best_nugget(conn, platinum, channel)
     if nuggets:
-        return "nugget", _best_nugget(conn, nuggets)
+        return "nugget", _best_nugget(conn, nuggets, channel)
     rfps = db.rfp_candidates(conn, channel)  # open RFPs (silver), soonest deadline first
     silver_rfps = [r for r in rfps if str(r["lead_grade"]) == "silver"]
     if silver_rfps:
@@ -684,7 +721,7 @@ def run_drip(
     # are separate blocks so the opening sentence still reads as one short human line.
     # The source is passed so a lead whose state was INFERRED from prose (the RFP
     # aggregator) can never tag a rep — see territory.VERIFIED_STATE_SOURCES.
-    text = text + territory.mention_line(row["state"], row["source"]) + source_line(row)
+    text = text + territory.routing_line(row["state"], row["source"]) + source_line(row)
     if dry_run:
         return f"[dry-run] would post {kind} ({style}): {text}"
     event_id = int(row["current_event_id"]) if row["current_event_id"] else None

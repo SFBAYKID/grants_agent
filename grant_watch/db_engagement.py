@@ -164,6 +164,28 @@ def delivery_attempts_today(
     )
 
 
+def recent_post_states(
+    conn: sqlite3.Connection, channel: str, limit: int
+) -> set[str]:
+    """Return the distinct states of the most recent `limit` proactive posts in a channel.
+
+    Feeds the drip state-diversity cooldown ([[grant-drip-campaign-direction]]): a state
+    posted within this window is de-prioritised so the daily card rotates across the
+    nationwide cohort instead of clustering. Empty when there is no history.
+    """
+    if limit <= 0:
+        return set()
+    # The states of the last `limit` POSTS (not the last `limit` distinct states) — a
+    # DISTINCT + LIMIT would collapse states first and limit the wrong thing.
+    rows = conn.execute(
+        """SELECT l.state FROM posts p JOIN leads l ON l.id=p.lead_id
+           WHERE p.channel=? AND p.lead_id IS NOT NULL
+           ORDER BY p.posted_at DESC, p.id DESC LIMIT ?""",
+        (channel, limit),
+    ).fetchall()
+    return {str(r[0] or "") for r in rows}
+
+
 def nugget_candidates(
     conn: sqlite3.Connection, channel: str
 ) -> list[sqlite3.Row]:

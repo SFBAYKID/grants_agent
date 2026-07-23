@@ -109,3 +109,33 @@ def test_mention_line_contains_no_injectable_markup() -> None:
     line = territory.mention_line("CA", "ca-grants-award:2024-2025")
     assert line.count("<") == 1 and line.count(">") == 1
     assert "http" not in line and "`" not in line
+
+
+def test_routing_line_tags_a_mapped_state() -> None:
+    """A mapped, verified-source state gets its rep mention."""
+    line = territory.routing_line("PA", "usaspending:16.071")
+    assert "<@U08C1NBH875>" in line and "Pennsylvania is your territory" in line
+
+
+def test_routing_line_labels_an_unmapped_state_as_unassigned() -> None:
+    """Nationwide: an unmapped state is an honest opportunity, labelled explicitly and
+    never tagged to a guessed rep (Chase 2026-07-22)."""
+    line = territory.routing_line("AZ", "usaspending:16.071")
+    assert "<@" not in line
+    assert "Arizona is unassigned territory" in line
+    assert "no rep mapped yet" in line
+
+
+def test_routing_line_stays_silent_for_an_inferred_state() -> None:
+    """A source that only INFERRED the state (RFP aggregator) asserts no territory at
+    all — not even 'unassigned' — because the state itself is untrusted."""
+    assert territory.routing_line("OR", "rfp") == ""
+    assert territory.routing_line("AZ", None) == ""
+
+
+def test_routing_line_has_no_injectable_markup() -> None:
+    """Built only from the fixed state table and validated ids."""
+    for line in (territory.routing_line("CA", "ca-grants-award:2024-2025"),
+                 territory.routing_line("AZ", "usaspending:16.071")):
+        assert "http" not in line and "`" not in line
+        assert line.count("<") == line.count(">")  # balanced or zero

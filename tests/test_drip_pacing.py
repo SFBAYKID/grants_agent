@@ -547,3 +547,94 @@ def test_drip_unblock_does_not_discard_an_active_rate_limit(tmp_path: Path) -> N
     assert db.clear_channel_guard(conn, "C1") is True  # default: blocked only
     assert db.channel_guard_any(conn, "C1", "blocked") is None
     assert db.channel_guard_any(conn, "C1", "backoff") is not None
+
+
+# ------------------------------------------------- state diversity (nationwide campaign)
+class _CountingClient:
+    """Fake Slack client that returns a UNIQUE ts per call (posts.UNIQUE(channel,ts))."""
+
+    def __init__(self) -> None:
+        """Start the ts counter."""
+        self.calls = 0
+
+    def chat_postMessage(self, **kwargs: object) -> dict[str, str]:  # noqa: N802
+        """Return an incrementing timestamp so repeated posts don't collide."""
+        self.calls += 1
+        return {"ts": f"300.{self.calls}"}
+
+
+def _mk_gold_state(
+    conn: object, iid: str, state: str, amount: float = 500_000.0
+) -> int:
+    """A gold SVPP award in a given state, dated fresh."""
+    from grant_watch.models import (DatePrecision, FundingEventType, Lead, RawItem,
+                                     VerificationStatus, LeadGrade)
+    db.upsert_lead(conn, Lead(item=RawItem(
+        source="usaspending:16.071", item_id=iid, title="SVPP award",
+        entity=f"{state} District {iid}", state=state, program="SVPP", amount=amount,
+        start="2025-10-01", end="2028-09-30", url="https://x.gov/a", raw={},
+        event_type=FundingEventType.AWARD_OBLIGATED, event_date="2026-06-01",
+        date_precision=DatePrecision.DAY, verification_status=VerificationStatus.VERIFIED),
+        grade=LeadGrade.GOLD))
+    return int(conn.execute("SELECT id FROM leads WHERE source_item_id=?", (iid,)).fetchone()["id"])
+
+
+def test_daily_card_never_clusters_by_state(tmp_path: Path) -> None:
+    """THE PRODUCTION FINDING. The honest gold cohort shares program+amount and is
+    inserted state-by-state, so a pure quality sort posted ~9 straight Arizona cards
+    (verified in the offline preview). The diversity rule must rotate states."""
+    conn = db.connect(tmp_path / "t.db")
+    # 4 AZ, 3 IL, 2 KY — a clustered insertion order, all equal quality.
+    for i in range(4):
+        _mk_gold_state(conn, f"AZ{i}", "AZ")
+    for i in range(3):
+        _mk_gold_state(conn, f"IL{i}", "IL")
+    for i in range(2):
+        _mk_gold_state(conn, f"KY{i}", "KY")
+    client = _CountingClient()
+    seq = []
+    for _ in range(9):
+        out = drip.run_drip(client, "C1", conn, force=True)
+        if not out.startswith("posted"):
+            break
+        lid = int(out.split("lead #")[1].split(":")[0])
+        seq.append(conn.execute("SELECT state FROM leads WHERE id=?", (lid,)).fetchone()["state"])
+    # No two consecutive cards share a state.
+    runs = [seq[i] for i in range(1, len(seq)) if seq[i] == seq[i-1]]
+    assert not runs, f"state clustered: {seq}"
+
+
+def test_diversity_preserves_quality_within_a_state(tmp_path: Path) -> None:
+    """Diversity chooses AMONG states; within a chosen state the higher-quality award
+    still wins (higher amount here → higher lead_score)."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_gold_state(conn, "AZlow", "AZ", amount=100_000.0)
+    hi = _mk_gold_state(conn, "AZhigh", "AZ", amount=500_000.0)
+    _mk_gold_state(conn, "IL1", "IL", amount=500_000.0)
+    # First AZ card picked must be the higher-value one.
+    kind, row = drip.pick(conn, "C1")
+    if row["state"] != "AZ":
+        # IL went first; force AZ next by surfacing IL, then re-pick.
+        db.mark_surfaced(conn, [int(row["id"])])
+        kind, row = drip.pick(conn, "C1")
+    assert row["state"] == "AZ" and int(row["id"]) == hi
+
+
+def test_diversity_falls_back_when_every_state_is_on_cooldown(tmp_path: Path) -> None:
+    """A single remaining state must still post — the cooldown never stalls the card."""
+    conn = db.connect(tmp_path / "t.db")
+    _mk_gold_state(conn, "AZ1", "AZ")
+    _mk_gold_state(conn, "AZ2", "AZ")
+    client = _CountingClient()
+    assert drip.run_drip(client, "C1", conn, force=True).startswith("posted")
+    # only AZ left, and AZ was just shown -> cooldown drops, it still posts
+    assert drip.run_drip(client, "C1", conn, force=True).startswith("posted")
+
+
+def test_recent_post_states_reads_the_join(tmp_path: Path) -> None:
+    """Provide test-local behavior for recent_post_states."""
+    conn = db.connect(tmp_path / "t.db")
+    a = _mk_gold_state(conn, "AZ1", "AZ")
+    db.record_post(conn, "nugget", a, "C1", "1.0", "award-brief")
+    assert db.recent_post_states(conn, "C1", 5) == {"AZ"}
+    assert db.recent_post_states(conn, "C1", 0) == set()
