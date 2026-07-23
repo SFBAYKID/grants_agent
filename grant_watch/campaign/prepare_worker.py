@@ -70,7 +70,9 @@ def run(
                 counts["contact_refreshed"] += 1
                 counts["writes"] += 1
         except paid_calls.CompletedPaidCall:
-            counts["contact_fresh"] += 1
+            # A completed paid attempt can mean verified, removed, or not_found.
+            # Preparation readiness comes from contact_evidence, never call status.
+            pass
         except paid_calls.IndeterminatePaidCall:
             counts["indeterminate"] += 1
         except Exception:  # noqa: BLE001 - one candidate cannot abort the bounded batch

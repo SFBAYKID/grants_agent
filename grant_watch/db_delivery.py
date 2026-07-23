@@ -30,14 +30,17 @@ def reserve_notification(
     delivery_class: str,
     payload: dict[str, object],
     snapshot_id: str = "",
+    stable_delivery_key: str = "",
 ) -> str | None:
-    """Atomically reserve one event/channel delivery before calling Slack.
+    """Atomically reserve one event, snapshot, or stable-award delivery before Slack.
 
     A stale ``sending`` state is intentionally not retried automatically: a network
     timeout can mean Slack accepted the post, so blind retrying could duplicate it.
     """
     delivery_key = (
-        f"{channel}:snapshot:{snapshot_id}"
+        f"{channel}:award:{stable_delivery_key}"
+        if stable_delivery_key
+        else f"{channel}:snapshot:{snapshot_id}"
         if snapshot_id
         else f"{channel}:lead:{lead_id}:event:{event_id or 'projection'}"
     )

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from grant_watch import db
 from grant_watch.campaign.routing import Route, RoutingReason
-from grant_watch.campaign.snapshot import SnapshotDraft, freeze, load
+from grant_watch.campaign.snapshot import SnapshotDraft, freeze, lead_context, load
 
 
 def _draft(**changes: object) -> SnapshotDraft:
@@ -23,6 +23,11 @@ def _draft(**changes: object) -> SnapshotDraft:
         source_item_id="award-123",
         canonical_entity_key="montebello usd|CA",
         award_identity="award-123",
+        event_type="award_obligated",
+        event_verification_status="verified",
+        event_evidence_excerpt="Award record",
+        event_evidence_hash="event-hash",
+        event_source_locator="award-123",
         tier="gold",
         entity_name="Montebello Unified School District",
         entity_kind="school_district",
@@ -37,6 +42,7 @@ def _draft(**changes: object) -> SnapshotDraft:
         spend_window_end="2028-09-30",
         award_url="https://www.usaspending.gov/award/award-123",
         official_website="https://www.montebello.k12.ca.us",
+        official_website_evidence_url="https://www.montebello.k12.ca.us/about",
         contact_evidence_id="contact-1",
         contact_evidence_hash="contact-hash",
         contact_name="Jon Smith",
@@ -101,10 +107,10 @@ def test_mutable_lead_change_cannot_change_snapshot(tmp_path: Path) -> None:
     assert loaded.draft.contact_email == "jon@montebello.k12.ca.us"
 
 
-def test_policy_change_or_event_surrogate_does_not_repost_same_award(
+def test_changed_evidence_creates_a_new_snapshot_for_the_same_award(
     tmp_path: Path,
 ) -> None:
-    """Stable award identity wins over mutable policy/event/lead surrogate ids."""
+    """Immutable evidence versions may supersede without changing delivery identity."""
     conn = _conn(tmp_path / "dedup.db")
     first, created = freeze(conn, _draft())
     second, created_again = freeze(
@@ -115,9 +121,25 @@ def test_policy_change_or_event_surrogate_does_not_repost_same_award(
             fallback_text="New renderer wording that must not create another delivery.",
         ),
     )
-    assert created is True and created_again is False
-    assert second.id == first.id
-    assert second.draft.fallback_text == first.draft.fallback_text
+    assert created is True and created_again is True
+    assert second.id != first.id
+    assert second.draft.fallback_text != first.draft.fallback_text
+
+
+def test_exact_same_evidence_reuses_one_snapshot(tmp_path: Path) -> None:
+    """A crash before reservation reuses an identical immutable preparation row."""
+    conn = _conn(tmp_path / "same.db")
+    first, created = freeze(conn, _draft())
+    second, created_again = freeze(conn, _draft())
+    assert created is True and created_again is False and second.id == first.id
+
+
+def test_award_identity_is_source_qualified(tmp_path: Path) -> None:
+    """Equal source ids from independent systems cannot collide."""
+    conn = _conn(tmp_path / "source.db")
+    first, _ = freeze(conn, _draft(state_provenance="usaspending:16.071"))
+    second, created = freeze(conn, _draft(state_provenance="another-award-source"))
+    assert created is True and second.id != first.id
 
 
 def test_same_award_may_be_frozen_for_a_distinct_audience(tmp_path: Path) -> None:
@@ -127,3 +149,13 @@ def test_same_award_may_be_frozen_for_a_distinct_audience(tmp_path: Path) -> Non
     second, created = freeze(conn, _draft(audience="CPLAYGROUND"))
     assert created is True
     assert second.id != first.id
+
+
+def test_month_precision_thread_context_contains_no_invented_day(tmp_path: Path) -> None:
+    """Frozen conversation facts expose only YYYY-MM for month-level evidence."""
+    conn = _conn(tmp_path / "month.db")
+    frozen, _ = freeze(
+        conn, _draft(award_date="2026-06-01", award_date_precision="month")
+    )
+    facts = lead_context(frozen)
+    assert facts["current_event_occurred_on"] == "2026-06"

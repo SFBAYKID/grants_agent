@@ -34,6 +34,12 @@ def should_post(
     force: bool = False,
 ) -> tuple[bool, str]:
     """Enforce weekday, deterministic slot, hard cutoff, and one total post."""
+    count = max(
+        len(db.posts_today(conn, channel, now_utc)),
+        len(db.delivery_attempts_today(conn, channel, now_utc)),
+    )
+    if count >= 1:
+        return False, "daily cap reached (1)"
     if force:
         return True, "forced"
     pt = now_utc.astimezone(PT)
@@ -45,10 +51,4 @@ def should_post(
     slot = daily_slot(channel, now_utc)
     if pt < slot:
         return False, f"waiting for today's {slot.strftime('%H:%M')} Pacific slot"
-    count = max(
-        len(db.posts_today(conn, channel, now_utc)),
-        len(db.delivery_attempts_today(conn, channel, now_utc)),
-    )
-    if count >= 1:
-        return False, "daily cap reached (1)"
     return True, "ready"

@@ -12,6 +12,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from .migrations_rich import migration_23_rich_snapshot_truth_and_retry_link
+
 
 @dataclass(frozen=True)
 class Migration:
@@ -923,6 +925,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         22,
         "freeze contact evidence hash",
         _migration_22_freeze_contact_evidence_hash,
+    ),
+    Migration(
+        23,
+        "exact rich snapshot truth and outreach retry link",
+        migration_23_rich_snapshot_truth_and_retry_link,
     ),
 )
 

@@ -181,7 +181,9 @@ def build_brief(
         # supports. No new key is introduced: `outreach-request.v1` is pinned and
         # agreed with Persequor, and an unknown field would 422 every brief if their
         # endpoint forbids extras. Changing the shape needs their agreement first.
-        "window_start": (row["funds_start"] or None) if _meaning.asserts_dates else None,
+        "window_start": (row["funds_start"] or None)
+        if _meaning.asserts_dates
+        else None,
         "window_end": (row["funds_end"] or None) if _meaning.asserts_dates else None,
         "source_url": row["current_event_source_url"] or row["detail_url"] or None,
         "requested_by_slack": requested_by_slack,
@@ -318,6 +320,66 @@ def _queue_retry(
         )
 
 
+def _brief_expired(brief: OutreachBrief, now: datetime) -> bool:
+    """Reject a queued handoff after its frozen evidence/spend-window expiry."""
+    raw = brief.get("expires_at")
+    if not raw:
+        return False
+    try:
+        expires = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if len(str(raw)) == 10:
+        expires = expires.replace(hour=23, minute=59, second=59, microsecond=999999)
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    return expires <= now.astimezone(timezone.utc)
+
+
+def _reconcile_rich_action(
+    conn: sqlite3.Connection, request_id: str, state: str, message: str
+) -> None:
+    """Mirror a queued Persequor terminal result into its snapshot-bound action."""
+    row = conn.execute(
+        """SELECT a.id,a.requester_slack,s.lead_id,p.id AS post_id
+             FROM rich_card_actions a
+             JOIN rich_card_snapshots s ON s.id=a.snapshot_id
+             LEFT JOIN posts p ON p.snapshot_id=a.snapshot_id
+            WHERE a.outreach_request_id=? AND a.action='draft'""",
+        (request_id,),
+    ).fetchone()
+    if row is None:
+        return
+    action_state = (
+        "accepted"
+        if state == "submitted"
+        else "rejected"
+        if state == "rejected"
+        else "requested"
+    )
+    with conn:
+        conn.execute(
+            "UPDATE rich_card_actions SET state=?,detail=?,updated_at=? WHERE id=?",
+            (action_state, message[:500], _now(), row["id"]),
+        )
+    if state in {"submitted", "rejected"}:
+        from . import db
+
+        kind = (
+            "persequor_intake_accepted"
+            if state == "submitted"
+            else "persequor_intake_rejected"
+        )
+        db.record_outcome(
+            conn,
+            int(row["lead_id"]),
+            int(row["post_id"]) if row["post_id"] is not None else None,
+            str(row["requester_slack"]),
+            kind,
+            f"rich-action:{row['id']}:{state}",
+        )
+
+
 def retry_pending(
     conn: sqlite3.Connection, dry_run: bool = False, limit: int = 20
 ) -> RetrySummary:
@@ -337,7 +399,7 @@ def retry_pending(
     submitted = queued = rejected = 0
     for row in rows:
         try:
-            json.loads(str(row["draft"]))
+            brief: OutreachBrief = json.loads(str(row["draft"]))
         except (json.JSONDecodeError, TypeError):
             with conn:
                 conn.execute(
@@ -347,7 +409,19 @@ def retry_pending(
                 )
             rejected += 1
             continue
-        state, _message = _attempt_saved(conn, row)
+        if _brief_expired(brief, datetime.now(timezone.utc)):
+            message = "Frozen outreach evidence expired before retry; nothing was sent."
+            with conn:
+                conn.execute(
+                    """UPDATE outreach SET status='rejected',last_error=?,
+                              next_attempt_at=NULL WHERE id=?""",
+                    ("frozen evidence expired", int(row["id"])),
+                )
+            _reconcile_rich_action(conn, brief["request_id"], "rejected", message)
+            rejected += 1
+            continue
+        state, message = _attempt_saved(conn, row)
+        _reconcile_rich_action(conn, brief["request_id"], state, message)
         submitted += int(state == "submitted")
         queued += int(state == "unreachable")
         rejected += int(state == "rejected")

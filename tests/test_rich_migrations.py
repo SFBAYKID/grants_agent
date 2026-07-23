@@ -12,14 +12,16 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from grant_watch import db
+import pytest
+
+from grant_watch import db, migrations
 
 
-def test_fresh_database_reaches_v22_with_all_rich_tables(tmp_path: Path) -> None:
-    """A brand-new database applies every migration through 22."""
+def test_fresh_database_reaches_v23_with_all_rich_tables(tmp_path: Path) -> None:
+    """A brand-new database applies every migration through 23."""
     conn = db.connect(tmp_path / "fresh.db")
     assert (
-        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 22
+        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 23
     )
     for table in (
         "rich_card_snapshots",
@@ -28,6 +30,7 @@ def test_fresh_database_reaches_v22_with_all_rich_tables(tmp_path: Path) -> None
         "salesforce_activity_snapshots",
         "organization_kind_evidence",
         "paid_enrichment_attempts",
+        "rich_card_snapshot_truth",
     ):
         assert conn.execute(
             "SELECT name FROM sqlite_master WHERE name=?", (table,)
@@ -56,20 +59,54 @@ def test_fresh_database_reaches_v22_with_all_rich_tables(tmp_path: Path) -> None
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
-def _at_v13(path: Path) -> sqlite3.Connection:
-    """Build a database, then rewind its ledger to v13 so 14-22 are 'pending'."""
-    conn = db.connect(path)
-    conn.execute("DELETE FROM schema_migrations WHERE version > 13")
+def _at_version(path: Path, target: int) -> sqlite3.Connection:
+    """Build one real historical schema from the ordered migration functions."""
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute(
+        """CREATE TABLE schema_migrations (
+             version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TIMESTAMP NOT NULL
+           )"""
+    )
+    for migration in migrations.MIGRATIONS:
+        if migration.version > target:
+            break
+        migration.apply(conn)
+        conn.execute(
+            "INSERT INTO schema_migrations VALUES (?,?,?)",
+            (migration.version, migration.name, "2026-07-01T00:00:00+00:00"),
+        )
     conn.commit()
-    conn.close()
-    return db.connect(path)  # re-open: applies 14-22 as an upgrade
+    return conn
+
+
+def _at_v13(path: Path) -> sqlite3.Connection:
+    """Build the real deployed v13 schema for data-preservation assertions."""
+    return _at_version(path, 13)
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 7, 8, 9, 13])
+def test_upgrade_from_each_supported_historical_schema(
+    tmp_path: Path, version: int
+) -> None:
+    """Every ledger version that existed upgrades to v23 with integrity intact."""
+    path = tmp_path / f"v{version}.db"
+    historical = _at_version(path, version)
+    historical.close()
+    upgraded = db.connect(path)
+    assert (
+        upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
+        == 23
+    )
+    assert upgraded.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
 def test_v13_upgrade_preserves_posts_ids_and_engagement(tmp_path: Path) -> None:
     """The v15 posts rebuild must preserve every post id (engagement.post_id references)
     and every row — the exact guarantee migration 13 established."""
     path = tmp_path / "hist.db"
-    seed = db.connect(path)
+    seed = _at_v13(path)
     # a lead + a post + an engagement row referencing it (the FK the rebuild must keep)
     seed.execute(
         "INSERT INTO leads (id, source, source_item_id, entity_name, status) "
@@ -86,10 +123,10 @@ def test_v13_upgrade_preserves_posts_ids_and_engagement(tmp_path: Path) -> None:
     seed.commit()
     seed.close()
 
-    upgraded = _at_v13(path)
+    upgraded = db.connect(path)
     assert (
         upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-        == 22
+        == 23
     )
     assert (
         upgraded.execute("SELECT kind FROM posts WHERE id=42").fetchone()[0] == "nugget"

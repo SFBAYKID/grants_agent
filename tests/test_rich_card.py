@@ -106,3 +106,29 @@ def test_salesforce_section_and_link_are_absent_without_evidence() -> None:
     encoded = str(rendered.blocks)
     assert "*Salesforce*" not in encoded
     assert "Open Salesforce" not in encoded
+
+
+def test_month_precision_never_invents_the_first_day() -> None:
+    """Month-only evidence renders as a month, never a normalized exact day."""
+    rendered = card.render(
+        _snapshot(award_date="2026-06-01", award_date_precision="month")
+    )
+    assert "in June 2026" in rendered.text
+    assert "June 1, 2026" not in rendered.text
+    assert "June 1, 2026" not in str(rendered.blocks)
+
+
+def test_context_link_element_respects_aggregate_limit() -> None:
+    """Several individually safe long URLs cannot overflow one context element."""
+    long_path = "x" * 1900
+    rendered = card.render(
+        _snapshot(
+            official_website=f"https://district.test/{long_path}",
+            contact_evidence_url=f"https://district.test/staff/{long_path}",
+            sf_open_link=f"https://sf.test/{long_path}",
+            award_url=f"https://award.test/{long_path}",
+        )
+    )
+    contexts = [block for block in rendered.blocks if block["type"] == "context"]
+    assert contexts
+    assert len(contexts[0]["elements"][0]["text"]) <= card.MAX_CONTEXT

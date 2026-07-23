@@ -32,6 +32,11 @@ class SnapshotDraft:
     source_item_id: str
     canonical_entity_key: str
     award_identity: str
+    event_type: str
+    event_verification_status: str
+    event_evidence_excerpt: str
+    event_evidence_hash: str
+    event_source_locator: str
     tier: str
     entity_name: str
     entity_kind: str
@@ -46,6 +51,7 @@ class SnapshotDraft:
     spend_window_end: str
     award_url: str
     official_website: str
+    official_website_evidence_url: str
     contact_evidence_id: str
     contact_evidence_hash: str
     contact_name: str
@@ -80,16 +86,25 @@ class FrozenSnapshot:
     draft: SnapshotDraft
 
 
-def dedup_key(draft: SnapshotDraft) -> str:
-    """Hash stable award identity without policy version or event surrogate id."""
+def award_dedup_key(draft: SnapshotDraft) -> str:
+    """Hash one source-qualified award identity, independent of evidence versions."""
     stable = "|".join(
         (
             draft.canonical_entity_key.strip().lower(),
             draft.program.strip().lower(),
+            draft.state_provenance.strip().lower(),
             draft.award_identity.strip().lower(),
         )
     )
     return hashlib.sha256(stable.encode("utf-8")).hexdigest()
+
+
+def _snapshot_key(draft: SnapshotDraft) -> str:
+    """Identify one exact immutable evidence version of a stable award."""
+    fingerprint = hashlib.sha256(_render_inputs(draft).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        f"{award_dedup_key(draft)}|{fingerprint}".encode("utf-8")
+    ).hexdigest()
 
 
 def _render_inputs(draft: SnapshotDraft) -> str:
@@ -108,16 +123,18 @@ def freeze(
     *,
     now: datetime | None = None,
 ) -> tuple[FrozenSnapshot, bool]:
-    """Insert once by stable award/audience identity; never update frozen facts.
+    """Insert one immutable evidence version; never update frozen facts.
 
-    Returns the original row when the same award was already frozen. Callers use the
-    boolean to distinguish a new delivery reservation from an existing snapshot.
+    The exact same evidence reuses its row after a pre-reservation crash. Changed
+    evidence creates a new preparation snapshot; the outbox separately enforces the
+    stable award/audience delivery key.
     """
     created_at = (
         (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
     )
     snapshot_id = uuid.uuid4().hex
-    key = dedup_key(draft)
+    key = _snapshot_key(draft)
+    stable_key = award_dedup_key(draft)
     render_inputs = _render_inputs(draft)
     with conn:
         inserted = conn.execute(
@@ -193,6 +210,26 @@ def freeze(
         (key, draft.audience),
     ).fetchone()
     assert row is not None
+    with conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO rich_card_snapshot_truth
+                 (snapshot_id,award_dedup_key,source_name,event_type,event_amount,
+                  event_verification_status,event_evidence_excerpt,event_evidence_hash,
+                  event_source_locator,official_website_evidence_url)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                row["id"],
+                stable_key,
+                draft.state_provenance,
+                draft.event_type,
+                draft.amount,
+                draft.event_verification_status,
+                draft.event_evidence_excerpt or None,
+                draft.event_evidence_hash,
+                draft.event_source_locator,
+                draft.official_website_evidence_url,
+            ),
+        )
     return _from_row(row), inserted.rowcount == 1
 
 
@@ -223,6 +260,11 @@ def load(conn: sqlite3.Connection, snapshot_id: str) -> FrozenSnapshot | None:
 def lead_context(snapshot: FrozenSnapshot) -> dict[str, object]:
     """Expose only frozen facts in the legacy conversation row shape."""
     draft = snapshot.draft
+    event_date = (
+        draft.award_date[:7]
+        if draft.award_date_precision == "month"
+        else draft.award_date
+    )
     return {
         "id": draft.lead_id,
         "source": draft.state_provenance,
@@ -237,16 +279,29 @@ def lead_context(snapshot: FrozenSnapshot) -> dict[str, object]:
         "status": "snapshotted",
         "lead_grade": "gold",
         "current_event_id": draft.event_id,
-        "current_event_type": "award_obligated",
-        "current_event_occurred_on": draft.award_date,
+        "current_event_type": draft.event_type,
+        "current_event_occurred_on": event_date,
         "current_event_date_precision": draft.award_date_precision,
-        "current_event_verification_status": "verified",
-        "current_event_evidence_excerpt": "Frozen verified award-card evidence.",
+        "current_event_verification_status": draft.event_verification_status,
+        "current_event_evidence_excerpt": draft.event_evidence_excerpt,
         "current_event_source_url": draft.award_url,
-        "current_event_source_locator": draft.source_item_id,
+        "current_event_source_locator": draft.event_source_locator,
         "salesforce_status": draft.sf_lookup_status,
         "salesforce_opportunity_link": (
             draft.sf_open_link if draft.sf_open_opp_id else ""
         ),
         "salesforce_account_link": draft.sf_open_link,
+        "snapshot_contact": (
+            f"{draft.contact_name or 'Official general mailbox'}"
+            f"{f' — {draft.contact_title}' if draft.contact_title else ''}: "
+            f"{draft.contact_email}; verified {draft.contact_verified_at}; "
+            f"evidence {draft.contact_evidence_url}"
+        ),
+        "snapshot_salesforce": draft.sf_display_text or "Complete no-match.",
+        "snapshot_routing": (
+            f"<@{draft.route.slack_user_id}> via {draft.route.reason.value}"
+            if draft.route.slack_user_id
+            else "unassigned; no verified owner mapped"
+        ),
+        "snapshot_official_website": draft.official_website,
     }

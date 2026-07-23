@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from .. import scoring, territory
 from ..enrich.salesforce_activity import RECENT_ACTIVITY_DAYS
@@ -20,12 +20,25 @@ from .snapshot import SnapshotDraft
 
 
 @dataclass(frozen=True)
+class Readiness:
+    """Independent PII-free evidence dimensions for shadow diagnostics."""
+
+    contact: bool = False
+    salesforce: bool = False
+    organization_kind: bool = False
+    source_run_link: bool = False
+    mapped_route: bool = False
+    unassigned_route: bool = False
+
+
+@dataclass(frozen=True)
 class CandidateReview:
-    """One candidate's first rejection cause or complete renderable draft."""
+    """One candidate's first rejection cause, readiness, or renderable draft."""
 
     lead_id: int
     reason: policy.Reason
     draft: SnapshotDraft | None = None
+    readiness: Readiness = Readiness()
 
 
 def _rows(conn: sqlite3.Connection, audience: str, limit: int) -> list[sqlite3.Row]:
@@ -34,11 +47,19 @@ def _rows(conn: sqlite3.Connection, audience: str, limit: int) -> list[sqlite3.R
         conn.execute(
             """SELECT l.*, e.id AS event_id, e.observation_id,
                       e.event_type, e.occurred_on, e.date_precision,
+                      e.amount AS event_amount,
                       e.verification_status AS event_verification_status,
                       e.source_url AS event_source_url,
+                      e.source_locator AS event_source_locator,
+                      e.evidence_excerpt AS event_evidence_excerpt,
+                      e.evidence_hash AS event_evidence_hash,
+                      o.source AS observation_source,
+                      o.source_locator AS observation_source_locator,
+                      o.payload_hash AS observation_payload_hash,
                       r.state AS confirmed_run_state
                FROM leads l
                LEFT JOIN funding_events e ON e.id=l.current_event_id
+               LEFT JOIN source_observations o ON o.id=e.observation_id
                LEFT JOIN runs r ON r.id=l.last_confirmed_run_id
                WHERE l.lead_grade='gold' AND COALESCE(l.status,'new')='new'
                  AND l.id NOT IN (SELECT lead_id FROM posts
@@ -68,7 +89,6 @@ def _latest(
     """Load the latest append-only evidence row from an allowlisted table shape."""
     allowed = {
         ("contact_evidence", "last_checked_at"),
-        ("organization_kind_evidence", "verified_at"),
         ("salesforce_activity_snapshots", "checked_at"),
     }
     if (table, order_column) not in allowed:
@@ -81,15 +101,11 @@ def _latest(
 
 
 def _kind(conn: sqlite3.Connection, row: sqlite3.Row) -> tuple[str, str]:
-    """Resolve kind from NCES or explicit evidence, never from name heuristics."""
+    """Resolve v1 school-district kind from runtime NCES evidence only."""
+    del conn
     if str(row["nces_id"] or ""):
         return "school_district", "nces"
-    evidence = _latest(
-        conn, "organization_kind_evidence", int(row["id"]), "verified_at"
-    )
-    if evidence is None or str(evidence["status"]) != "verified":
-        return "", ""
-    return str(evidence["kind"]), str(evidence["provenance"])
+    return "", ""
 
 
 def _crm(
@@ -122,11 +138,9 @@ def _crm(
         and item["account_id"] == account["record_id"]
         and not bool(item["is_closed"])
     ]
-    opportunity = (
-        sorted(opportunities, key=lambda item: str(item["record_id"]))[0]
-        if opportunities
-        else None
-    )
+    if len(opportunities) > 1:
+        return "ambiguous", checked_at, account, None, frozenset()
+    opportunity = opportunities[0] if opportunities else None
     people = frozenset(
         str(item["record_id"])
         for item in matches
@@ -137,9 +151,13 @@ def _crm(
 
 
 def _fresh_activity(
-    conn: sqlite3.Connection, lead_id: int, now: datetime
+    conn: sqlite3.Connection,
+    lead_id: int,
+    account_id: str,
+    person_ids: frozenset[str],
+    now: datetime,
 ) -> sqlite3.Row | None:
-    """Return only a fresh verified call; old/outage results provide no claim/route."""
+    """Return a fresh call still bound to the current exact CRM identities."""
     row = _latest(conn, "salesforce_activity_snapshots", lead_id, "checked_at")
     if row is None or str(row["status"]) != "verified_call":
         return None
@@ -154,11 +172,46 @@ def _fresh_activity(
         checked = checked.replace(tzinfo=timezone.utc)
     if completed.tzinfo is None:
         completed = completed.replace(tzinfo=timezone.utc)
-    if now - checked > timedelta(hours=policy.CRM_FRESH_HOURS):
+    if checked > now or now - checked > timedelta(hours=policy.CRM_FRESH_HOURS):
         return None
     if completed > now or now - completed > timedelta(days=RECENT_ACTIVITY_DAYS):
         return None
+    if (
+        str(row["activity_type"] or "") != "Call"
+        or str(row["account_id"] or "") != account_id
+        or str(row["person_id"] or "") not in person_ids
+        or str(row["roster_status"] or "") != "exact"
+    ):
+        return None
     return row
+
+
+def _snapshot_expiry(contact_expiry: str, spend_window_end: str) -> str:
+    """Use the earliest instant at which any display/action evidence becomes stale."""
+    contact = datetime.fromisoformat(contact_expiry.replace("Z", "+00:00"))
+    if contact.tzinfo is None:
+        contact = contact.replace(tzinfo=timezone.utc)
+    window = datetime.combine(
+        datetime.fromisoformat(spend_window_end[:10]).date(), time.max, timezone.utc
+    )
+    return min(contact.astimezone(timezone.utc), window).isoformat()
+
+
+def _age_days(value: str, now: datetime) -> int | None:
+    """Return a non-negative UTC calendar age for readiness reporting."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = datetime.combine(
+                datetime.fromisoformat(value[:10]).date(), time.min, timezone.utc
+            )
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    days = (now.date() - parsed.astimezone(timezone.utc).date()).days
+    return days if days >= 0 else None
 
 
 def _candidate(
@@ -172,17 +225,30 @@ def _candidate(
     lead_id = int(row["id"])
     contact = _latest(conn, "contact_evidence", lead_id, "last_checked_at")
     entity_kind, kind_provenance = _kind(conn, row)
-    crm_state, crm_checked, account, opportunity, _people = _crm(conn, lead_id)
-    activity = _fresh_activity(conn, lead_id, now)
+    crm_state, crm_checked, account, opportunity, people = _crm(conn, lead_id)
+    account_id = str(account["record_id"] or "") if account else ""
+    activity = _fresh_activity(conn, lead_id, account_id, people, now)
     award_url = str(row["event_source_url"] or row["detail_url"] or "")
     website = card.safe_url(row["org_website"] or "")
+    website_evidence_url = card.safe_url(row["org_profile_source_url"] or "")
     contact_url = card.safe_url(contact["official_evidence_url"] if contact else "")
+    event_locator = str(
+        row["event_source_locator"] or row["observation_source_locator"] or ""
+    )
+    event_hash = str(
+        row["event_evidence_hash"] or row["observation_payload_hash"] or ""
+    )
+    source_name = str(row["observation_source"] or row["source"] or "")
+    award_identity = card.award_record_identity(source_name, award_url, event_locator)
     evidence = policy.CandidateEvidence(
         lead_id=lead_id,
         lead_grade=str(row["lead_grade"] or ""),
         event_type=str(row["event_type"] or ""),
         event_verified=str(row["event_verification_status"] or "") == "verified",
-        amount=float(row["amount"]) if row["amount"] is not None else None,
+        event_evidence_complete=bool(event_locator and event_hash),
+        amount=(
+            float(row["event_amount"]) if row["event_amount"] is not None else None
+        ),
         award_date=str(row["occurred_on"] or ""),
         award_date_precision=str(row["date_precision"] or ""),
         spend_window_start=str(row["funds_start"] or ""),
@@ -192,8 +258,12 @@ def _candidate(
         entity_kind=entity_kind,
         entity_kind_provenance=kind_provenance,
         state_verified=territory.state_is_verified(row["source"]),
-        award_url_safe=bool(card.safe_url(award_url)),
+        award_url_safe=bool(award_identity),
         official_website=website,
+        official_website_verified=(
+            str(row["org_profile_status"] or "") == "found"
+            and card.official_site_evidenced(website, website_evidence_url)
+        ),
         contact_status=str(contact["status"] if contact else ""),
         contact_type=str(contact["contact_type"] if contact else ""),
         contact_email=str(contact["email"] if contact else ""),
@@ -208,10 +278,6 @@ def _candidate(
         today=now.date(),
         now_utc=now,
     )
-    eligibility = policy.evaluate(evidence)
-    if not eligibility.eligible or contact is None:
-        return CandidateReview(lead_id, eligibility.reason)
-
     call_owner = OwnerEvidence(
         str(activity["owner_user_id"] or "") if activity else "",
         str(activity["owner_email"] or "") if activity else "",
@@ -232,6 +298,61 @@ def _candidate(
         state_source=str(row["source"] or ""),
         channel_members=channel_members,
     )
+    confirmed_age = _age_days(evidence.last_confirmed_at, now)
+    contact_age = _age_days(evidence.contact_last_verified_at, now)
+    email_domain = (
+        evidence.contact_email.rsplit("@", 1)[-1].lower()
+        if "@" in evidence.contact_email
+        else ""
+    )
+    try:
+        contact_expiry = datetime.fromisoformat(
+            evidence.contact_expires_at.replace("Z", "+00:00")
+        )
+    except ValueError:
+        contact_expiry = now
+    if contact_expiry.tzinfo is None:
+        contact_expiry = contact_expiry.replace(tzinfo=timezone.utc)
+    try:
+        crm_time = datetime.fromisoformat(
+            evidence.crm_checked_at.replace("Z", "+00:00")
+        )
+    except ValueError:
+        crm_time = now - timedelta(days=999)
+    if crm_time.tzinfo is None:
+        crm_time = crm_time.replace(tzinfo=timezone.utc)
+    readiness = Readiness(
+        contact=(
+            evidence.contact_status == "verified"
+            and evidence.contact_type in policy.CONTACT_TYPES
+            and contact_age is not None
+            and contact_age <= policy.CONTACT_FRESH_DAYS
+            and contact_expiry > now
+            and evidence.contact_evidence_url_safe
+            and email_domain not in policy.PERSONAL_EMAIL_DOMAINS
+            and email_domain == evidence.contact_official_domain.lower()
+        ),
+        salesforce=(
+            evidence.crm_state in policy.SAFE_CRM_STATES
+            and now - timedelta(hours=policy.CRM_FRESH_HOURS) <= crm_time <= now
+        ),
+        organization_kind=(
+            evidence.entity_kind in policy.QUALIFYING_ENTITY_KINDS
+            and evidence.entity_kind_provenance in policy.VALID_KIND_PROVENANCE
+        ),
+        source_run_link=(
+            evidence.last_confirmed_run_complete
+            and confirmed_age is not None
+            and confirmed_age <= policy.OBSERVATION_FRESH_DAYS
+            and evidence.award_url_safe
+            and evidence.official_website_verified
+        ),
+        mapped_route=bool(route.slack_user_id),
+        unassigned_route=not bool(route.slack_user_id),
+    )
+    eligibility = policy.evaluate(evidence)
+    if not eligibility.eligible or contact is None:
+        return CandidateReview(lead_id, eligibility.reason, readiness=readiness)
     sf_display = ""
     if activity is not None:
         completed = datetime.fromisoformat(
@@ -250,21 +371,27 @@ def _candidate(
         run_id=int(row["last_confirmed_run_id"]),
         source_item_id=str(row["source_item_id"]),
         canonical_entity_key=str(row["canonical_entity_key"]),
-        award_identity=str(row["source_item_id"]),
+        award_identity=award_identity,
+        event_type=str(row["event_type"]),
+        event_verification_status=str(row["event_verification_status"]),
+        event_evidence_excerpt=str(row["event_evidence_excerpt"] or ""),
+        event_evidence_hash=event_hash,
+        event_source_locator=event_locator,
         tier=eligibility.tier,
         entity_name=str(row["entity_name"]),
         entity_kind=entity_kind,
         entity_kind_provenance=kind_provenance,
         state=str(row["state"] or ""),
-        state_provenance=str(row["source"]),
+        state_provenance=source_name,
         program=str(row["program"] or ""),
-        amount=float(row["amount"]),
+        amount=float(row["event_amount"]),
         award_date=str(row["occurred_on"]),
         award_date_precision=str(row["date_precision"]),
         spend_window_start=str(row["funds_start"]),
         spend_window_end=str(row["funds_end"]),
         award_url=card.safe_url(award_url),
         official_website=website,
+        official_website_evidence_url=website_evidence_url,
         contact_evidence_id=str(contact["id"]),
         contact_evidence_hash=str(contact["evidence_hash"] or ""),
         contact_name=str(contact["name"] or ""),
@@ -290,12 +417,12 @@ def _candidate(
         sf_open_link=str(account["link"] or "") if account else "",
         route=route,
         fallback_text="",
-        expires_at=str(contact["expires_at"]),
+        expires_at=_snapshot_expiry(str(contact["expires_at"]), str(row["funds_end"])),
     )
     draft = SnapshotDraft(
         **{**draft.__dict__, "fallback_text": card.fallback_text(draft)}
     )
-    return CandidateReview(lead_id, policy.Reason.ELIGIBLE, draft)
+    return CandidateReview(lead_id, policy.Reason.ELIGIBLE, draft, readiness)
 
 
 def review_candidates(

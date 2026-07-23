@@ -67,22 +67,28 @@ def _authorized_snapshot(
 def _fresh_contact(
     conn: sqlite3.Connection, snapshot: FrozenSnapshot, now: datetime
 ) -> bool:
-    """Recheck expiry/removal while keeping every submitted fact snapshot-bound."""
+    """Recheck contact and whole-snapshot expiry without live enrichment."""
     draft = snapshot.draft
     try:
-        expires = datetime.fromisoformat(
+        contact_expires = datetime.fromisoformat(
             draft.contact_expires_at.replace("Z", "+00:00")
+        )
+        snapshot_expires = datetime.fromisoformat(
+            draft.expires_at.replace("Z", "+00:00")
         )
     except ValueError:
         return False
-    if expires.tzinfo is None:
-        expires = expires.replace(tzinfo=timezone.utc)
+    if contact_expires.tzinfo is None:
+        contact_expires = contact_expires.replace(tzinfo=timezone.utc)
+    if snapshot_expires.tzinfo is None:
+        snapshot_expires = snapshot_expires.replace(tzinfo=timezone.utc)
     current = conn.execute(
         "SELECT status,email,evidence_hash FROM contact_evidence WHERE id=?",
         (draft.contact_evidence_id,),
     ).fetchone()
     return bool(
-        expires > now
+        contact_expires > now
+        and snapshot_expires > now
         and current is not None
         and current["status"] == "verified"
         and current["email"] == draft.contact_email
@@ -170,8 +176,10 @@ def request_draft(
     if not _fresh_contact(conn, snapshot, at):
         return ActionResult(
             "blocked_expired",
-            "The verified contact expired or was removed; no draft was requested.",
+            "The frozen award/contact evidence expired or was removed; no draft was requested.",
         )
+    brief = _brief(snapshot, requester, channel, thread_ts)
+    request_id = brief["request_id"]
     existing = conn.execute(
         "SELECT * FROM rich_card_actions WHERE snapshot_id=? AND action='draft'",
         (snapshot_id,),
@@ -186,13 +194,20 @@ def request_draft(
         # A crash may occur after action reservation but before the Persequor
         # outbox is created. Re-enter the idempotent submitter with the same brief.
         action_id = str(existing["id"])
+        if not existing["outreach_request_id"]:
+            with conn:
+                conn.execute(
+                    "UPDATE rich_card_actions SET outreach_request_id=? WHERE id=?",
+                    (request_id, action_id),
+                )
     else:
         action_id = uuid.uuid4().hex
         with conn:
             conn.execute(
                 """INSERT INTO rich_card_actions
-                     (id,snapshot_id,action,nonce,requester_slack,state,created_at,updated_at)
-                   VALUES (?,?, 'draft',?,?, 'requested',?,?)""",
+                     (id,snapshot_id,action,nonce,requester_slack,state,created_at,
+                      updated_at,outreach_request_id)
+                   VALUES (?,?, 'draft',?,?, 'requested',?,?,?)""",
                 (
                     action_id,
                     snapshot_id,
@@ -200,6 +215,7 @@ def request_draft(
                     requester,
                     at.isoformat(),
                     at.isoformat(),
+                    request_id,
                 ),
             )
     post = conn.execute(
@@ -217,7 +233,7 @@ def request_draft(
     state, message = submitter(
         conn,
         snapshot.draft.lead_id,
-        _brief(snapshot, requester, channel, thread_ts),
+        brief,
     )
     action_state = (
         "accepted"

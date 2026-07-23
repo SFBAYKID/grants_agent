@@ -11,13 +11,14 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from .snapshot import FrozenSnapshot, SnapshotDraft
 
 MAX_FALLBACK = 4000
 MAX_SECTION = 3000
 MAX_FIELD = 2000
+MAX_CONTEXT = 3000
 _SENSITIVE_QUERY_RE = re.compile(
     r"(?:^|[_-])(?:api[_-]?key|access[_-]?key|auth|credential|password|secret|signature|token)(?:$|[_-])",
     re.IGNORECASE,
@@ -62,6 +63,39 @@ def safe_url(value: object) -> str:
     return raw
 
 
+def exact_award_url(source: str, url: str, locator: str) -> bool:
+    """Recognize an exact source record, not a homepage/dataset/parent award."""
+    return bool(award_record_identity(source, url, locator))
+
+
+def award_record_identity(source: str, url: str, locator: str) -> str:
+    """Return the source's stable exact-record identity, or empty when unsupported."""
+    safe = safe_url(url)
+    locator_value = locator.strip()
+    if not safe or not locator_value or not source.startswith("usaspending:"):
+        return ""
+    parsed = urlsplit(safe)
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    path = unquote(parsed.path).rstrip("/")
+    if host != "usaspending.gov" or not path.startswith("/award/"):
+        return ""
+    record_id = path.removeprefix("/award/").split("/", 1)[0].strip()
+    return record_id if record_id else ""
+
+
+def official_site_evidenced(website: str, evidence_url: str) -> bool:
+    """Require the persisted website and its evidence page to share an official site."""
+    site = urlsplit(safe_url(website)).hostname or ""
+    evidence = urlsplit(safe_url(evidence_url)).hostname or ""
+    left = site.lower().removeprefix("www.")
+    right = evidence.lower().removeprefix("www.")
+    return bool(
+        left
+        and right
+        and (left == right or left.endswith(f".{right}") or right.endswith(f".{left}"))
+    )
+
+
 def _money(amount: float) -> str:
     """Render an evidenced award amount without implying a remaining balance."""
     return f"${amount:,.0f}"
@@ -74,6 +108,23 @@ def _date(value: str) -> str:
     except ValueError:
         return safe_text(value, 30)
     return parsed.strftime("%B %d, %Y").replace(" 0", " ")
+
+
+def _award_date(value: str, precision: str) -> str:
+    """Render only the date precision supported by the frozen evidence."""
+    try:
+        parsed = date.fromisoformat(value[:10])
+    except ValueError:
+        return safe_text(value, 30)
+    if precision == "month":
+        return parsed.strftime("%B %Y")
+    return _date(value)
+
+
+def _award_when(value: str, precision: str) -> str:
+    """Return a grammatical, precision-safe award-date phrase."""
+    preposition = "in" if precision == "month" else "on"
+    return f"{preposition} {_award_date(value, precision)}"
 
 
 def fallback_text(draft: SnapshotDraft) -> str:
@@ -98,8 +149,8 @@ def fallback_text(draft: SnapshotDraft) -> str:
     text = (
         f"{tier}: {safe_text(draft.entity_name, 180)} in {safe_text(draft.state, 2)} "
         f"received a verified {_money(draft.amount)} {safe_text(draft.program, 120)} "
-        "funding award on "
-        f"{_date(draft.award_date)}. Spend window: {_date(draft.spend_window_start)} "
+        f"funding award {_award_when(draft.award_date, draft.award_date_precision)}. "
+        f"Spend window: {_date(draft.spend_window_start)} "
         f"through {_date(draft.spend_window_end)}. {route}{crm} {contact} "
         "Actions: Ask Persequor to draft; Not relevant."
     )
@@ -123,7 +174,7 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
     award = (
         f"*{safe_text(draft.entity_name, 180)}* · {safe_text(draft.state, 2)}\n"
         f"Verified {_money(draft.amount)} {safe_text(draft.program, 120)} funding award\n"
-        f"*Award date:* {_date(draft.award_date)}"
+        f"*Award date:* {_award_date(draft.award_date, draft.award_date_precision)}"
     )
     blocks: list[dict[str, Any]] = [
         {
@@ -187,7 +238,12 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
         _link(draft.sf_open_link, "Open Salesforce") if draft.sf_open_link else "",
         _link(draft.award_url, "View exact award record"),
     ]
-    valid_links = " · ".join(filter(None, links))
+    accepted: list[str] = []
+    for link in filter(None, links):
+        candidate = " · ".join((*accepted, link))
+        if len(candidate) <= MAX_CONTEXT:
+            accepted.append(link)
+    valid_links = " · ".join(accepted)
     if valid_links:
         blocks.append(
             {

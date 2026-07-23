@@ -3,6 +3,7 @@ and the test-mode brief. All offline."""
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -271,6 +272,36 @@ def test_retry_reuses_request_id_and_does_not_duplicate_row(
     assert summary.submitted == 1
     assert sent_ids == [brief["request_id"]]
     assert len(saved) == 1 and saved[0]["status"] == "submitted"
+
+
+def test_retry_rejects_expired_frozen_evidence_without_http(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A queued draft cannot outlive its frozen contact/spend-window evidence."""
+    conn, row = _lead_row(tmp_path)
+    brief = persequor_client.build_brief(
+        row, None, "U01DPJVURHU", "chase@monarchconnected.com"
+    )
+    assert brief is not None
+    brief["expires_at"] = "2000-01-01T00:00:00+00:00"
+    conn.execute(
+        """INSERT INTO outreach
+             (lead_id,channel,draft,request_id,status,attempts,next_attempt_at,created_at)
+           VALUES (?,'persequor',?,?,'queued',1,'2000-01-01','2000-01-01')""",
+        (int(row["id"]), json.dumps(brief), brief["request_id"]),
+    )
+    conn.commit()
+    monkeypatch.setattr(
+        persequor_client.requests,
+        "post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("expired retry called HTTP")
+        ),
+    )
+    summary = persequor_client.retry_pending(conn)
+    assert summary.rejected == 1
+    saved = conn.execute("SELECT status,last_error FROM outreach").fetchone()
+    assert tuple(saved) == ("rejected", "frozen evidence expired")
 
 
 def test_request_id_is_stable_per_slack_request(tmp_path: Path) -> None:

@@ -69,38 +69,53 @@ def enrich_lead_contact(
             c["phone"] or "",
             c["source_url"] or "",
         )
-    try:
+    if any(
+        c["contact_status"] == "not_found" for c in db.contacts_for_lead(conn, lead_id)
+    ):
+        return ContactOutcome("not_found")
+
+    def discover() -> ContactOutcome:
+        """Run every paid fallback only after the outer durable reservation."""
         candidate = finder.find_contact(
-            str(lead["entity_name"]), str(lead["state"] or ""), on_progress=on_progress
+            str(lead["entity_name"]),
+            str(lead["state"] or ""),
+            on_progress=on_progress,
+        )
+        if candidate is None:
+            return _fallback_contact(conn, lead, lead_id, on_progress)
+        db.save_contact(
+            conn,
+            lead_id,
+            candidate.name,
+            candidate.title,
+            candidate.email,
+            candidate.phone,
+            candidate.source_url,
+            candidate.confidence,
+            candidate.official_domain,
+            candidate.field_evidence,
+        )
+        return ContactOutcome(
+            "verified",
+            candidate.name,
+            candidate.title,
+            candidate.email,
+            candidate.phone,
+            candidate.source_url,
+        )
+
+    from ..campaign import paid_calls
+
+    try:
+        return paid_calls.execute(
+            conn,
+            lead_id,
+            "legacy_contact_enrichment",
+            f"legacy-contact:{lead_id}",
+            discover,
         )
     except finder.SourceUnreachable:
-        return ContactOutcome("unreachable")  # could not look -> record nothing
-    if candidate is None:
-        # Fallback chain (Chase's rule: every school and city has an email
-        # somewhere). No named person on the site -> try LinkedIn for a named
-        # decision-maker, then the org's verified general mailbox. Only when
-        # ALL of those come up empty is the lead honestly not_found.
-        return _fallback_contact(conn, lead, lead_id, on_progress)
-    db.save_contact(
-        conn,
-        lead_id,
-        candidate.name,
-        candidate.title,
-        candidate.email,
-        candidate.phone,
-        candidate.source_url,
-        candidate.confidence,
-        candidate.official_domain,
-        candidate.field_evidence,
-    )
-    return ContactOutcome(
-        "verified",
-        candidate.name,
-        candidate.title,
-        candidate.email,
-        candidate.phone,
-        candidate.source_url,
-    )
+        return ContactOutcome("unreachable")
 
 
 def _fallback_contact(

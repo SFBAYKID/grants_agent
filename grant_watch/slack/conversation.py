@@ -19,6 +19,7 @@ import re
 import sqlite3
 import sys
 import traceback
+from collections.abc import Mapping
 from datetime import date
 from typing import Any  # Anthropic tool-use response payloads are runtime-shaped.
 
@@ -318,10 +319,16 @@ def _source_record_label(row: sqlite3.Row) -> str:
     return f"{source} record{suffix}"
 
 
-def lead_facts(row: sqlite3.Row | None) -> str:
+def lead_facts(row: sqlite3.Row | Mapping[str, object] | None) -> str:
     """The FACTS block — every lead-specific field Grant may assert."""
     if row is None:
         return "FACTS: (no lead attached to this thread)"
+    keys = set(row.keys())
+
+    def value(name: str, default: object = "") -> object:
+        """Read an optional frozen-only fact without weakening legacy rows."""
+        return row[name] if name in keys else default
+
     fields = {
         "lead_id": row["id"],
         "entity": display_entity_name(row["entity_name"]),
@@ -342,6 +349,19 @@ def lead_facts(row: sqlite3.Row | None) -> str:
         "salesforce_opportunity": row["salesforce_opportunity_link"] or "(none)",
         "salesforce_account": row["salesforce_account_link"] or "(none)",
     }
+    if "snapshot_contact" in keys:
+        fields.update(
+            {
+                "frozen_public_contact": value("snapshot_contact"),
+                "frozen_salesforce_context": value("snapshot_salesforce"),
+                "frozen_routing": value("snapshot_routing"),
+                "frozen_official_website": value("snapshot_official_website"),
+                "snapshot_rule": (
+                    "These card facts are immutable. Do not replace them with a "
+                    "new contact or CRM lookup in this thread."
+                ),
+            }
+        )
     return "FACTS:\n" + "\n".join(f"- {k}: {v}" for k, v in fields.items())
 
 
@@ -615,13 +635,14 @@ def _ambiguous_award_timing_reply(user_text: str) -> str | None:
 
 def respond(
     user_text: str,
-    row: sqlite3.Row | None,
+    row: sqlite3.Row | Mapping[str, object] | None,
     thread_context: list[str] | None = None,
     on_progress: tools.Progress | None = None,
     requester_slack: str = "",
     workspace: str = "",
     channel: str = "",
     thread_ts: str = "",
+    allowed_tools: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """One conversational turn, with tool use.
 
@@ -688,6 +709,15 @@ def respond(
     single_execution_cache: dict[str, str] = {}
     model = os.environ.get("GRANT_MODEL", DEFAULT_MODEL)
     search_confirmed = _search_plan_confirmed(user_text, thread_context)
+    tool_schemas = (
+        tools.TOOL_SCHEMAS
+        if allowed_tools is None
+        else [
+            schema
+            for schema in tools.TOOL_SCHEMAS
+            if str(schema.get("name") or "") in allowed_tools
+        ]
+    )
 
     try:
         for turn_index in range(MAX_TOOL_TURNS):
@@ -696,7 +726,7 @@ def respond(
                 model=model,
                 max_tokens=1500,
                 system=_SYSTEM,
-                tools=tools.TOOL_SCHEMAS,
+                tools=tool_schemas,
                 messages=messages,
             )
             if msg.stop_reason != "tool_use":
@@ -771,6 +801,15 @@ def respond(
                     file=sys.stderr,
                     flush=True,
                 )
+                if allowed_tools is not None and block.name not in allowed_tools:
+                    results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": "ERROR: this frozen card thread cannot refresh mutable lead evidence",
+                        }
+                    )
+                    continue
                 single_execution_key = _single_execution_tool_key(block.name, tool_args)
                 if single_execution_key in single_execution_cache:
                     text = single_execution_cache[single_execution_key]

@@ -174,3 +174,26 @@ def test_delivered_reminder_registers_natural_reply_thread(monkeypatch: Any,
     slack = FakeSlack()
     assert followups.run(slack, "C", conn, smoke=True).startswith("posted follow-up")
     assert db.is_conversation_thread(conn, "TWORK", "C", "123.456")
+
+
+def test_shared_cap_counts_rich_unknown_using_pacific_day(tmp_path: Path) -> None:
+    """An ambiguous rich send consumes today's shared slot across the PT boundary."""
+    conn, _ = _eligible(tmp_path)
+    now = datetime(2026, 7, 22, 7, 30, tzinfo=timezone.utc)  # 00:30 Pacific
+    conn.execute(
+        """INSERT INTO notification_outbox
+             (delivery_key,lead_id,audience,delivery_class,payload_json,state,attempts,
+              available_at,created_at,updated_at)
+           VALUES ('rich',1,'C','rich_award','{}','unknown',1,
+                   '2026-07-22T07:00:00+00:00','2026-07-22T07:00:00+00:00',
+                   '2026-07-22T07:00:00+00:00')"""
+    )
+    conn.execute(
+        """INSERT INTO salesforce_followup_state
+             (campaign_member_id,crm_action_item_id,campaign_id,target_sobject,
+              target_record_id,joined_at,due_at,policy_version,state,checked_at)
+           VALUES ('old-day',1,'701','Lead','00Q','2026-07-01','2026-07-02','v1',
+                   'unknown','2026-07-22T06:30:00+00:00')"""
+    )
+    conn.commit()
+    assert followups._used_slots(conn, "C", now) == 1

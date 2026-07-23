@@ -71,7 +71,7 @@ def execute(
                    SET state='failed',finished_at=?,error=? WHERE id=?""",
                 (
                     datetime.now(timezone.utc).isoformat(),
-                    f"{type(exc).__name__}: {str(exc)[:300]}",
+                    type(exc).__name__,
                     attempt_id,
                 ),
             )

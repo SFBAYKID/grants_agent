@@ -201,14 +201,23 @@ def build_message(candidate: FollowupCandidate) -> str:
 
 def _used_slots(conn: sqlite3.Connection, channel: str, now: datetime) -> int:
     """Count normal proactive posts plus reserved follow-up deliveries today."""
-    start = datetime.combine(now.date(), time.min, timezone.utc).isoformat()
+    local = now.astimezone(BUSINESS_TZ)
+    start_local = datetime.combine(local.date(), time.min, BUSINESS_TZ)
+    end_local = start_local + timedelta(days=1)
     followups = conn.execute(
         """SELECT COUNT(*) FROM salesforce_followup_state
             WHERE state IN ('sending','delivered','unknown')
-              AND checked_at>=?""",
-        (start,),
+              AND checked_at>=? AND checked_at<?""",
+        (
+            start_local.astimezone(timezone.utc).isoformat(),
+            end_local.astimezone(timezone.utc).isoformat(),
+        ),
     ).fetchone()[0]
-    return len(db.posts_today(conn, channel, now)) + int(followups)
+    proactive = max(
+        len(db.posts_today(conn, channel, now)),
+        len(db.delivery_attempts_today(conn, channel, now)),
+    )
+    return proactive + int(followups)
 
 
 def run(

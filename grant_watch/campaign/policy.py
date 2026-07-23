@@ -95,6 +95,7 @@ class Reason(str, Enum):
     NOT_GOLD = "not_gold_grade"
     NOT_AWARD_EVENT = "not_verified_award_event"
     UNVERIFIED_EVENT = "award_event_not_verified"
+    EVENT_EVIDENCE_MISSING = "award_event_evidence_missing"
     BAD_AMOUNT = "amount_not_finite_positive"
     AWARD_DATE_MISSING = "award_date_missing_or_imprecise"
     AWARD_DATE_FUTURE = "award_date_in_future"
@@ -107,6 +108,7 @@ class Reason(str, Enum):
     STATE_PROVENANCE = "state_provenance_unverified"
     AWARD_URL_UNSAFE = "award_url_missing_or_unsafe"
     NO_WEBSITE = "official_website_missing"
+    WEBSITE_UNVERIFIED = "official_website_provenance_missing"
     CONTACT_MISSING = "contact_missing_or_unverified"
     CONTACT_STALE = "contact_evidence_stale"
     CONTACT_URL_UNSAFE = "contact_evidence_url_missing_or_unsafe"
@@ -128,6 +130,7 @@ class CandidateEvidence:
     lead_grade: str
     event_type: str
     event_verified: bool
+    event_evidence_complete: bool
     amount: float | None
     award_date: str  # ISO; "" when absent
     award_date_precision: str  # 'day' | 'month' | 'unknown'
@@ -140,6 +143,7 @@ class CandidateEvidence:
     state_verified: bool
     award_url_safe: bool
     official_website: str
+    official_website_verified: bool
     contact_status: str  # 'verified' | ... ; only 'verified' qualifies
     contact_type: str
     contact_email: str
@@ -216,6 +220,8 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
         return Eligibility(False, Reason.NOT_AWARD_EVENT, "")
     if not c.event_verified:
         return Eligibility(False, Reason.UNVERIFIED_EVENT, "")
+    if not c.event_evidence_complete:
+        return Eligibility(False, Reason.EVENT_EVIDENCE_MISSING, "")
     if c.amount is None or not isfinite(c.amount) or not (c.amount > 0):
         return Eligibility(False, Reason.BAD_AMOUNT, "")
 
@@ -241,6 +247,7 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
     if (
         not c.last_confirmed_run_complete
         or confirmed_days is None
+        or confirmed_days < 0
         or confirmed_days > OBSERVATION_FRESH_DAYS
     ):
         return Eligibility(False, Reason.STALE_OBSERVATION, "")
@@ -261,6 +268,8 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
         return Eligibility(False, Reason.AWARD_URL_UNSAFE, "")
     if not c.official_website:
         return Eligibility(False, Reason.NO_WEBSITE, "")
+    if not c.official_website_verified:
+        return Eligibility(False, Reason.WEBSITE_UNVERIFIED, "")
 
     # --- contact evidence --------------------------------------------------------
     if c.contact_status != "verified" or c.contact_type not in CONTACT_TYPES:
@@ -270,6 +279,7 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
     policy_now = c.now_utc.astimezone(timezone.utc)
     if (
         contact_days is None
+        or contact_days < 0
         or contact_days > CONTACT_FRESH_DAYS
         or contact_expiry is None
         or contact_expiry <= policy_now

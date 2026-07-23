@@ -9,7 +9,7 @@ from pathlib import Path
 from grant_watch import db
 from grant_watch.campaign import report
 from grant_watch.campaign.policy import Reason
-from grant_watch.campaign.preparation import review_candidates
+from grant_watch.campaign.preparation import _fresh_activity, review_candidates
 
 NOW = datetime(2026, 7, 22, 18, 0, tzinfo=timezone.utc)
 
@@ -28,12 +28,13 @@ def _eligible_conn(path: Path) -> sqlite3.Connection:
              (id,source,source_item_id,lead_grade,entity_name,entity_type,state,program,
               amount,funds_start,funds_end,detail_url,status,canonical_entity_key,
               nces_id,org_website,org_profile_status,last_confirmed_run_id,
-              last_confirmed_at,current_event_id)
+              last_confirmed_at,current_event_id,org_profile_source_url)
            VALUES (1,'usaspending:16.071','award-123','gold','Montebello USD','district',
                    'CA','SVPP',500000,'2025-10-10','2028-09-30',
                    'https://www.usaspending.gov/award/award-123','new',
                    'montebello usd|CA','0625260','https://montebello.k12.ca.us','found',
-                   4,'2026-07-22T17:05:00+00:00',2)"""
+                   4,'2026-07-22T17:05:00+00:00',2,
+                   'https://montebello.k12.ca.us/about')"""
     )
     conn.execute(
         """INSERT INTO source_observations
@@ -91,6 +92,73 @@ def test_complete_persisted_evidence_builds_one_routed_draft(tmp_path: Path) -> 
     assert "jon@montebello.k12.ca.us" in draft.fallback_text
 
 
+def test_card_amount_and_event_meaning_come_from_exact_event(tmp_path: Path) -> None:
+    """Mutable projection drift cannot change the frozen event's amount or meaning."""
+    conn = _eligible_conn(tmp_path / "event-truth.db")
+    conn.execute("UPDATE leads SET amount=1 WHERE id=1")
+    conn.execute(
+        "UPDATE funding_events SET event_type='award_announced',evidence_excerpt='DOJ announcement' WHERE id=2"
+    )
+    conn.commit()
+    draft = review_candidates(conn, "CGRANTS", frozenset(), now=NOW)[0].draft
+    assert draft is not None
+    assert draft.amount == 500_000
+    assert draft.event_type == "award_announced"
+    assert draft.event_evidence_excerpt == "DOJ announcement"
+
+
+def test_generic_award_page_is_not_labelled_an_exact_record(tmp_path: Path) -> None:
+    """A safe homepage remains ineligible when it is not the exact award locator."""
+    conn = _eligible_conn(tmp_path / "generic-url.db")
+    conn.execute(
+        "UPDATE funding_events SET source_url='https://www.usaspending.gov/' WHERE id=2"
+    )
+    conn.commit()
+    review = review_candidates(conn, "CGRANTS", frozenset(), now=NOW)[0]
+    assert review.reason is Reason.AWARD_URL_UNSAFE and review.draft is None
+
+
+def test_snapshot_expires_when_spend_window_closes_before_contact(
+    tmp_path: Path,
+) -> None:
+    """A long-lived contact cannot extend a card beyond its evidenced spend window."""
+    conn = _eligible_conn(tmp_path / "expiry.db")
+    conn.execute("UPDATE leads SET funds_end='2026-07-22' WHERE id=1")
+    conn.execute(
+        "UPDATE contact_evidence SET expires_at='2027-01-01T00:00:00+00:00' WHERE lead_id=1"
+    )
+    conn.commit()
+    draft = review_candidates(conn, "CGRANTS", frozenset(), now=NOW)[0].draft
+    assert draft is not None
+    assert draft.expires_at.startswith("2026-07-22T23:59:59.999999")
+
+
+def test_saved_call_must_match_current_account_and_person(tmp_path: Path) -> None:
+    """Fresh old-Account activity cannot claim or route after CRM binding changes."""
+    conn = _eligible_conn(tmp_path / "activity-binding.db")
+    conn.execute(
+        """INSERT INTO salesforce_activity_snapshots
+             (id,lead_id,status,activity_id,activity_type,completed_at,account_id,
+              person_id,owner_user_id,owner_email,owner_slack_id,roster_status,checked_at)
+           VALUES ('call',1,'verified_call','00T000000000001AAA','Call',
+                   '2026-07-20T00:00:00+00:00','001OLD000000001AAA',
+                   '003OLD000000001AAA','005000000000001AAA',
+                   'anthony@monarchconnected.com','U01DFJWQQJ3','exact',
+                   '2026-07-22T17:30:00+00:00')"""
+    )
+    conn.commit()
+    assert (
+        _fresh_activity(
+            conn,
+            1,
+            "001NEW000000001AAA",
+            frozenset({"003NEW000000001AAA"}),
+            NOW,
+        )
+        is None
+    )
+
+
 def test_removed_or_expired_contact_rejects_instead_of_using_older_fact(
     tmp_path: Path,
 ) -> None:
@@ -121,5 +189,10 @@ def test_shadow_report_is_deterministic_and_contains_no_contact_or_crm_pii(
     assert rendered == report.to_json(report.build(reviews))
     assert '"ready_card_count": 1' in rendered
     assert "@" not in rendered
-    assert "salesforce" not in rendered.lower()
+    assert '"salesforce_ready": 1' in rendered
+    assert '"contact_ready": 1' in rendered
+    assert '"organization_kind_ready": 1' in rendered
+    assert '"source_run_link_ready": 1' in rendered
+    assert '"mapped_route_ready": 0' in rendered
+    assert '"unassigned_route_ready": 1' in rendered
     assert "montebello" not in rendered.lower()

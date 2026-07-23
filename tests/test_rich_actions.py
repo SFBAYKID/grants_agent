@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+import requests
 
 from grant_watch import persequor_client
 from grant_watch.campaign import actions, delivery
@@ -188,6 +190,44 @@ def test_requested_action_resumes_idempotent_submit_after_crash(tmp_path: Path) 
     assert tuple(row) == ("reserved", "accepted")
 
 
+def test_queued_retry_reconciles_snapshot_action_and_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Later Persequor acceptance updates the action without another human click."""
+    conn, post = _posted(tmp_path / "queued-reconcile.db")
+
+    def offline(*_args: object, **_kwargs: object) -> object:
+        """Simulate an unavailable Persequor endpoint."""
+        raise requests.ConnectionError("offline")
+
+    monkeypatch.setattr(persequor_client.requests, "post", offline)
+    first = actions.request_draft(conn, str(post["snapshot_id"]), **_kwargs(post))
+    assert first.state == "requested"
+    conn.execute("UPDATE outreach SET next_attempt_at='2000-01-01T00:00:00+00:00'")
+    conn.commit()
+
+    class Accepted:
+        """Minimal requests response for a successful retry."""
+
+        status_code = 202
+        text = "accepted"
+
+    monkeypatch.setattr(
+        persequor_client.requests, "post", lambda *_args, **_kwargs: Accepted()
+    )
+    summary = persequor_client.retry_pending(conn)
+    assert summary.submitted == 1
+    assert (
+        conn.execute("SELECT state FROM rich_card_actions").fetchone()[0] == "accepted"
+    )
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) FROM outcome_events WHERE kind='persequor_intake_accepted'"
+        ).fetchone()[0]
+        == 1
+    )
+
+
 def test_not_relevant_is_deduplicated_and_legacy_visible(tmp_path: Path) -> None:
     """Feedback updates the legacy lead status once so rollback cannot repost it."""
     conn, post = _posted(tmp_path / "irrelevant.db")
@@ -226,6 +266,7 @@ def test_rich_thread_question_uses_frozen_snapshot_not_mutable_lead(
     ) -> dict[str, object]:
         """Capture the immutable context passed to the offline responder."""
         seen.update(row)
+        seen["allowed_tools"] = _kwargs.get("allowed_tools")
         return {"intent": "question", "reply": "Frozen answer", "files": []}
 
     class Status:
@@ -268,3 +309,31 @@ def test_rich_thread_question_uses_frozen_snapshot_not_mutable_lead(
     assert seen["entity_name"] == "Montebello USD"
     assert seen["amount"] == 500_000
     assert seen["current_event_id"] == 2
+    assert "jon@montebello.k12.ca.us" in str(seen["snapshot_contact"])
+    assert seen["allowed_tools"] == frozenset({"web_search"})
+
+
+def test_closed_spend_window_blocks_click_even_when_contact_is_fresh(
+    tmp_path: Path,
+) -> None:
+    """Click-time truth veto uses the whole snapshot expiry, not contact alone."""
+    conn, post = _posted(tmp_path / "closed-window.db")
+    conn.execute(
+        "UPDATE rich_card_snapshots SET expires_at='2026-07-22T23:59:59+00:00'"
+    )
+    row = conn.execute("SELECT render_inputs_json FROM rich_card_snapshots").fetchone()
+    body = json.loads(row[0])
+    body["expires_at"] = "2026-07-22T23:59:59+00:00"
+    conn.execute(
+        "UPDATE rich_card_snapshots SET render_inputs_json=?", (json.dumps(body),)
+    )
+    conn.commit()
+    result = actions.request_draft(
+        conn,
+        str(post["snapshot_id"]),
+        submitter=lambda *_args: ("submitted", "bad"),
+        now=datetime(2026, 7, 23, tzinfo=timezone.utc),
+        **_kwargs(post),
+    )
+    assert result.state == "blocked_expired"
+    assert conn.execute("SELECT COUNT(*) FROM outreach").fetchone()[0] == 0

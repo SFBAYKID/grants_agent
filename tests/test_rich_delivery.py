@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from slack_sdk.errors import SlackApiError
+
+from grant_watch import db
 from grant_watch.campaign import delivery, pacing
 from tests.test_rich_preparation import _eligible_conn
 
@@ -39,6 +42,20 @@ class FakeSlack:
         return {"ts": "171.001"}
 
 
+class FakeSlackResponse:
+    """Minimal HTTP-200 Slack rejection payload."""
+
+    status_code = 200
+
+    def __init__(self, code: str) -> None:
+        """Store one definitive Slack error code."""
+        self.code = code
+
+    def get(self, key: str, default: object = None) -> object:
+        """Expose Slack's error field through mapping-like access."""
+        return self.code if key == "error" else default
+
+
 def test_pacing_hard_cutoff_and_weekday_slot() -> None:
     """The deterministic slot never permits a late-afternoon catch-up."""
     conn = sqlite3.connect(":memory:")
@@ -55,6 +72,21 @@ def test_pacing_hard_cutoff_and_weekday_slot() -> None:
         "missed the 11:00 Pacific hard cutoff",
     )
     assert pacing.should_post(conn, "C", READY)[0] is True
+
+
+def test_force_never_bypasses_one_message_daily_cap() -> None:
+    """Force bypasses timing for operators, never the engagement flood limit."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        "CREATE TABLE posts(id INTEGER,channel TEXT,posted_at TEXT);"
+        "CREATE TABLE notification_outbox(id INTEGER,lead_id INTEGER,audience TEXT,created_at TEXT);"
+    )
+    conn.execute("INSERT INTO posts VALUES (1,'C','2026-07-22T17:00:00+00:00')")
+    assert pacing.should_post(conn, "C", READY, force=True) == (
+        False,
+        "daily cap reached (1)",
+    )
 
 
 def test_dst_conversion_keeps_local_pacific_band() -> None:
@@ -130,3 +162,68 @@ def test_ambiguous_send_is_never_blind_retried(tmp_path: Path) -> None:
     second = delivery.run(second_client, "CGRANTS", conn, force=True, now=READY)
     assert second.startswith("skip:")
     assert second_client.calls == []
+
+
+def test_stable_award_key_blocks_delivery_across_snapshot_versions(
+    tmp_path: Path,
+) -> None:
+    """Evidence supersession cannot deliver the same source-qualified award twice."""
+    conn = _eligible_conn(tmp_path / "stable-key.db")
+    first = db.reserve_notification(
+        conn, 1, 2, "CGRANTS", "rich_award", {}, "snap-one", "stable-award"
+    )
+    second = db.reserve_notification(
+        conn, 1, 3, "CGRANTS", "rich_award", {}, "snap-two", "stable-award"
+    )
+    assert first is not None and second is None
+
+
+def test_systemic_slack_rejection_blocks_channel_without_consuming_lead(
+    tmp_path: Path,
+) -> None:
+    """Credential/channel failures release the award and prevent cron-loop retries."""
+    conn = _eligible_conn(tmp_path / "blocked.db")
+    error = SlackApiError("rejected", FakeSlackResponse("invalid_auth"))
+    first = delivery.run(FakeSlack(conn, error), "CGRANTS", conn, force=True, now=READY)
+    assert first.startswith("blocked:")
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) FROM notification_outbox WHERE lead_id IS NOT NULL"
+        ).fetchone()[0]
+        == 0
+    )
+    second = delivery.run(FakeSlack(conn), "CGRANTS", conn, force=True, now=READY)
+    assert second.startswith("blocked:")
+
+
+def test_renderer_failure_quarantines_before_any_slack_call(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """A deterministic render defect cannot wedge the top candidate forever."""
+    conn = _eligible_conn(tmp_path / "render.db")
+    client = FakeSlack(conn)
+    monkeypatch.setattr(
+        delivery.card,
+        "render",
+        lambda _snapshot: (_ for _ in ()).throw(ValueError("bad render")),
+    )
+    outcome = delivery.run(client, "CGRANTS", conn, force=True, now=READY)
+    assert outcome.startswith("quarantined:") and client.calls == []
+    assert (
+        conn.execute("SELECT state FROM notification_outbox").fetchone()[0]
+        == "unrenderable"
+    )
+
+
+def test_content_rejection_is_quarantined_not_retried(tmp_path: Path) -> None:
+    """Slack-proven invalid Block Kit sets aside the unusable evidence version."""
+    conn = _eligible_conn(tmp_path / "content.db")
+    error = SlackApiError("rejected", FakeSlackResponse("invalid_blocks"))
+    outcome = delivery.run(
+        FakeSlack(conn, error), "CGRANTS", conn, force=True, now=READY
+    )
+    assert outcome.startswith("quarantined:")
+    assert (
+        conn.execute("SELECT state FROM notification_outbox").fetchone()[0]
+        == "rejected"
+    )

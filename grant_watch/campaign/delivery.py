@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 from slack_sdk.errors import SlackApiError
@@ -17,7 +17,32 @@ from slack_sdk.errors import SlackApiError
 from .. import db
 from . import card, pacing
 from .preparation import CandidateReview, review_candidates
-from .snapshot import freeze
+from .snapshot import award_dedup_key, freeze
+
+_SYSTEMIC_SLACK_ERRORS = frozenset(
+    {
+        "channel_not_found",
+        "not_in_channel",
+        "is_archived",
+        "invalid_auth",
+        "account_inactive",
+        "token_revoked",
+        "token_expired",
+        "no_permission",
+        "org_login_required",
+        "restricted_action",
+    }
+)
+_CONTENT_SLACK_ERRORS = frozenset(
+    {
+        "msg_too_long",
+        "invalid_blocks",
+        "invalid_block_part",
+        "blocks_too_long",
+        "invalid_attachments",
+        "no_text",
+    }
+)
 
 
 class SlackPoster(Protocol):
@@ -99,6 +124,9 @@ def run(
 ) -> str:
     """Review, freeze, reserve, and at most once post one rich card."""
     at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    guard = db.channel_guard(conn, channel)
+    if guard is not None:
+        return f"{guard['state']}: channel hold active ({guard['last_error'] or 'unknown'})"
     go, reason = pacing.should_post(conn, channel, at, force=force)
     if not go:
         return f"skip: {reason}"
@@ -118,6 +146,7 @@ def run(
     ):
         return "skip: candidate changed after preparation; no post attempted"
     frozen, _created = freeze(conn, choice.draft, now=at)
+    stable_key = award_dedup_key(frozen.draft)
     prior = conn.execute(
         """SELECT 1 FROM posts WHERE snapshot_id=?
            UNION ALL SELECT 1 FROM notification_outbox WHERE snapshot_id=? LIMIT 1""",
@@ -136,6 +165,7 @@ def run(
             "rich_award",
             {},
             snapshot_id=frozen.id,
+            stable_delivery_key=stable_key,
         )
         if delivery_key is not None:
             db.finish_notification(
@@ -150,6 +180,7 @@ def run(
         "rich_award",
         {"text": rendered.text, "blocks": list(rendered.blocks)},
         snapshot_id=frozen.id,
+        stable_delivery_key=stable_key,
     )
     if delivery_key is None:
         return "skip: this rich-card delivery is already reserved"
@@ -165,7 +196,25 @@ def run(
             unfurl_media=False,
         )
     except SlackApiError as exc:
+        if getattr(exc.response, "status_code", None) == 429:
+            db.release_notification(conn, delivery_key)
+            until = (at + timedelta(minutes=1)).isoformat()
+            db.set_channel_guard(
+                conn, channel, "backoff", "ratelimited", available_at=until
+            )
+            return "backoff: Slack rate limit active; no lead consumed"
         if getattr(exc.response, "status_code", None) == 200:
+            code = str(exc.response.get("error") or "unknown_error")
+            if code in _SYSTEMIC_SLACK_ERRORS:
+                db.release_notification(conn, delivery_key)
+                until = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+                db.set_channel_guard(conn, channel, "blocked", code, available_at=until)
+                return (
+                    f"blocked: Slack rejected this channel ({code}); no lead consumed"
+                )
+            if code in _CONTENT_SLACK_ERRORS:
+                db.finish_notification(conn, delivery_key, "rejected", error=code)
+                return f"quarantined: Slack rejected this rich card ({code})"
             db.release_notification(conn, delivery_key)
             return "error: Slack rejected the rich card; reservation released"
         db.finish_notification(conn, delivery_key, "unknown", error=type(exc).__name__)

@@ -118,6 +118,23 @@ def test_worker_preview_does_no_calls_or_writes(tmp_path: Path) -> None:
     assert conn.total_changes == before
 
 
+def test_completed_not_found_attempt_is_not_counted_contact_fresh(
+    tmp_path: Path,
+) -> None:
+    """Paid-call completion proves execution, not that usable contact evidence exists."""
+    conn = _eligible_conn(tmp_path / "completed-miss.db")
+    conn.execute("DELETE FROM contact_evidence")
+    conn.execute(
+        """INSERT INTO paid_enrichment_attempts
+             (id,lead_id,operation,request_key,attempt_no,state,started_at,finished_at)
+           VALUES ('done',1,'contact_refresh','rich-contact:1:2026-07-22',1,'completed',
+                   '2026-07-22T00:00:00+00:00','2026-07-22T00:01:00+00:00')"""
+    )
+    conn.commit()
+    summary = prepare_worker.run(conn, "CGRANTS", dry_run=False, now=NOW)
+    assert summary.contact_fresh == 0
+
+
 def test_worker_persists_fake_readonly_activity_for_exact_account(
     tmp_path: Path,
 ) -> None:
