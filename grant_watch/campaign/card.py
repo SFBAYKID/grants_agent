@@ -13,6 +13,7 @@ from datetime import date
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
 
+from .policy import is_website_ownership_proven
 from .routing import RoutingReason
 from .snapshot import FrozenSnapshot, SnapshotDraft
 
@@ -104,6 +105,20 @@ def _award_date(value: str, precision: str) -> str:
     return _date(value)
 
 
+def _research_note(draft: SnapshotDraft) -> str:
+    """The honest reason(s) an eligible card still needs human review before drafting:
+    an ambiguous Salesforce match and/or a website whose org ownership is only inferred
+    from a name match (not an exact authoritative record)."""
+    reasons: list[str] = []
+    if draft.sf_lookup_status == "ambiguous":
+        reasons.append("the Salesforce match is ambiguous")
+    if not is_website_ownership_proven(draft.official_website_provenance):
+        reasons.append(
+            "the organization website is inferred from a name match, not an exact record"
+        )
+    return "; ".join(reasons) or "confirm the details"
+
+
 def _event_date_label(event_type: str) -> str:
     """Label the evidenced event date in the source's exact terms.
 
@@ -135,7 +150,7 @@ def fallback_text(draft: SnapshotDraft) -> str:
     crm_text = safe_text(draft.sf_display_text, 500).rstrip(".")
     crm = f" Salesforce: {crm_text}." if crm_text else ""
     actions = (
-        "Actions: Not relevant. Resolve the Salesforce match before drafting outreach."
+        f"Actions: Not relevant. Confirm before drafting outreach — {_research_note(draft)}."
         if draft.card_mode == "research_needed"
         else "Actions: Ask Persequor to draft; Not relevant."
     )
@@ -254,14 +269,14 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
             }
         )
     if research:
-        # No active draft action until a human resolves the ambiguous Salesforce match.
+        # No active draft action until a human confirms the flagged evidence.
         blocks.append(
             {
                 "type": "context",
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": "_Salesforce match is ambiguous — resolve it before drafting outreach._",
+                        "text": f"_Confirm before drafting outreach — {_research_note(draft)}._",
                     }
                 ],
             }

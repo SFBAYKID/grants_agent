@@ -21,6 +21,13 @@ from enum import Enum
 from math import isfinite
 from urllib.parse import parse_qs, urlsplit
 
+import tldextract
+
+# Offline registrable-domain extractor: uses the Public Suffix List snapshot bundled in
+# the tldextract package (``suffix_list_urls=()`` => never the network — gov servers are
+# not hammered and tests stay deterministic). One shared instance.
+_EXTRACT = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
+
 
 def _host(url: str) -> str:
     """Normalized hostname for same-site comparison; '' when unparseable."""
@@ -30,19 +37,31 @@ def _host(url: str) -> str:
         return ""
 
 
-def _same_site(left: str, right: str) -> bool:
-    """Exact host or a direct parent/subdomain relationship — never unrelated hosts.
+def _registrable(host: str) -> str:
+    """Return the registrable domain (public suffix + one label) via the PSL, or '' when
+    the host IS a bare public suffix / has no registrable part.
 
-    Boundary-safe: the parent/child test anchors on a leading dot, so a lookalike suffix
-    (``evilmontebello.net`` vs ``montebello.net``) never matches. Both sides must carry at
-    least one dot, so a bare label or public suffix (``net``) can never bind a real org."""
-    if "." not in left or "." not in right:
-        return False
-    return bool(
-        left
-        and right
-        and (left == right or left.endswith(f".{right}") or right.endswith(f".{left}"))
-    )
+    Proper eTLD+1, not a hand-rolled guess: ``sd.vallelindo.k12.ca.us`` ->
+    ``vallelindo.k12.ca.us``; ``k12.ca.us`` and ``net`` -> '' (they are public suffixes)."""
+    parts = _EXTRACT((host or "").strip().lower())
+    return f"{parts.domain}.{parts.suffix}" if parts.domain and parts.suffix else ""
+
+
+def _same_site(left: str, right: str) -> bool:
+    """Two hosts belong to the same organization iff they share ONE registrable domain
+    (eTLD+1) under the Public Suffix List.
+
+    This closes the cross-district hole a suffix test cannot: a bare public suffix
+    (``k12.ca.us``, ``net``) has no registrable domain and never binds, and two districts
+    under the same suffix (``montebello.k12.ca.us`` vs ``valle.k12.ca.us``) have DIFFERENT
+    registrable domains and never cross-bind. Exact host and true subdomains share it.
+    NOTE: a private shared-hosting domain NOT in the PSL (e.g. ``txed.net``) collapses its
+    subdomains to one registrable domain; within a single lead the email and website hosts
+    are compared and are typically identical, and such a lead can never be draft-ready
+    (its website provenance is heuristic, not exact) — so no auto-draft rests on it."""
+    left_domain = _registrable(left)
+    right_domain = _registrable(right)
+    return bool(left_domain and left_domain == right_domain)
 
 # Bump when a rule changes. Stored on the snapshot as PROVENANCE ONLY — never part of a
 # delivery-uniqueness key (that would re-post the eligible backlog on every tightening;
@@ -126,10 +145,30 @@ class ContactBinding(str, Enum):
 
 
 class CardMode(str, Enum):
-    """Whether an eligible card may draft immediately or needs Salesforce review first."""
+    """Whether an eligible card may draft immediately or needs human review first."""
 
     DRAFT_READY = "draft_ready"
     RESEARCH_NEEDED = "research_needed"
+
+
+# Website-provenance kinds that PROVE the organization owns the website by an exact,
+# authoritative record — the only kinds that may back a DRAFT-READY card (Chase,
+# 2026-07-23). VERIFIED_ORG_PAGE rests on ``finder._looks_official`` (a name-token
+# anchor), so it is NOT proven ownership and caps a card at research-needed (no
+# auto-draft). Neither exact kind is fed by a runtime source yet, so no current lead is
+# draft-ready — the safe intended state until an exact org->website source is wired.
+EXACT_WEBSITE_PROVENANCE = frozenset(
+    {WebsiteProvenance.NCES, WebsiteProvenance.AUTHORITATIVE_DIRECTORY}
+)
+_EXACT_WEBSITE_PROVENANCE_VALUES = frozenset(p.value for p in EXACT_WEBSITE_PROVENANCE)
+
+
+def is_website_ownership_proven(provenance: object) -> bool:
+    """True iff the website's organization ownership is an EXACT authoritative record, not
+    a name heuristic. Accepts a ``WebsiteProvenance`` or its ``.value`` (the frozen
+    snapshot stores the value string)."""
+    value = provenance.value if isinstance(provenance, WebsiteProvenance) else provenance
+    return value in _EXACT_WEBSITE_PROVENANCE_VALUES
 
 # Personal / private mailbox providers rejected for this campaign even when the address
 # appears on an official page (spec E).
@@ -471,22 +510,30 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
     if binding is ContactBinding.NONE:
         return Eligibility(False, Reason.CONTACT_DOMAIN, "")
 
-    # --- Salesforce: exact/no-match draft-ready; ambiguous research-needed ---------
+    # --- Salesforce freshness gate ------------------------------------------------
     crm_checked = _parse_datetime(c.crm_checked_at)
     crm_fresh = (
         crm_checked is not None
         and crm_checked <= policy_now
         and (policy_now - crm_checked).total_seconds() <= CRM_FRESH_HOURS * 3600
     )
-    if c.crm_state in SAFE_CRM_STATES and crm_fresh:
-        mode = CardMode.DRAFT_READY
-    elif c.crm_state in RESEARCH_CRM_STATES and crm_fresh:
-        # Fresh but ambiguous: post a research-needed card (no draft action, no
-        # relationship/net-new claim, territory routing only) — never a hard reject.
-        mode = CardMode.RESEARCH_NEEDED
-    else:
+    crm_draft_safe = c.crm_state in SAFE_CRM_STATES and crm_fresh
+    crm_research = c.crm_state in RESEARCH_CRM_STATES and crm_fresh
+    if not (crm_draft_safe or crm_research):
         # partial, unavailable, missing, or any STALE lookup — ineligible for v1.
         return Eligibility(False, Reason.CRM_UNSAFE, "")
+
+    # --- card mode: DRAFT-READY requires BOTH a draft-safe CRM AND PROVEN website ---
+    # ownership (an exact authoritative record). A heuristic-owned website (a name-token
+    # anchor) or an ambiguous CRM caps the card at research-needed — safe, no auto-draft
+    # (Chase, 2026-07-23). No relationship/net-new claim and no CRM-owner routing on the
+    # ambiguous path; both are enforced downstream in preparation and card.
+    website_proven = provenance in EXACT_WEBSITE_PROVENANCE
+    mode = (
+        CardMode.DRAFT_READY
+        if crm_draft_safe and website_proven
+        else CardMode.RESEARCH_NEEDED
+    )
 
     # --- eligible: gold, or platinum if a very fresh physical-security award -------
     days_since_award = (c.today - awarded).days

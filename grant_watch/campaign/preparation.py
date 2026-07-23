@@ -263,7 +263,9 @@ def _candidate(
         official_website=website,
         org_profile_found=str(row["org_profile_status"] or "") == "found",
         org_profile_evidence_url=website_evidence_url,
-        nces_website="",  # NCES-published official site not yet captured at runtime
+        # Exact NCES-published site (migration 26). NULL for every current lead (no runtime
+        # source populates it yet), so real leads stay research-only until one is wired.
+        nces_website=str(row["nces_website"] or ""),
         contact_status=str(contact["status"] if contact else ""),
         contact_type=str(contact["contact_type"] if contact else ""),
         contact_email=str(contact["email"] if contact else ""),
@@ -279,11 +281,13 @@ def _candidate(
         now_utc=now,
     )
     eligibility = policy.evaluate(evidence)
-    research = eligibility.card_mode is policy.CardMode.RESEARCH_NEEDED
-    # A research-needed (ambiguous CRM) card must assert no relationship and route by
-    # TERRITORY only — never to a Salesforce owner. Drop every exact CRM binding so an
-    # ambiguous single-account/multi-opportunity result cannot leak an owner mention.
-    if research:
+    crm_ambiguous = crm_state == "ambiguous"
+    # An AMBIGUOUS Salesforce result must assert no relationship and route by TERRITORY
+    # only — never to a Salesforce owner. Drop every exact CRM binding so an ambiguous
+    # single-account/multi-opportunity result cannot leak an owner mention. A card whose
+    # ONLY reason for research is heuristic website ownership keeps its exact CRM
+    # relationship and owner routing (those are trustworthy); it simply cannot auto-draft.
+    if crm_ambiguous:
         account = opportunity = activity = None
         people = frozenset()
     call_owner = OwnerEvidence(
@@ -374,7 +378,7 @@ def _candidate(
     )
     if not eligibility.eligible or contact is None:
         return CandidateReview(lead_id, eligibility.reason, readiness=readiness)
-    if research:
+    if crm_ambiguous:
         sf_display = "Possible Salesforce matches—review before outreach."
     else:
         sf_display = ""
