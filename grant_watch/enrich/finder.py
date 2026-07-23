@@ -113,13 +113,48 @@ _SCHOOL_ROLE_RE = re.compile(
 # is not rejected.
 _ROLE_LEAD_WORDS = frozenset(
     {
-        "director", "manager", "superintendent", "coordinator", "officer", "chief",
-        "administrator", "principal", "president", "supervisor", "specialist",
-        "analyst", "engineer", "technician", "assistant", "deputy", "head", "lead",
-        "it", "technology", "information", "systems", "security", "facilities",
-        "operations", "business", "finance", "department", "dept", "office", "division",
-        "city", "county", "district", "school", "schools", "university", "college",
-        "board", "authority", "public", "the",
+        "director",
+        "manager",
+        "superintendent",
+        "coordinator",
+        "officer",
+        "chief",
+        "administrator",
+        "principal",
+        "president",
+        "supervisor",
+        "specialist",
+        "analyst",
+        "engineer",
+        "technician",
+        "assistant",
+        "deputy",
+        "head",
+        "lead",
+        "it",
+        "technology",
+        "information",
+        "systems",
+        "security",
+        "facilities",
+        "operations",
+        "business",
+        "finance",
+        "department",
+        "dept",
+        "office",
+        "division",
+        "city",
+        "county",
+        "district",
+        "school",
+        "schools",
+        "university",
+        "college",
+        "board",
+        "authority",
+        "public",
+        "the",
     }
 )
 
@@ -155,6 +190,7 @@ def _titles_for(entity: str) -> tuple[str, ...]:
     """Decision-maker titles matched to the org kind (city vs school)."""
     return _CITY_TITLES if _org_kind(entity) == "city" else _SCHOOL_TITLES
 
+
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
@@ -180,6 +216,23 @@ def verify_on_page(page_text: str, email: str, name: str) -> bool:
     if not email or not _EMAIL_RE.fullmatch(email) or email.lower() not in low:
         return False
     return bool(name) and all(tok.lower() in low for tok in name.split()[:2])
+
+
+def reverify_general_mailbox(
+    email: str, evidence_url: str, official_domain: str
+) -> bool:
+    """Re-read an official page and require the general email verbatim on its host.
+
+    This may call paid Firecrawl and is invoked only inside the rich preparation
+    worker's durable pre-HTTP marker.
+    """
+    if not email or not _EMAIL_RE.fullmatch(email):
+        return False
+    page_host = _host(evidence_url)
+    if not _same_site(page_host, official_domain.lower().removeprefix("www.")):
+        return False
+    page = _scrape(evidence_url)
+    return bool(page) and email.lower() in page.lower()
 
 
 def _text_field_on_page(page_text: str, value: str) -> bool:

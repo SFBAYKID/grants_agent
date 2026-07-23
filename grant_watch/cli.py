@@ -230,6 +230,34 @@ def cmd_rich_shadow(limit: int, channel_members: list[str]) -> int:
     return 0
 
 
+def cmd_rich_prepare(limit: int, execute: bool, retry_indeterminate: bool) -> int:
+    """Run or safely preview the bounded evidence-preparation worker."""
+    from .campaign import prepare_worker
+
+    channel = primary_channel_id()
+    if not channel:
+        print("SLACK_CHANNEL_ID is not set in .env", file=sys.stderr)
+        return 1
+    conn = db.connect() if execute else db.connect_readonly()
+    summary = prepare_worker.run(
+        conn,
+        channel,
+        limit=limit,
+        dry_run=not execute,
+        retry_indeterminate=retry_indeterminate,
+    )
+    print(
+        f"rich prepare: {summary.candidates} candidates; "
+        f"{summary.contact_fresh} contact-fresh, "
+        f"{summary.contact_refreshed} contact-refreshed, "
+        f"{summary.activity_checked} activity-checked, "
+        f"{summary.indeterminate} indeterminate, {summary.errors} errors, "
+        f"{summary.writes} local writes"
+        f"{' (preview: no HTTP or writes)' if not execute else ''}"
+    )
+    return 1 if summary.indeterminate or summary.errors else 0
+
+
 def cmd_drip_unblock(channel: str) -> int:
     """Clear a channel-level block after an operator has fixed Slack.
 
@@ -398,6 +426,21 @@ def main(argv: list[str] | None = None) -> int:
     p_shadow.add_argument(
         "--limit", type=int, default=100, help="maximum Gold candidates to audit"
     )
+    p_prepare = sub.add_parser(
+        "rich-prepare",
+        help="preview bounded evidence refresh; --execute permits reads + local evidence writes",
+    )
+    p_prepare.add_argument("--limit", type=int, default=25)
+    p_prepare.add_argument(
+        "--execute",
+        action="store_true",
+        help="perform bounded Salesforce/public-source reads and local evidence writes",
+    )
+    p_prepare.add_argument(
+        "--retry-indeterminate",
+        action="store_true",
+        help="explicitly retry an interrupted possibly-paid call",
+    )
     p_shadow.add_argument(
         "--channel-member",
         action="append",
@@ -466,6 +509,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_drip(args.force, args.dry_run)
     if args.command == "rich-shadow":
         return cmd_rich_shadow(args.limit, args.channel_member)
+    if args.command == "rich-prepare":
+        if args.retry_indeterminate and not args.execute:
+            parser.error("--retry-indeterminate requires --execute")
+        return cmd_rich_prepare(args.limit, args.execute, args.retry_indeterminate)
     if args.command == "outreach-retry":
         return cmd_outreach_retry(args.dry_run)
     if args.command == "salesforce-sync":

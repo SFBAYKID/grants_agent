@@ -312,3 +312,20 @@ def review_candidates(
         _candidate(conn, row, audience, channel_members, at)
         for row in _rows(conn, audience, limit)
     )
+
+
+def candidate_lead_ids(
+    conn: sqlite3.Connection, audience: str, limit: int
+) -> tuple[int, ...]:
+    """Expose the bounded quality-ordered queue to the preparation worker."""
+    return tuple(int(row["id"]) for row in _rows(conn, audience, limit))
+
+
+def exact_crm_bindings(
+    conn: sqlite3.Connection, lead_id: int
+) -> tuple[str, frozenset[str]]:
+    """Expose only an exact Account id and its bound Contact/Lead ids for activity."""
+    state, _checked, account, _opportunity, people = _crm(conn, lead_id)
+    if state != "exact_match" or account is None:
+        return "", frozenset()
+    return str(account["record_id"]), people
