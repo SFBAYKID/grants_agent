@@ -29,20 +29,25 @@ def reserve_notification(
     channel: str,
     delivery_class: str,
     payload: dict[str, object],
+    snapshot_id: str = "",
 ) -> str | None:
     """Atomically reserve one event/channel delivery before calling Slack.
 
     A stale ``sending`` state is intentionally not retried automatically: a network
     timeout can mean Slack accepted the post, so blind retrying could duplicate it.
     """
-    delivery_key = f"{channel}:lead:{lead_id}:event:{event_id or 'projection'}"
+    delivery_key = (
+        f"{channel}:snapshot:{snapshot_id}"
+        if snapshot_id
+        else f"{channel}:lead:{lead_id}:event:{event_id or 'projection'}"
+    )
     now = _now()
     with conn:
         cur = conn.execute(
             """INSERT OR IGNORE INTO notification_outbox
                  (delivery_key,event_id,lead_id,audience,delivery_class,payload_json,
-                  state,attempts,available_at,created_at,updated_at)
-               VALUES (?,?,?,?,?,?,'sending',1,?,?,?)""",
+                  state,attempts,available_at,created_at,updated_at,snapshot_id)
+               VALUES (?,?,?,?,?,?,'sending',1,?,?,?,?)""",
             (
                 delivery_key,
                 event_id,
@@ -53,6 +58,7 @@ def reserve_notification(
                 now,
                 now,
                 now,
+                snapshot_id or None,
             ),
         )
     return delivery_key if cur.rowcount == 1 else None
@@ -298,5 +304,3 @@ def blocked_notifications(
         sql += " AND o.audience=?"
         params = (channel,)
     return list(conn.execute(sql + " ORDER BY o.created_at DESC, o.id DESC", params))
-
-

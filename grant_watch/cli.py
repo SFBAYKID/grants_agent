@@ -171,6 +171,7 @@ def cmd_drip(force: bool, dry_run: bool) -> int:
     Designed for a 30-minute cron, Mon-Fri, inside the 7am ET - 5pm PT window."""
     from slack_sdk import WebClient
 
+    from .campaign import rich_card_enabled
     from .slack import drip as drip_mod
 
     # Proactive drip always posts to the PRIMARY channel (first configured id).
@@ -180,7 +181,24 @@ def cmd_drip(force: bool, dry_run: bool) -> int:
         return 1
     client = None if dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     conn = db.connect_readonly() if dry_run else db.connect()
-    outcome = drip_mod.run_drip(client, channel, conn, force=force, dry_run=dry_run)
+    if rich_card_enabled():
+        from .campaign import delivery as rich_delivery
+
+        members = (
+            rich_delivery.channel_members(client, channel)
+            if client is not None
+            else frozenset()
+        )
+        outcome = rich_delivery.run(
+            client,
+            channel,
+            conn,
+            channel_members=members,
+            force=force,
+            dry_run=dry_run,
+        )
+    else:
+        outcome = drip_mod.run_drip(client, channel, conn, force=force, dry_run=dry_run)
     print(f"drip: {outcome}")
     # Non-zero for every outcome a human needs to look at, so cron surfaces it rather
     # than the failure reading as a routine tick. `blocked:` in particular repeats every
@@ -191,6 +209,25 @@ def cmd_drip(force: bool, dry_run: bool) -> int:
 # Drip outcomes that mean "a human should look at this". Everything else — a skip for
 # the cap, the slot, or an empty pool — is a normal tick.
 FAILING_DRIP_OUTCOMES = ("unknown:", "blocked:", "error:", "quarantined:")
+
+
+def cmd_rich_shadow(limit: int, channel_members: list[str]) -> int:
+    """Print a deterministic, PII-free, write-free readiness report."""
+    from .campaign import preparation, report
+
+    channel = primary_channel_id()
+    if not channel:
+        print("SLACK_CHANNEL_ID is not set in .env", file=sys.stderr)
+        return 1
+    conn = db.connect_readonly()
+    reviews = preparation.review_candidates(
+        conn,
+        channel,
+        frozenset(channel_members),
+        limit=limit,
+    )
+    print(report.to_json(report.build(reviews)))
+    return 0
 
 
 def cmd_drip_unblock(channel: str) -> int:
@@ -354,6 +391,20 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="bypass window/cap/jitter pacing (for testing)",
     )
+    p_shadow = sub.add_parser(
+        "rich-shadow",
+        help="write-free rich-card readiness report (never posts or enriches)",
+    )
+    p_shadow.add_argument(
+        "--limit", type=int, default=100, help="maximum Gold candidates to audit"
+    )
+    p_shadow.add_argument(
+        "--channel-member",
+        action="append",
+        default=[],
+        metavar="SLACK_ID",
+        help="offline channel-membership fixture; may be repeated",
+    )
     p_drip.add_argument(
         "--dry-run", action="store_true", help="print what would post; write nothing"
     )
@@ -413,6 +464,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_drip_unblock(args.channel)
     if args.command == "drip":
         return cmd_drip(args.force, args.dry_run)
+    if args.command == "rich-shadow":
+        return cmd_rich_shadow(args.limit, args.channel_member)
     if args.command == "outreach-retry":
         return cmd_outreach_retry(args.dry_run)
     if args.command == "salesforce-sync":

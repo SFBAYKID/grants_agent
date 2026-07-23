@@ -31,6 +31,8 @@ from .models import (
 
 # Default DB lives next to the repo root; git-ignored (*.db).
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "grant_watch.db"
+
+
 def connect(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     """Open a writable database and apply explicit versioned migrations."""
     conn = sqlite3.connect(db_path, timeout=10.0)
@@ -113,9 +115,7 @@ def _adopt_drifted_lead(
     conn.execute(
         "UPDATE leads SET source_item_id=? WHERE id=?", (new_item_id, int(row["id"]))
     )
-    return conn.execute(
-        "SELECT * FROM leads WHERE id=?", (int(row["id"]),)
-    ).fetchone()
+    return conn.execute("SELECT * FROM leads WHERE id=?", (int(row["id"]),)).fetchone()
 
 
 def upsert_lead(conn: sqlite3.Connection, lead: Lead) -> bool:
@@ -718,12 +718,14 @@ def record_post(
     delivery_key: str = "",
     event_id: int | None = None,
     urgent: bool = False,
+    snapshot_id: str = "",
 ) -> int:
     """Log a proactive Grant post (the thread anchor engagement attaches to)."""
     cur = conn.execute(
         """INSERT INTO posts
-             (kind,lead_id,channel,ts,style,posted_at,delivery_key,event_id,urgent)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
+             (kind,lead_id,channel,ts,style,posted_at,delivery_key,event_id,urgent,
+              snapshot_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (
             kind,
             lead_id,
@@ -734,6 +736,7 @@ def record_post(
             delivery_key or None,
             event_id,
             int(urgent),
+            snapshot_id or None,
         ),
     )
     conn.commit()
