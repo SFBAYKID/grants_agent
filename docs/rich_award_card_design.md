@@ -47,40 +47,18 @@ loses the fabricated `school_district` fallback and gains snapshot-bound intake.
 
 ## 2. Migrations (forward-only, after v13; never reuse 10–12; never edit history)
 
-Next versions **14–17**. Each is additive (new tables / nullable columns), so old code
-(`264b0e2`/`99c0240`) that never references them keeps working → rollback-safe.
+Implemented versions **14–23**: completed-run freshness; widened rich post kind and
+nullable snapshot links; immutable snapshot/action/contact tables; exact Salesforce
+owner/completed-call evidence; reviewed-kind and paid-attempt state; contact hash; and
+the v23 exact-event truth companion plus queued-outreach action link. Historical
+migrations remain unchanged.
 
-- **v14 `rich_card_snapshots`** — the immutable frozen card. One row per prepared card.
-  Columns (all frozen at creation): `id` (uuid), `policy_version` (int), `lead_id`,
-  `event_id` (exact funding_events.id), `observation_id`, `run_id`, `tier`
-  (`gold`|`platinum`), `entity_name`, `entity_kind` (`city`|`school`|`school_district`),
-  `entity_kind_provenance` (`source`|`nces`|`census`|`reviewed`), `state`,
-  `state_provenance`, `program`, `amount`, `award_date`, `award_date_precision`,
-  `spend_window_start`, `spend_window_end`, `award_url`, `official_website`,
-  `contact_name`, `contact_type` (`named_direct`|`official_general`), `contact_email`,
-  `contact_evidence_url`, `contact_verified_at`, `contact_expires_at`,
-  `sf_lookup_status`, `sf_account_id`, `sf_open_opp_id`, `sf_activity_id`,
-  `sf_display_text`, `sf_open_link`, `routing_reason`
-  (`sf_call_owner`|`sf_account_owner`|`sf_opp_owner`|`territory`|`unassigned`),
-  `slack_user_id` (nullable → unassigned), `fallback_text`, `render_inputs_json`,
-  `created_at`, `expires_at`, `state_updated_at`. **No mutable pointer** — the snapshot
-  is the truth; nothing reads `leads.current_event_id` after freeze.
-  UNIQUE `(event_id, policy_version, audience)` prevents duplicate delivery of the same
-  event/policy/audience. `audience` stored alongside for the constraint.
-- **v15 `rich_card_actions`** — action state keyed by snapshot: `snapshot_id`,
-  `action` (`draft`|`not_relevant`), `nonce`, `requester_slack`, `state`
-  (`requested`|`accepted`|`rejected`|`blocked_expired`), `created_at`, `updated_at`,
-  UNIQUE `(snapshot_id, action, nonce)` and a partial UNIQUE `(snapshot_id, action)` for
-  `draft` so a double-click/replay collapses to one request.
-- **v16 `contact_evidence`** — forward-only contact lifecycle (does NOT edit `contacts`):
-  `id`, `lead_id`, `status` (`verified`|`superseded`|`removed`|`unavailable`|
-  `not_found`), `contact_type`, `name`, `title`, `email`, `official_evidence_url`,
-  `official_domain`, `evidence_hash`, `first_verified_at`, `last_checked_at`,
-  `last_verified_at`, `expires_at`. Append-only: a re-verify inserts a new row and marks
-  the prior `superseded`; the current contact is the latest non-superseded row.
-- **v17 link columns**: add nullable `snapshot_id` to `posts` and to
-  `notification_outbox` (both default NULL). Old code ignores them; new code resolves
-  every reply/action/outcome/Persequor request through `snapshot_id`.
+Each preparation snapshot freezes one exact evidence version. Its v23 truth row carries
+the source-qualified stable award key, event type and amount, verification/evidence
+hash/locator, and official-site evidence URL. Changed contact or CRM evidence creates a
+new immutable preparation row. The notification outbox—not snapshot uniqueness—uses the
+stable award/audience key to prevent duplicate delivery across evidence versions.
+Thread replies, actions, outcomes, and Persequor requests resolve through `snapshot_id`.
 
 Rollback: old code never selects these tables/columns; `apply_migrations` never
 downgrades; a higher `schema_migrations` MAX is inert to `264b0e2`. Documented and
@@ -98,14 +76,15 @@ amount; award date exact enough for the wording, not future, `≤ 12 months`; sp
 explicit and currently open. Platinum is a presentation tier only (verified award `≤ 7`
 days meeting the existing strong physical-security program rule).
 
-Freshness (named constants): `OBSERVATION_FRESH_DAYS = 4` calendar days (covers
-weekends), and the observation must bind to a **completed successful run**, not
+Freshness (named constants): `OBSERVATION_FRESH_DAYS = 6` calendar days (weekend plus
+one holiday), and the observation must bind to a **completed successful run**, not
 `last_seen`. Contact freshness `CONTACT_FRESH_DAYS` (proposed 30). CRM freshness reuses
 the existing 24h `checked_at` window; activity `ACTIVITY_FRESH_DAYS = 30`.
 
-Organization: explicitly evidenced `city`|`school`|`school_district`, with stored
-provenance = source | exact NCES/Census | separately reviewed. **Name heuristics alone
-never qualify.** State provenance verified (the existing `VERIFIED_STATE_SOURCES` gate).
+Organization: v1 currently qualifies only a school district with an exact runtime NCES
+identifier. The broader evidence table is forward schema, not a claimed writer path;
+cities and unlinked schools remain deferred. **Name heuristics never qualify.** State
+provenance uses the existing verified-source gate.
 
 Links/contact/CRM: exact public award-record URL present + URL-safe; official website
 evidenced; a fresh public work contact exists (named-direct or official-general, never a
@@ -212,17 +191,16 @@ unassigned routing counts.
 
 ## 11. Feature flag, dry-run, shadow (`campaign/__init__.py` + `cli.py`)
 
-`GRANT_RICH_CARD_ENABLED` defaults **OFF**. CLI (documented in `--help`): `cli
-rich-prepare [--dry-run|--shadow]`, `cli rich-review` (deterministic, PII-free),
-`cli rich-drip --dry-run` (write-free preview). Boundaries: **dry-run** = no db/Slack/
-SF-write/paid-call/Persequor; **shadow** = local preparation state allowed, no Slack/
-Persequor/SF writes; **enabled delivery** = not authorized this task. No cron changes.
+`GRANT_RICH_CARD_ENABLED` defaults **OFF**. Implemented CLI: `rich-prepare` is a
+no-HTTP/no-write preview unless `--execute` is explicit; `rich-shadow` is deterministic,
+PII-free, and read-only; ordinary `drip --dry-run` previews the selected path without a
+write or external action. Enabled delivery is not authorized. No cron changes.
 
 ---
 
 ## 12. Test plan (happy + failure)
 
-Eligibility (valid platinum city; valid gold school/district; RFP/bulletin rejected;
+Eligibility (valid platinum/Gold NCES district; city/RFP/bulletin rejected;
 nonprofit/unknown/heuristic-only kind rejected; award-date boundaries; closed/missing
 window; stale observation; incomplete run; unsafe/generic URL; stale/incomplete
 CRM/contact; no candidate ⇒ silence). Diversity/pacing (no consecutive same-state;
@@ -244,19 +222,14 @@ compat; no historical edits).
 
 ---
 
-## 13. Open design questions for the critic
+## 13. Resolved design questions
 
-1. Snapshot `audience` in the UNIQUE key vs a separate posts link — is the constraint on
-   `(event_id, policy_version, audience)` sufficient, or should it be
-   `(snapshot content hash)` to prevent a re-prepared snapshot double-posting?
-2. `contact_evidence` append-only vs mutating `contacts` — confirm the forward-only table
-   is the right isolation and that the existing `contacts`-based flows are unaffected.
-3. Preparation worker cadence: a new cron vs folding into the existing poll — the spec
-   forbids production cron changes, so this must run only under explicit CLI in this task.
-4. Rollback: after enable, a `not_relevant`/snapshot row exists; confirm `264b0e2`/
-   `99c0240` selection ignores it (they don't read snapshots) — but the v17 `posts.
-   snapshot_id` column must have a default so old INSERTs still work.
-5. DST + hard cutoff interaction with the deployed slot-band clamp (04:00–16:30 PT).
+1. Preparation snapshots are versioned by exact render/evidence content. The
+   notification outbox owns the separate source-qualified award/audience delivery key.
+2. `contact_evidence` is append-only and isolated from legacy `contacts` reads.
+3. Preparation remains an explicit CLI; this task adds no cron.
+4. Nullable snapshot links and legacy-visible `not_relevant` state preserve rollback.
+5. Pacing tests cover Pacific/Eastern DST, the deterministic band, and hard cutoff.
 
 ---
 
@@ -280,8 +253,8 @@ run" freshness before this migration exists.
 **C2 — dedup on the `event_id` surrogate re-invites the `rfp_item_id` drift incident,
 and `policy_version` in the uniqueness key re-posts the backlog on any policy bump.**
 RESOLUTION: delivery dedup is **policy-independent** and keyed on a STABLE identity —
-`canonical_entity_key(entity,state)` + program + a stable award identity (the source
-award id, e.g. `usaspending` Award ID) + `audience`. `policy_version` stays on the
+`canonical_entity_key(entity,state)` + program + source namespace + the exact
+USASpending record identity + `audience`. `policy_version` stays on the
 snapshot as provenance ONLY, never in the uniqueness key. ADDITIONALLY retain the legacy
 guard the plain drip already relies on: exclude any lead already in `posts`/
 `notification_outbox` for the audience (that is what actually held the line after
@@ -291,7 +264,7 @@ but must still dedup; field reordering changes the hash).
 **C3 — the rich card MUST write a `posts` row (thread attribution goes through
 `find_post_by_ts`), but `posts.kind` CHECK admits only platinum/nugget/rfp/bulletin
 after v13 → a CHECK violation fires AFTER the Slack post lands = the migration-13
-wedge.** RESOLUTION: migration **v14b** rebuilds `posts` with the widened CHECK adding
+wedge.** RESOLUTION: migration **v15** rebuilds `posts` with the widened CHECK adding
 `'rich_award'`, using the exact CREATE-copy-DROP-rename recipe as `_migration_13`,
 preserving `id` for `engagement.post_id`. The rich card records `kind='rich_award'`.
 
@@ -306,19 +279,16 @@ context overrides the live `lead_id`-keyed lookup for a snapshot-backed thread.
 
 **C5 — `Not relevant` suppression must be written where the LEGACY candidate queries and
 a ROLLED-BACK `264b0e2` look, or the plain drip re-posts a rejected lead.** RESOLUTION:
-`Not relevant` writes the `rich_card_actions` row AND sets `leads.status='dead'` with a
-note (the terminal state `nugget_candidates`/`rfp_candidates`/`bulletin_candidates` all
+`Not relevant` writes the `rich_card_actions` row AND sets
+`leads.status='not_relevant'` with a note (legacy selectors all
 already exclude via `status='new'`). Rollback test asserts all three legacy queries
 exclude a not-relevant lead.
 
 **H1 — city `entity_kind` has no non-heuristic runtime provenance (usaspending recipient
 name is a bare string; `entity_type` is frequently blank; the Census place universe is a
-research queue, not linked to runtime leads).** RESOLUTION: **scope v1 to school /
-school_district**, whose kind can reach `nces` provenance via `leads.nces_id`. A `city`
-qualifies only through explicit `reviewed` provenance (a separately-reviewed evidence
-row), never a heuristic. The "valid platinum city" happy-path test uses a hand-built
-`reviewed`-provenance fixture and is documented as reviewed-only until a runtime
-city-kind source exists.
+research queue, not linked to runtime leads).** RESOLUTION: **scope v1 to NCES-linked
+school districts** through `leads.nces_id`. City and other-kind evidence rows remain
+ineligible until a separately reviewed runtime writer exists.
 
 **H2 — routing must resolve owners by exact `User.Email`/`Id`, not `Owner.Name` (the only
 field the reader returns today), AND must not tag a rep who is not in the configured
@@ -337,9 +307,9 @@ contact Persequor under this task). §9 corrected accordingly.
 
 **H4 — the `in_flight`-before-paid-HTTP discipline must live at the FINDER boundary, not
 just the worker; the legacy thread-draft path pays inside a Slack handler.** RESOLUTION:
-`in_flight` markers are written at the paid boundary (`finder._search`/`_scrape` /
-`linkedin_person`) via a small reservation, so any caller (worker or handler) is
-protected and a restart never blind-retries a paid call. The rich `draft` handler's
+`in_flight` markers wrap the caller-facing contact operation before its first
+Firecrawl/LinkedIn/Anthropic call in both rich preparation and the legacy Slack contact
+tool. A restart never blind-retries an indeterminate operation. The rich draft handler's
 "re-check expiry with NO live enrichment" is a HARD guarantee: it reads frozen snapshot +
 `contact_evidence` only and can never call `find_contact`.
 

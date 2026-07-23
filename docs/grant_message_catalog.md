@@ -16,10 +16,11 @@ source link; no internal identifiers or emoji in alerts; short paragraphs.
 ### 0. Rich verified award card — feature flag OFF  (kind `rich_award`)
 - **Status:** implemented and fixture-tested locally; `GRANT_RICH_CARD_ENABLED` defaults
   OFF. Not deployed, scheduled, production-validated, or authorized for live Slack.
-- **Fires only when:** a Gold verified award for an evidenced school/district has an
-  exact recent award date, positive finite amount, currently open spend window, recent
-  completed source run, safe exact award URL, official site, fresh public official
-  contact, and fresh complete CRM result. Otherwise it posts nothing.
+- **Fires only when:** a Gold verified award for an NCES-linked district has a
+  precision-safe recent award date, event-owned positive finite amount, currently open
+  spend window, recent completed source run, safe exact award URL, evidenced official
+  site, fresh public official contact, and fresh complete CRM result. Otherwise it
+  posts nothing.
 - **Pacing:** one card maximum per weekday, deterministic 10:00–10:45 Pacific slot,
   hard 11:00 cutoff, no urgent second card. It shares the cap with follow-up reminders.
 - **Card:** GOLD/PLATINUM header; exact owner mention or explicit unassigned territory;

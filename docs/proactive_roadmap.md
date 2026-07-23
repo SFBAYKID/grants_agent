@@ -14,15 +14,15 @@ every funding claim, human approval before any write/email, no fabricated contac
 ## A. Upgrade the award nugget into an actionable card  `implemented locally · OFF`
 Today: `Commerce ISD in TX has a verified $500,000 SVPP funding award. Source: …`
 Proposed: chain discovery → contact → offer, in one card:
-> **Peoria Unified School District (AZ)** just landed a verified **$500,000 SVPP**
-> award (spend window 2025–2028).
+> **Peoria Unified School District (AZ)** has a verified **$500,000 SVPP** award
+> (award date and spend window shown only at their stored precision).
 > The likely contact is **Jane Doe, Director of Technology** (jdoe@peoriaud.org).
 > Want me to add her to Salesforce, or draft an intro about cameras & access control?
 > *Source: usaspending.gov/award/…*
 
 - Preparation runs before the delivery window, never inside Slack send/click handling.
-- The card is silent unless every award, run, kind/state, link, contact, CRM, and routing
-  evidence rule passes. No RFP/bulletin fallback exists on the rich path.
+- The v1 card is silent unless an NCES-linked district satisfies every award, run,
+  state, exact-link, contact, and CRM evidence rule. No RFP/bulletin fallback exists.
 - One immutable snapshot binds Block Kit, thread answers, feedback, and Persequor.
 - `rich-prepare` defaults to a no-HTTP/no-write preview; `rich-shadow` is DB-read-only.
 - Production viability and presentation remain `needs-testing` in a separately approved
