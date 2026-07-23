@@ -14,7 +14,7 @@ from grant_watch import db
 from grant_watch.models import RunStats
 
 
-def _lead(conn, iid: str, source: str = "usaspending:16.071") -> int:
+def _lead(conn: object, iid: str, source: str = "usaspending:16.071") -> int:
     """Insert a minimal lead and return its id."""
     conn.execute(
         "INSERT INTO leads (source, source_item_id, entity_name, status) "
