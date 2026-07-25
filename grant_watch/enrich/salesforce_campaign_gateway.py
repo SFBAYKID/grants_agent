@@ -15,6 +15,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from .. import db
+
 API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
 MAX_ACTION_ORGANIZATIONS = 200
 MEMBER_STATUS = "Identified by Grant"
@@ -52,6 +54,7 @@ class SalesforceRecordRef:
     link: str
     company: str = ""
     state: str = ""
+    account_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -103,7 +106,10 @@ def _soql_literal(value: str) -> str:
 # have no fallback — they must be set deliberately before any write.
 def _write_client_id() -> str:
     """Writer OAuth client id, defaulting to the reader's when not separately set."""
-    return os.environ.get("SALESFORCE_WRITE_CLIENT_ID") or os.environ["SALESFORCE_CLIENT_ID"]
+    return (
+        os.environ.get("SALESFORCE_WRITE_CLIENT_ID")
+        or os.environ["SALESFORCE_CLIENT_ID"]
+    )
 
 
 def _write_client_secret() -> str:
@@ -161,6 +167,8 @@ def parse_record_link(link: str, allowed_sobjects: set[str]) -> tuple[str, str]:
 
 class SalesforceCampaignGateway:
     """Least-privilege Salesforce reader/create client for Campaign operations."""
+
+    reconciliation_delays: tuple[float, ...] = (0.0, 0.2, 0.8)
 
     def _auth(self, force: bool = False) -> tuple[str, str]:
         """Authenticate with the dedicated writer Connected App."""
@@ -260,6 +268,21 @@ class SalesforceCampaignGateway:
         )
         response.raise_for_status()
         return response.json()  # type: ignore[no-any-return]  # third-party JSON
+
+    def _query_all(self, soql: str, cap: int = 5_000) -> list[dict[str, Any]]:
+        """Read every bounded SOQL page and reject malformed pagination paths."""
+        body = self._get("query", {"q": soql})
+        records = list(body.get("records") or [])
+        prefix = f"/services/data/{API_VERSION}/"
+        while not bool(body.get("done", True)):
+            next_path = str(body.get("nextRecordsUrl") or "")
+            if not next_path.startswith(prefix):
+                raise ValueError("Salesforce pagination path was malformed")
+            body = self._get(next_path[len(prefix) :])
+            records.extend(body.get("records") or [])
+            if len(records) > cap:
+                raise ValueError("Salesforce organization resolution exceeded its cap")
+        return records
 
     def _create_one(self, sobject: str, payload: dict[str, object]) -> CreateResult:
         """Create one record on the explicit object allowlist."""
@@ -380,7 +403,8 @@ class SalesforceCampaignGateway:
         fields = {
             "Campaign": "Id,Name",
             "Lead": "Id,Name,Company,State",
-            "Contact": "Id,Name,MailingState,Account.Name",
+            "Contact": "Id,Name,Account.Id,Account.Name,Account.BillingState",
+            "Account": "Id,Name,BillingState",
         }[sobject]
         body = self._get(f"sobjects/{sobject}/{record_id}", {"fields": fields})
         account = body.get("Account") or {}
@@ -389,8 +413,18 @@ class SalesforceCampaignGateway:
             record_id=record_id,
             name=str(body.get("Name") or ""),
             link=self.lightning_link(sobject, record_id),
-            company=str(body.get("Company") or account.get("Name") or ""),
-            state=str(body.get("State") or body.get("MailingState") or ""),
+            company=str(
+                body.get("Company") or account.get("Name") or body.get("Name") or ""
+            ),
+            state=str(
+                body.get("State")
+                or account.get("BillingState")
+                or body.get("BillingState")
+                or ""
+            ),
+            account_id=str(
+                account.get("Id") or (record_id if sobject == "Account" else "")
+            ),
         )
 
     def find_people(self, entity_name: str, state: str) -> list[SalesforceRecordRef]:
@@ -402,10 +436,12 @@ class SalesforceCampaignGateway:
             f"WHERE Company='{literal}'{state_filter} LIMIT 20"
         )
         contact_state = (
-            f" AND MailingState='{_soql_literal(state.upper())}'" if state else ""
+            f" AND Account.BillingState='{_soql_literal(state.upper())}'"
+            if state
+            else ""
         )
         contact_soql = (
-            "SELECT Id,Name,MailingState,Account.Name FROM Contact "
+            "SELECT Id,Name,Account.Id,Account.Name,Account.BillingState FROM Contact "
             f"WHERE Account.Name='{literal}'{contact_state} LIMIT 20"
         )
         records: list[tuple[str, dict[str, Any]]] = []
@@ -428,10 +464,117 @@ class SalesforceCampaignGateway:
                     str(record.get("Name") or ""),
                     self.lightning_link(sobject, record_id),
                     company=str(record.get("Company") or account.get("Name") or ""),
-                    state=str(record.get("State") or record.get("MailingState") or ""),
+                    state=str(record.get("State") or account.get("BillingState") or ""),
+                    account_id=str(account.get("Id") or ""),
                 )
             )
         return refs
+
+    def find_accounts(self, entity_name: str, state: str) -> list[SalesforceRecordRef]:
+        """Find exact Accounts so organization-only Lead creation cannot duplicate one."""
+        if not state.strip():
+            return []
+        literal = _soql_literal(entity_name.strip())
+        state_literal = _soql_literal(state.strip().upper())
+        soql = (
+            "SELECT Id,Name,BillingState FROM Account "
+            f"WHERE Name='{literal}' AND BillingState='{state_literal}' LIMIT 20"
+        )
+        records = self._get("query", {"q": soql}).get("records") or []
+        return [
+            SalesforceRecordRef(
+                "Account",
+                str(record["Id"]),
+                str(record.get("Name") or ""),
+                self.lightning_link("Account", str(record["Id"])),
+                company=str(record.get("Name") or ""),
+                state=str(record.get("BillingState") or ""),
+                account_id=str(record["Id"]),
+            )
+            for record in records
+        ]
+
+    def resolve_organizations(
+        self, organizations: list[tuple[str, str]]
+    ) -> dict[str, tuple[list[SalesforceRecordRef], list[SalesforceRecordRef]]]:
+        """Resolve exact Leads/Contacts/Accounts in bounded, paginated SOQL chunks."""
+        requested = {
+            db.canonical_entity_key(name, state): (name.strip(), state.strip().upper())
+            for name, state in organizations
+            if name.strip() and state.strip()
+        }
+        resolved: dict[
+            str, tuple[list[SalesforceRecordRef], list[SalesforceRecordRef]]
+        ] = {key: ([], []) for key in requested}
+        values = list(requested.values())
+        for offset in range(0, len(values), 20):
+            chunk = values[offset : offset + 20]
+            lead_where = " OR ".join(
+                f"(Company='{_soql_literal(name)}' AND State='{_soql_literal(state)}')"
+                for name, state in chunk
+            )
+            contact_where = " OR ".join(
+                f"(Account.Name='{_soql_literal(name)}' "
+                f"AND Account.BillingState='{_soql_literal(state)}')"
+                for name, state in chunk
+            )
+            account_where = " OR ".join(
+                f"(Name='{_soql_literal(name)}' "
+                f"AND BillingState='{_soql_literal(state)}')"
+                for name, state in chunk
+            )
+            lead_rows = self._query_all(
+                f"SELECT Id,Name,Company,State FROM Lead WHERE {lead_where} LIMIT 2000"
+            )
+            contact_rows = self._query_all(
+                "SELECT Id,Name,Account.Id,Account.Name,Account.BillingState "
+                f"FROM Contact WHERE {contact_where} LIMIT 2000"
+            )
+            account_rows = self._query_all(
+                "SELECT Id,Name,BillingState FROM Account "
+                f"WHERE {account_where} LIMIT 2000"
+            )
+            for sobject, rows in (("Lead", lead_rows), ("Contact", contact_rows)):
+                for record in rows:
+                    account = record.get("Account") or {}
+                    company = str(record.get("Company") or account.get("Name") or "")
+                    state = str(
+                        record.get("State") or account.get("BillingState") or ""
+                    )
+                    key = db.canonical_entity_key(company, state)
+                    if key not in resolved:
+                        continue
+                    record_id = str(record["Id"])
+                    resolved[key][0].append(
+                        SalesforceRecordRef(
+                            sobject,
+                            record_id,
+                            str(record.get("Name") or ""),
+                            self.lightning_link(sobject, record_id),
+                            company=company,
+                            state=state,
+                            account_id=str(account.get("Id") or ""),
+                        )
+                    )
+            for record in account_rows:
+                company = str(record.get("Name") or "")
+                state = str(record.get("BillingState") or "")
+                key = db.canonical_entity_key(company, state)
+                if key not in resolved:
+                    continue
+                record_id = str(record["Id"])
+                resolved[key][1].append(
+                    SalesforceRecordRef(
+                        "Account",
+                        record_id,
+                        company,
+                        self.lightning_link("Account", record_id),
+                        company=company,
+                        state=state,
+                        account_id=record_id,
+                    )
+                )
+        return resolved
 
     def member_status_exists(self, campaign_id: str) -> bool:
         """Return whether the honest non-response member status is configured."""
@@ -451,17 +594,27 @@ class SalesforceCampaignGateway:
 
     def existing_members(self, campaign_id: str, record_ids: list[str]) -> set[str]:
         """Return Lead/Contact IDs already present in the selected Campaign."""
+        return set(self.member_records(campaign_id, record_ids))
+
+    def member_records(
+        self, campaign_id: str, record_ids: list[str]
+    ) -> dict[str, tuple[str, str]]:
+        """Return member target ID mapped to CampaignMember ID and current status."""
         if not record_ids:
-            return set()
+            return {}
         quoted = ",".join(f"'{_soql_literal(item)}'" for item in record_ids)
         soql = (
-            "SELECT Id,LeadId,ContactId FROM CampaignMember "
+            "SELECT Id,LeadId,ContactId,Status FROM CampaignMember "
             f"WHERE CampaignId='{campaign_id}' AND (LeadId IN ({quoted}) "
             f"OR ContactId IN ({quoted}))"
         )
         records = self._get("query", {"q": soql}).get("records") or []
         return {
-            str(record.get("LeadId") or record.get("ContactId")) for record in records
+            str(record.get("LeadId") or record.get("ContactId")): (
+                str(record.get("Id") or ""),
+                str(record.get("Status") or ""),
+            )
+            for record in records
         }
 
     def create_campaign(self, payload: dict[str, object]) -> CreateResult:
@@ -525,7 +678,9 @@ class SalesforceCampaignGateway:
         )
         if not link.success:
             return CreateResult(
-                False, note.record_id, error=f"note created but not linked: {link.error}"
+                False,
+                note.record_id,
+                error=f"note created but not linked: {link.error}",
             )
         return note
 

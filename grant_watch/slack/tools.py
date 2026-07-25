@@ -26,6 +26,12 @@ from .contact_enrichment import (  # re-export: search.py and tests call these
     enrich_lead_contact,
 )
 from .search import search_leads
+from .salesforce_campaign_tools import (
+    CAMPAIGN_BATCH_TOOL_SCHEMA,
+    CAMPAIGN_CREATE_TOOL_SCHEMA,
+    salesforce_campaign_batch_preview,
+    salesforce_campaign_create_preview,
+)
 from .source_status import SOURCE_STATUS_TOOL_SCHEMA, source_inventory_status
 
 Progress = Callable[[str], None]
@@ -40,6 +46,8 @@ _NOOP: Progress = _noop
 # Tool schemas passed to the Anthropic API (the model picks; we execute).
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     SOURCE_STATUS_TOOL_SCHEMA,
+    CAMPAIGN_BATCH_TOOL_SCHEMA,
+    CAMPAIGN_CREATE_TOOL_SCHEMA,
     {
         "name": "web_search",
         "description": "Search the public web. Returns real titles, URLs and "
@@ -131,31 +139,6 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "salesforce_campaign_create_preview",
-        "description": "Prepare, but DO NOT execute, an immutable preview for creating "
-        "a new Salesforce Campaign. Use only after the user explicitly "
-        "asks to create one and has supplied a name. A Slack confirmation "
-        "button performs the later write.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "campaign_type": {"type": "string", "default": "Other"},
-                "status": {"type": "string", "default": "Planned"},
-                "is_active": {"type": "boolean", "default": True},
-                "owner_id": {
-                    "type": "string",
-                    "description": "confirmed Salesforce User ID",
-                },
-                "owner_label": {"type": "string"},
-                "start_date": {"type": "string"},
-                "end_date": {"type": "string"},
-                "description": {"type": "string"},
-            },
-            "required": ["name"],
-        },
-    },
-    {
         "name": "salesforce_campaign_members_preview",
         "description": "Prepare, but DO NOT execute, an exact preview for adding a "
         "frozen list of Grant lead IDs to a human-confirmed Campaign. "
@@ -188,6 +171,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                 },
                 "allow_org_leads": {"type": "boolean", "default": False},
+                "allow_resolved_only": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Only after explicit approval to exclude unresolved orgs.",
+                },
             },
             "required": ["campaign_link"],
         },
@@ -400,7 +388,7 @@ def lead_stats(
     column = columns.get(group_by or "grade")
     if column is None:
         return f"ERROR: unsupported grouping '{group_by}'."
-    where = ["COALESCE(status,'new') != 'dead'"]
+    where = [db.SEARCHABLE_LEAD_PREDICATE]
     params: list[str] = []
     if state:
         where.append("UPPER(state)=?")
@@ -461,7 +449,9 @@ def resolve_lead_by_name(
             f"ERROR: no Grant lead is named {entity!r} — run a search first so the "
             "lead exists, then ask again."
         )
-    listing = ", ".join(f"#{r['id']} {r['entity_name']} ({r['state']})" for r in rows[:5])
+    listing = ", ".join(
+        f"#{r['id']} {r['entity_name']} ({r['state']})" for r in rows[:5]
+    )
     return (
         f"ERROR: several Grant leads match {entity!r}: {listing} — ask the user "
         "which Lead # they mean."
@@ -628,57 +618,6 @@ def salesforce_campaign_search(name_or_link: str) -> str:
     )
 
 
-def salesforce_campaign_create_preview(
-    args: dict[str, Any],
-    requester_slack: str,
-    workspace: str,
-    channel: str,
-    thread_ts: str,
-) -> str:
-    """Persist a requester-bound Campaign creation preview and return its marker."""
-    from ..enrich import salesforce_campaigns as crm
-
-    gateway = crm.SalesforceCampaignGateway()
-    owner_id = str(args.get("owner_id", ""))
-    owner_label = str(args.get("owner_label", "Salesforce integration user"))
-    if not owner_id:
-        from .. import persequor_client
-
-        requester_email = persequor_client.rep_email_for(requester_slack) or ""
-        owners = gateway.find_active_user_by_email(requester_email)
-        if len(owners) == 1:
-            owner_id = owners[0].record_id
-            owner_label = owners[0].name
-    draft = crm.CampaignDraft(
-        name=str(args.get("name", "")),
-        campaign_type=str(args.get("campaign_type", "Other")),
-        status=str(args.get("status", "Planned")),
-        is_active=bool(args.get("is_active", True)),
-        owner_id=owner_id,
-        owner_label=owner_label,
-        start_date=str(args.get("start_date", "")),
-        end_date=str(args.get("end_date", "")),
-        description=str(args.get("description", "")),
-    )
-    try:
-        action = crm.prepare_campaign_creation(
-            db.connect(),
-            gateway,
-            workspace,
-            channel,
-            thread_ts,
-            requester_slack,
-            draft,
-        )
-    except (ValueError, PermissionError, KeyError, requests.RequestException) as exc:
-        return (
-            f"ERROR: Campaign preview failed ({type(exc).__name__}): {str(exc)[:180]}"
-        )
-    return _crm_action_result(
-        action.action_id, action.nonce, action.preview, action.expires_at
-    )
-
-
 def salesforce_campaign_members_preview(
     args: dict[str, Any],
     requester_slack: str,
@@ -711,9 +650,16 @@ def salesforce_campaign_members_preview(
                 raise PermissionError(
                     "search snapshot is stale or belongs to another thread"
                 )
-            lead_ids = [
-                int(item) for item in json.loads(str(snapshot["result_lead_ids_json"]))
-            ]
+            stored_ids = json.loads(str(snapshot["result_lead_ids_json"]))
+            if (
+                not bool(snapshot["result_complete"])
+                or snapshot["total_count"] is None
+                or len(stored_ids) != int(snapshot["total_count"])
+            ):
+                raise ValueError(
+                    "search snapshot is incomplete; run the complete state/tier batch tool"
+                )
+            lead_ids = [int(item) for item in stored_ids]
         action = crm.prepare_membership(
             conn,
             gateway,
@@ -725,6 +671,7 @@ def salesforce_campaign_members_preview(
             lead_ids,
             supplied_links=links,
             allow_org_leads=bool(args.get("allow_org_leads", False)),
+            allow_resolved_only=bool(args.get("allow_resolved_only", False)),
         )
     except (ValueError, PermissionError, KeyError, requests.RequestException) as exc:
         return f"ERROR: Campaign member preview failed ({type(exc).__name__}): {str(exc)[:180]}"
@@ -881,6 +828,11 @@ def run_tool(
     if name == "salesforce_campaign_members_preview":
         p("Resolving Campaign members")
         return salesforce_campaign_members_preview(
+            args, requester_slack, workspace, channel, thread_ts
+        ), None
+    if name == "salesforce_campaign_batch_preview":
+        p("Freezing complete Campaign batches")
+        return salesforce_campaign_batch_preview(
             args, requester_slack, workspace, channel, thread_ts
         ), None
     if name == "lead_stats":

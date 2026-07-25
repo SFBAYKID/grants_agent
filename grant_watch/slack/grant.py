@@ -24,7 +24,7 @@ from typing import Any, Protocol  # Slack Bolt event/view payloads are runtime-s
 from weakref import WeakValueDictionary
 
 from dotenv import load_dotenv
-from slack_bolt import Ack, App
+from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
 
@@ -194,118 +194,9 @@ def create_app() -> App:
     app = App(token=os.environ["SLACK_BOT_TOKEN"])
 
     # ------------------------------------------------------ Salesforce approvals
-    @app.action("salesforce_confirm")
-    def salesforce_confirm(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
-        """Execute one requester-bound, immutable Salesforce create preview."""
-        ack()
-        from ..enrich import salesforce_campaigns as campaigns
+    from . import salesforce_actions
 
-        user_id = str((body.get("user") or {}).get("id") or "")
-        channel = str((body.get("channel") or {}).get("id") or "")
-        if not _in_configured_channel({"channel": channel}):
-            _thread_reply(
-                client,
-                body,
-                "Salesforce was not changed because this is not the Grant channel.",
-            )
-            return
-        workspace = _workspace_id(body)
-        thread_ts = _interaction_thread_ts(body)
-        try:
-            value = json.loads(str(body["actions"][0]["value"]))
-            action_id = str(value["action_id"])
-            nonce = str(value["nonce"])
-        except (KeyError, TypeError, json.JSONDecodeError):
-            _thread_reply(
-                client, body, "Salesforce approval data was malformed; nothing changed."
-            )
-            return
-        if not _active_human_channel_member(client, user_id, channel):
-            _thread_reply(
-                client,
-                body,
-                "I couldn't verify you as an active member of this Grant channel, "
-                "so Salesforce was not changed.",
-            )
-            return
-        conn = db.connect()
-        try:
-            result = campaigns.confirm_action(
-                conn,
-                campaigns.SalesforceCampaignGateway(),
-                action_id,
-                nonce,
-                workspace,
-                channel,
-                thread_ts,
-                user_id,
-            )
-        except TimeoutError:
-            # An expired preview must offer the way forward, not a
-            # dead end (Chase hit this live, 2026-07-18).
-            _thread_reply(
-                client,
-                body,
-                "Salesforce was not changed - this approval "
-                "preview expired before the tap. Ask me again "
-                "(for example: add Breann Green to Salesforce) "
-                "and I'll rebuild it with current data.",
-            )
-            return
-        except PermissionError as exc:
-            _thread_reply(client, body, f"Salesforce was not changed: {str(exc)}")
-            return
-        except ValueError:
-            try:
-                result = campaigns.stored_action_result(
-                    conn, action_id, workspace, channel, thread_ts, user_id
-                )
-            except (PermissionError, ValueError) as exc:
-                _thread_reply(client, body, f"Salesforce was not changed: {str(exc)}")
-                return
-        if result.added > 0:
-            added_rows = conn.execute(
-                """SELECT lead_id FROM crm_action_items
-                   WHERE action_id=? AND state='added' AND lead_id IS NOT NULL""",
-                (action_id,),
-            ).fetchall()
-            for item in added_rows:
-                lead_id = int(item["lead_id"])
-                db.record_outcome(
-                    conn,
-                    lead_id,
-                    None,
-                    user_id,
-                    "campaign_added",
-                    f"salesforce-action:{action_id}:{lead_id}",
-                )
-        _thread_reply(client, body, result.message)
-
-    @app.action("salesforce_cancel")
-    def salesforce_cancel(ack: Ack, body: dict[str, Any], client: WebClient) -> None:
-        """Cancel a ready Salesforce preview for its initiating user."""
-        ack()
-        from ..enrich import salesforce_campaigns as campaigns
-
-        action_id = str(body["actions"][0]["value"])
-        user_id = str((body.get("user") or {}).get("id") or "")
-        channel = str((body.get("channel") or {}).get("id") or "")
-        if not _in_configured_channel({"channel": channel}):
-            _thread_reply(
-                client,
-                body,
-                "Nothing was changed because this is not the Grant channel.",
-            )
-            return
-        if campaigns.cancel_action(db.connect(), action_id, user_id):
-            _thread_reply(client, body, "Cancelled — Salesforce was not changed.")
-        else:
-            _thread_reply(
-                client,
-                body,
-                "That preview was already handled or belongs to another user; "
-                "Salesforce was not changed by this click.",
-            )
+    salesforce_actions.register(app)
 
     from . import proactive_actions
 

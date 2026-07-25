@@ -244,12 +244,31 @@ or *"No record found — this is net-new."* This turns a raw lead into an action
   CampaignMemberStatus, organization-only Lead, and CampaignMember records. It cannot update/delete
   existing CRM records. Every execution requires an immutable Slack preview, one-time nonce, same
   requester/channel, short expiry, and a final button confirmation. The feature flag defaults off.
+  Complete state/tier requests use a durable parent batch with one isolated child per Campaign.
+  The server—not the model or an export—selects and hashes every source row, aggregates all
+  contributing lead IDs/grades under an NCES identity when available, freezes exact source and
+  organization counts, shares normal search's dead-row exclusion, and refuses the 201st unique
+  organization instead of truncating. The manifest separately freezes the exact approved subset;
+  click-time verification requires every included organization to map one-to-one to the child
+  action before any Salesforce request. Any
+  unresolved or ambiguous organization blocks confirmation; an explicitly approved resolved-only
+  subset carries an immutable completion mode and remains permanently `partial_by_user`.
   An organization-only Lead is owned by the requesting rep: Grant maps Slack ID to the approved roster
   email, requires exactly one active Salesforce User with that email, and freezes its `OwnerId` in the
   preview. Missing or ambiguous ownership fails before an action is stored; the integration user is
   never an implicit fallback owner.
   Every create request also requires the OAuth instance host to equal the configured HTTPS writer
   host and Salesforce's live Organization ID/sandbox flag to match explicit environment allowlists.
+  Each mutating request is durably `in_flight` before HTTP. Returned IDs move to verification-pending,
+  and exact CampaignMember readback with the expected non-response status is required before Grant
+  reports `added`, records a campaign outcome, or schedules a follow-up. A timeout or missing readback
+  becomes `unknown`; Slack retains a requester-bound read-only reconciliation control, and replay
+  rechecks the frozen writer org before reading Salesforce and never blindly resubmits.
+- **Campaign identity is strict.** Leads require exact Company plus nonblank exact state. Contacts
+  bind through exact Account name/ID and `Account.BillingState`; `Contact.MailingState` is not an
+  organization identity. Existing Accounts are checked before organization-only Lead creation.
+  Blank state, cross-state matches, multiple exact records, unbound NCES rows, and two authoritative
+  organizations resolving to one Salesforce member remain blocked.
 - **Sandbox for all development.** `test.salesforce.com`, sandbox `monarchdev`
   (`...--monarchdev.sandbox.my.salesforce.com`). Production Salesforce is never touched during dev.
 - **Production uses SEPARATE credentials from sandbox** — different org, different Connected App.

@@ -1,4 +1,4 @@
-# FINDINGS — Integrated Grant Lead Research (through 2026-07-15)
+# FINDINGS — Integrated Grant Lead Research (through 2026-07-24)
 
 This records live integrations, verified lead findings, and open implementation work. It is not the
 complete nationwide candidate list. See `docs/source_inventory/README.md` and its generated CSVs for
@@ -9,7 +9,26 @@ the canonical discovery catalog.
 - **verified (offline tests):** typed package, versioned truth/event schema, official-source
   pollers, scoring/dedup, Slack proactive/search tools, Excel/Google Sheets export jobs,
   contact integrity gates, Persequor outbox/retry, NCES enrichment, Salesforce reader snapshots,
-  and the disabled create-only Salesforce Campaign approval workflow.
+  and the feature-gated create-only Salesforce Campaign approval workflow. The Campaign path now has
+  complete server-selected batch manifests, an exact one-to-one approved-subset binding, blocked
+  unresolved identity, per-request in-flight records, post-create member verification, and a
+  retained read-only timeout-reconciliation control.
+- **verified (offline incident regression, 2026-07-24):** the exact IL 15 Gold/18 Silver,
+  FL 1 Gold/4 Silver, and TX 9 Gold/20 Silver matrix freezes all 67 source rows into three isolated
+  Campaign actions. Tests prove no confirmation is produced for unresolved/Account-only identity,
+  the 201st organization is rejected rather than truncated, a successful POST without readback is
+  not called added, an indeterminate request is reconciled without duplicate creation, and a
+  multi-Campaign resolved-only batch can never be upgraded from `partial_by_user` to complete.
+- **verified (Slack playground delivery, 2026-07-24):** a clearly labeled Campaign-batch smoke
+  result was posted and read back in `#monarch-bot-playground`; it reported the offline 67-row
+  regression and performed zero Salesforce writes. This verifies Slack rendering/delivery only,
+  not live event ingestion or Salesforce membership.
+- **verified (monarchdev sandbox E2E, 2026-07-25):** two human-authored, multi-turn Slack threads
+  collected Campaign settings, ignored typed approval text, required requester-bound button taps,
+  added two exact Leads with CampaignMember readback, repeated the same add without duplicates,
+  blocked an unresolved organization with no approval control, and added only the explicitly
+  approved resolved subset. Salesforce, Slack, and the immutable action/batch ledgers agreed.
+  Production Salesforce writes remain separately gated and `needs-testing`.
 - **verified (live read-only, 2026-07-13/14):** USAspending, Grants.gov, SAM.gov, WEBS fetch/parser,
   California Grants Portal, OregonBuys recent-bids fetch/table parse, and NCES district data.
 - **needs-testing:** Salesforce and Persequor live round trips, a positive OregonBuys security bid,

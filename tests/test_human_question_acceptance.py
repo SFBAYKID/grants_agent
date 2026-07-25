@@ -90,7 +90,10 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "discovery-readonly-search",
         "source-discovery",
         "what did the raw discovery search find in California?",
-        expected_reply=("completed one recent discovery search", "45 potential results"),
+        expected_reply=(
+            "completed one recent discovery search",
+            "45 potential results",
+        ),
     ),
     HumanQuestion(
         "discovery-paid-refusal",
@@ -293,10 +296,26 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         expected_reply=("2026 School Security",),
     ),
     HumanQuestion(
+        "campaign-create-name-only",
+        "salesforce-write",
+        "Name it 2026 California School Security.",
+        context=(
+            "Chase: I need a new Campaign.",
+            "Grant: What would you like to name it?",
+        ),
+        forbidden_tools=("salesforce_campaign_create_preview",),
+        expected_reply=("Type", "Status", "Active", "date"),
+    ),
+    HumanQuestion(
         "campaign-create",
         "salesforce-write",
-        "Create a new campaign named 2026 California School Security.",
-        context=("Grant: No matching Campaign exists. Want me to prepare a new one?",),
+        "Use Type Other, Status Planned, Active, with no dates.",
+        context=(
+            "Chase: I need a new Campaign.",
+            "Grant: What would you like to name it?",
+            "Chase: Name it 2026 California School Security.",
+            "Grant: What Type, Status, Active setting, and dates should I use?",
+        ),
         expected_tools=("salesforce_campaign_create_preview",),
         expected_reply=("preview",),
         forbidden_reply=("campaign was created", "created in salesforce"),
@@ -551,6 +570,15 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         forbidden_reply=("person was found", "Salesforce was changed"),
     ),
     HumanQuestion(
+        "campaign-complete-state-tiers",
+        "salesforce-write",
+        "Add every Illinois and Texas gold and silver lead to their matching campaigns.",
+        context=("Grant: Confirmed IL and TX Campaign links are in the thread.",),
+        expected_tools=("salesforce_campaign_batch_preview",),
+        expected_reply=("preview", "Campaign"),
+        forbidden_reply=("export the IDs", "Salesforce was changed"),
+    ),
+    HumanQuestion(
         "capabilities-casual",
         "chitchat",
         "Grant, what can you actually help me do in here?",
@@ -662,6 +690,7 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         forbidden_tools=(
             "salesforce_campaign_create_preview",
             "salesforce_campaign_members_preview",
+            "salesforce_campaign_batch_preview",
         ),
         allowed_intents=("question", "chitchat"),
     ),
@@ -722,6 +751,10 @@ def _canned_tool(
             "Campaign member preview ready. Nothing has been written; click the "
             "confirmation button to execute."
         ),
+        "salesforce_campaign_batch_preview": (
+            "Complete state/tier batch frozen with one isolated Campaign preview per "
+            "state. Nothing has been written; inspect each confirmation button."
+        ),
     }
     return outcomes.get(name, f"Safe canned result for {name}."), None
 
@@ -771,6 +804,59 @@ def test_real_model_understands_human_question_families(
         assert any(fragment.lower() in reply.lower() for fragment in alternatives)
     for forbidden in case.forbidden_reply:
         assert forbidden.lower() not in reply.lower()
+
+
+@pytest.mark.skipif(
+    os.environ.get("GRANT_LLM_ACCEPTANCE") != "1",
+    reason="real-model acceptance requires explicit GRANT_LLM_ACCEPTANCE=1",
+)
+def test_campaign_settings_followup_passes_exact_preview_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The model carries the named Campaign into one exact, fully specified preview."""
+    load_dotenv()
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    def canned_tool(
+        name: str,
+        args: dict[str, object],
+        *_pos: object,
+        **_kw: object,
+    ) -> tuple[str, None]:
+        """Capture exact model arguments while keeping every tool write-free."""
+        captured.append((name, dict(args)))
+        if name == "salesforce_campaign_create_preview":
+            return "Campaign preview ready; click its confirmation button.", None
+        return f"Safe canned result for {name}.", None
+
+    monkeypatch.setattr(tools, "run_tool", canned_tool)
+    output = conversation.respond(
+        "Use Type Other, Status Planned, Active, with no dates.",
+        None,
+        thread_context=[
+            "Chase: I need a new Campaign.",
+            "Grant: What would you like to name it?",
+            "Chase: Name it 2026 California School Security.",
+            "Grant: What Type, Status, Active setting, and dates should I use?",
+        ],
+        requester_slack="U_TEST",
+        workspace="T_TEST",
+        channel="C_TEST",
+        thread_ts="THREAD_TEST",
+    )
+    preview_calls = [
+        args for name, args in captured if name == "salesforce_campaign_create_preview"
+    ]
+    assert len(preview_calls) == 1
+    args = preview_calls[0]
+    assert args["name"] == "2026 California School Security"
+    assert args["campaign_type"] == "Other"
+    assert args["status"] == "Planned"
+    assert args["is_active"] is True
+    assert args["date_mode"] == "none"
+    assert not args.get("start_date")
+    assert not args.get("end_date")
+    assert "preview" in str(output["reply"]).lower()
 
 
 def test_matrix_covers_every_documented_human_question_family() -> None:

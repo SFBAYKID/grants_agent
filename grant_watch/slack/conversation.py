@@ -261,15 +261,26 @@ SALESFORCE CAMPAIGNS — EXPLICIT APPROVALS, NEVER SILENT WRITES:
 - Ask for the Campaign name or link, then call salesforce_campaign_search. Show the
   result and ask the user to confirm the exact Campaign. Never select among multiple
   or fuzzy results yourself.
-- If none exists, offer a new Campaign. Only after the user gives the name and says to
-  create it, call salesforce_campaign_create_preview. The preview gets a one-time Slack
-  confirmation button; typed yes alone never performs the write.
+- If none exists, offer a new Campaign. Before calling
+  salesforce_campaign_create_preview, collect or explicitly confirm ALL creation
+  settings: Campaign name, Type, Status, Active yes/no, and either both exact dates or
+  an explicit "no dates." A name alone is never preview-ready. Ask for missing settings;
+  never infer tool defaults. Call the preview tool exactly once after the complete
+  settings are explicit. The preview gets a one-time Slack confirmation button; typed
+  yes alone never performs the write.
 - For a confirmed Campaign, call salesforce_campaign_members_preview with the exact
   Grant lead IDs. First leave allow_org_leads=false. If an organization is unmatched,
   ask the user for a Lead/Contact link. If they cannot find one, OFFER organization-only
   Lead creation. Only after explicit approval call it again with allow_org_leads=true.
 - Organization-only means the real organization fills Company and LastName and all
   person/contact fields stay blank. Never imply a person was found.
+- When the request covers complete tiers for one or more states, call
+  salesforce_campaign_batch_preview with every state, tier, and Campaign in ONE tool
+  call. Never export IDs or split gold and silver into separate hidden steps. The tool
+  freezes source-row and unique-organization counts and returns one isolated approval
+  per Campaign. If any target is unresolved, it returns no buttons. Only pass
+  allow_resolved_only=true after the user explicitly accepts excluding the disclosed
+  organizations.
 - Campaign and member tools prepare audited previews only. Tell the user to inspect and
   click the confirmation button. Never claim Salesforce was changed from a preview.
 
@@ -398,23 +409,27 @@ _CRM_ACTION_RE = re.compile(
 )
 
 
-def _extract_pending_action(text: str) -> tuple[str, dict[str, str] | None]:
-    """Remove a server-only CRM marker and return its validated button metadata."""
-    match = _CRM_ACTION_RE.search(text)
-    if match is None:
-        return text, None
+def _extract_pending_actions(text: str) -> tuple[str, list[dict[str, str]]]:
+    """Remove all server-only CRM markers and return validated button metadata."""
+    matches = list(_CRM_ACTION_RE.finditer(text))
+    if not matches:
+        return text, []
     clean = _CRM_ACTION_RE.sub("", text).strip()
-    try:
-        value = json.loads(match.group(1))
-        action = {
-            "action_id": str(value["action_id"]),
-            "nonce": str(value["nonce"]),
-            "preview": str(value["preview"]),
-            "expires_at": str(value["expires_at"]),
-        }
-    except (KeyError, TypeError, json.JSONDecodeError):
-        return clean, None
-    return clean, action
+    actions: list[dict[str, str]] = []
+    for match in matches:
+        try:
+            value = json.loads(match.group(1))
+            actions.append(
+                {
+                    "action_id": str(value["action_id"]),
+                    "nonce": str(value["nonce"]),
+                    "preview": str(value["preview"]),
+                    "expires_at": str(value["expires_at"]),
+                }
+            )
+        except (KeyError, TypeError, json.JSONDecodeError):
+            continue
+    return clean, actions
 
 
 def _normalize_action_intent(
@@ -833,9 +848,8 @@ def respond(
                         )
                     if artifact:
                         files.append(artifact)
-                    text, action = _extract_pending_action(text)
-                    if action is not None:
-                        pending_actions.append(action)
+                    text, actions = _extract_pending_actions(text)
+                    pending_actions.extend(actions)
                     tool_result_cache[cache_key] = text
                     if single_execution_key:
                         single_execution_cache[single_execution_key] = text

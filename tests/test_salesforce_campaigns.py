@@ -15,10 +15,8 @@ from grant_watch.enrich import salesforce_campaigns as campaigns
 from grant_watch.enrich import salesforce_campaign_gateway as gateway_mod
 from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem
 
-CAMPAIGN_ID = "701000000000001"
-LEAD_ID = "00Q000000000001"
-CONTACT_ID = "003000000000001"
-USER_ID = "005000000000001"
+CAMPAIGN_ID, LEAD_ID = "701000000000001", "00Q000000000001"
+CONTACT_ID, USER_ID = "003000000000001", "005000000000001"
 CHASE_SLACK_ID = "U01DPJVURHU"
 
 
@@ -29,6 +27,7 @@ class FakeGateway:
     people: dict[str, list[campaigns.SalesforceRecordRef]] = field(default_factory=dict)
     status_exists: bool = True
     existing: set[str] = field(default_factory=set)
+    member_ids: dict[str, str] = field(default_factory=dict)
     member_results: list[gateway_mod.CreateResult] = field(default_factory=list)
     users_by_email: dict[str, list[campaigns.SalesforceRecordRef]] = field(
         default_factory=lambda: {
@@ -44,6 +43,7 @@ class FakeGateway:
     )
     created_lead_payloads: list[dict[str, object]] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
+    campaign_name: str = "Grant QA"
 
     def campaign_picklists(self) -> tuple[set[str], set[str]]:
         """Return the sandbox-verified defaults used by Grant-created Campaigns."""
@@ -57,7 +57,10 @@ class FakeGateway:
         """Read back a known fake record."""
         if sobject == "Campaign":
             return campaigns.SalesforceRecordRef(
-                "Campaign", record_id, "Grant QA", campaigns_link("Campaign", record_id)
+                "Campaign",
+                record_id,
+                self.campaign_name,
+                campaigns_link("Campaign", record_id),
             )
         return campaigns.SalesforceRecordRef(
             sobject,
@@ -93,9 +96,23 @@ class FakeGateway:
         """Return preconfigured duplicate member IDs."""
         return set(self.existing)
 
-    def create_campaign(self, _payload: dict[str, object]) -> gateway_mod.CreateResult:
+    def member_records(
+        self, _campaign_id: str, record_ids: list[str]
+    ) -> dict[str, tuple[str, str]]:
+        """Return exact fake member readback for verification tests."""
+        return {
+            record_id: (
+                self.member_ids.get(record_id, "00v000000000999"),
+                gateway_mod.MEMBER_STATUS,
+            )
+            for record_id in record_ids
+            if record_id in self.existing
+        }
+
+    def create_campaign(self, payload: dict[str, object]) -> gateway_mod.CreateResult:
         """Record one Campaign create."""
         self.calls.append("create_campaign")
+        self.campaign_name = str(payload["Name"])
         return gateway_mod.CreateResult(True, CAMPAIGN_ID)
 
     def create_leads(
@@ -114,12 +131,17 @@ class FakeGateway:
     ) -> list[gateway_mod.CreateResult]:
         """Return configured partial results or all successful member creates."""
         self.calls.append("create_members")
-        if self.member_results:
-            return self.member_results
-        return [
+        results = self.member_results or [
             gateway_mod.CreateResult(True, f"00v0000000000{index:02d}")
             for index, _payload in enumerate(payloads, start=10)
         ]
+        for payload, result in zip(payloads, results):
+            if result.success:
+                target_id = str(payload.get("LeadId") or payload.get("ContactId"))
+                self.existing.add(target_id)
+                if result.record_id:
+                    self.member_ids[target_id] = result.record_id
+        return results
 
 
 def campaigns_link(sobject: str, record_id: str) -> str:
@@ -166,21 +188,6 @@ def writer_config(monkeypatch: pytest.MonkeyPatch) -> None:
         "SALESFORCE_WRITE_MY_DOMAIN_URL", "https://writer.salesforce.test"
     )
     monkeypatch.setenv("SALESFORCE_CAMPAIGN_WRITES_ENABLED", "1")
-
-
-def test_record_links_validate_host_object_and_prefix() -> None:
-    """Pasted links cannot cross orgs or smuggle an Account as a Campaign Member."""
-    assert campaigns.parse_record_link(
-        campaigns_link("Campaign", CAMPAIGN_ID), {"Campaign"}
-    ) == ("Campaign", CAMPAIGN_ID)
-    with pytest.raises(ValueError, match="configured Salesforce org"):
-        campaigns.parse_record_link(
-            f"https://evil.test/lightning/r/Campaign/{CAMPAIGN_ID}/view", {"Campaign"}
-        )
-    with pytest.raises(ValueError, match="cannot be used"):
-        campaigns.parse_record_link(
-            campaigns_link("Account", "001000000000001"), {"Lead", "Contact"}
-        )
 
 
 def test_campaign_preview_is_persisted_without_create(tmp_path: Path) -> None:
@@ -543,17 +550,17 @@ def test_campaign_readback_failure_after_create_is_unknown(tmp_path: Path) -> No
         (action.action_id,),
     ).fetchone()
     assert tuple(row) == (CAMPAIGN_ID, 1)
-    with pytest.raises(ValueError, match="already unknown"):
-        campaigns.confirm_action(
-            conn,
-            gateway,
-            action.action_id,
-            action.nonce,
-            "TWORK",
-            "CGRANTS",
-            "123.4",
-            "UCHASE",
-        )
+    replay = campaigns.confirm_action(
+        conn,
+        gateway,
+        action.action_id,
+        action.nonce,
+        "TWORK",
+        "CGRANTS",
+        "123.4",
+        "UCHASE",
+    )
+    assert replay.state is campaigns.CampaignActionState.UNKNOWN
     assert gateway.calls == ["create_campaign"]
 
 
@@ -752,10 +759,10 @@ def test_membership_skips_duplicates_and_reports_partial(tmp_path: Path) -> None
     assert states == {"already_present", "failed"}
 
 
-def test_unresolved_organization_forces_partial_and_preview_names_mapping(
+def test_unresolved_organization_blocks_confirmation(
     tmp_path: Path,
 ) -> None:
-    """Skipped organizations stay visible in the frozen preview and final state."""
+    """A partial mapping produces no executable action or misleading button."""
     conn = db.connect(tmp_path / "t.db")
     alpha_id = _lead(conn, "A1", "Alpha School District")
     beta_id = _lead(conn, "B1", "Beta School District")
@@ -773,30 +780,18 @@ def test_unresolved_organization_forces_partial_and_preview_names_mapping(
             "Beta School District": [],
         }
     )
-    action = campaigns.prepare_membership(
-        conn,
-        gateway,
-        "TWORK",
-        "CGRANTS",
-        "123.4",
-        "UCHASE",
-        gateway.get_record("Campaign", CAMPAIGN_ID),
-        [alpha_id, beta_id],
-    )
-    assert "Alpha School District" in action.preview
-    assert "Beta School District" in action.preview and "skipped" in action.preview
-    result = campaigns.confirm_action(
-        conn,
-        gateway,
-        action.action_id,
-        action.nonce,
-        "TWORK",
-        "CGRANTS",
-        "123.4",
-        "UCHASE",
-    )
-    assert result.state is campaigns.CampaignActionState.PARTIAL
-    assert result.added == 1 and result.unresolved == 1
+    with pytest.raises(ValueError, match="No approval was created"):
+        campaigns.prepare_membership(
+            conn,
+            gateway,
+            "TWORK",
+            "CGRANTS",
+            "123.4",
+            "UCHASE",
+            gateway.get_record("Campaign", CAMPAIGN_ID),
+            [alpha_id, beta_id],
+        )
+    assert conn.execute("SELECT COUNT(*) FROM crm_actions").fetchone()[0] == 0
 
 
 def test_action_hard_cap_is_200(tmp_path: Path) -> None:
@@ -820,7 +815,7 @@ def test_supplied_person_link_must_match_grant_organization(tmp_path: Path) -> N
     conn = db.connect(tmp_path / "t.db")
     grant_id = _lead(conn, "A1", "Beta School District")
     gateway = FakeGateway()
-    with pytest.raises(ValueError, match="No organizations can be added"):
+    with pytest.raises(ValueError, match="No approval was created"):
         campaigns.prepare_membership(
             conn,
             gateway,

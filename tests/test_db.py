@@ -134,7 +134,8 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
     ]
     # 13 (not 10): the "widen post kinds" migration is numbered above the droplet's
     # divergent 10-12 lineage so it is never masked as already-applied (see migrations.py).
-    # 14-26 add the rich award-card campaign schema (forward-only after 13).
+    # 14-26 add rich cards; 27 adds exact verified Salesforce Campaign batches;
+    # 28 enforces one ready Campaign-creation preview per requester/thread.
     assert versions == [
         1,
         2,
@@ -159,6 +160,8 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
         24,
         25,
         26,
+        27,
+        28,
     ]
     crm_tables = {
         row[0]

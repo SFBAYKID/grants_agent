@@ -87,7 +87,17 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
   User with that email, and shows that owner in the immutable preview. It never defaults new Leads to
   Chase or the integration user; missing/ambiguous ownership blocks preparation.
   This owner assignment was verified with one live synthetic Lead in the `monarchdev` sandbox on
-  2026-07-16. Campaign membership and production writes remain separately gated and needs-testing.
+  2026-07-16. Complete state/tier requests now freeze one durable server-selected batch and one
+  isolated approval per Campaign. Every approved organization must map one-to-one to that child
+  action; unresolved identity produces no confirmation button. Campaign members count as added only
+  after the returned CampaignMember ID and exact Salesforce readback agree. Timeout replay retains a
+  requester-bound read-only reconciliation button and never resubmits the write.
+  The IL/FL/TX 67-row Gold+Silver regression is verified offline. Live Campaign membership was
+  verified in the `monarchdev` sandbox on 2026-07-25: a multi-turn human-authored Slack thread
+  created a Campaign, added two exact existing Leads with verified CampaignMember readback, repeated
+  the add without duplicates, blocked one unresolved organization, and added only the explicitly
+  approved resolved subset. Typed approval text caused no write; requester-bound button taps did.
+  Production Salesforce writes remain separately gated and needs-testing.
 
 ## Slack app config
 
@@ -132,6 +142,13 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
   state-code, read-only discovery wording, confirm-first, and unconfigured-Salesforce error paths;
   permanent offline regressions now cover those routes. Delivery/readback was `verified`, while varied
   human `app_mention` ingestion remains `needs-testing` beyond the owner's successful status mention.
+- Campaign-batch smoke rendering/delivery was `verified` in `#monarch-bot-playground` on 2026-07-24
+  with a labeled, non-interactive result and readback. It performed zero Salesforce writes; live
+  Campaign membership was subsequently `verified` end to end in the `monarchdev` sandbox on
+  2026-07-25. The two created QA Campaigns each contain exactly the two approved Lead IDs with
+  `Identified by Grant` status; the idempotent retry created no duplicate, and the unresolved path
+  remained blocked until the requester explicitly chose a resolved-only subset. Production
+  Salesforce membership remains `needs-testing`.
 - The separate permanent core live verifier is `verified` for the exact Birmingham USAspending award
   and same-card official IT Systems Manager directory record. It makes no Slack or external write and
   does not claim a verified personal email or LinkedIn identity.

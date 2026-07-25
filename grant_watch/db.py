@@ -31,6 +31,7 @@ from .models import (
 
 # Default DB lives next to the repo root; git-ignored (*.db).
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "grant_watch.db"
+SEARCHABLE_LEAD_PREDICATE = "COALESCE(status, 'new') != 'dead'"
 
 
 def connect(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
@@ -460,16 +461,18 @@ def save_search_request(
     top_n: int | None,
     format_name: str,
     lead_ids: list[int],
+    total_count: int,
+    result_complete: bool,
 ) -> str:
-    """Persist one immutable completed search snapshot for follow-up CRM/export actions."""
+    """Persist one immutable search snapshot with explicit completeness evidence."""
     request_id = str(uuid.uuid4())
     now = _now()
     with conn:
         conn.execute(
             """INSERT INTO search_requests
                  (id,session_key,requested_by,filters_json,scope,top_n,format,state,
-                  result_lead_ids_json,created_at,updated_at)
-               VALUES (?,?,?,?,?,?,?,'complete',?,?,?)""",
+                  result_lead_ids_json,total_count,result_complete,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,'complete',?,?,?,?,?)""",
             (
                 request_id,
                 session_key,
@@ -479,6 +482,8 @@ def save_search_request(
                 top_n,
                 format_name or None,
                 json.dumps(lead_ids),
+                total_count,
+                int(result_complete),
                 now,
                 now,
             ),

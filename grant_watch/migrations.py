@@ -12,6 +12,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from .migration_runner import apply_migrations as _run_migrations
+from .migrations_campaign_batch import migration_27_exact_campaign_batches
+from .migrations_campaign_preview import migration_28_single_ready_campaign_creation
 from .migrations_rich import (
     migration_23_rich_snapshot_truth_and_retry_link,
     migration_24_atomic_proactive_daily_slots,
@@ -951,45 +954,19 @@ MIGRATIONS: tuple[Migration, ...] = (
         "exact NCES website for draft-ready org binding",
         migration_26_exact_nces_website,
     ),
+    Migration(
+        27,
+        "exact Salesforce Campaign batches and verified writes",
+        migration_27_exact_campaign_batches,
+    ),
+    Migration(
+        28,
+        "one ready Salesforce Campaign creation per thread",
+        migration_28_single_ready_campaign_creation,
+    ),
 )
 
 
 def apply_migrations(conn: sqlite3.Connection) -> None:
     """Apply every unapplied migration transactionally and record its version."""
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS schema_migrations (
-               version INTEGER PRIMARY KEY,
-               name TEXT NOT NULL,
-               applied_at TIMESTAMP NOT NULL
-           )"""
-    )
-    conn.commit()
-    applied = {
-        int(row[0]) for row in conn.execute("SELECT version FROM schema_migrations")
-    }
-    pending = [m for m in MIGRATIONS if m.version not in applied]
-    if not pending:
-        return
-    # Foreign-key enforcement OFF for the duration of the DDL run so a migration can
-    # REBUILD a table that a child table references (e.g. widening a CHECK on posts,
-    # referenced by engagement) via CREATE-copy-DROP-rename without tripping the child
-    # FK. This PRAGMA is a no-op inside a transaction, so it is toggled here, OUTSIDE the
-    # per-migration BEGIN/COMMIT, and restored afterward. Row ids are preserved by every
-    # rebuild, so no child reference is actually broken.
-    conn.execute("PRAGMA foreign_keys=OFF")
-    try:
-        for migration in pending:
-            try:
-                conn.execute("BEGIN IMMEDIATE")
-                migration.apply(conn)
-                conn.execute(
-                    "INSERT INTO schema_migrations(version, name, applied_at)"
-                    " VALUES (?,?,?)",
-                    (migration.version, migration.name, _now()),
-                )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-    finally:
-        conn.execute("PRAGMA foreign_keys=ON")
+    _run_migrations(conn, MIGRATIONS, _now)

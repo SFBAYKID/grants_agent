@@ -54,10 +54,10 @@ def record_matches_organization(
     record: SalesforceRecordRef, entity_name: str, state: str
 ) -> bool:
     """Require a supplied/found person record to belong to the Grant organization."""
-    if not record.company.strip():
+    if not record.company.strip() or not state.strip() or not record.state.strip():
         return False
     expected_name = db.canonical_entity_key(entity_name).partition("|")[0]
     record_name = db.canonical_entity_key(record.company).partition("|")[0]
     if expected_name != record_name:
         return False
-    return not (state and record.state and state.upper() != record.state.upper())
+    return state.strip().upper() == record.state.strip().upper()

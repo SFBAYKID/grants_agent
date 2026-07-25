@@ -463,10 +463,12 @@ def search_leads(
         # Named filter groups: the zero-result path re-counts with one group
         # dropped at a time to offer honest widen/broaden alternatives.
         groups: list[tuple[str, str, list[object]]] = [
-            ("base", "COALESCE(status, 'new') != 'dead'", [])
+            ("base", db.SEARCHABLE_LEAD_PREDICATE, [])
         ]
         if state:
-            groups.append(("the state filter", "UPPER(state) = ?", [state.strip().upper()]))
+            groups.append(
+                ("the state filter", "UPPER(state) = ?", [state.strip().upper()])
+            )
         if program:
             groups.append(
                 (
@@ -476,7 +478,9 @@ def search_leads(
                 )
             )
         if grade:
-            groups.append(("the grade filter", "lead_grade = ?", [grade.strip().lower()]))
+            groups.append(
+                ("the grade filter", "lead_grade = ?", [grade.strip().lower()])
+            )
         if amount_min is not None:
             groups.append(("the minimum amount", "amount >= ?", [amount_min]))
         if amount_max is not None:
@@ -619,9 +623,13 @@ def search_leads(
 
     if enrollment_filter_ready:
         if enrollment_min is not None:
-            groups.append(("the enrollment filter", "enrollment >= ?", [enrollment_min]))
+            groups.append(
+                ("the enrollment filter", "enrollment >= ?", [enrollment_min])
+            )
         if enrollment_max is not None:
-            groups.append(("the enrollment filter", "enrollment <= ?", [enrollment_max]))
+            groups.append(
+                ("the enrollment filter", "enrollment <= ?", [enrollment_max])
+            )
     if city_filter_ready and city.strip():
         groups.append(
             ("the city filter", "UPPER(location_city) = ?", [city.strip().upper()])
@@ -805,6 +813,8 @@ def search_leads(
                 None if scope_value == ResultScope.ALL.value else int(limit or 50),
                 export_value or "slack",
                 [int(row["id"]) for row in rows],
+                total,
+                len(rows) == total,
             )
         finally:
             writable.close()

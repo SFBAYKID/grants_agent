@@ -97,7 +97,8 @@ def candidates(
              LEFT JOIN leads l ON l.id=i.lead_id
             WHERE a.action_type='add_campaign_members'
               AND a.state IN ('complete','partial')
-              AND i.state='added' AND i.campaign_member_id IS NOT NULL
+              AND i.state='added' AND i.verification_state='verified'
+              AND i.campaign_member_id IS NOT NULL
               AND a.committed_at IS NOT NULL
               AND EXISTS (
                   SELECT 1 FROM crm_actions c
