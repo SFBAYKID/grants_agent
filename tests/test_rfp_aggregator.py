@@ -91,18 +91,33 @@ def test_two_target_states_in_one_row_is_dropped_never_misfiled() -> None:
 
 def test_past_due_row_is_dropped() -> None:
     """A row whose Close date has passed is not surfaced."""
-    row = _row("Access Control", "California DGS", "Jan 1, 2026", "Dec 1, 2025",
-               "State of California")
+    row = _row(
+        "Access Control",
+        "California DGS",
+        "Jan 1, 2026",
+        "Dec 1, 2025",
+        "State of California",
+    )
     assert rfp_aggregator.parse_starbridge(row, TODAY) == []
 
 
 def test_open_rfp_is_silver_regardless_of_posting_age() -> None:
     """An open RFP is SILVER whether posted recently or long ago — RFPs are never gold
     (Chase 2026-07-19: winning one is a lot of work with a low hit rate)."""
-    fresh = _row("Camera RFP", "California DGS", "Sep 1, 2026", "Jul 10, 2026",
-                 "State of California")
-    stale = _row("Camera RFP 2", "California DGS", "Sep 1, 2026", "Jan 1, 2026",
-                 "State of California")
+    fresh = _row(
+        "Camera RFP",
+        "California DGS",
+        "Sep 1, 2026",
+        "Jul 10, 2026",
+        "State of California",
+    )
+    stale = _row(
+        "Camera RFP 2",
+        "California DGS",
+        "Sep 1, 2026",
+        "Jan 1, 2026",
+        "State of California",
+    )
     g = rfp_aggregator.parse_starbridge(fresh, TODAY)[0]
     s = rfp_aggregator.parse_starbridge(stale, TODAY)[0]
     assert scoring.grade(g, today=TODAY).grade is LeadGrade.SILVER
@@ -121,8 +136,13 @@ def test_unavailable_status_row_is_dropped() -> None:
 
 def test_non_security_row_is_dropped() -> None:
     """A target-state row that is not physical security is excluded."""
-    row = _row("Janitorial Services", "California DGS", "Sep 1, 2026", "Jul 1, 2026",
-               "State of California cleaning contract")
+    row = _row(
+        "Janitorial Services",
+        "California DGS",
+        "Sep 1, 2026",
+        "Jul 1, 2026",
+        "State of California cleaning contract",
+    )
     assert rfp_aggregator.parse_starbridge(row, TODAY) == []
 
 
@@ -136,6 +156,16 @@ def test_poll_raises_when_listing_unreadable(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_poll_parses_a_mocked_listing(monkeypatch: pytest.MonkeyPatch) -> None:
     """poll() scrapes and parses; a good listing yields target-state items."""
+
+    class FrozenDate(date):
+        """Keep the recorded listing open at its recorded verification date."""
+
+        @classmethod
+        def today(cls) -> date:
+            """Return the fixture's stable verification date."""
+            return TODAY
+
     monkeypatch.setattr(rfp_aggregator, "_scrape", lambda url: _FIXTURE)
+    monkeypatch.setattr(rfp_aggregator, "date", FrozenDate)
     items = rfp_aggregator.poll()
     assert items and {i.state for i in items} <= set(rfp_aggregator.TARGET_STATES)
