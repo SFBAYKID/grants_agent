@@ -174,9 +174,24 @@ def test_orphaned_spinner_sweep_finalizes_stale_progress_messages() -> None:
             self.updated: list[tuple[str, str]] = []
             self._history = {
                 "messages": [
-                    {"user": "UBOT", "ts": f"{now - 600:.6f}", "text": "/ Searching for the contact…", "reply_count": 0},
-                    {"user": "UBOT", "ts": f"{now - 10:.6f}", "text": "| Thinking…", "reply_count": 0},
-                    {"user": "UHUMAN", "ts": f"{now - 900:.6f}", "text": "/ Searching for the contact…", "reply_count": 0},
+                    {
+                        "user": "UBOT",
+                        "ts": f"{now - 600:.6f}",
+                        "text": "/ Searching for the contact…",
+                        "reply_count": 0,
+                    },
+                    {
+                        "user": "UBOT",
+                        "ts": f"{now - 10:.6f}",
+                        "text": "| Thinking…",
+                        "reply_count": 0,
+                    },
+                    {
+                        "user": "UHUMAN",
+                        "ts": f"{now - 900:.6f}",
+                        "text": "/ Searching for the contact…",
+                        "reply_count": 0,
+                    },
                 ]
             }
 

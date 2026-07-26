@@ -74,7 +74,10 @@ def _general_email_on_page(page_text: str, email: str) -> bool:
     if email.lower() not in page_text.lower():
         return False
     localpart = email.split("@", 1)[0].lower()
-    return any(localpart == generic or localpart.startswith(generic) for generic in _GENERIC_LOCALPARTS)
+    return any(
+        localpart == generic or localpart.startswith(generic)
+        for generic in _GENERIC_LOCALPARTS
+    )
 
 
 def _resolve_site(conn: sqlite3.Connection, lead: sqlite3.Row) -> str:
@@ -138,7 +141,11 @@ def _merge(profile: OrgProfile, page_text: str, data: dict[str, str], url: str) 
     if not profile.state and _text_field_on_page(page_text, state):
         profile.state = state
     postal = str(data.get("postal_code") or "").strip()
-    if not profile.postal_code and re.fullmatch(r"\d{5}(?:-\d{4})?", postal) and postal in page_text:
+    if (
+        not profile.postal_code
+        and re.fullmatch(r"\d{5}(?:-\d{4})?", postal)
+        and postal in page_text
+    ):
         profile.postal_code = postal
 
 
@@ -190,7 +197,9 @@ def enrich_org_profile(
         # We never actually read a page — honest retryable non-result.
         db.save_org_profile(conn, lead_id, OrgProfile(status="unreachable"))
         raise SourceUnreachable(f"could not read any page for {entity}")
-    profile.status = "found" if (profile.street or profile.general_email) else "not_found"
+    profile.status = (
+        "found" if (profile.street or profile.general_email) else "not_found"
+    )
     db.save_org_profile(conn, lead_id, profile)
     return profile
 
@@ -211,7 +220,10 @@ def org_enrichment_summary(
         # (blocked, offline, or no contact page). Nothing is recorded and it's
         # retryable, so log a clean one-liner — a full traceback here reads like a
         # code bug when it is just an unreachable website.
-        print(f"[org-enrichment] site unreachable, nothing recorded ({exc})", file=sys.stderr)
+        print(
+            f"[org-enrichment] site unreachable, nothing recorded ({exc})",
+            file=sys.stderr,
+        )
         return ""
     except Exception:  # noqa: BLE001 — an UNEXPECTED failure: keep the full traceback
         print("[tool-error] org_enrichment_summary:", file=sys.stderr)
@@ -224,9 +236,7 @@ def org_enrichment_summary(
         found.append(f"phone {profile.phone}")
     if profile.street or profile.city or profile.postal_code:
         address = ", ".join(
-            part
-            for part in (profile.street, profile.city, profile.postal_code)
-            if part
+            part for part in (profile.street, profile.city, profile.postal_code) if part
         )
         found.append(f"address {address}")
     if profile.website:

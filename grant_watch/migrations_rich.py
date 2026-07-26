@@ -81,9 +81,7 @@ def migration_25_typed_provenance_and_card_mode(conn: sqlite3.Connection) -> Non
             "ALTER TABLE rich_card_snapshot_truth "
             "ADD COLUMN official_website_provenance TEXT"
         )
-    if "contact_domain_binding" not in _column_names(
-        conn, "rich_card_snapshot_truth"
-    ):
+    if "contact_domain_binding" not in _column_names(conn, "rich_card_snapshot_truth"):
         conn.execute(
             "ALTER TABLE rich_card_snapshot_truth ADD COLUMN contact_domain_binding TEXT"
         )

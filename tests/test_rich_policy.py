@@ -212,9 +212,7 @@ def test_email_matching_verified_org_website_is_eligible() -> None:
 
 def test_email_on_a_subdomain_of_the_org_website_is_eligible() -> None:
     """A district mail subdomain (sd.<district>) still binds to the organization."""
-    result = policy.evaluate(
-        _valid(contact_email="eevans@sd.montebelloschools.net")
-    )
+    result = policy.evaluate(_valid(contact_email="eevans@sd.montebelloschools.net"))
     assert result.eligible and result.contact_binding is ContactBinding.ORG_SITE
 
 

@@ -189,9 +189,7 @@ def test_gold_lead_search_reaches_the_model_path(
         "Here are the gold school leads I found for Michigan — strong districts "
         "with open spend windows. Want the full list right here?"
     )
-    stub = stub_model(
-        monkeypatch, '{"intent": "question", "reply": "' + canned + '"}'
-    )
+    stub = stub_model(monkeypatch, '{"intent": "question", "reply": "' + canned + '"}')
     output = conversation.respond(prompt, None)
     assert stub.calls >= 1, "this prompt must reach the model/tools path"
     assert output["reply"] == canned
@@ -234,9 +232,7 @@ def test_lead_breakdown_regression(
         "Quick breakdown: most of our leads are gold school leads, and Michigan "
         "and Texas lead the pack. Want it split by program instead?"
     )
-    stub = stub_model(
-        monkeypatch, '{"intent": "question", "reply": "' + canned + '"}'
-    )
+    stub = stub_model(monkeypatch, '{"intent": "question", "reply": "' + canned + '"}')
     output = conversation.respond(prompt, None)
     assert stub.calls >= 1
     assert output["reply"] == canned
@@ -252,9 +248,7 @@ def test_lead_breakdown_regression(
         "who was awarded funding in June 2026?",
     ],
 )
-def test_award_timing_regression(
-    monkeypatch: pytest.MonkeyPatch, prompt: str
-) -> None:
+def test_award_timing_regression(monkeypatch: pytest.MonkeyPatch, prompt: str) -> None:
     """Award-received asks get the honest deterministic clarification."""
     forbid_model(monkeypatch)
     output = conversation.respond(prompt, None)

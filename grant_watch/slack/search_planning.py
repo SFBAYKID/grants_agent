@@ -123,8 +123,7 @@ def search_confirmation(
         or str(arguments.get("name_contains") or "")
     )
     already_asked = any(
-        SCOPING_MARKER.lower() in line.lower()
-        for line in (thread_context or [])[-6:]
+        SCOPING_MARKER.lower() in line.lower() for line in (thread_context or [])[-6:]
     )
     if not anchored and not already_asked:
         return _scoping_question()
@@ -149,9 +148,7 @@ def search_confirmation(
     date_to = str(arguments.get("date_to") or "")
     if date_field and (date_from or date_to):
         phrase = _DATE_FIELD_PHRASES.get(date_field, date_field)
-        clauses.append(
-            f"{phrase} {date_from or 'any time'} to {date_to or 'any time'}"
-        )
+        clauses.append(f"{phrase} {date_from or 'any time'} to {date_to or 'any time'}")
     for key, render in (
         ("record_kind", lambda v: _RECORD_KIND_PHRASES.get(str(v), str(v))),
         ("amount_min", lambda v: f"amounts of ${v} and up"),

@@ -80,9 +80,7 @@ _NUMBER_WORDS = {
     "ten": 10,
 }
 _LIMIT_PATTERN = re.compile(
-    r"\b(?:top|last|latest|show|first)\s+(\d{1,2}|"
-    + "|".join(_NUMBER_WORDS)
-    + r")\b"
+    r"\b(?:top|last|latest|show|first)\s+(\d{1,2}|" + "|".join(_NUMBER_WORDS) + r")\b"
 )
 
 

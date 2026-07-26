@@ -200,7 +200,9 @@ def parse_awards(payload: dict[str, Any], cfda: str, state: str) -> list[RawItem
                 # The verified obligation date — the honest award date that drives
                 # freshness and the platinum tier. Empty (never guessed) when absent.
                 event_date=obligated,
-                date_precision=DatePrecision.DAY if obligated else DatePrecision.UNKNOWN,
+                date_precision=DatePrecision.DAY
+                if obligated
+                else DatePrecision.UNKNOWN,
                 funded_scope=desc[:500],
                 eligible_scope="SVPP school security",
                 source_locator=str(a.get("Award ID") or gid),

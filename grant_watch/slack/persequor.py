@@ -49,9 +49,7 @@ def compose_draft(row: sqlite3.Row) -> str:
         )
         # No raw source key in external copy: "A public seed:svpp_csv record lists …"
         # reached a school administrator once. Internal identifiers never leave.
-        fact = (
-            f"A public record lists {entity}{amount_context} in {program} funding."
-        )
+        fact = f"A public record lists {entity}{amount_context} in {program} funding."
     elif meaning.kind is RecordKind.SOLICITATION:
         fact = f"{entity} published a {program} solicitation."
     elif meaning.kind is RecordKind.FUNDING_OPPORTUNITY:

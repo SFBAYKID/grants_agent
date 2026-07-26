@@ -109,8 +109,17 @@ def _seed(conn: "db.sqlite3.Connection", item_id: str, entity: str, state: str) 
         conn,
         Lead(
             RawItem(
-                "test", item_id, "award", entity, state, "SVPP",
-                100_000, "2026-01-01", "2027-01-01", "", {},
+                "test",
+                item_id,
+                "award",
+                entity,
+                state,
+                "SVPP",
+                100_000,
+                "2026-01-01",
+                "2027-01-01",
+                "",
+                {},
                 event_type=FundingEventType.RECORD_OBSERVED,
             ),
             LeadGrade.GOLD,
@@ -152,7 +161,7 @@ def test_resolve_lead_by_name_unknown_is_honest(tmp_path: Path) -> None:
 def test_contact_preview_resolves_lead_by_entity_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """"add <person> to Salesforce" resolves the lead from the org name — a natural
+    """ "add <person> to Salesforce" resolves the lead from the org name — a natural
     request never carries a lead number (live snag 2026-07-18: City of East
     Providence dead-ended because the preview tool demanded a lead_id)."""
     from grant_watch.enrich import salesforce_campaign_gateway as gw

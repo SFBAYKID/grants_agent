@@ -63,6 +63,7 @@ def _same_site(left: str, right: str) -> bool:
     right_domain = _registrable(right)
     return bool(left_domain and left_domain == right_domain)
 
+
 # Bump when a rule changes. Stored on the snapshot as PROVENANCE ONLY — never part of a
 # delivery-uniqueness key (that would re-post the eligible backlog on every tightening;
 # critic C2).
@@ -167,8 +168,11 @@ def is_website_ownership_proven(provenance: object) -> bool:
     """True iff the website's organization ownership is an EXACT authoritative record, not
     a name heuristic. Accepts a ``WebsiteProvenance`` or its ``.value`` (the frozen
     snapshot stores the value string)."""
-    value = provenance.value if isinstance(provenance, WebsiteProvenance) else provenance
+    value = (
+        provenance.value if isinstance(provenance, WebsiteProvenance) else provenance
+    )
     return value in _EXACT_WEBSITE_PROVENANCE_VALUES
+
 
 # Personal / private mailbox providers rejected for this campaign even when the address
 # appears on an official page (spec E).

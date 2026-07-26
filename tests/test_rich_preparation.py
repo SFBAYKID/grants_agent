@@ -146,7 +146,9 @@ def test_ambiguous_crm_builds_a_research_card_routed_by_territory(
     assert draft.card_mode == "research_needed"
     assert draft.route.reason is RoutingReason.TERRITORY
     assert draft.route.slack_user_id == "U01DFJWQQJ3"
-    assert draft.sf_display_text == "Possible Salesforce matches—review before outreach."
+    assert (
+        draft.sf_display_text == "Possible Salesforce matches—review before outreach."
+    )
     assert draft.sf_account_id == "" and draft.sf_open_link == ""
     assert "net-new" not in draft.fallback_text.lower()
 
@@ -199,11 +201,17 @@ def test_heuristic_website_caps_exact_crm_at_research_but_keeps_owner_routing(
     reviews = review_candidates(conn, "CGRANTS", frozenset({"U08C1NBH875"}), now=NOW)
     draft = reviews[0].draft
     assert draft is not None
-    assert draft.card_mode == "research_needed"  # heuristic website caps it (no auto-draft)
+    assert (
+        draft.card_mode == "research_needed"
+    )  # heuristic website caps it (no auto-draft)
     assert draft.official_website_provenance == "verified_org_page"
-    assert draft.route.reason is RoutingReason.SF_ACCOUNT_OWNER  # real relationship kept
+    assert (
+        draft.route.reason is RoutingReason.SF_ACCOUNT_OWNER
+    )  # real relationship kept
     assert draft.route.slack_user_id == "U08C1NBH875"
-    assert draft.sf_account_id == "001EXACT"  # NOT dropped (only the ambiguous path drops)
+    assert (
+        draft.sf_account_id == "001EXACT"
+    )  # NOT dropped (only the ambiguous path drops)
     assert draft.sf_open_link  # the account link is preserved
     assert draft.sf_display_text == "Exact Account match."
 

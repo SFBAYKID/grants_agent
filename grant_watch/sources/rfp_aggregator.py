@@ -142,7 +142,9 @@ def parse_starbridge(
                 raw={
                     "buyer": entity,
                     "close_printed": close_raw.strip(),
-                    "release_printed": (release_raw.group(1).strip() if release_raw else ""),
+                    "release_printed": (
+                        release_raw.group(1).strip() if release_raw else ""
+                    ),
                     "aggregator": "starbridge",
                 },
                 event_type=FundingEventType.RFP_POSTED,

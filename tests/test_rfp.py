@@ -98,7 +98,9 @@ POSTED_EXTRACT = {
 def test_fresh_posting_date_still_grades_rfp_silver() -> None:
     """An open RFP is SILVER even when freshly posted — RFPs are never gold (Chase
     2026-07-19: a solicitation is a lot of work and never outranks a real award)."""
-    item = rfp_parse.build_rawitem(POSTED_EXTRACT, POSTED_PAGE, OPEN_URL, date(2027, 7, 10))
+    item = rfp_parse.build_rawitem(
+        POSTED_EXTRACT, POSTED_PAGE, OPEN_URL, date(2027, 7, 10)
+    )
     assert item is not None
     assert item.event_date == "2027-07-05" and item.start == "2027-07-05"
     assert scoring.grade(item, today=date(2027, 7, 10)).grade is LeadGrade.SILVER
@@ -106,7 +108,9 @@ def test_fresh_posting_date_still_grades_rfp_silver() -> None:
 
 def test_old_posting_date_grades_rfp_silver() -> None:
     """Open but posted more than ~a month ago -> still SILVER."""
-    item = rfp_parse.build_rawitem(POSTED_EXTRACT, POSTED_PAGE, OPEN_URL, date(2027, 8, 20))
+    item = rfp_parse.build_rawitem(
+        POSTED_EXTRACT, POSTED_PAGE, OPEN_URL, date(2027, 8, 20)
+    )
     assert item is not None
     assert scoring.grade(item, today=date(2027, 8, 20)).grade is LeadGrade.SILVER
 
@@ -121,7 +125,9 @@ def test_unproven_posting_date_defaults_to_silver() -> None:
 def test_posted_date_needs_a_posting_label_adjacent() -> None:
     """A date next to 'questions due' (not a posting label) is not a posting date."""
     assert rfp_parse.posted_iso_date(POSTED_PAGE, "July 5, 2027") == "2027-07-05"
-    assert rfp_parse.posted_iso_date(OPEN_PAGE, "July 20, 2027") is None  # questions-due
+    assert (
+        rfp_parse.posted_iso_date(OPEN_PAGE, "July 20, 2027") is None
+    )  # questions-due
 
 
 # --------------------------------------------------------- C1: label-adjacency gate
@@ -170,13 +176,18 @@ def test_closed_status_with_future_date_is_dropped() -> None:
     """A future due date does not save an explicitly Closed/Cancelled RFP."""
     closed_page = OPEN_PAGE + "\nStatus: Cancelled\n"
     assert rfp_parse.has_closed_status(closed_page)
-    assert rfp_parse.build_rawitem(OPEN_EXTRACT, closed_page, OPEN_URL, BEFORE_DUE) is None
+    assert (
+        rfp_parse.build_rawitem(OPEN_EXTRACT, closed_page, OPEN_URL, BEFORE_DUE) is None
+    )
 
 
 def test_open_is_not_inferred_from_absence_of_status() -> None:
     """No status word present -> the date gate alone decides; not auto-closed."""
     assert not rfp_parse.has_closed_status(OPEN_PAGE)
-    assert rfp_parse.build_rawitem(OPEN_EXTRACT, OPEN_PAGE, OPEN_URL, BEFORE_DUE) is not None
+    assert (
+        rfp_parse.build_rawitem(OPEN_EXTRACT, OPEN_PAGE, OPEN_URL, BEFORE_DUE)
+        is not None
+    )
 
 
 def test_past_due_date_is_dropped_even_if_open() -> None:
@@ -267,9 +278,15 @@ def test_real_kemah_page_is_dropped_as_closed() -> None:
         "portal": "",
     }
     # even before the deadline, the explicit Closed status drops it (H1)
-    assert rfp_parse.build_rawitem(
-        extract, page, "https://www.kemahtx.gov/bids.aspx?bidID=19", date(2026, 1, 1)
-    ) is None
+    assert (
+        rfp_parse.build_rawitem(
+            extract,
+            page,
+            "https://www.kemahtx.gov/bids.aspx?bidID=19",
+            date(2026, 1, 1),
+        )
+        is None
+    )
 
 
 def test_real_woodland_page_is_dropped_as_closed() -> None:
@@ -287,9 +304,17 @@ def test_scoring_grades_rfp_source() -> None:
     assert scoring.grade(item, today=BEFORE_DUE).grade is LeadGrade.SILVER
     # a hand-built past-due rfp item is WATCH
     stale = RawItem(
-        source="rfp", item_id="e|1", title="Camera RFP", entity="City of X", state="X",
-        program="RFP:security", amount=None, start="", end="2020-01-01",
-        url="u", event_type=FundingEventType.RFP_POSTED,
+        source="rfp",
+        item_id="e|1",
+        title="Camera RFP",
+        entity="City of X",
+        state="X",
+        program="RFP:security",
+        amount=None,
+        start="",
+        end="2020-01-01",
+        url="u",
+        event_type=FundingEventType.RFP_POSTED,
     )
     assert scoring.grade(stale, today=BEFORE_DUE).grade is LeadGrade.WATCH
 
@@ -339,7 +364,9 @@ def _rfp_item(
     )
 
 
-_DRIFT_URL = "https://starbridge.ai/rfp/sci-pine-grove-control-room-security-cameras-and-0"
+_DRIFT_URL = (
+    "https://starbridge.ai/rfp/sci-pine-grove-control-room-security-cameras-and-0"
+)
 
 
 def test_item_id_format_change_adopts_the_existing_lead(tmp_path: Path) -> None:
@@ -350,7 +377,9 @@ def test_item_id_format_change_adopts_the_existing_lead(tmp_path: Path) -> None:
     and the next poll inserted the same solicitation a second time — so Grant queued the
     identical card twice. The old row is adopted and re-keyed instead."""
     conn = db.connect(tmp_path / "drift.db")
-    legacy = _rfp_item("pa-doc|sci-pine-grove-control-room-security|2027-08-14", _DRIFT_URL)
+    legacy = _rfp_item(
+        "pa-doc|sci-pine-grove-control-room-security|2027-08-14", _DRIFT_URL
+    )
     assert db.upsert_lead(conn, scoring.grade(legacy, today=BEFORE_DUE)) is True
     original_id = int(conn.execute("SELECT id FROM leads").fetchone()["id"])
 
@@ -376,7 +405,12 @@ def test_a_sibling_solicitation_at_its_own_url_stays_separate(tmp_path: Path) ->
     Construction *REBID*' package — same buyer and due date, different URL. Collapsing
     them would drop a real solicitation (Constitution rule 1)."""
     conn = db.connect(tmp_path / "sibling.db")
-    db.upsert_lead(conn, scoring.grade(_rfp_item("pa|general-hvac|2027-08-14", _DRIFT_URL), today=BEFORE_DUE))
+    db.upsert_lead(
+        conn,
+        scoring.grade(
+            _rfp_item("pa|general-hvac|2027-08-14", _DRIFT_URL), today=BEFORE_DUE
+        ),
+    )
     rebid = _rfp_item(
         "pa|plumbing-rebid|2027-08-14",
         "https://starbridge.ai/rfp/sci-pine-grove-control-room-security-cameras-and-2",

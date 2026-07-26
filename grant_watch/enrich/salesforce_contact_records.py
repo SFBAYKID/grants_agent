@@ -91,16 +91,23 @@ def _grant_summary(row: sqlite3.Row) -> str:
             f"{row['funds_end'] or 'unknown'}. Source {source}."
         )
     if meaning.kind is RecordKind.FUNDING_OPPORTUNITY:
-        return (
-            f"{program} funding opportunity; applications {window}. "
-            f"Source {source}."
-        )
+        return f"{program} funding opportunity; applications {window}. Source {source}."
     return f"{program} public funding record; dates unverified. Source {source}."
 
 
 _MONTHS = (
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
 )
 
 
@@ -167,7 +174,9 @@ _SCHOOL_RE = re.compile(
     r"\b(school|schools|district|academy|isd|usd|elementary|k-?12|charter)\b",
     re.IGNORECASE,
 )
-_CITY_RE = re.compile(r"\b(city of|town of|village of|county|municipal)\b", re.IGNORECASE)
+_CITY_RE = re.compile(
+    r"\b(city of|town of|village of|county|municipal)\b", re.IGNORECASE
+)
 
 
 def _lead_value(lead: sqlite3.Row, column: str) -> str:
@@ -417,9 +426,7 @@ def _resolve_existing_record(
     return ref
 
 
-def _select_contact(
-    contacts: list[sqlite3.Row], contact_id: int | None
-) -> sqlite3.Row:
+def _select_contact(contacts: list[sqlite3.Row], contact_id: int | None) -> sqlite3.Row:
     """Choose the evidence-backed contact, failing closed on any ambiguity."""
     usable = [
         c for c in contacts if str(c["contact_status"]) in _USABLE_CONTACT_STATUSES
@@ -433,16 +440,12 @@ def _select_contact(
         for c in usable:
             if int(c["id"]) == int(contact_id):
                 return c
-        raise ValueError(
-            f"contact {contact_id} is not a usable contact for this lead"
-        )
+        raise ValueError(f"contact {contact_id} is not a usable contact for this lead")
     verified = [c for c in usable if str(c["contact_status"]) == "verified"]
     pool = verified or usable
     if len(pool) > 1:
         names = ", ".join(f"#{c['id']} {c['name']}" for c in pool)
-        raise ValueError(
-            f"several contacts are on file ({names}); specify contact_id"
-        )
+        raise ValueError(f"several contacts are on file ({names}); specify contact_id")
     return pool[0]
 
 
@@ -549,11 +552,10 @@ def _preview_text(
     else:
         assert target is not None  # attach mode always carries a target
         lines.append(
-            f"*{entity}* is already in Salesforce — no duplicate Lead will be "
-            "created."
+            f"*{entity}* is already in Salesforce — no duplicate Lead will be created."
         )
         lines.append(
-            f"• Existing record: {target.sobject} \"{target.name}\" — "
+            f'• Existing record: {target.sobject} "{target.name}" — '
             f"{target.link or 'no link'} (single high-confidence match)"
         )
         lines.append("• A Note with the grant context will be added to it instead.")
@@ -602,7 +604,9 @@ def prepare_contact_record(
     mode = "attach_existing" if target is not None else "new_lead"
     # Org address/phone/general email were gathered during find_contact and read
     # from the lead row here; prepare performs no network scraping of its own.
-    record_type_id = gateway.lead_record_type_id(LEAD_RECORD_TYPE) if target is None else ""
+    record_type_id = (
+        gateway.lead_record_type_id(LEAD_RECORD_TYPE) if target is None else ""
+    )
     lead_payload = (
         None
         if target is not None
@@ -704,8 +708,7 @@ def confirm_contact_record(
             _set_item_state(conn, action_id, "failed")
             return ActionExecution(
                 CampaignActionState.FAILED,
-                f"Salesforce rejected the Note ({result.error}); nothing was "
-                "created.",
+                f"Salesforce rejected the Note ({result.error}); nothing was created.",
                 failed=1,
             )
         if not result.record_id:
@@ -746,8 +749,7 @@ def confirm_contact_record(
         _set_item_state(conn, action_id, "failed")
         return ActionExecution(
             CampaignActionState.FAILED,
-            f"Salesforce rejected the Lead ({lead_result.error}); nothing was "
-            "created.",
+            f"Salesforce rejected the Lead ({lead_result.error}); nothing was created.",
             failed=1,
         )
     if not lead_result.record_id:
@@ -759,8 +761,7 @@ def confirm_contact_record(
         )
         return ActionExecution(
             CampaignActionState.UNKNOWN,
-            "Salesforce accepted the Lead but returned no id; reconciliation "
-            "required.",
+            "Salesforce accepted the Lead but returned no id; reconciliation required.",
             unknown=1,
         )
     validate_record_id(lead_result.record_id, "Lead")

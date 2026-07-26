@@ -301,10 +301,30 @@ def test_open_only_keeps_future_deadlines_and_drops_expired(tmp_path: Path) -> N
     (open_only compares funds_end to SQL date('now'), the real current date)."""
     path = tmp_path / "open.db"
     conn = db.connect(path)
-    _insert(conn, "rfp", "R_OPEN", "City of Sacramento", "CA", "RFP:security",
-            None, "2026-06-01", "2099-12-31", LeadGrade.SILVER)
-    _insert(conn, "rfp", "R_CLOSED", "City of Fresno", "CA", "RFP:security",
-            None, "2019-06-01", "2020-01-01", LeadGrade.SILVER)
+    _insert(
+        conn,
+        "rfp",
+        "R_OPEN",
+        "City of Sacramento",
+        "CA",
+        "RFP:security",
+        None,
+        "2026-06-01",
+        "2099-12-31",
+        LeadGrade.SILVER,
+    )
+    _insert(
+        conn,
+        "rfp",
+        "R_CLOSED",
+        "City of Fresno",
+        "CA",
+        "RFP:security",
+        None,
+        "2019-06-01",
+        "2020-01-01",
+        LeadGrade.SILVER,
+    )
     conn.close()
 
     open_text, _ = search_leads(
@@ -314,9 +334,7 @@ def test_open_only_keeps_future_deadlines_and_drops_expired(tmp_path: Path) -> N
     assert "City of Fresno" not in open_text
 
     # Without open_only, the expired solicitation is still part of the record set.
-    all_text, _ = search_leads(
-        state="CA", record_kind="solicitation", db_path=path
-    )
+    all_text, _ = search_leads(state="CA", record_kind="solicitation", db_path=path)
     assert "City of Sacramento" in all_text
     assert "City of Fresno" in all_text
 
@@ -325,15 +343,39 @@ def test_open_only_export_is_complete_and_source_linked(tmp_path: Path) -> None:
     """An 'open RFPs -> Excel' export carries every open row with its source link."""
     path = tmp_path / "open_export.db"
     conn = db.connect(path)
-    _insert(conn, "rfp", "R_OPEN", "City of Sacramento", "CA", "RFP:security",
-            None, "2026-06-01", "2099-12-31", LeadGrade.SILVER)
-    _insert(conn, "rfp", "R_CLOSED", "City of Fresno", "CA", "RFP:security",
-            None, "2019-06-01", "2020-01-01", LeadGrade.SILVER)
+    _insert(
+        conn,
+        "rfp",
+        "R_OPEN",
+        "City of Sacramento",
+        "CA",
+        "RFP:security",
+        None,
+        "2026-06-01",
+        "2099-12-31",
+        LeadGrade.SILVER,
+    )
+    _insert(
+        conn,
+        "rfp",
+        "R_CLOSED",
+        "City of Fresno",
+        "CA",
+        "RFP:security",
+        None,
+        "2019-06-01",
+        "2020-01-01",
+        LeadGrade.SILVER,
+    )
     conn.close()
 
     text, artifact = search_leads(
-        state="CA", record_kind="solicitation", open_only=True,
-        export="excel", result_scope="all", db_path=path,
+        state="CA",
+        record_kind="solicitation",
+        open_only=True,
+        export="excel",
+        result_scope="all",
+        db_path=path,
     )
     assert artifact is not None
     wb = load_workbook(artifact.path)
@@ -342,7 +384,9 @@ def test_open_only_export_is_complete_and_source_linked(tmp_path: Path) -> None:
     entities = {r[header.index("entity_name")] for r in rows[1:]}
     assert entities == {"City of Sacramento"}  # only the open RFP exported
     detail = rows[1][header.index("detail_url")]
-    assert detail and detail.startswith("http")  # honest source link travels to the file
+    assert detail and detail.startswith(
+        "http"
+    )  # honest source link travels to the file
 
 
 def test_award_received_uses_verified_event_date_with_coverage_disclosure(
@@ -365,9 +409,7 @@ def test_zero_results_offer_relaxation_hints_with_real_counts(
     tmp_path: Path,
 ) -> None:
     """A dead search names what one dropped filter would find — never a bare no."""
-    text, artifact = search_leads(
-        state="CA", program="ZZNOPE", db_path=_db(tmp_path)
-    )
+    text, artifact = search_leads(state="CA", program="ZZNOPE", db_path=_db(tmp_path))
     assert artifact is None
     assert "No grants matched those filters." in text
     assert "Nearby alternatives" in text
@@ -377,9 +419,7 @@ def test_zero_results_offer_relaxation_hints_with_real_counts(
 
 def test_zero_results_fall_back_to_whole_pool_count(tmp_path: Path) -> None:
     """When every single-filter drop is still zero, the total pool is offered."""
-    text, _ = search_leads(
-        state="ZZ", program="ZZNOPE", db_path=_db(tmp_path)
-    )
+    text, _ = search_leads(state="ZZ", program="ZZNOPE", db_path=_db(tmp_path))
     assert "Nearby alternatives" in text
     assert "leads on file overall" in text
 
@@ -645,8 +685,18 @@ def test_solicitation_grade_split_never_claims_award_or_open(tmp_path: Path) -> 
     RFP's due date is shown per row, not blessed open by the tier label (C3)."""
     path = tmp_path / "sol.db"
     conn = db.connect(path)
-    _insert(conn, "rfp", "R_OLD", "City of Fresno", "CA", "RFP:security",
-            None, "2026-01-01", "2098-01-01", LeadGrade.SILVER)
+    _insert(
+        conn,
+        "rfp",
+        "R_OLD",
+        "City of Fresno",
+        "CA",
+        "RFP:security",
+        None,
+        "2026-01-01",
+        "2098-01-01",
+        LeadGrade.SILVER,
+    )
     conn.close()
     text, _ = search_leads(state="CA", record_kind="solicitation", db_path=path)
     assert "award won" not in text

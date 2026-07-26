@@ -84,6 +84,7 @@ class FakeGateway:
             raise self.lead_result
         return self.lead_result
 
+
 class TimeoutGateway(FakeGateway):
     """Gateway whose Lead create times out after reaching the network."""
 
@@ -544,7 +545,10 @@ def test_linkedin_only_contact_builds_emailless_lead(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     lead_id = _lead_row(conn, "a16", "Alpha School District")
     db.save_linkedin_contact(
-        conn, lead_id, "Joshua Ihrig", "Information Systems",
+        conn,
+        lead_id,
+        "Joshua Ihrig",
+        "Information Systems",
         "https://www.linkedin.com/in/joshuaihrig",
     )
     gateway = FakeGateway()
@@ -578,7 +582,8 @@ def test_contact_record_tool_schema_exposed() -> None:
     from grant_watch.slack import tools
 
     schema = next(
-        s for s in tools.TOOL_SCHEMAS
+        s
+        for s in tools.TOOL_SCHEMAS
         if s["name"] == "salesforce_contact_record_preview"
     )
     props = schema["input_schema"]["properties"]
@@ -620,7 +625,10 @@ def test_org_name_masquerading_as_title_is_dropped(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     lead_id = _lead_row(conn, "a19", "Chicago Jewish Day School", "IL")
     db.save_linkedin_contact(
-        conn, lead_id, "Richard Moline", "Chicago Jewish Day School",
+        conn,
+        lead_id,
+        "Richard Moline",
+        "Chicago Jewish Day School",
         "https://www.linkedin.com/in/richard-moline",
     )
     gateway = FakeGateway()
@@ -764,7 +772,9 @@ def test_note_body_reads_like_a_lead_briefing(tmp_path: Path) -> None:
     assert "Lead #" in content
 
 
-def test_writer_credentials_fall_back_to_reader(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_writer_credentials_fall_back_to_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """One Connected App for read+write is valid (Chase): the writer client id/secret and
     My Domain default to the READER's when no separate SALESFORCE_WRITE_* app is set — no
     env duplication — while a distinct writer app still takes precedence when configured."""
@@ -784,7 +794,11 @@ def test_writer_credentials_fall_back_to_reader(monkeypatch: pytest.MonkeyPatch)
 
     # A dedicated writer app, when set, overrides the reader fallback per-field.
     monkeypatch.setenv("SALESFORCE_WRITE_CLIENT_ID", "writer-id")
-    monkeypatch.setenv("SALESFORCE_WRITE_MY_DOMAIN_URL", "https://writer.my.salesforce.com")
+    monkeypatch.setenv(
+        "SALESFORCE_WRITE_MY_DOMAIN_URL", "https://writer.my.salesforce.com"
+    )
     assert gateway_mod._write_client_id() == "writer-id"
     assert gateway_mod._write_my_domain() == "https://writer.my.salesforce.com"
-    assert gateway_mod._write_client_secret() == "reader-secret"  # unset -> still reader
+    assert (
+        gateway_mod._write_client_secret() == "reader-secret"
+    )  # unset -> still reader

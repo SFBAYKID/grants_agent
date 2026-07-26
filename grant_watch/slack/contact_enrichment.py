@@ -21,7 +21,6 @@ from .. import db
 Progress = Callable[[str], None]
 
 
-
 @dataclass(frozen=True)
 class ContactOutcome:
     """One lead's enrichment result — the honest, structured outcome the batch search
@@ -176,8 +175,6 @@ def _fallback_contact(
             str(person["url"]),
         )
     if general_email:
-        return ContactOutcome(
-            "org_email", "", "", general_email, "", profile_source
-        )
+        return ContactOutcome("org_email", "", "", general_email, "", profile_source)
     db.mark_contact_not_found(conn, lead_id)
     return ContactOutcome("not_found")

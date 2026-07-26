@@ -61,9 +61,7 @@ def _lead(
             grade=grade,
         ),
     )
-    row = conn.execute(
-        "SELECT id FROM leads WHERE source_item_id=?", (iid,)
-    ).fetchone()
+    row = conn.execute("SELECT id FROM leads WHERE source_item_id=?", (iid,)).fetchone()
     joined = db.get_lead(conn, int(row["id"]))
     assert joined is not None
     return joined
@@ -85,9 +83,7 @@ def test_kind_follows_the_event_not_the_grade(
 ) -> None:
     """The same event type yields the same kind under EVERY grade."""
     conn = db.connect(tmp_path / "t.db")
-    for index, grade in enumerate(
-        (LeadGrade.GOLD, LeadGrade.SILVER, LeadGrade.WATCH)
-    ):
+    for index, grade in enumerate((LeadGrade.GOLD, LeadGrade.SILVER, LeadGrade.WATCH)):
         row = _lead(conn, event_type, grade, iid=f"L{index}")
         assert semantics_for(row).kind is expected, f"{grade} changed the kind"
 
@@ -141,7 +137,12 @@ def test_unknown_event_claims_nothing_anywhere(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     row = _lead(conn, FundingEventType.RECORD_OBSERVED, LeadGrade.GOLD)
     draft = persequor.compose_draft(row).lower()
-    for claim in ("solicitation", "spend window", "response deadline", "application deadline"):
+    for claim in (
+        "solicitation",
+        "spend window",
+        "response deadline",
+        "application deadline",
+    ):
         assert claim not in draft, claim
     assert "purpose unverified" in search_presentation.window_label(row)
     assert "dates unverified" in sf._grant_summary(row)
@@ -202,10 +203,25 @@ def test_payload_keeps_the_pinned_v1_schema(
     )
     assert brief is not None
     assert set(json.loads(json.dumps(brief))) == {
-        "schema", "request_id", "entity", "entity_type", "state", "program",
-        "amount_usd", "window_start", "window_end", "source_url",
-        "requested_by_slack", "send_as", "contact_name", "contact_email",
-        "contact_title", "angle", "rep_notes", "expires_at", "slack_channel",
+        "schema",
+        "request_id",
+        "entity",
+        "entity_type",
+        "state",
+        "program",
+        "amount_usd",
+        "window_start",
+        "window_end",
+        "source_url",
+        "requested_by_slack",
+        "send_as",
+        "contact_name",
+        "contact_email",
+        "contact_title",
+        "angle",
+        "rep_notes",
+        "expires_at",
+        "slack_channel",
         "slack_thread_ts",
     }
     assert brief["schema"] == "outreach-request.v1"

@@ -244,8 +244,12 @@ def test_thread_followup_addressing_someone_else_keeps_grant_silent(
     _register_human_message(app.client, first_text, root_ts)
     app.events["app_mention"](
         event={
-            "team": "TWORK", "channel": "CGRANT", "user": "UCHASE",
-            "text": first_text, "ts": root_ts, "channel_type": "channel",
+            "team": "TWORK",
+            "channel": "CGRANT",
+            "user": "UCHASE",
+            "text": first_text,
+            "ts": root_ts,
+            "channel_type": "channel",
         },
         body={"event_id": "Ev-gate-1", "team_id": "TWORK"},
         say=lambda **_kwargs: None,
@@ -272,8 +276,12 @@ def test_thread_followup_addressing_someone_else_keeps_grant_silent(
         _register_human_message(app.client, followup, ts, root_ts)
         app.events["message"](
             event={
-                "team": "TWORK", "channel": "CGRANT", "user": "UCHASE",
-                "text": followup, "ts": ts, "thread_ts": root_ts,
+                "team": "TWORK",
+                "channel": "CGRANT",
+                "user": "UCHASE",
+                "text": followup,
+                "ts": ts,
+                "thread_ts": root_ts,
                 "channel_type": "channel",
             },
             body={"event_id": event_id, "team_id": "TWORK"},
@@ -283,6 +291,7 @@ def test_thread_followup_addressing_someone_else_keeps_grant_silent(
         assert _grant_posts() == posts_before  # Grant added nothing — it stayed out
 
     claimed = {
-        row[0] for row in connection.execute("SELECT event_id FROM slack_event_receipts")
+        row[0]
+        for row in connection.execute("SELECT event_id FROM slack_event_receipts")
     }
     assert "Ev-gate-2" not in claimed and "Ev-gate-3" not in claimed

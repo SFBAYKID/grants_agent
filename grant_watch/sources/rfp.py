@@ -64,11 +64,11 @@ def _extract_rfp(page_text: str, url: str) -> dict[str, str]:
         "- due_date: the deadline for SUBMITTING proposals, copied EXACTLY as printed "
         "on the page (e.g. 'May 28, 2026' or 'Fri, 01/30/2026 - 2:00 PM'). NOT a "
         "pre-bid meeting, questions-due, addendum, or award date. If no submission "
-        "deadline is printed, use \"\".\n"
+        'deadline is printed, use "".\n'
         "- posted_date: the date the RFP was POSTED/ISSUED/advertised, copied exactly "
         "as printed next to a posting label ('Posted', 'Date Issued', 'Publication "
-        "Date'). NOT the deadline. If none is printed, use \"\".\n"
-        "- rfp_number, title, state (2-letter), status, portal: copy verbatim or \"\".\n"
+        'Date\'). NOT the deadline. If none is printed, use "".\n'
+        '- rfp_number, title, state (2-letter), status, portal: copy verbatim or "".\n'
         "- If this is a LIST of multiple solicitations, or not physical security, "
         "return null.\n\n"
         'Respond with ONLY JSON: {"entity":"...","state":"...","rfp_number":"...",'

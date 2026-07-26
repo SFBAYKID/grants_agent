@@ -255,8 +255,9 @@ def _short_title(value: object, limit: int = 88) -> str:
 
 
 _RFP_CAMERA_RE = re.compile(r"camera|surveillance|cctv|\bvideo\b", re.IGNORECASE)
-_RFP_ACCESS_RE = re.compile(r"access control|door (?:access|hardening)|card reader",
-                            re.IGNORECASE)
+_RFP_ACCESS_RE = re.compile(
+    r"access control|door (?:access|hardening)|card reader", re.IGNORECASE
+)
 
 
 def build_rfp_alert(row: sqlite3.Row) -> tuple[str, str]:
@@ -274,9 +275,7 @@ def build_rfp_alert(row: sqlite3.Row) -> tuple[str, str]:
     entity = display_entity_name(row["entity_name"])
     if not entity:
         raise ValueError("proactive RFP requires an entity")
-    haystack = (
-        f"{row['title'] or ''} {row['current_event_evidence_excerpt'] or ''}"
-    )
+    haystack = f"{row['title'] or ''} {row['current_event_evidence_excerpt'] or ''}"
     camera = bool(_RFP_CAMERA_RE.search(haystack))
     access = bool(_RFP_ACCESS_RE.search(haystack))
     if camera and access:
@@ -476,7 +475,9 @@ def _best_nugget(
         if cooldown > 0:
             recent = db.recent_post_states(conn, channel, cooldown)
             preferred = [n for n in nuggets if str(n["state"] or "") not in recent]
-            if preferred:  # fall back to the full set only if every state is on cooldown
+            if (
+                preferred
+            ):  # fall back to the full set only if every state is on cooldown
                 nuggets = preferred
     return max(nuggets, key=lambda r: _nugget_sort_key(conn, r))
 
@@ -497,7 +498,9 @@ def pick(
         return "platinum", _best_nugget(conn, platinum, channel)
     if nuggets:
         return "nugget", _best_nugget(conn, nuggets, channel)
-    rfps = db.rfp_candidates(conn, channel)  # open RFPs (silver), soonest deadline first
+    rfps = db.rfp_candidates(
+        conn, channel
+    )  # open RFPs (silver), soonest deadline first
     silver_rfps = [r for r in rfps if str(r["lead_grade"]) == "silver"]
     if silver_rfps:
         return "rfp", silver_rfps[0]  # open RFP, soonest deadline
@@ -636,9 +639,7 @@ def _retry_after_seconds(exc: SlackApiError) -> int:
     return max(1, min(seconds, 3600))
 
 
-def _ambiguous(
-    conn: sqlite3.Connection, delivery_key: str, exc: BaseException
-) -> str:
+def _ambiguous(conn: sqlite3.Connection, delivery_key: str, exc: BaseException) -> str:
     """Record a delivery whose outcome genuinely cannot be determined.
 
     A timeout or a 5xx may mean Slack accepted the post, so the reservation is KEPT —
@@ -758,7 +759,10 @@ def run_drip(
             retry_after = _retry_after_seconds(exc)
             until = (now + timedelta(seconds=retry_after)).isoformat(timespec="seconds")
             db.set_channel_guard(
-                conn, channel, "backoff", f"ratelimited; retry after {retry_after}s",
+                conn,
+                channel,
+                "backoff",
+                f"ratelimited; retry after {retry_after}s",
                 available_at=until,
             )
             return (
@@ -792,7 +796,11 @@ def run_drip(
             # future unblock time — the one line an operator greps for was the wrong one.
             first_failure = str(prior["created_at"]) if continuing else now_iso
             db.set_channel_guard(
-                conn, channel, "blocked", code, available_at=until,
+                conn,
+                channel,
+                "blocked",
+                code,
+                available_at=until,
                 reset=not continuing,
             )
             _log_channel_block(channel, code, until, attempts, first_failure)

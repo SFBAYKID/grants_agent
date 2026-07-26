@@ -427,7 +427,9 @@ def _coverage_line(label: str, counts: Counter[str]) -> str:
     """One human coverage line: 'Counties: 3,144 in total — 56 with a source link…'."""
     total = sum(counts.values())
     parts = [
-        f"{counts[key]:,} {phrase}" for key, phrase in _COVERAGE_WORDS if counts.get(key)
+        f"{counts[key]:,} {phrase}"
+        for key, phrase in _COVERAGE_WORDS
+        if counts.get(key)
     ]
     detail = " — " + ", ".join(parts) if parts else ""
     return f"- {label[:1].upper()}{label[1:]}: {total:,} in total{detail}"
@@ -607,7 +609,9 @@ def _render_recent_batches(
         rows.append((manifest, len(checkpoints), attempt_count, result_count, statuses))
     scope = f" for {state}" if state else ""
     if not rows:
-        return f"I haven't run any discovery searches{scope} matching those filters yet."
+        return (
+            f"I haven't run any discovery searches{scope} matching those filters yet."
+        )
     shown = rows[:limit]
     if len(shown) == 1:
         manifest, task_count, attempt_count, result_count, status_counts = shown[0]

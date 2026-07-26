@@ -79,7 +79,9 @@ def test_prime_award_captures_base_obligation_date_never_guesses() -> None:
     }
     items = usaspending.parse_awards(payload, "16.071", "CA")
     assert len(items) == 2
-    assert items[0].event_date == "2026-07-15"  # obligation date, NOT the 2026-07-01 start
+    assert (
+        items[0].event_date == "2026-07-15"
+    )  # obligation date, NOT the 2026-07-01 start
     assert items[0].raw["Base Obligation Date"] == "2026-07-15"
     assert items[1].event_date == ""  # missing field is never guessed
 

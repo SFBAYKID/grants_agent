@@ -104,9 +104,27 @@ _GOV_HOST_RE = re.compile(r"\.gov$|\.k12\.\w\w\.us$|\.\w\w\.us$|\.us$", re.IGNOR
 # generic name words that don't identify a specific place — never the distinctive token
 _GENERIC_ENTITY_WORDS = frozenset(
     {
-        "city", "town", "village", "borough", "township", "county", "of", "the",
-        "school", "district", "public", "schools", "unified", "board", "education",
-        "municipal", "municipality", "isd", "usd", "department", "police",
+        "city",
+        "town",
+        "village",
+        "borough",
+        "township",
+        "county",
+        "of",
+        "the",
+        "school",
+        "district",
+        "public",
+        "schools",
+        "unified",
+        "board",
+        "education",
+        "municipal",
+        "municipality",
+        "isd",
+        "usd",
+        "department",
+        "police",
     }
 )
 
@@ -115,8 +133,18 @@ _MONTHS = {
     m: i
     for i, m in enumerate(
         (
-            "january", "february", "march", "april", "may", "june", "july",
-            "august", "september", "october", "november", "december",
+            "january",
+            "february",
+            "march",
+            "april",
+            "may",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
         ),
         start=1,
     )
@@ -246,7 +274,9 @@ def posted_iso_date(page_text: str, printed_date: str, window: int = 90) -> str 
     a bare date, or one not next to a posting label, yields None -> the RFP defaults to
     SILVER rather than being called freshly-posted on a guess.
     """
-    if not _label_adjacent_date(page_text, printed_date, _POSTED_LABEL_RE, None, window):
+    if not _label_adjacent_date(
+        page_text, printed_date, _POSTED_LABEL_RE, None, window
+    ):
         return None
     return parse_iso_date(printed_date)
 
@@ -270,8 +300,14 @@ def is_index_page(page_text: str) -> bool:
     index pages.
     """
     bid_numbers = len(
-        set(re.findall(r"(?:bid|rfp|rfq|project|solicitation)\s*(?:no\.?|number|#)?\s*"
-                       r":?\s*([0-9]{2,}[-/][0-9]{2,})", page_text, re.IGNORECASE))
+        set(
+            re.findall(
+                r"(?:bid|rfp|rfq|project|solicitation)\s*(?:no\.?|number|#)?\s*"
+                r":?\s*([0-9]{2,}[-/][0-9]{2,})",
+                page_text,
+                re.IGNORECASE,
+            )
+        )
     )
     deadline_labels = len(_DEADLINE_LABEL_RE.findall(page_text))
     return bid_numbers > 1 or deadline_labels > 8
@@ -282,7 +318,9 @@ def has_closed_status(page_text: str) -> bool:
     return bool(_CLOSED_STATUS_RE.search(page_text))
 
 
-def rfp_item_id(entity: str, rfp_number: str, title: str, due_iso: str, url: str) -> str:
+def rfp_item_id(
+    entity: str, rfp_number: str, title: str, due_iso: str, url: str
+) -> str:
     """Stable dedup key namespaced by ENTITY (C3): a bare 'RFP 2026-05' is not globally
     unique, so two cities' '2026-05' must never collide in upsert_lead."""
     ent = "-".join(re.findall(r"[a-z0-9]+", (entity or "").lower())) or "unknown"
@@ -346,7 +384,9 @@ def build_rawitem(
     item_id = rfp_item_id(entity, rfp_number, verified_title or title, due_iso, url)
     # Posting date drives GOLD (freshly put out) vs SILVER (older-but-open) in scoring —
     # only when a posting label sits next to it; otherwise blank -> SILVER default.
-    posted_iso = posted_iso_date(page_text, (extracted.get("posted_date") or "").strip())
+    posted_iso = posted_iso_date(
+        page_text, (extracted.get("posted_date") or "").strip()
+    )
     return RawItem(
         source="rfp",
         item_id=item_id,

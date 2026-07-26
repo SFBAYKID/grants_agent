@@ -157,12 +157,18 @@ def test_find_contact_reports_org_address_for_linkedin_only(
     from grant_watch.enrich import organization_profile
     from grant_watch.slack.contact_enrichment import ContactOutcome
 
-    monkeypatch.setattr(tools.db, "connect", lambda *_a, **_k: sqlite3.connect(":memory:"))
+    monkeypatch.setattr(
+        tools.db, "connect", lambda *_a, **_k: sqlite3.connect(":memory:")
+    )
     monkeypatch.setattr(
         tools,
         "enrich_lead_contact",
         lambda *_a, **_k: ContactOutcome(
-            "linkedin_only", "Jane Roe", "IT Director", "", "",
+            "linkedin_only",
+            "Jane Roe",
+            "IT Director",
+            "",
+            "",
             "https://www.linkedin.com/in/jane-roe",
         ),
     )

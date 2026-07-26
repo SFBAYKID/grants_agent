@@ -135,7 +135,9 @@ def test_routing_line_stays_silent_for_an_inferred_state() -> None:
 
 def test_routing_line_has_no_injectable_markup() -> None:
     """Built only from the fixed state table and validated ids."""
-    for line in (territory.routing_line("CA", "ca-grants-award:2024-2025"),
-                 territory.routing_line("AZ", "usaspending:16.071")):
+    for line in (
+        territory.routing_line("CA", "ca-grants-award:2024-2025"),
+        territory.routing_line("AZ", "usaspending:16.071"),
+    ):
         assert "http" not in line and "`" not in line
         assert line.count("<") == line.count(">")  # balanced or zero
