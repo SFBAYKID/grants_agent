@@ -112,8 +112,73 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
-## Current status (2026-07-21)
+## Current status (2026-07-25)
 
+- `verified` 2026-07-25 PRODUCTION DEPLOY of the Salesforce Campaign-member fix.
+  Production moved `e8ecf0c` → **`359c1e3`**, schema **26 → 28**, through
+  grants-ops-guardian over the scoped grants SSH only. `integrity_check` ok. Migration 27
+  adds the five `crm_campaign_*` ledger tables (batches / batch_targets / batch_items /
+  write_attempts / approval_attempts) plus `crm_actions.batch_id`/`batch_target_id`; all
+  five are present and EMPTY. Migration 28 enforces one ready Campaign-creation preview
+  per `(workspace, channel, thread_ts, requested_by)` via unique partial index
+  `ux_crm_one_ready_campaign_creation`, keeping the NEWEST by `(created_at, rowid)`.
+  Exactly the two Chase-approved older duplicates were cancelled (`1de9fac0…`,
+  `ef622493…`, both `last_error='Superseded by migration 28: duplicate ready Campaign
+  preview'`); `b620bd04…` and the unrelated `6f90999e…` stayed ready; all four kept
+  `external_write_started=0`. A full sweep of all 45 `crm_actions` rows against the
+  pre-migration backup found EXACTLY two rows changed in EXACTLY three columns
+  (`state`, `last_error`, `updated_at`) — the kept rows are byte-identical.
+  **MIGRATION 28 MUTATES DATA**, so its rollback is restore-from-backup, not a reverse
+  migration; there is also NO migration CLI and no preview — `db.connect()` on a writable
+  connection IS the migration (`connect_readonly()` deliberately does not migrate).
+  Rollback artifact retained: `backups/deploy-359c1e3-20260726T012742Z/grant_watch.db.pre28`
+  (`VACUUM INTO`, sha256 `79a918db…76ef`, verified ok/26/2FK/4ready) + `code_before.tar.gz`
+  (`d974adbc…23ae`), both re-checksummed after cleanup. A code rollback MUST also delete
+  the DB's `-wal`/`-shm` before restoring, `rm` the 15 files `359c1e3` adds (tar cannot
+  delete them), and purge `__pycache__` — otherwise the restarting bot's `db.connect()`
+  silently re-applies 27/28. Cron restored byte-for-byte (4 lines, sha `6275d502…44711`);
+  `.env` sha `fe9fd588…3f55` unchanged; one listener PID 633555, correct uid/cwd/argv,
+  "Grant is listening" + Bolt running, PID stable. NO production Salesforce call and NO
+  Slack post occurred during the deploy (the migration path imports only `sqlite3`; the
+  bot was down throughout). The TWO PRE-EXISTING `source_observations` FK violations
+  (rowids 10642, 11892) were PRESERVED unchanged on Chase's explicit approval — the same
+  2026-07-21 decision recorded below; `foreign_key_check` returns exactly those two and
+  no new ones. **`SALESFORCE_CAMPAIGN_WRITES_ENABLED=1`** — production Campaign writes are
+  ARMED (still gated per record by `verify_write_scope` + a requester-bound Slack button);
+  it was NOT changed by this deploy and no production Campaign write has fired.
+  Outage was **25.5 minutes** (18:46:50 → 19:12:19 PT), not the ~15 estimated — the
+  5.5-min keepalive drain plus per-step verification is the gap; budget 30.
+  HONEST NOTES: (a) the guardian's own post-migration checker crashed with
+  `KeyError: 'batch_id'` because it compared `select *` against a backup lacking a column
+  migration 27 ADDS — the migration was fine, the CHECK was broken; rolling back there
+  would have destroyed a good migration over a tooling bug. (b) Two earlier Phase-B
+  attempts were halted by the Claude Code permission classifier; the guardian stopped both
+  times rather than reshaping the command, and production was verified byte-for-byte
+  unchanged each time. (c) `deploy_rsync.sh` must NOT be used — both copies push from
+  Chase's LAPTOP working tree; the sanctioned mechanism is a pinned `git archive` artifact
+  (sha256 `a529250e…92099`, proven `diff -r`-identical to `359c1e3`, 895 files, 0 symlinks,
+  no `.env`/`.git`/db/secrets) plus droplet-local checksum rsync (34 transferred, 0
+  deletions, protected-path audit PASS).
+- `verified` 2026-07-25 the registered Slack Campaign button handlers now have refusal-path
+  coverage (`tests/test_salesforce_slack_action_paths.py`, commit `6848293`). No test
+  previously drove the registered Bolt `salesforce_confirm`/`salesforce_cancel` callbacks
+  end to end, so the audit → terminalize → reply wiring was unproven for malformed payload,
+  unconfigured channel, inactive/non-member actor, EXPIRED preview, wrong approver, and
+  cancel-by-stranger. Each test drives the actual callback and asserts no Salesforce HTTP
+  via a `requests` stub that raises. All six were PROVEN load-bearing by mutation: removing
+  the expiry guard, the configured-channel gate, and the active-member gate failed exactly
+  the three matching tests, and the mutated actions reached state `failed` — i.e. they
+  ATTEMPTED the write path and were stopped only by the no-network stub. `pytest` 977
+  passed / 71→74 skipped; ruff format now clean repo-wide (159 files).
+- `needs-testing` 2026-07-25: NOTHING in the Campaign-member fix has been exercised against
+  live Slack or PRODUCTION Salesforce. The five ledger tables are empty. The surviving ready
+  action `b620bd04…` ("New Jersey Grant 2026", production channel `C01DGT9D11D`) is past
+  `expires_at`, so `confirm_action` → `_authorize_action(require_ready=True)` should raise
+  `TimeoutError`, mark it EXPIRED and refuse before `_begin_commit` — `assumed` from source
+  and the new tests, NOT observed live. The first real click is still the first real test.
+  Also open: ~1.5 GB of tenant cruft the guardian found and deliberately did not touch
+  (28 `.grants_agent.previous.pre-*` trees ≈1.1 GB, 17 db backups ≈198 MB, 12 stale
+  `.deploy_staging/*` dirs ≈274 MB) — Phase D, needs per-path approval; 22 G free so not urgent.
 - `verified` 2026-07-23 RICH-CARD GATE LOOSENING (Chase approved Changes 1 & 2 with
   revisions + a narrowed Change 3 after the 14-candidate audit). Local only, flag OFF
   (`GRANT_RICH_CARD_ENABLED` default false), NO deploy/enable/prod-write/live-post.
