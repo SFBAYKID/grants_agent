@@ -286,7 +286,12 @@ affect Chase's other projects.
   replenishment is LOW without enriching more of the 563 gold leads (most lack an NCES id
   or a verifiable contact) — the 14 were a pre-characterized NCES+dated+open-window subset,
   not a rate. NOTE: my first two rerun attempts were HARNESS artifacts, both caught and
-  corrected — (1) `.env` not loaded from the background cwd (false all-website_missing);
+  corrected — (1) `.env` never loaded at all (false all-website_missing). **CORRECTED
+  2026-08-06: this said "not loaded from the background cwd", which blamed the wrong
+  thing and cost a wasted production run today.** `load_dotenv()` is called only inside
+  the three entrypoints' `main()` (`cli.py`, `slack/grant.py`, `source_discovery_batch.py`);
+  importing `grant_watch.*` triggers none of them. cwd only matters GIVEN such a call.
+  Any script that imports the package directly must call `load_dotenv()` itself;
   (2) `now` captured before enrichment, so SF `checked_at` read as a future timestamp and
   the freshness guard correctly rejected it (false all-CRM_UNSAFE). The policy was right
   both times; re-evaluating with a correct clock produced the numbers above. Frame this as
