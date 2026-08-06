@@ -15,7 +15,6 @@ from grant_watch import db
 from grant_watch.campaign import delivery, pacing
 from tests.test_rich_preparation import _eligible_conn
 
-NOW = datetime(2026, 7, 22, 18, 0, tzinfo=timezone.utc)  # 11:00 PT cutoff
 READY = datetime(2026, 7, 22, 17, 59, tzinfo=timezone.utc)
 
 
@@ -68,11 +67,15 @@ def test_pacing_hard_cutoff_and_weekday_slot() -> None:
         "CREATE TABLE proactive_daily_slots(audience TEXT,local_date TEXT,delivery_kind TEXT,delivery_key TEXT,reserved_at TEXT);"
     )
     before = datetime(2026, 7, 22, 16, 0, tzinfo=timezone.utc)  # 09:00 PT
-    at_cutoff = datetime(2026, 7, 22, 18, 0, tzinfo=timezone.utc)  # 11:00 PT
+    # 11:00 PT is now ADMITTED: it is the first :00/:30 cron tick after any slot in
+    # 10:31–10:45, which the old 11:00 cutoff refused — making those slots unreachable.
+    late_morning_tick = datetime(2026, 7, 22, 18, 0, tzinfo=timezone.utc)  # 11:00 PT
+    at_cutoff = datetime(2026, 7, 22, 18, 30, tzinfo=timezone.utc)  # 11:30 PT
     assert pacing.should_post(conn, "C", before)[0] is False
+    assert pacing.should_post(conn, "C", late_morning_tick)[0] is True
     assert pacing.should_post(conn, "C", at_cutoff) == (
         False,
-        "missed the 11:00 Pacific hard cutoff",
+        "missed the 11:30 Pacific hard cutoff",
     )
     assert pacing.should_post(conn, "C", READY)[0] is True
 

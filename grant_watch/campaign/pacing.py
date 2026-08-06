@@ -1,6 +1,6 @@
 """Deterministic one-card weekday pacing for the rich campaign.
 
-The one daily slot is 10:00–10:45 Pacific and the hard cutoff is 11:00 Pacific. A
+The one daily slot is 10:00–10:45 Pacific and the hard cutoff is 11:30 Pacific. A
 missed slot never posts in the afternoon. Existing posts and pre-Slack reservations
 share the same cap, so neither legacy nor future reminder paths can bypass it.
 """
@@ -16,6 +16,15 @@ from .. import db
 
 PT = ZoneInfo("America/Los_Angeles")
 ET = ZoneInfo("America/New_York")
+
+# Exclusive hard cutoff for the day's rich card, exported so delivery's skip string and
+# cli's fallback classification stay derived from ONE value. It must sit at least one
+# full cron interval past the END of the slot band: with the cutoff at 11:00, a slot of
+# 10:31–10:45 was unreachable on a :00/:30 30-minute cron grid — the first tick at or
+# after the slot was 11:00, which the cutoff refused — so those days could never post a
+# rich card at all. 11:29 is still late morning, so the invariant "a missed slot never
+# posts in the afternoon" holds.
+HARD_CUTOFF_PT = time(11, 30)
 
 
 def daily_slot(channel: str, now_utc: datetime) -> datetime:
@@ -91,8 +100,8 @@ def should_post(
     et = now_utc.astimezone(ET)
     if pt.weekday() >= 5 or et.weekday() >= 5:
         return False, "weekend"
-    if pt.time() >= time(11, 0):
-        return False, "missed the 11:00 Pacific hard cutoff"
+    if pt.time() >= HARD_CUTOFF_PT:
+        return False, f"missed the {HARD_CUTOFF_PT:%H:%M} Pacific hard cutoff"
     slot = daily_slot(channel, now_utc)
     if pt < slot:
         return False, f"waiting for today's {slot.strftime('%H:%M')} Pacific slot"

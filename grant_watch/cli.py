@@ -197,6 +197,17 @@ def cmd_drip(force: bool, dry_run: bool) -> int:
             force=force,
             dry_run=dry_run,
         )
+        if rich_delivery.fallback_to_daily(outcome):
+            # Chase 2026-08-05: a card lands every weekday in the newest look. When
+            # the rich path provably cannot post today (no card satisfies the evidence
+            # rules, or the rich cutoff has passed), the restyled daily card takes the
+            # tick. Cap, guard, ambiguous-send, and waiting-for-slot outcomes never
+            # fall through — see delivery.fallback_to_daily. The final outcome (and so
+            # the exit status) is the path that actually ran.
+            print(f"drip[rich]: {outcome}; falling back to the daily card")
+            outcome = drip_mod.run_drip(
+                client, channel, conn, force=force, dry_run=dry_run
+            )
     else:
         outcome = drip_mod.run_drip(client, channel, conn, force=force, dry_run=dry_run)
     print(f"drip: {outcome}")

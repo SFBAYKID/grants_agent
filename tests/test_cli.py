@@ -161,6 +161,90 @@ def test_rich_flag_off_never_enters_the_rich_delivery_path(
     assert cli.cmd_drip(force=True, dry_run=True) == 0
 
 
+def test_rich_eligibility_miss_falls_back_to_the_daily_card(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Chase 2026-08-05: when no rich card qualifies, the restyled daily card posts —
+    the tick's outcome (and exit status) comes from the path that actually ran."""
+    from grant_watch.campaign import delivery
+    from grant_watch.slack import drip
+
+    sentinel = _readonly_only(monkeypatch)
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANTS")
+    monkeypatch.setenv("GRANT_RICH_CARD_ENABLED", "1")
+    monkeypatch.setattr(
+        delivery,
+        "run",
+        lambda *_a, **_k: "skip: no rich award card satisfies every evidence rule",
+    )
+    calls: list[object] = []
+
+    def legacy(client: object, channel: str, conn: object, **_kwargs: object) -> str:
+        """Record the fallback invocation and return a normal daily outcome."""
+        calls.append(conn)
+        assert client is None and channel == "CGRANTS" and conn is sentinel
+        return "[dry-run] would post nugget (award-brief): ..."
+
+    monkeypatch.setattr(drip, "run_drip", legacy)
+    assert cli.cmd_drip(force=True, dry_run=True) == 0
+    assert len(calls) == 1
+    out = capsys.readouterr().out
+    assert "drip[rich]: skip: no rich award card satisfies every evidence rule" in out
+    assert "falling back to the daily card" in out
+
+
+def test_rich_cap_guard_and_ambiguous_outcomes_never_fall_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A spent cap, a waiting slot, or an ambiguous send must never trigger a second
+    posting attempt — and a failing rich outcome must keep its non-zero exit."""
+    from grant_watch.campaign import delivery
+    from grant_watch.slack import drip
+
+    _readonly_only(monkeypatch)
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANTS")
+    monkeypatch.setenv("GRANT_RICH_CARD_ENABLED", "1")
+    monkeypatch.setattr(
+        drip,
+        "run_drip",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("fell back on a non-fallback outcome")
+        ),
+    )
+    for outcome, expected_exit in (
+        ("skip: daily cap reached (1)", 0),
+        ("skip: waiting for today's 10:07 Pacific slot", 0),
+        ("posted rich_award for lead #7: Bartlett ISD", 0),
+        ("unknown: Slack delivery could not be confirmed; no retry", 1),
+        ("quarantined: Slack rejected this rich card (invalid_blocks)", 1),
+    ):
+        monkeypatch.setattr(delivery, "run", lambda *_a, _o=outcome, **_k: _o)
+        assert cli.cmd_drip(force=True, dry_run=True) == expected_exit, outcome
+
+
+def test_fallback_daily_failure_keeps_its_nonzero_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ambiguous send on the FALLBACK path is just as loud as on the legacy path."""
+    from grant_watch.campaign import delivery
+    from grant_watch.slack import drip
+
+    _readonly_only(monkeypatch)
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANTS")
+    monkeypatch.setenv("GRANT_RICH_CARD_ENABLED", "1")
+    monkeypatch.setattr(
+        delivery,
+        "run",
+        lambda *_a, **_k: "skip: no rich award card satisfies every evidence rule",
+    )
+    monkeypatch.setattr(
+        drip,
+        "run_drip",
+        lambda *_a, **_k: "unknown: Slack delivery could not be confirmed",
+    )
+    assert cli.cmd_drip(force=True, dry_run=True) == 1
+
+
 def test_rich_prepare_defaults_to_no_http_readonly_preview(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

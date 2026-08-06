@@ -13,16 +13,23 @@ source link; no internal identifiers or emoji in alerts; short paragraphs.
 
 ## PROACTIVE — Grant initiates (weekday cron, 05:00–17:30 PT)
 
-### 0. Rich verified award card — feature flag OFF  (kind `rich_award`)
-- **Status:** implemented and fixture-tested locally; `GRANT_RICH_CARD_ENABLED` defaults
-  OFF. Not deployed, scheduled, production-validated, or authorized for live Slack.
+### 0. Rich verified award card — feature flag ON in production 2026-08-05  (kind `rich_award`)
+- **Status:** `GRANT_RICH_CARD_ENABLED=1` in production since 2026-08-05 (Chase's
+  explicit instruction; the five-business-day shadow gate was waived by him the same
+  day). First live render/notification still `needs-testing` until a human confirms
+  the first posted card.
 - **Fires only when:** a Gold verified award for an NCES-linked district has a
   precision-safe recent award date, event-owned positive finite amount, currently open
   spend window, recent completed source run, safe exact award URL, evidenced official
-  site, fresh public official contact, and fresh complete CRM result. Otherwise it
-  posts nothing.
+  site, fresh public official contact, and fresh complete CRM result. Otherwise the
+  tick FALLS BACK to the restyled legacy daily card (§1–§4 content in the rich Block
+  Kit layout) — a card lands every weekday; after an outage past the rich cutoff the
+  fallback card may land in the afternoon, which is accepted (Chase 2026-08-05: never
+  a silent day).
 - **Pacing:** one card maximum per weekday, deterministic 10:00–10:45 Pacific slot,
-  hard 11:00 cutoff, no urgent second card. It shares the cap with follow-up reminders.
+  hard 11:30 cutoff (`pacing.HARD_CUTOFF_PT`), no urgent second card. It shares the
+  cap with follow-up reminders and with the fallback daily card (both paths count
+  posts AND pre-Slack reservations, so neither can double-post).
 - **Card:** GOLD/PLATINUM header; exact owner mention or explicit unassigned territory;
   award/spend-window facts; typed Salesforce context; evidenced contact; separately
   labelled official/contact/Salesforce/award links; `Ask Persequor to draft` and

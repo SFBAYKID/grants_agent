@@ -19,3 +19,9 @@
 - [RFP dedup key drift](rfp-dedup-key-drift.md) — dup RFP leads = 6-token→full-title KEY migration (not case); recompute-key proof; orphan gold RFP #9534; gold backlog has no usable award dates
 - [Disk footprint + cruft](disk-footprint-and-cruft.md) — 26 snapshot venvs purged 2026-07-22 (home 7.7G→1.9G, / 95%→83%); safe-purge recipe; `du -b` under-predicts df; no log rotation
 - [Grant Slack event flow](grant-slack-event-flow.md) — both app_mention+message handlers exist; slack_event_receipts has no event-type col; message-handler receipt is gated by thread-ownership; private channels need message.groups/groups:history
+- [Firecrawl paid-call surface](firecrawl-paid-call-surface.md) — only 3 paths spend credits; RFP poller is the sole scheduled one (≤40 calls/weekday); 402/429/billing greps are all false positives
+- [Campaign fix 359c1e3 DEPLOYED](campaign-fix-359c1e3-preflight.md) — LIVE 2026-07-26 schema 28; migration 28 MUTATES crm_actions; live-traffic counters are floors not invariants; post-quiesce gate; `select *` backup-diff KeyError trap
+- [Codex parallel-writer forensics](codex-parallel-writer-forensics.md) — the other toolchain's staging/backup/handoff signatures; silent keepalive tick = crontab mid-restore, not damage; origin can be AHEAD of local
+- [Campaign writes flag ARMED in prod](campaign-writes-flag-armed-in-prod.md) — SALESFORCE_CAMPAIGN_WRITES_ENABLED=1 live vs PRODUCTION Salesforce; 4 ready create_campaign previews
+- [Rich-card deploy e8ecf0c](rich-card-deploy-e8ecf0c.md) — COMPLETED 2026-07-24 flag-OFF: tldextract 5.3.1 installed, migrations 14-26 applied (MAX 26, cron self-heal), bot pid 597044; buttons need tldextract (boot/cron don't); rollback snapshot at 20260724T214420Z
+- [Rich-card ENABLED 2026-08-05](rich-card-enable-20260805.md) — GRANT_RICH_CARD_ENABLED=1 LIVE (Chase waived shadow gate); crontab now 5 lines sha 70e309aa…; rich pacing 10:00-10:45+11:00 cutoff replaces legacy band

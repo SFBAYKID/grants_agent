@@ -40,6 +40,7 @@ from slack_sdk.errors import SlackApiError
 
 from .. import db, scoring, territory
 from ..presentation import display_entity_name, plain_fragment, state_display_name
+from .drip_card import render_blocks
 from .search_presentation import record_link
 from .source_status import _safe_url
 
@@ -722,7 +723,13 @@ def run_drip(
     # are separate blocks so the opening sentence still reads as one short human line.
     # The source is passed so a lead whose state was INFERRED from prose (the RFP
     # aggregator) can never tag a rep — see territory.VERIFIED_STATE_SOURCES.
-    text = text + territory.routing_line(row["state"], row["source"]) + source_line(row)
+    sentence = text
+    routing = territory.routing_line(row["state"], row["source"])
+    source = source_line(row)
+    text = sentence + routing + source
+    # The same three strings, restyled into the rich-campaign Block Kit layout (Chase
+    # 2026-08-05). `text` stays the complete message for notifications/screen readers.
+    blocks = render_blocks(kind, sentence, routing, source)
     if dry_run:
         return f"[dry-run] would post {kind} ({style}): {text}"
     event_id = int(row["current_event_id"]) if row["current_event_id"] else None
@@ -732,7 +739,7 @@ def run_drip(
         event_id,
         channel,
         kind,
-        {"text": text, "style": style, "urgent": urgent},
+        {"text": text, "style": style, "urgent": urgent, "blocks": blocks},
     )
     if delivery_key is None:
         return "skip: this funding event is already reserved or delivered"
@@ -741,10 +748,12 @@ def run_drip(
         resp = client.chat_postMessage(
             channel=channel,
             text=text,
-            # mrkdwn on so the source renders as a hyperlink (Chase 2026-07-19). Safe:
-            # the sentence is built only from sanitized facts (display_entity_name strips
-            # <>*_~|@`), and the URL is the stored, hardened detail link — nothing
-            # injectable reaches the render.
+            # The blocks carry the SAME sanitized strings in the rich layout; `text`
+            # remains the complete fallback. mrkdwn on so the source renders as a
+            # hyperlink (Chase 2026-07-19). Safe: the sentence is built only from
+            # sanitized facts (display_entity_name strips <>*_~|@`), and the URL is
+            # the stored, hardened detail link — nothing injectable reaches the render.
+            blocks=blocks,
             mrkdwn=True,
             unfurl_links=False,
             unfurl_media=False,

@@ -144,8 +144,14 @@ Salesforce/Persequor.
 
 One proactive-message cap per weekday (reuse `DAILY_CAP=1`). **Remove the urgent/
 exceptional second-post path** for the rich campaign. Keep deterministic per-day
-slotting; default band 10:00–10:45 PT with a fixed 11:00 PT hard cutoff, after which a
-missed card waits a day. Follow-up reminders stay default-off and atomically share the
+slotting; default band 10:00–10:45 PT with a fixed hard cutoff (`pacing.HARD_CUTOFF_PT`,
+11:30 PT since 2026-08-05 — at 11:00 the first :00/:30 cron tick after a 10:31–10:45
+slot was refused, making those slots unreachable), after which a missed RICH card waits
+a day. Since 2026-08-05 (Chase: a card lands every weekday in the newest look) a rich
+tick that provably cannot post today — no eligible card, or the cutoff passed — falls
+back to the RESTYLED legacy daily card (`cli.cmd_drip` → `delivery.fallback_to_daily`);
+cap/guard/ambiguous outcomes never fall through, so the fallback can neither double-post
+nor mask a failure. Follow-up reminders stay default-off and atomically share the
 same persisted daily slot when rich delivery is enabled. State diversity across posting
 days is already deployed (`_best_nugget` cooldown via `db.recent_post_states`); the rich
 selector reuses it: prefer a state ≠ most recent, deterministic fallback for one

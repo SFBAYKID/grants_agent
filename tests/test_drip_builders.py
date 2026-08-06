@@ -136,7 +136,7 @@ def test_bulletin_uses_opportunity_title(tmp_path: Path) -> None:
         source="grants.gov",
         amount=None,
         start="2026-07-01",
-        end="2026-08-04",
+        end="2030-08-04",
         title="FY26 School Violence Prevention Program",
     )
     row = db.bulletin_candidates(conn, "C1")[0]
@@ -144,7 +144,7 @@ def test_bulletin_uses_opportunity_title(tmp_path: Path) -> None:
     assert "FY26 School Violence Prevention Program" in text
     assert (
         text
-        == "FY26 School Violence Prevention Program is listed as open through 2026-08-04."
+        == "FY26 School Violence Prevention Program is listed as open through 2030-08-04."
     )
     assert style == "bulletin-open"
 
@@ -323,7 +323,7 @@ def test_bulletin_only_when_no_nuggets(tmp_path: Path) -> None:
         grade=LeadGrade.WATCH,
         source="grants.gov",
         amount=None,
-        end="2026-08-04",
+        end="2030-08-04",
         title="SVPP FY26",
     )
     kind, row = drip.pick(conn, "C1")
@@ -340,12 +340,12 @@ def test_california_opportunity_can_become_bulletin(tmp_path: Path) -> None:
         grade=LeadGrade.WATCH,
         source="ca-grants-portal",
         amount=None,
-        end="2026-08-04",
+        end="2030-08-04",
         title="School Security Grant",
     )
     row = db.bulletin_candidates(conn, "C1")[0]
     text, style = drip.build_bulletin(row)
-    assert text == "School Security Grant is listed as open through 2026-08-04."
+    assert text == "School Security Grant is listed as open through 2030-08-04."
     assert style == "bulletin-open"
 
 
@@ -369,7 +369,8 @@ def test_delivery_reservation_prevents_duplicate_post(tmp_path: Path) -> None:
     assert first.startswith("posted nugget")
     assert second == "skip: nothing new worth saying"
     assert client.calls == 1
-    assert "blocks" not in client.last_kwargs
+    # The rich-layout restyle (Chase 2026-08-05): blocks carry the same strings.
+    assert client.last_kwargs["blocks"][0]["text"]["text"] == "GOLD · Verified award"
     assert client.last_kwargs["mrkdwn"] is True  # source renders as a hyperlink
     assert client.last_kwargs["unfurl_links"] is False
     assert client.last_kwargs["unfurl_media"] is False

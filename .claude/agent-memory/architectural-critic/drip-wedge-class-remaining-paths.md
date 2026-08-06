@@ -1,9 +1,21 @@
 ---
 name: drip-wedge-class-remaining-paths
-description: 85295d7 fixed the reserve-collision wedge but two paths in the SAME class remain — an unrenderable candidate crashes every tick forever, and a deterministic Slack rejection now silently burns inventory
+description: RESOLVED — all three 85295d7-era gaps were closed (db.quarantine_lead on render failure, SlackApiError three-way split, cli drip-blocked); kept for the "one bad top-ranked lead stops the product" pattern to re-check on any new pre-reservation step
 metadata:
   type: project
 ---
+
+**STATUS 2026-08-05: all three items below are RESOLVED in current `run_drip` (verified by
+reading the code): render `ValueError` → `db.quarantine_lead` (durable outbox row, loud
+`quarantined:` exit); `SlackApiError` split systemic-release / content-quarantine /
+ambiguous-keep with a 429 backoff; `blocked_notifications` + `cli drip-blocked` surface
+set-aside leads. Kept for the pattern: any NEW step added between pick() and
+reserve_notification that can raise (e.g. `render_blocks` KeyError on an unknown kind,
+2026-08-05) recreates wedge class #1 — it must either be precondition-guarded in the
+candidate query or fail into a durable quarantine, never a bare traceback. See
+[[rich-daily-fallback-wiring]] for the flag-on economics of the content-quarantine path.**
+
+Original (historical) findings:
 
 `85295d7` fixed the C1 wedge (see [[drip-wedge-on-ambiguous-send]], now RESOLVED) by excluding
 `notification_outbox` leads from all three candidate queries. Two paths in the same "one bad top-ranked

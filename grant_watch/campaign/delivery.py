@@ -112,6 +112,51 @@ def _delivery_veto(
     )
 
 
+# Outcome strings shared by run() and the fallback classifier below. They MUST be the
+# same objects at the return sites: the classifier matches exactly, so a reworded
+# literal in run() would silently kill the fallback — a permanent cardless flag-on day
+# behind a benign skip line and exit 0 (architectural-critic H1, 2026-08-05).
+_SKIP_NO_ELIGIBLE_CARD = "skip: no rich award card satisfies every evidence rule"
+_SKIP_CANDIDATE_CHANGED = "skip: candidate changed after preparation; no post attempted"
+_SKIP_STABLE_DELIVERY_EXISTS = (
+    "skip: this stable award/audience delivery already exists"
+)
+_SKIP_ALREADY_RESERVED = "skip: this rich-card delivery is already reserved"
+
+# Rich outcomes after which the RESTYLED legacy daily card may still post this tick
+# (Chase 2026-08-05: a card lands every weekday in the newest look — rich when the
+# evidence gates pass, the restyled plain card otherwise, never silence). An outcome
+# qualifies only when all three hold:
+#   1. nothing was posted or reserved TODAY (both paths count posts AND outbox
+#      reservations toward the same cap, so a fallback can never double-post);
+#   2. no Slack call was attempted this tick (an ambiguous send must never be followed
+#      by a second post); and
+#   3. the rich path provably cannot post LATER today, so it is not preempted while
+#      merely waiting for its slot.
+# Excluded on purpose: "daily cap reached" (the day is spent), "waiting for today's
+# … slot" (rich may still post), "weekend" (nothing should post), guard holds /
+# blocked / backoff (a channel problem stops both paths), "unknown" (ambiguous send),
+# and "error"/"quarantined" (loud failures that must keep their non-zero exit).
+_FALLBACK_EXACT = frozenset(
+    {
+        _SKIP_NO_ELIGIBLE_CARD,
+        _SKIP_CANDIDATE_CHANGED,
+        _SKIP_STABLE_DELIVERY_EXISTS,
+        _SKIP_ALREADY_RESERVED,
+    }
+)
+
+
+def fallback_to_daily(outcome: str) -> bool:
+    """Whether cli.cmd_drip may hand this tick to the legacy daily-card path."""
+    if outcome in _FALLBACK_EXACT:
+        return True
+    # Derived from the same constant pacing uses, so the strings cannot drift apart.
+    return outcome == (
+        f"skip: missed the {pacing.HARD_CUTOFF_PT:%H:%M} Pacific hard cutoff"
+    )
+
+
 def run(
     client: SlackPoster | None,
     channel: str,
@@ -133,7 +178,7 @@ def run(
     reviews = review_candidates(conn, channel, channel_members, now=at)
     choice = _pick(reviews, db.recent_post_states(conn, channel, 1))
     if choice is None or choice.draft is None:
-        return "skip: no rich award card satisfies every evidence rule"
+        return _SKIP_NO_ELIGIBLE_CARD
     if dry_run:
         preview = replace(choice.draft, fallback_text=card.fallback_text(choice.draft))
         return f"[dry-run] would post rich_award for lead #{choice.lead_id}: {preview.fallback_text}"
@@ -144,7 +189,7 @@ def run(
         choice.draft.contact_evidence_id,
         at,
     ):
-        return "skip: candidate changed after preparation; no post attempted"
+        return _SKIP_CANDIDATE_CHANGED
     frozen, _created = freeze(conn, choice.draft, now=at)
     stable_key = award_dedup_key(frozen.draft)
     prior = conn.execute(
@@ -153,7 +198,7 @@ def run(
         (frozen.id, frozen.id),
     ).fetchone()
     if prior is not None:
-        return "skip: this stable award/audience delivery already exists"
+        return _SKIP_STABLE_DELIVERY_EXISTS
     try:
         rendered = card.render(frozen)
     except Exception as exc:  # noqa: BLE001 - permanently quarantine bad render input
@@ -187,7 +232,7 @@ def run(
     )
     if delivery_key is None:
         pacing.release_daily_slot(conn, slot_key)
-        return "skip: this rich-card delivery is already reserved"
+        return _SKIP_ALREADY_RESERVED
     if client is None:
         db.finish_notification(conn, delivery_key, "unknown", error="missing_client")
         return "unknown: Slack client absent after reservation; no retry"

@@ -112,7 +112,48 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
-## Current status (2026-07-25)
+## Current status (2026-08-05)
+
+- `verified` 2026-08-05 RICH CARD ENABLED IN PRODUCTION on Chase's explicit instruction
+  ("No just make it live"), WAIVING his own A4 five-business-day shadow gate after the
+  tradeoffs were explained. Through grants-ops-guardian over the scoped grants SSH only:
+  `GRANT_RICH_CARD_ENABLED=1` appended to the tenant `.env` (sha `fe9fd588…3f55` →
+  `b3f338ff…c3bff`, exactly one line added) and ONE cron line added — `45 7 * * 1-5
+  … rich-prepare --execute` (paid Firecrawl contact discovery + read-only Salesforce,
+  bounded --limit 25) — original 4 cron lines byte-identical (sha `6275d502…44711` →
+  `70e309aa…876f`). Preflight held: prod `359c1e3`, schema 28 read-only, one healthy
+  listener, no bot restart needed (nothing in the bot process reads the flag; card
+  buttons bind to frozen snapshots). Prepare preview: 25 candidates. `needs-testing`:
+  the paid seed run's counts and the post-enable `drip --dry-run` (guardian session was
+  still executing them at last report); the first LIVE rich/restyled card render and
+  its rep phone notification (critic H2 — a human must confirm tomorrow's 10:00–11:30
+  PT card); AZ and 44 other states + DC remain UNMAPPED in territory.py, so most cards
+  say "unassigned territory" until Chase names reps.
+- `verified` 2026-08-05 NEW-LOOK-EVERY-DAY fallback (Chase chose it over silent days
+  and over old-card fallback): with the flag on, a rich tick that provably cannot post
+  today — `delivery.fallback_to_daily`: eligibility miss, candidate-changed,
+  stable-delivery-exists, already-reserved, or the rich cutoff passed — hands the tick
+  to the legacy drip, whose card is now RESTYLED into the rich Block Kit layout
+  (`grant_watch/slack/drip_card.py`): header (kind label), the builder's exact
+  sentence, the territory routing line, and the source link as blocks; `text` stays
+  the full proven string, and a test enforces every block is a substring of it (no new
+  claims; no contact/CRM/website/buttons on this path). Cap/guard/ambiguous/waiting
+  outcomes NEVER fall through — architectural-critic review found NO double-post
+  sequence (the cap counts posts + pre-Slack reservations on both paths) and no
+  unclassified outcome; its H1 (string drift) closed via shared constants at the
+  return sites. Rich hard cutoff moved 11:00 → 11:30 PT (`pacing.HARD_CUTOFF_PT`):
+  slot minutes 10:31–10:45 were UNREACHABLE on a :00/:30 cron grid because the first
+  tick after the slot was refused — ~a third of rich days would have silently fallen
+  back. After an outage past the cutoff the fallback card may land in the afternoon —
+  accepted, per "never a silent day". Also fixed: three PRE-EXISTING bulletin-test
+  failures from fixture date-rot ("open through 2026-08-04" expired 2026-08-05; pinned
+  to 2030 per the file's convention). `pytest` 992 passed / 74 skipped; ruff + format
+  + vulture + health clean. OPEN from the critic, NOT fixed: (M1) salesforce_followups
+  arbitrates only via slot rows which legacy `pacing_ok` cannot see — MUST be fixed
+  before any followups cron is ever scheduled (none exists today); (M2) a crash between
+  slot-reserve and outbox-reserve leaves an orphan slot row = one silent day, no
+  sweeper; (M5) `--dry-run` can mispredict WHICH path posts (rich preview returns
+  before the veto/prior checks).
 
 - `verified` 2026-07-25 PRODUCTION DEPLOY of the Salesforce Campaign-member fix.
   Production moved `e8ecf0c` → **`359c1e3`**, schema **26 → 28**, through
