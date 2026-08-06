@@ -38,6 +38,14 @@ def _now() -> str:
 
 def _candidates(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
     """Return the highest-base-value active leads whose CRM snapshot is stale/missing."""
+    # The ranking MUST see every stale lead. A `LIMIT 500` used to sit in this query,
+    # before the sort and with no ORDER BY, so SQLite handed back an arbitrary (in
+    # practice oldest-rowid) 500 rows and the "highest-base-value" ranking below only
+    # ever ordered that arbitrary slice. With thousands of live leads the high-value
+    # recent awards — exactly the rich card's candidates — could never enter the window,
+    # which would have made a scheduled salesforce-sync populate CRM state for the wrong
+    # leads forever (found 2026-08-06 while wiring the feeders). Bounding happens after
+    # the sort, the same shape campaign/preparation._rows already uses.
     rows = list(
         conn.execute(
             """SELECT l.*,e.occurred_on AS event_date
@@ -45,8 +53,7 @@ def _candidates(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
            LEFT JOIN funding_events e ON e.id=l.current_event_id
            LEFT JOIN salesforce_lookup_state s ON s.lead_id=l.id
            WHERE COALESCE(l.status,'new') NOT IN ('dead','contacted')
-             AND (s.checked_at IS NULL OR datetime(s.checked_at) < datetime('now', ?))
-           LIMIT 500""",
+             AND (s.checked_at IS NULL OR datetime(s.checked_at) < datetime('now', ?))""",
             (f"-{STALE_HOURS} hours",),
         )
     )

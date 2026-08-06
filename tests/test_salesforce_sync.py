@@ -140,3 +140,33 @@ def test_outage_preserves_last_known_matches(
         conn.execute("SELECT status FROM salesforce_lookup_state").fetchone()["status"]
         == "unavailable"
     )
+
+
+def test_ranking_sees_every_stale_lead_not_an_arbitrary_slice(tmp_path: Path) -> None:
+    """A high-value lead must be selected even when thousands of older rows precede it.
+
+    `_candidates` once carried a `LIMIT 500` INSIDE the query, before the sort and with
+    no ORDER BY, so SQLite returned an arbitrary (in practice oldest-rowid) slice and
+    the "highest-base-value" ranking only ordered that slice. With production holding
+    thousands of leads, the recent high-value awards the rich card depends on could
+    never enter the window — a scheduled sync would have refreshed CRM state for the
+    wrong leads indefinitely.
+    """
+    conn = db.connect(tmp_path / "rank.db")
+    conn.executemany(
+        """INSERT INTO leads(id,source,source_item_id,lead_grade,entity_name,state,
+                             program,amount,status,canonical_entity_key)
+           VALUES (?,'seed',?,'silver',?,'WA','',1.0,'new',?)""",
+        [(i, f"old-{i}", f"Low Value {i}", f"low {i}|WA") for i in range(1, 601)],
+    )
+    # Inserted LAST, so it lands at the highest rowid — beyond any leading-500 window.
+    conn.execute(
+        """INSERT INTO leads(id,source,source_item_id,lead_grade,entity_name,state,
+                             program,amount,status,canonical_entity_key)
+           VALUES (9999,'usaspending:16.071','hot','gold','Hot Award District','WA',
+                   'SVPP',500000.0,'new','hot award district|WA')"""
+    )
+    conn.commit()
+
+    picked = salesforce_sync._candidates(conn, 1)
+    assert [int(row["id"]) for row in picked] == [9999]
