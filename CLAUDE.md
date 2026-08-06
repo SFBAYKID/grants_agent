@@ -114,6 +114,100 @@ affect Chase's other projects.
 
 ## Current status (2026-08-06)
 
+- `verified` 2026-08-06 **THE RICH CARD HAD NEVER POSTED — NOT ONCE.** Chase reported
+  that morning's 11:00 PT card was still "the same incorrect format". It was not a
+  regression: efbd8b5 shipped correctly and that card WAS the new layout — but it was
+  the FALLBACK (header + sentence + source link), because the rich path has never once
+  been eligible. Evidence: `rich_card_snapshots` = **0 rows** in production, and
+  `rich-shadow --limit 500` returned **184 candidates, 0 eligible**, every one rejected.
+  The single `drip[rich]:` line ever written appeared today: "skip: no rich award card
+  satisfies every evidence rule; falling back to the daily card".
+  ROOT CAUSE: `GRANT_RICH_CARD_ENABLED=1` was set 2026-08-05 without the jobs that
+  populate the evidence its gates read. NONE were in cron: `leads.nces_id` (NULL on
+  **176/184** → `entity_kind_unsupported`; only writer is a side effect of one shape of
+  Slack search), `leads.org_website` (set on 11/184; only writer is a Slack chat
+  conversation), and `salesforce_lookup_state` (**0 rows** — the hard deadlock: with it
+  empty EVERY candidate fails `CRM_UNSAFE` regardless of the other two). Compounding it,
+  `rich-prepare --limit 25` ranked by raw `lead_score`, and the top 25 contained **zero**
+  NCES-bearing leads — the only 8 kind-eligible ones sat at ranks 34–123, so the paid
+  Firecrawl/Anthropic batch was enriching leads that could never qualify.
+  FIXED (deployed in order): **d66802b** — an untitled contact rendered
+  `Contact: Dalton Cagle, — dalton@…`; the comma belongs to the title, and this text is
+  the notification/lock-screen surface. **b22ed55** — `nces-bind` CLI (free, keyless,
+  preview by default, matching UNCHANGED so an ambiguous name still binds nothing);
+  `prepare_worker` targets `preparation.preparable_lead_ids` (skips leads whose first
+  rejection cause preparation cannot close — a SPEND fix, not a gate change); org-website
+  discovery added, guarded by `_needs_website` so each lead is attempted exactly ONCE
+  (`enrich_org_profile` short-circuits only on a prior `found`, so unguarded it would
+  re-scrape and re-bill every not_found lead forever). **79db6e1** — `salesforce_sync
+  ._candidates` had `LIMIT 500` INSIDE the query, before the sort and with no ORDER BY,
+  so the "highest-base-value" ranking only ordered an arbitrary oldest-rowid slice of a
+  10,627-lead pool. **03ab7bb** — the redesign that actually closes the deadlock, forced
+  by the guardian measuring 79db6e1 against production: a GLOBAL ranking cannot feed a
+  TARGETED pipeline. The 8 candidate leads rank **51–165** among 10,627 stale leads and
+  `_candidates` hard-caps at 100, so NO `--limit` reaches them (0/8 at 50, 1/8 at 100);
+  the old bug had been reaching 5/8 purely by accident. So `prepare_worker` now refreshes
+  the CRM snapshot for the leads it is ALREADY preparing, by id
+  (`salesforce_sync.refresh_lead` + `_crm_is_stale`), which also removes the need for any
+  `salesforce-sync` cron line — `rich-prepare` at 07:45 PT now completes the whole chain
+  (contact → website → CRM → activity). Also in 03ab7bb: `salesforce-sync --dry-run` was
+  **NOT dry** — it called `lookup()` per candidate and skipped only the local write,
+  spending 150–350 live production API calls; a preview now makes no request at all.
+  NO EVIDENCE RULE WAS RELAXED in any of these — Chase's instruction was to leave the
+  gates alone, and the fixes only make the evidence exist and aim the paid work.
+  `pytest` 1001 passed / 74 skipped; ruff + format clean. Every new test proven
+  load-bearing by mutation — including one that was NOT: the fresh-CRM-snapshot test
+  initially passed against broken code because `prepare_worker`'s per-candidate
+  `except Exception` swallowed a raising stub. Rewritten to RECORD calls rather than
+  raise. A test that looks strict and asserts nothing is exactly what rule 3 exists for.
+- `needs-testing` 2026-08-06: **no rich card has ever been submitted to Slack's live
+  Block Kit validator.** `card.render`, the `rich_not_relevant` button binding, and the
+  snapshot round-trip are all unproven against real Slack. The first live post IS the
+  first real test.
+- `verified` 2026-08-06 lead #1603 (Hoxie School District No 46, AR, $500k SVPP) became
+  the first ever ELIGIBLE rich card, at `card_mode=research_needed`. Its website
+  provenance is `verified_org_page` (a scrape), and draft-ready requires
+  `nces`/`authoritative_directory` — but `leads.nces_website` has NO writer anywhere in
+  the codebase, so **no lead can currently reach draft-ready** and no card carries the
+  "Ask Persequor to draft" button. Wiring `nces_website` from the record `nces-bind`
+  already fetches is the change that would unlock it; deliberately NOT done, because that
+  button is the outreach path.
+  Its NCES binding needed an operator-supplied LEAID: USAspending reports the legal name
+  `HOXIE SCHOOL DISTRICT NO 46`, NCES `LEA_NAME` is `HOXIE SCHOOL DISTRICT`, and
+  `normalize_name` strips "school"/"district" but not "no 46" — so `hoxie no 46` ≠
+  `hoxie`. `nces.normalize_name` was deliberately NOT loosened: relaxing an exact matcher
+  is how a lead binds to the WRONG district, and a wrong `nces_id` freezes into a card
+  snapshot. That needs a cross-state false-positive audit first. Identity was confirmed
+  from three independent sources (single AR Hoxie district; USAspending recipient address
+  602 SW HARTIGAN ST, HOXIE 72433; the scraped site's own address matching).
+- `assumed` 2026-08-06 NCES coverage ceiling, measured live across the 5 most-pending
+  states: of 69 pending leads only **19 can ever bind — 50 (72%) never will**
+  (`AJO UNIFIED SCHOOL DISTRICT 15`, `SCHOOL DIST 103`, `DEKALB … #428`,
+  `FRANKFORT INDEPENDENT BOARD OF EDUCATION`). Because `nces-bind` orders states by
+  pending DESC, permanently-unmatchable states stay pinned at the top forever and the
+  other 31 states are never reached — which is why the cron line is WEEKLY with
+  `--limit-states 12` (sweeps all 36 in three Mondays) rather than daily. The real fix is
+  marking unmatchable leads so they stop re-queuing; NOT done.
+- `needs-testing` 2026-08-06 two known silent-failure paths, neither fixed:
+  (1) `CRM_FRESH_HOURS = 24` with a once-daily refresh means ONE missed `rich-prepare`
+  guarantees staleness at the next day's window — every affected lead flips to
+  `CRM_UNSAFE`, the rich path misses, and it falls back SILENTLY (one `drip[rich]:` line;
+  no MAILTO is set on the droplet). Widening to ~36h would give real slack.
+  (2) `cron.log` is 1.7 MB with no rotation.
+- `verified` 2026-08-06 OPERATIONAL LESSONS worth keeping: (a) a long ssh one-liner
+  WRAPPED in the terminal between `.venv/bin/python` and its script argument, and that
+  newline inside the single quotes split it into two commands — a bare `python`
+  (interactive REPL, hung on stdin) plus an orphan line. The repost silently never ran;
+  Ctrl-C landed before `reserve_notification`, so nothing was left to clean up
+  (`integrity_check` ok, zero `rich_award` outbox rows, `proactive_daily_slots` empty).
+  Keep operator commands SHORT. (b) The guardian twice caught its own bad verification —
+  an artifact proof that printed PASS while comparing ZERO files (`git hash-object` run
+  with cwd outside the repo), and a discriminator that string-matched `LIMIT 500` in
+  source that now merely QUOTES it in a comment. Behavioral checks beat textual ones.
+  (c) A `__pycache__` purge destroyed the `.pyc` mtime evidence of an incident under
+  investigation. (d) The CPU spike Chase reported during the failed repost was NEVER
+  explained: the guardian's own `rsync -cain` audit was the leading suspect and it
+  instrumented that away (0.457 s, load average unmoved). Left honestly unexplained.
 - `verified` 2026-08-06 00:15 PT PRODUCTION DEPLOY 359c1e3 → **5f09200** (guardian,
   scoped SSH, sanctioned git-archive + checksum rsync; 46-file delta matched exactly,
   0 deletions, `__pycache__` purged, revision stamp updated, crontab/`.env` shas
