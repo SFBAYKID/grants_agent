@@ -228,3 +228,70 @@ def test_worker_persists_fake_readonly_activity_for_exact_account(
         conn.execute("SELECT status FROM salesforce_activity_snapshots").fetchone()[0]
         == "no_recent_call"
     )
+
+
+def test_worker_skips_leads_preparation_could_never_help(tmp_path: Path) -> None:
+    """A blocker preparation cannot close must not consume the paid batch.
+
+    Production 2026-08-06: 176 of 184 Gold candidates were `entity_kind_unsupported`
+    (no nces_id), yet `--limit 25` by raw lead_score paid to enrich 25 of them every
+    weekday. No amount of contact or website discovery can change an entity-kind
+    rejection -- only the NCES binder can -- so such a lead must never be picked.
+    """
+    conn = _eligible_conn(tmp_path / "unhelpable.db")
+    conn.execute("UPDATE leads SET nces_id=''")
+    conn.commit()
+    called: list[int] = []
+
+    summary = prepare_worker.run(
+        conn,
+        "CGRANTS",
+        dry_run=False,
+        contact_finder=lambda lead: called.append(int(lead["id"])),  # type: ignore[arg-type,return-value]
+        now=NOW,
+    )
+    assert summary.candidates == 0
+    assert called == [], "a kind-rejected lead must not trigger a paid contact call"
+
+
+def test_worker_discovers_a_missing_website_exactly_once(tmp_path: Path) -> None:
+    """Website discovery runs for a lead that never had one, and never repeats.
+
+    `enrich_org_profile` short-circuits only on a prior ``found``, so without the
+    `_needs_website` guard a ``not_found`` lead would be re-scraped (Firecrawl +
+    Anthropic) on every weekday run forever.
+    """
+    conn = _eligible_conn(tmp_path / "website.db")
+    conn.execute("UPDATE leads SET org_website='', org_profile_status=''")
+    conn.commit()
+    attempts: list[int] = []
+
+    def spy(_conn: object, lead_id: int) -> object:
+        """Record the attempt and simulate an honest not-found outcome."""
+        attempts.append(lead_id)
+        conn.execute(
+            "UPDATE leads SET org_profile_status='not_found' WHERE id=?", (lead_id,)
+        )
+        conn.commit()
+        return None
+
+    first = prepare_worker.run(
+        conn,
+        "CGRANTS",
+        dry_run=False,
+        contact_finder=lambda _lead: None,
+        website_finder=spy,
+        now=NOW,
+    )
+    assert first.website_checked == 1
+    assert attempts == [1]
+
+    prepare_worker.run(
+        conn,
+        "CGRANTS",
+        dry_run=False,
+        contact_finder=lambda _lead: None,
+        website_finder=spy,
+        now=NOW,
+    )
+    assert attempts == [1], "a recorded not_found must not be re-scraped and re-billed"

@@ -364,3 +364,106 @@ def test_slack_failure_cli_lists_and_reviews_without_replay(
     assert cli.cmd_slack_failures() == 1
     assert cli.cmd_slack_failures("evt-1") == 0
     assert cli.cmd_slack_failures() == 0
+
+
+def _nces_conn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> object:
+    """Create three Gold leads lacking nces_id: two in AR, one in MI."""
+    from grant_watch import db
+
+    conn = db.connect(tmp_path / "nces.db")
+    conn.executemany(
+        """INSERT INTO leads(id,source,source_item_id,lead_grade,entity_name,state,
+                             status,canonical_entity_key)
+           VALUES (?,?,?,?,?,?,'new',?)""",
+        [
+            (
+                1,
+                "usaspending:16.071",
+                "a",
+                "gold",
+                "Alpha School District",
+                "AR",
+                "a|AR",
+            ),
+            (
+                2,
+                "usaspending:16.071",
+                "b",
+                "gold",
+                "Beta School District",
+                "AR",
+                "b|AR",
+            ),
+            (
+                3,
+                "usaspending:16.071",
+                "c",
+                "gold",
+                "Gamma School District",
+                "MI",
+                "c|MI",
+            ),
+        ],
+    )
+    conn.commit()
+    monkeypatch.setattr(cli.db, "connect_readonly", lambda: conn)
+    monkeypatch.setattr(cli.db, "connect", lambda: conn)
+    return conn
+
+
+def test_nces_bind_preview_writes_nothing_and_touches_no_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without --execute the binder may not fetch NCES or write an identity."""
+    from grant_watch.enrich import nces
+
+    conn = _nces_conn(tmp_path, monkeypatch)
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        """Provide test-local behavior for a forbidden network call."""
+        raise AssertionError("preview reached the NCES API")
+
+    monkeypatch.setattr(nces, "enrich_state_leads", fail)
+    before = conn.total_changes  # type: ignore[attr-defined]
+    assert cli.cmd_nces_bind(5, True) == 0
+    assert conn.total_changes == before  # type: ignore[attr-defined]
+
+
+def test_nces_bind_visits_the_most_pending_state_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bounded run spends its state budget where the most Gold leads are waiting."""
+    from grant_watch.enrich import nces
+
+    _nces_conn(tmp_path, monkeypatch)
+    visited: list[str] = []
+
+    def record(_conn: object, state: str) -> nces.EnrichmentSummary:
+        """Record the visited state without contacting NCES."""
+        visited.append(state)
+        return nces.EnrichmentSummary(2, 2, 0)
+
+    monkeypatch.setattr(nces, "enrich_state_leads", record)
+    assert cli.cmd_nces_bind(1, False) == 0
+    assert visited == ["AR"], "AR has two pending leads to MI's one"
+
+
+def test_nces_bind_reports_a_failed_state_without_aborting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One unreachable state is counted and surfaced, never silently swallowed."""
+    from grant_watch.enrich import nces
+
+    _nces_conn(tmp_path, monkeypatch)
+    visited: list[str] = []
+
+    def flaky(_conn: object, state: str) -> nces.EnrichmentSummary:
+        """Fail the first state and succeed on the second."""
+        visited.append(state)
+        if state == "AR":
+            raise ValueError("NCES pagination repeated a page without advancing")
+        return nces.EnrichmentSummary(1, 1, 0)
+
+    monkeypatch.setattr(nces, "enrich_state_leads", flaky)
+    assert cli.cmd_nces_bind(5, False) == 1, "a failed state must exit non-zero"
+    assert visited == ["AR", "MI"], "a bad state cannot abort the remaining budget"

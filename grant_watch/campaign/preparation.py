@@ -41,6 +41,37 @@ class CandidateReview:
     readiness: Readiness = Readiness()
 
 
+# Rejection causes that BOUNDED PREPARATION CAN ACTUALLY REMEDY, i.e. the ones whose
+# missing evidence `prepare_worker.run` itself goes and fetches. Everything absent from
+# this set is either an upstream fact preparation cannot change (award age, spend
+# window, event verification, state provenance) or evidence a DIFFERENT job supplies
+# (`entity_kind_unsupported` needs the NCES binder). Targeting the paid batch with this
+# set is a spend fix, not a gate change: it re-aims Firecrawl/Anthropic calls at leads
+# whose ONLY remaining blockers preparation can close, instead of burning them on leads
+# that must be rejected no matter what preparation learns.
+#
+# On 2026-08-06 production held 184 Gold candidates of which 176 were
+# `entity_kind_unsupported`; `--limit 25` by raw lead_score therefore paid to enrich 25
+# leads that could never qualify, while the only 8 kind-eligible leads sat at ranks
+# 34-123 and were never reached. ELIGIBLE is included so an already-passing card keeps
+# its contact evidence fresh rather than ageing out of the 30-day window.
+#
+# Deliberately EXCLUDED though contact-shaped: `contact_personal_mailbox`. Re-running
+# discovery would re-find the same personal address and pay for the privilege.
+REMEDIABLE_REASONS = frozenset(
+    {
+        policy.Reason.ELIGIBLE,
+        policy.Reason.NO_WEBSITE,
+        policy.Reason.WEBSITE_UNVERIFIED,
+        policy.Reason.CONTACT_MISSING,
+        policy.Reason.CONTACT_STALE,
+        policy.Reason.CONTACT_URL_UNSAFE,
+        policy.Reason.CONTACT_DOMAIN,
+        policy.Reason.CRM_UNSAFE,
+    }
+)
+
+
 def _rows(conn: sqlite3.Connection, audience: str, limit: int) -> list[sqlite3.Row]:
     """Return bounded unsurfaced Gold projections with their current event/run."""
     candidates = list(
@@ -477,6 +508,28 @@ def candidate_lead_ids(
 ) -> tuple[int, ...]:
     """Expose the bounded quality-ordered queue to the preparation worker."""
     return tuple(int(row["id"]) for row in _rows(conn, audience, limit))
+
+
+def preparable_lead_ids(
+    conn: sqlite3.Connection,
+    audience: str,
+    *,
+    limit: int = 25,
+    pool: int = 500,
+    now: datetime | None = None,
+) -> tuple[int, ...]:
+    """Return the bounded queue of leads whose blockers preparation can actually close.
+
+    Reviews a WIDE pool (write-free -- `review_candidates` performs no I/O) and keeps
+    quality order, but skips any lead whose first rejection cause preparation cannot
+    remedy. Channel membership is deliberately not passed: routing never causes a
+    rejection, and an empty member set would only mis-report the routing readiness
+    flags, which this function does not read.
+    """
+    reviews = review_candidates(conn, audience, frozenset(), limit=pool, now=now)
+    return tuple(
+        review.lead_id for review in reviews if review.reason in REMEDIABLE_REASONS
+    )[:limit]
 
 
 def exact_crm_bindings(

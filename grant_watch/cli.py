@@ -261,12 +261,61 @@ def cmd_rich_prepare(limit: int, execute: bool, retry_indeterminate: bool) -> in
         f"rich prepare: {summary.candidates} candidates; "
         f"{summary.contact_fresh} contact-fresh, "
         f"{summary.contact_refreshed} contact-refreshed, "
+        f"{summary.website_checked} website-checked, "
         f"{summary.activity_checked} activity-checked, "
         f"{summary.indeterminate} indeterminate, {summary.errors} errors, "
         f"{summary.writes} local writes"
         f"{' (preview: no HTTP or writes)' if not execute else ''}"
     )
     return 1 if summary.indeterminate or summary.errors else 0
+
+
+def cmd_nces_bind(limit_states: int, dry_run: bool) -> int:
+    """Bind authoritative NCES district identity to Gold leads that still lack it.
+
+    `leads.nces_id` is the ONLY input to the rich card's entity-kind gate, and the only
+    thing that ever wrote it was a side effect of one shape of Slack search. On
+    2026-08-06 that left 176 of production's 184 Gold candidates permanently rejected
+    `entity_kind_unsupported`, which is why no rich card had ever posted. This is the
+    schedulable binder for that column. It is free and keyless (NCES ArcGIS), and it
+    relaxes nothing: `match_district` still demands a unique exact normalized-name
+    match, so an ambiguous name binds nothing and the lead simply stays ineligible.
+
+    States are visited most-pending first so one bounded run covers the most leads.
+    """
+    from .enrich import nces
+
+    conn = db.connect_readonly() if dry_run else db.connect()
+    states = [
+        str(row["state"]).upper()
+        for row in conn.execute(
+            """SELECT state, COUNT(*) AS pending FROM leads
+               WHERE lead_grade='gold' AND COALESCE(status,'new')='new'
+                 AND (nces_id IS NULL OR nces_id='')
+                 AND LENGTH(COALESCE(state,''))=2
+               GROUP BY state ORDER BY pending DESC, state"""
+        )
+    ][: max(1, limit_states)]
+    if dry_run:
+        listed = ", ".join(states) or "(none)"
+        print(f"nces bind: would fetch {len(states)} state(s): {listed}")
+        return 0
+    matched = considered = failures = 0
+    for state in states:
+        try:
+            summary = nces.enrich_state_leads(conn, state)
+        except Exception as exc:  # noqa: BLE001 - one bad state cannot abort the run
+            failures += 1
+            print(f"nces bind: {state} FAILED ({type(exc).__name__}: {exc})")
+            continue
+        considered += summary.candidates
+        matched += summary.matched
+        print(f"nces bind: {state} bound {summary.matched}/{summary.candidates}")
+    print(
+        f"nces bind: {matched}/{considered} leads bound across "
+        f"{len(states) - failures} state(s); {failures} failed"
+    )
+    return 1 if failures else 0
 
 
 def cmd_drip_unblock(channel: str) -> int:
@@ -452,6 +501,21 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="explicitly retry an interrupted possibly-paid call",
     )
+    p_nces = sub.add_parser(
+        "nces-bind",
+        help="bind NCES district identity to Gold leads that lack it (free; --execute to write)",
+    )
+    p_nces.add_argument(
+        "--limit-states",
+        type=int,
+        default=5,
+        help="how many states to fetch this run, most-pending first",
+    )
+    p_nces.add_argument(
+        "--execute",
+        action="store_true",
+        help="perform the NCES reads and write the matched identities",
+    )
     p_shadow.add_argument(
         "--channel-member",
         action="append",
@@ -524,6 +588,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.retry_indeterminate and not args.execute:
             parser.error("--retry-indeterminate requires --execute")
         return cmd_rich_prepare(args.limit, args.execute, args.retry_indeterminate)
+    if args.command == "nces-bind":
+        return cmd_nces_bind(args.limit_states, not args.execute)
     if args.command == "outreach-retry":
         return cmd_outreach_retry(args.dry_run)
     if args.command == "salesforce-sync":
