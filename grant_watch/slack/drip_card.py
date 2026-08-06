@@ -56,8 +56,8 @@ def render_blocks(
     ]
     route = routing.strip()
     if route:
-        # The only markup here is the roster-validated rep mention (or the italic
-        # unassigned-territory note) that territory.routing_line already emits.
+        # The only markup here is the roster-validated rep mention that
+        # territory.routing_line already emits (an unmapped state emits nothing).
         blocks.append(
             {"type": "section", "text": {"type": "mrkdwn", "text": route[:MAX_SECTION]}}
         )

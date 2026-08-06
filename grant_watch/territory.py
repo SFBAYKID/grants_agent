@@ -180,23 +180,13 @@ def mention_line(state: object, source: object = None) -> str:
 
 def routing_line(state: object, source: object = None) -> str:
     """Return the routing line for a proactive card: the rep mention when a verified map
-    entry exists, otherwise an explicit 'unassigned territory' note.
+    entry exists, otherwise nothing at all.
 
-    Chase's settled direction (2026-07-22, [[grant-drip-campaign-direction]]): Monarch
-    sells nationwide but the owner map covers five states. A card in a mapped state tags
-    its verified rep; a card in any other state says so plainly rather than tagging
-    nobody silently or — the thing this must never do — guessing an owner. A source that
-    only INFERRED the state (the RFP aggregator) gets neither a tag nor a state label,
-    because the state itself is untrusted.
+    Chase revised the settled direction on 2026-08-05 ([[grant-drip-campaign-direction]]):
+    Monarch sells nationwide but the owner map covers five states. A card in a mapped
+    state tags its verified rep; a card in ANY other state carries no routing line — no
+    tag, no "unassigned territory" note (the note was his 2026-07-22 choice; he dropped
+    it). The invariant that survives both versions: an owner is never guessed, and a
+    source that only INFERRED the state (the RFP aggregator) can never produce a tag.
     """
-    mention = mention_line(state, source)
-    if mention:
-        return mention
-    if not state_is_verified(source):
-        return ""  # inferred/unknown state — assert no territory at all
-    name = state_display_name(state)
-    where = f"{name} is" if name else "This state is"
-    return (
-        f"\n\n_{where} unassigned territory — no rep mapped yet. "
-        "Reply if you want to take it._"
-    )
+    return mention_line(state, source)

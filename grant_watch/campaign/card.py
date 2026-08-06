@@ -134,10 +134,12 @@ def _event_date_label(event_type: str) -> str:
 def fallback_text(draft: SnapshotDraft) -> str:
     """Create complete screen-reader/notification text from deterministic facts."""
     tier = draft.tier.upper()
+    # No owner → no routing sentence at all (Chase 2026-08-05: never say
+    # "unassigned territory" on a card; just don't tag anyone).
     route = (
-        f"Assigned to <@{draft.route.slack_user_id}>."
+        f"Assigned to <@{draft.route.slack_user_id}>. "
         if draft.route.slack_user_id
-        else "Unassigned territory."
+        else ""
     )
     contact = (
         f"Contact: {safe_text(draft.contact_name, 120)}, "
@@ -178,6 +180,9 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
     research = draft.card_mode == "research_needed"
     # Name the routing reason honestly: a Salesforce owner is a relationship; a
     # territory owner is not. A research-needed card only ever routes by territory.
+    # No owner → NO routing block at all (Chase 2026-08-05: a card without a mapped
+    # rep simply tags nobody; it no longer says "unassigned territory").
+    route_text = ""
     if draft.route.slack_user_id:
         owner_kind = (
             "territory owner"
@@ -185,8 +190,6 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
             else "relationship owner"
         )
         route_text = f"<@{draft.route.slack_user_id}> — {owner_kind}"
-    else:
-        route_text = "_Unassigned territory — no verified owner mapped_"
     award = (
         f"*{safe_text(draft.entity_name, 180)}* · {safe_text(draft.state, 2)}\n"
         f"Verified {_money(draft.amount)} {safe_text(draft.program, 120)} funding award\n"
@@ -202,41 +205,48 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
                 "emoji": True,
             },
         },
-        {
-            "type": "section",
-            # The only markup intentionally preserved is a roster-validated Slack id
-            # frozen by routing. No source-controlled text enters this line.
-            "text": {"type": "mrkdwn", "text": route_text},
-        },
-        {
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": award[:MAX_SECTION]},
-        },
-        {
-            "type": "section",
-            "fields": [
-                {
-                    "type": "mrkdwn",
-                    "text": (
-                        f"*Spend window*\n{_date(draft.spend_window_start)} – "
-                        f"{_date(draft.spend_window_end)}"
-                    )[:MAX_FIELD],
-                },
-                {
-                    "type": "mrkdwn",
-                    "text": (
-                        f"*Contact*\n{safe_text(draft.contact_name or 'Official general mailbox', 120)}"
-                        + (
-                            f" · {safe_text(draft.contact_title, 120)}"
-                            if draft.contact_title
-                            else ""
-                        )
-                        + f"\n{safe_text(draft.contact_email, 254)}"
-                    )[:MAX_FIELD],
-                },
-            ],
-        },
     ]
+    if route_text:
+        blocks.append(
+            {
+                "type": "section",
+                # The only markup intentionally preserved is a roster-validated Slack
+                # id frozen by routing. No source-controlled text enters this line.
+                "text": {"type": "mrkdwn", "text": route_text},
+            }
+        )
+    blocks.extend(
+        [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": award[:MAX_SECTION]},
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"*Spend window*\n{_date(draft.spend_window_start)} – "
+                            f"{_date(draft.spend_window_end)}"
+                        )[:MAX_FIELD],
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"*Contact*\n{safe_text(draft.contact_name or 'Official general mailbox', 120)}"
+                            + (
+                                f" · {safe_text(draft.contact_title, 120)}"
+                                if draft.contact_title
+                                else ""
+                            )
+                            + f"\n{safe_text(draft.contact_email, 254)}"
+                        )[:MAX_FIELD],
+                    },
+                ],
+            },
+        ]
+    )
     if draft.sf_display_text:
         blocks.append(
             {

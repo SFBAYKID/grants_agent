@@ -127,8 +127,12 @@ affect Chase's other projects.
   the paid seed run's counts and the post-enable `drip --dry-run` (guardian session was
   still executing them at last report); the first LIVE rich/restyled card render and
   its rep phone notification (critic H2 — a human must confirm tomorrow's 10:00–11:30
-  PT card); AZ and 44 other states + DC remain UNMAPPED in territory.py, so most cards
-  say "unassigned territory" until Chase names reps.
+  PT card); AZ and 44 other states + DC remain UNMAPPED in territory.py — and per
+  Chase's SAME-DAY revision, an unmapped state now renders NO routing line at all: no
+  tag AND no "unassigned territory" label (that label was his 2026-07-22 choice; he
+  dropped it 2026-08-05). Applied to territory.routing_line, the rich card render
+  (route section omitted), and the rich fallback text; owners are still never guessed
+  and inferred states still cannot tag.
 - `verified` 2026-08-05 NEW-LOOK-EVERY-DAY fallback (Chase chose it over silent days
   and over old-card fallback): with the flag on, a rich tick that provably cannot post
   today — `delivery.fallback_to_daily`: eligibility miss, candidate-changed,

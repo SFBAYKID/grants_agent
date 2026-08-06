@@ -70,12 +70,16 @@ def test_draft_ready_salesforce_line_has_no_double_period() -> None:
 
 
 def test_platinum_and_unassigned_routes_render_honestly() -> None:
-    """Presentation tier and nationwide unassigned state are explicit, never guessed."""
+    """An unmapped state tags nobody and says nothing about it (Chase 2026-08-05:
+    the card simply has no routing line — never a guessed owner, never an
+    'unassigned territory' label)."""
     rendered = card.render(
         _snapshot(tier="platinum", route=Route(RoutingReason.UNASSIGNED))
     )
     assert "PLATINUM" in str(rendered.blocks)
-    assert "Unassigned territory" in rendered.text
+    assert "Unassigned" not in rendered.text
+    assert "Unassigned" not in str(rendered.blocks)
+    assert "<@" not in rendered.text
     assert "&lt;@" not in str(rendered.blocks)
 
 

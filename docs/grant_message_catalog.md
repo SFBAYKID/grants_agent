@@ -30,7 +30,9 @@ source link; no internal identifiers or emoji in alerts; short paragraphs.
   hard 11:30 cutoff (`pacing.HARD_CUTOFF_PT`), no urgent second card. It shares the
   cap with follow-up reminders and with the fallback daily card (both paths count
   posts AND pre-Slack reservations, so neither can double-post).
-- **Card:** GOLD/PLATINUM header; exact owner mention or explicit unassigned territory;
+- **Card:** GOLD/PLATINUM header; exact owner mention when a rep is mapped, otherwise
+  NO routing line at all (Chase 2026-08-05 — never a guessed owner, never an
+  "unassigned territory" label);
   award/spend-window facts; typed Salesforce context; evidenced contact; separately
   labelled official/contact/Salesforce/award links; `Ask Persequor to draft` and
   `Not relevant` buttons. All actions resolve the immutable posted snapshot.

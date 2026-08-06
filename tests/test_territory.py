@@ -117,13 +117,11 @@ def test_routing_line_tags_a_mapped_state() -> None:
     assert "<@U08C1NBH875>" in line and "Pennsylvania is your territory" in line
 
 
-def test_routing_line_labels_an_unmapped_state_as_unassigned() -> None:
-    """Nationwide: an unmapped state is an honest opportunity, labelled explicitly and
-    never tagged to a guessed rep (Chase 2026-07-22)."""
-    line = territory.routing_line("AZ", "usaspending:16.071")
-    assert "<@" not in line
-    assert "Arizona is unassigned territory" in line
-    assert "no rep mapped yet" in line
+def test_routing_line_is_empty_for_an_unmapped_state() -> None:
+    """Nationwide: an unmapped state gets NO routing line — no tag, no 'unassigned
+    territory' note (Chase 2026-08-05, revising his 2026-07-22 direction). An owner
+    is still never guessed."""
+    assert territory.routing_line("AZ", "usaspending:16.071") == ""
 
 
 def test_routing_line_stays_silent_for_an_inferred_state() -> None:
