@@ -262,6 +262,7 @@ def cmd_rich_prepare(limit: int, execute: bool, retry_indeterminate: bool) -> in
         f"{summary.contact_fresh} contact-fresh, "
         f"{summary.contact_refreshed} contact-refreshed, "
         f"{summary.website_checked} website-checked, "
+        f"{summary.crm_checked} crm-checked, "
         f"{summary.activity_checked} activity-checked, "
         f"{summary.indeterminate} indeterminate, {summary.errors} errors, "
         f"{summary.writes} local writes"

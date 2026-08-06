@@ -10,16 +10,41 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from ..enrich import organization_profile, salesforce_activity
-from . import contact_evidence, paid_calls, preparation
+from ..enrich import organization_profile, salesforce_activity, salesforce_sync
+from . import contact_evidence, paid_calls, policy, preparation
 
 ActivityLookup = Callable[[str, frozenset[str]], salesforce_activity.ActivityEvidence]
 # Returns the enriched profile object, which this worker deliberately ignores -- the
 # only thing that matters here is the persisted `leads.org_website`, which the policy
 # reads later. Typed as `object` because the worker asserts nothing about the shape.
 WebsiteFinder = Callable[[sqlite3.Connection, int], object]
+# Refreshes one lead's read-only CRM snapshot; returns its status string.
+CrmRefresh = Callable[[sqlite3.Connection, int], str]
+
+
+def _crm_is_stale(conn: sqlite3.Connection, lead_id: int, now: datetime) -> bool:
+    """Whether this lead's CRM snapshot is missing, unparseable, future, or expired.
+
+    The policy rejects any candidate whose CRM state is older than CRM_FRESH_HOURS, and
+    NOTHING scheduled writes `salesforce_lookup_state` -- the table stood at 0 rows in
+    production while the rich card was enabled, which alone made every candidate
+    CRM_UNSAFE and the card unpostable. `salesforce_sync.sync` cannot fill the gap
+    because it ranks globally and caps at 100; see salesforce_sync.refresh_lead.
+    """
+    row = conn.execute(
+        "SELECT checked_at FROM salesforce_lookup_state WHERE lead_id=?", (lead_id,)
+    ).fetchone()
+    if row is None:
+        return True
+    try:
+        checked = datetime.fromisoformat(str(row["checked_at"]).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if checked.tzinfo is None:
+        checked = checked.replace(tzinfo=timezone.utc)
+    return not (now - timedelta(hours=policy.CRM_FRESH_HOURS) <= checked <= now)
 
 
 def _needs_website(conn: sqlite3.Connection, lead_id: int) -> bool:
@@ -48,6 +73,7 @@ class PreparationSummary:
     errors: int
     writes: int
     website_checked: int = 0
+    crm_checked: int = 0
 
 
 def run(
@@ -60,6 +86,7 @@ def run(
     contact_finder: contact_evidence.Finder = contact_evidence._default_finder,
     activity_lookup: ActivityLookup = salesforce_activity.lookup_recent_completed_call,
     website_finder: WebsiteFinder = organization_profile.enrich_org_profile,
+    crm_refresh: CrmRefresh = salesforce_sync.refresh_lead,
     now: datetime | None = None,
 ) -> PreparationSummary:
     """Refresh a bounded quality-ordered batch or report the planned batch only."""
@@ -78,6 +105,7 @@ def run(
         "errors": 0,
         "writes": 0,
         "website_checked": 0,
+        "crm_checked": 0,
     }
     for lead_id in lead_ids:
         try:
@@ -111,6 +139,17 @@ def run(
                 counts["writes"] += 1
             except Exception:  # noqa: BLE001 - a dead site cannot abort the batch
                 counts["errors"] += 1
+        # CRM state must exist and be fresh before `exact_crm_bindings` can return
+        # anything, and before the policy will accept the candidate at all. This is the
+        # step that had no scheduled writer, which is why salesforce_lookup_state sat
+        # empty and no rich card could ever post.
+        if _crm_is_stale(conn, lead_id, at):
+            try:
+                crm_refresh(conn, lead_id)
+                counts["crm_checked"] += 1
+                counts["writes"] += 1
+            except Exception:  # noqa: BLE001 - a CRM outage cannot abort the batch
+                counts["errors"] += 1
         account_id, person_ids = preparation.exact_crm_bindings(conn, lead_id)
         if not account_id or not person_ids:
             continue
@@ -130,4 +169,5 @@ def run(
         errors=counts["errors"],
         writes=counts["writes"],
         website_checked=counts["website_checked"],
+        crm_checked=counts["crm_checked"],
     )

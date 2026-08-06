@@ -106,12 +106,24 @@ def test_sync_persists_read_only_account_and_opportunity(
 def test_sync_dry_run_writes_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Dry-run may read Salesforce but creates no local snapshot rows."""
+    """Dry-run creates no local rows AND issues no Salesforce request at all.
+
+    This previously called lookup() per candidate and skipped only the local write, so
+    `salesforce-sync --dry-run` quietly spent 150-350 live production API calls against
+    the real org -- the precise thing an operator reaching for that flag is avoiding.
+    Every other dry run in this CLI is network-free.
+    """
     conn = db.connect(tmp_path / "sf.db")
     _lead(conn)
-    monkeypatch.setattr(salesforce, "lookup", lambda *_args, **_kwargs: _found())
+
+    def forbidden(*_args: object, **_kwargs: object) -> object:
+        """Provide test-local behavior for a call a preview must never make."""
+        raise AssertionError("dry-run reached the Salesforce API")
+
+    monkeypatch.setattr(salesforce, "lookup", forbidden)
     summary = salesforce_sync.sync(conn, dry_run=True)
     assert summary.writes == 0
+    assert summary.checked == 1, "a preview still reports the batch it would check"
     assert (
         conn.execute("SELECT COUNT(*) FROM salesforce_lookup_state").fetchone()[0] == 0
     )

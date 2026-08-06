@@ -295,3 +295,66 @@ def test_worker_discovers_a_missing_website_exactly_once(tmp_path: Path) -> None
         now=NOW,
     )
     assert attempts == [1], "a recorded not_found must not be re-scraped and re-billed"
+
+
+def test_worker_refreshes_missing_crm_state_for_its_own_targets(
+    tmp_path: Path,
+) -> None:
+    """Preparation must create the CRM state its own candidates are judged on.
+
+    Nothing scheduled wrote `salesforce_lookup_state`: it stood at 0 rows in production
+    while the rich card was enabled, so every candidate failed CRM_UNSAFE and no card
+    could post. `salesforce_sync.sync` cannot close this -- it ranks globally and caps
+    at 100 rows, and the pipeline's leads ranked 51-165 among 10,627 stale leads, so no
+    --limit reached them. The worker refreshes the leads it is actually preparing.
+    """
+    conn = _eligible_conn(tmp_path / "crm-missing.db")
+    conn.execute("DELETE FROM salesforce_lookup_state")
+    conn.commit()
+    refreshed: list[int] = []
+
+    def refresh(_conn: object, lead_id: int) -> str:
+        """Record the refresh and persist a no-match snapshot without network I/O."""
+        refreshed.append(lead_id)
+        conn.execute(
+            """INSERT INTO salesforce_lookup_state(lead_id,status,error,checked_at)
+               VALUES (?,'no_match',NULL,?)""",
+            (lead_id, NOW.isoformat()),
+        )
+        conn.commit()
+        return "no_match"
+
+    summary = prepare_worker.run(
+        conn,
+        "CGRANTS",
+        dry_run=False,
+        contact_finder=lambda _lead: None,
+        crm_refresh=refresh,
+        now=NOW,
+    )
+    assert refreshed == [1]
+    assert summary.crm_checked == 1
+
+
+def test_worker_leaves_a_fresh_crm_snapshot_alone(tmp_path: Path) -> None:
+    """A snapshot inside CRM_FRESH_HOURS must not be re-queried every weekday."""
+    conn = _eligible_conn(tmp_path / "crm-fresh.db")
+    conn.execute("UPDATE salesforce_lookup_state SET checked_at=?", (NOW.isoformat(),))
+    conn.commit()
+
+    # Recorded, NOT raised: the worker catches Exception per candidate, so a raising
+    # stub would be swallowed and the assertion would pass against broken code too.
+    # (Caught by mutation testing -- replacing the staleness guard with `if True`
+    # initially still passed.)
+    calls: list[int] = []
+
+    summary = prepare_worker.run(
+        conn,
+        "CGRANTS",
+        dry_run=False,
+        contact_finder=lambda _lead: None,
+        crm_refresh=lambda _conn, lead_id: (calls.append(lead_id), "no_match")[1],
+        now=NOW,
+    )
+    assert calls == [], "a fresh CRM snapshot was re-queried"
+    assert summary.crm_checked == 0

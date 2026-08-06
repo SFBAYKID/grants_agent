@@ -109,6 +109,26 @@ def _persist(
         )
 
 
+def refresh_lead(conn: sqlite3.Connection, lead_id: int) -> str:
+    """Refresh ONE named lead's read-only CRM snapshot and return its status.
+
+    `sync()` selects by global `lead_score` and hard-caps at 100 rows, so it cannot be
+    aimed. Measured on production 2026-08-06: the rich card's eight candidate leads rank
+    51-165 among 10,627 stale leads, so `--limit 50` reached none of them and `--limit
+    100` reached one -- no limit value reaches them all. The preparation worker knows
+    exactly which leads it is preparing, so it refreshes those by id instead of hoping
+    they surface in a global ranking. Reads only; `salesforce.lookup` is GET-only.
+    """
+    row = conn.execute(
+        "SELECT entity_name, state FROM leads WHERE id=?", (lead_id,)
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"unknown Grant lead id {lead_id}")
+    result = salesforce.lookup(str(row["entity_name"]), state=str(row["state"] or ""))
+    _persist(conn, lead_id, result)
+    return str(result.status.value)
+
+
 def sync(
     conn: sqlite3.Connection, limit: int = 25, dry_run: bool = False
 ) -> SyncSummary:
@@ -116,14 +136,20 @@ def sync(
     counts = {status.value: 0 for status in salesforce.SFResultStatus}
     candidates = _candidates(conn, limit)
     writes = 0
+    if dry_run:
+        # A preview makes NO Salesforce request. This used to call lookup() for every
+        # candidate and skip only the local write, so `--dry-run` quietly spent 150-350
+        # live production API calls -- the one thing an operator reaching for that flag
+        # is trying to avoid. Every other dry run in this CLI is network-free; this one
+        # now matches (found 2026-08-06 when the guardian refused to run it).
+        return SyncSummary(len(candidates), 0, 0, 0, 0, 0, 0)
     for row in candidates:
         result = salesforce.lookup(
             str(row["entity_name"]), state=str(row["state"] or "")
         )
         counts[result.status.value] += 1
-        if not dry_run:
-            _persist(conn, int(row["id"]), result)
-            writes += 1
+        _persist(conn, int(row["id"]), result)
+        writes += 1
     return SyncSummary(
         checked=len(candidates),
         found=counts[salesforce.SFResultStatus.FOUND.value],
