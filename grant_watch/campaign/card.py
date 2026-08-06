@@ -13,6 +13,7 @@ from datetime import date
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
 
+from ..presentation import display_entity_name, state_display_name
 from .policy import is_website_ownership_proven
 from .routing import RoutingReason
 from .snapshot import FrozenSnapshot, SnapshotDraft
@@ -94,6 +95,20 @@ def _date(value: str) -> str:
     return parsed.strftime("%B %d, %Y").replace(" 0", " ")
 
 
+def _short_date(value: str) -> str:
+    """Render one ISO date compactly for the spend window ("Oct 1, 2025").
+
+    The award date deliberately keeps the long form — it is the load-bearing claim —
+    while the window is a range and reads better short (Chase's approved layout,
+    2026-08-06). An unparseable value degrades to the stored text, never to a guess.
+    """
+    try:
+        parsed = date.fromisoformat(value[:10])
+    except ValueError:
+        return safe_text(value, 30)
+    return parsed.strftime("%b %d, %Y").replace(" 0", " ")
+
+
 def _award_date(value: str, precision: str) -> str:
     """Render only the date precision supported by the frozen evidence."""
     try:
@@ -111,12 +126,13 @@ def _research_note(draft: SnapshotDraft) -> str:
     from a name match (not an exact authoritative record)."""
     reasons: list[str] = []
     if draft.sf_lookup_status == "ambiguous":
-        reasons.append("the Salesforce match is ambiguous")
+        reasons.append("Salesforce match is ambiguous")
     if not is_website_ownership_proven(draft.official_website_provenance):
-        reasons.append(
-            "the organization website is inferred from a name match, not an exact record"
-        )
-    return "; ".join(reasons) or "confirm the details"
+        # Shortened 2026-08-06 at Chase's request. Still states the limitation plainly:
+        # the website was NOT matched against an exact authoritative record. It must
+        # never soften into implying the website is confirmed.
+        reasons.append("Website not exact-matched")
+    return "; ".join(reasons) or "Details unconfirmed"
 
 
 def _event_date_label(event_type: str) -> str:
@@ -158,13 +174,19 @@ def fallback_text(draft: SnapshotDraft) -> str:
     # adds exactly one (never "…net-new..").
     crm_text = safe_text(draft.sf_display_text, 500).rstrip(".")
     crm = f" Salesforce: {crm_text}." if crm_text else ""
+    # The "Not relevant" button was removed 2026-08-06, so this no longer advertises it.
+    # A research card offers no action at all; only a draft-ready card does.
     actions = (
-        f"Actions: Not relevant. Confirm before drafting outreach — {_research_note(draft)}."
+        f"{_research_note(draft)} — confirm before outreach."
         if draft.card_mode == "research_needed"
-        else "Actions: Ask Persequor to draft; Not relevant."
+        else "Actions: Ask Persequor to draft."
     )
+    # Humanized to match the card face, so the lock-screen text and the rendered blocks
+    # name the same organization the same way.
+    entity = safe_text(display_entity_name(draft.entity_name, 180), 180)
+    where = state_display_name(draft.state) or safe_text(draft.state, 2)
     text = (
-        f"{tier}: {safe_text(draft.entity_name, 180)} in {safe_text(draft.state, 2)} "
+        f"{tier}: {entity} in {where} "
         f"has a verified {_money(draft.amount)} {safe_text(draft.program, 120)} "
         f"funding award. {_event_date_label(draft.event_type)}: "
         f"{_award_date(draft.award_date, draft.award_date_precision)}. "
@@ -197,10 +219,20 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
             else "relationship owner"
         )
         route_text = f"<@{draft.route.slack_user_id}> — {owner_kind}"
+    # Chase 2026-08-06: the first live card read as a wall of shouting, because the rich
+    # path printed the raw USAspending recipient name ("HOXIE SCHOOL DISTRICT NO 46")
+    # while the legacy card had always humanized it. Both helpers are the drip card's,
+    # and both fail safe: display_entity_name strips <>*_~|@` and state_display_name
+    # returns "" for an unknown code rather than printing a bare two-letter code.
+    # safe_text AFTER display_entity_name, deliberately: the humanizer strips <>*_~|@`
+    # (so a hostile source name cannot inject a mention or link at all) but does NOT
+    # escape `&`, which is Slack's own escape character. Composing them gives both.
+    named = safe_text(display_entity_name(draft.entity_name, 180), 180)
+    located = state_display_name(draft.state)
     award = (
-        f"*{safe_text(draft.entity_name, 180)}* · {safe_text(draft.state, 2)}\n"
-        f"Verified {_money(draft.amount)} {safe_text(draft.program, 120)} funding award\n"
-        f"*{_event_date_label(draft.event_type)}:* "
+        f"*{named}*" + (f" — {located}" if located else "") + "\n"
+        f"{_money(draft.amount)} · {safe_text(draft.program, 120)}\n"
+        f"{_event_date_label(draft.event_type)} "
         f"{_award_date(draft.award_date, draft.award_date_precision)}"
     )
     blocks: list[dict[str, Any]] = [
@@ -228,29 +260,26 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
                 "type": "section",
                 "text": {"type": "mrkdwn", "text": award[:MAX_SECTION]},
             },
+            {"type": "divider"},
             {
                 "type": "section",
-                "fields": [
-                    {
-                        "type": "mrkdwn",
-                        "text": (
-                            f"*Spend window*\n{_date(draft.spend_window_start)} – "
-                            f"{_date(draft.spend_window_end)}"
-                        )[:MAX_FIELD],
-                    },
-                    {
-                        "type": "mrkdwn",
-                        "text": (
-                            f"*Contact*\n{safe_text(draft.contact_name or 'Official general mailbox', 120)}"
-                            + (
-                                f" · {safe_text(draft.contact_title, 120)}"
-                                if draft.contact_title
-                                else ""
-                            )
-                            + f"\n{safe_text(draft.contact_email, 254)}"
-                        )[:MAX_FIELD],
-                    },
-                ],
+                # Stacked, NOT a two-field section. Slack lays fields out side by side,
+                # which is what made the spend window and contact collide into one dense
+                # run of text on the first live card.
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"*Spend window*\n{_short_date(draft.spend_window_start)} – "
+                        f"{_short_date(draft.spend_window_end)}\n\n"
+                        f"*Contact*\n{safe_text(draft.contact_name or 'Official general mailbox', 120)}"
+                        + (
+                            f" · {safe_text(draft.contact_title, 120)}"
+                            if draft.contact_title
+                            else ""
+                        )
+                        + f"\n{safe_text(draft.contact_email, 254)}"
+                    )[:MAX_SECTION],
+                },
             },
         ]
     )
@@ -270,7 +299,7 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
         _link(draft.official_website, "Official website"),
         _link(draft.contact_evidence_url, "Contact evidence"),
         _link(draft.sf_open_link, "Open Salesforce") if draft.sf_open_link else "",
-        _link(draft.award_url, "View exact award record"),
+        _link(draft.award_url, "Award record"),
     ]
     accepted: list[str] = []
     for link in filter(None, links):
@@ -293,11 +322,19 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": f"_Confirm before drafting outreach — {_research_note(draft)}._",
+                        "text": f"_{_research_note(draft)} — confirm before outreach._",
                     }
                 ],
             }
         )
+    # Chase 2026-08-06 removed the "Not relevant" button: the card is information, not a
+    # control surface. (It had also never worked — SLACK_WORKSPACE_ID was absent from
+    # production, so `actions._authorized_snapshot` refused every click on its first
+    # gate.) The Persequor draft button survives for a draft-ready card, but no lead can
+    # currently reach that mode because `leads.nces_website` has no writer, so in
+    # practice today every card renders with NO actions block at all. An `actions` block
+    # with an empty `elements` list is invalid Block Kit and Slack rejects the whole
+    # message, so the block is omitted rather than emitted empty.
     action_elements: list[dict[str, Any]] = []
     if not research:
         action_elements.append(
@@ -308,15 +345,7 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
                 "value": snapshot.id,
             }
         )
-    action_elements.append(
-        {
-            "type": "button",
-            "action_id": "rich_not_relevant",
-            "text": {"type": "plain_text", "text": "Not relevant"},
-            "style": "danger",
-            "value": snapshot.id,
-        }
-    )
-    blocks.append({"type": "actions", "elements": action_elements})
+    if action_elements:
+        blocks.append({"type": "actions", "elements": action_elements})
     text = draft.fallback_text or fallback_text(draft)
     return RenderedCard(text=text[:MAX_FALLBACK], blocks=tuple(blocks))

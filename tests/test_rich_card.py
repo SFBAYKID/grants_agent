@@ -25,8 +25,10 @@ def test_gold_card_has_accessible_truthful_sections_and_actions() -> None:
     assert "$500,000 SVPP funding award" in rendered.text
     assert "Spend window" in rendered.text
     assert "Ask Persequor to draft" in encoded
-    assert "Not relevant" in encoded
-    assert "View exact award record" in encoded
+    # The "Not relevant" button was removed 2026-08-06 (Chase: the card is information,
+    # not a control surface). It had also never worked in production.
+    assert "Not relevant" not in encoded
+    assert "Award record" in encoded
     assert "Official website" in encoded
     assert "Contact evidence" in encoded
     assert "Open Salesforce" in encoded
@@ -49,15 +51,19 @@ def test_research_needed_card_offers_no_active_draft_action() -> None:
     )
     encoded = str(rendered.blocks)
     assert "Ask Persequor to draft" not in encoded
-    assert "Not relevant" in encoded
-    assert "Confirm before drafting outreach" in encoded
-    assert "the Salesforce match is ambiguous" in encoded
-    assert "inferred from a name match" in encoded  # heuristic website reason
+    assert "Not relevant" not in encoded
+    # With no draft button and no "Not relevant" button, a research card has NOTHING to
+    # put in an actions block. Slack rejects the whole message for an actions block with
+    # an empty `elements` list, so the block must be omitted entirely, not emitted empty.
+    assert not [block for block in rendered.blocks if block["type"] == "actions"]
+    assert "confirm before outreach" in encoded
+    assert "Salesforce match is ambiguous" in encoded
+    assert "Website not exact-matched" in encoded  # heuristic website reason
     assert "Possible Salesforce matches—review before outreach" in rendered.text
     assert "territory owner" in encoded  # never "relationship owner"
     assert "relationship owner" not in encoded
     assert "net-new" not in rendered.text.lower()
-    assert "Confirm before drafting outreach" in rendered.text
+    assert "confirm before outreach" in rendered.text
 
 
 def test_draft_ready_salesforce_line_has_no_double_period() -> None:
@@ -89,15 +95,34 @@ def test_verified_route_preserves_only_the_safe_slack_mention() -> None:
     assert "<@U01DFJWQQJ3>" in rendered.blocks[1]["text"]["text"]
 
 
-def test_untrusted_markup_is_escaped_and_action_values_are_opaque() -> None:
-    """Source text cannot inject mentions/links and action values contain no PII."""
+def test_untrusted_markup_is_neutralized_and_action_values_are_opaque() -> None:
+    """Source text cannot inject mentions/links and action values contain no PII.
+
+    The entity name is humanized by `display_entity_name` before escaping, and that
+    helper STRIPS `<>*_~|@\\`` rather than escaping them -- so hostile markup vanishes
+    outright instead of surviving as visible entities. This asserts the PROPERTY (no
+    mention, no link, no injectable fragment reaches the card) rather than the escaping
+    mechanism, which changed on 2026-08-06 when the card started humanizing names.
+    """
     rendered = card.render(
-        _snapshot(entity_name="<!channel> <https://evil.test|click>")
+        _snapshot(entity_name="<!channel> <https://evil.test|click> @here *b* `c`")
     )
     encoded = str(rendered.blocks)
-    assert "<!channel>" not in encoded
-    assert "&lt;!channel&gt;" in encoded
-    actions = rendered.blocks[-1]["elements"]
+    for injected in (
+        "<!channel>",
+        "<!here>",
+        "@here",
+        "<https://evil.test|click>",
+        "|click",
+        "evil.test",
+    ):
+        assert injected not in encoded, f"{injected!r} survived into the card"
+    assert "&" not in rendered.text.replace("&amp;", ""), "a bare & reached mrkdwn"
+
+    # A draft-ready card still carries exactly one button, whose value is the opaque
+    # snapshot id and never PII.
+    ready = card.render(_snapshot(card_mode="draft_ready"))
+    actions = [b for b in ready.blocks if b["type"] == "actions"][0]["elements"]
     assert {button["value"] for button in actions} == {"a" * 32}
     assert "@" not in actions[0]["value"]
     assert "http" not in actions[0]["value"]
