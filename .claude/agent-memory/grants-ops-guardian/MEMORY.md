@@ -24,4 +24,5 @@
 - [Codex parallel-writer forensics](codex-parallel-writer-forensics.md) — the other toolchain's staging/backup/handoff signatures; silent keepalive tick = crontab mid-restore, not damage; origin can be AHEAD of local
 - [Campaign writes flag ARMED in prod](campaign-writes-flag-armed-in-prod.md) — SALESFORCE_CAMPAIGN_WRITES_ENABLED=1 live vs PRODUCTION Salesforce; 4 ready create_campaign previews
 - [Rich-card deploy e8ecf0c](rich-card-deploy-e8ecf0c.md) — COMPLETED 2026-07-24 flag-OFF: tldextract 5.3.1 installed, migrations 14-26 applied (MAX 26, cron self-heal), bot pid 597044; buttons need tldextract (boot/cron don't); rollback snapshot at 20260724T214420Z
-- [Rich-card ENABLED 2026-08-05](rich-card-enable-20260805.md) — GRANT_RICH_CARD_ENABLED=1 LIVE (Chase waived shadow gate); crontab now 5 lines sha 70e309aa…; rich pacing 10:00-10:45+11:00 cutoff replaces legacy band
+- [Rich-card ENABLED 2026-08-05](rich-card-enable-20260805.md) — GRANT_RICH_CARD_ENABLED=1 LIVE (Chase waived shadow gate); crontab now 5 lines sha 70e309aa…; seed C2 resolved: 22 completed/3 indeterminate, 7 verified/15 not_found
+- [Deploy 5f09200 fallback+routing](deploy-5f09200-fallback-routing.md) — LIVE 2026-08-06 no-restart; AST-diff for "no migration" claims; --files-from surgical rsync; cutoff now 11:30, cutoff-miss falls back to daily

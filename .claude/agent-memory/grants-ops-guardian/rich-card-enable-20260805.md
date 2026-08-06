@@ -53,6 +53,13 @@ Facts proven from 359c1e3 source during this run (reusable):
 Seed run (Phase C, 2026-08-06T05:48Z→): C1 dry-run verbatim
 `rich prepare: 25 candidates; 0 contact-fresh, 0 contact-refreshed, 0 activity-checked,
 0 indeterminate, 0 errors, 0 local writes (preview: no HTTP or writes)` exit 0.
-**C2 `--execute --limit 25` + C3 drip --dry-run: PENDING at last update — see final session report;
-if this file still says pending, verify current evidence state read-only before assuming the seed ran**
-(`contact_evidence` / `paid_enrichment_attempts` counts, cron.log `rich prepare:` lines).
+**C2 outcome RESOLVED 2026-08-06T07:15Z from the ledger tables (read-only), verified:** the seed's
+paid work COMPLETED. 25 `paid_enrichment_attempts` rows in the window 05:49:29–05:55:32Z, all
+`operation=contact_refresh`: **22 completed + 3 indeterminate** (0 stuck non-terminal).
+`contact_evidence` now 22 rows total = **7 verified + 15 not_found** (not_found rows carry NULL
+`first_verified_at` — count(*) vs min/max NULL-skipping can mislead; the 7 verified are all stamped
+05:49:29Z). `salesforce_activity_snapshots` = 0. The verbatim `rich prepare:` C2 summary line is NOT
+recoverable on the droplet — the manual run's stdout went to that session, and cron.log has no such
+line (first cron-written one lands at the next 07:45 PT tick). C2's exit code is unknown (exit 1
+expected with 3 indeterminate — honesty signal, not a crash). C3's slot was answered post-deploy by
+[[deploy-5f09200-fallback-routing]]: `drip: skip: waiting for today's 10:41 Pacific slot`.

@@ -112,8 +112,27 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
-## Current status (2026-08-05)
+## Current status (2026-08-06)
 
+- `verified` 2026-08-06 00:15 PT PRODUCTION DEPLOY 359c1e3 → **5f09200** (guardian,
+  scoped SSH, sanctioned git-archive + checksum rsync; 46-file delta matched exactly,
+  0 deletions, `__pycache__` purged, revision stamp updated, crontab/`.env` shas
+  unchanged, listener PID 633555 untouched — no restart needed, `verified` by
+  importing the bot's full lazy closure against the semantic-change set). Ships the
+  rich→daily fallback + Block Kit restyle (efbd8b5) and the no-routing-line revision
+  (5f09200). Post-deploy `drip --dry-run` at 00:15 PT: "skip: waiting for today's
+  10:41 Pacific slot" — the RICH path is live. Two stated deploy assumptions were
+  CORRECTED by the guardian with evidence: migrations_rich.py byte-differs
+  (ruff rewrap) but is AST-identical — schema stays 28; and `territory` IS lazily
+  bot-reachable but no bot-side module calls it, so no restart was required.
+  SEED EVIDENCE (read-only ledger counts; the manual run's stdout was lost with its
+  session): 25 paid contact-refresh attempts 05:49–05:55Z on 08-05 — 22 completed,
+  3 indeterminate; `contact_evidence` = 22 rows: **7 verified, 15 not_found**;
+  0 salesforce_activity_snapshots. `needs-testing`: TODAY'S first live card
+  (~11:00 PT tick for the 10:41 slot) — whether rich or fallback, a human must
+  confirm it renders and the rep mention notifies (critic H2); nothing has yet
+  proven `render_blocks` or the rich card against Slack's live validator. Droplet
+  disk 64% used / 18G free (~9G freed since 07-25, not by this session).
 - `verified` 2026-08-05 RICH CARD ENABLED IN PRODUCTION on Chase's explicit instruction
   ("No just make it live"), WAIVING his own A4 five-business-day shadow gate after the
   tradeoffs were explained. Through grants-ops-guardian over the scoped grants SSH only:
