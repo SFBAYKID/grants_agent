@@ -141,9 +141,16 @@ def fallback_text(draft: SnapshotDraft) -> str:
         if draft.route.slack_user_id
         else ""
     )
+    # The comma belongs to the TITLE, not the name, so it is emitted only when a title
+    # exists. contact_evidence often verifies a named person without one, and the
+    # unconditional form rendered "Contact: Dalton Cagle, — dalton@…" — a visibly broken
+    # line on the phone lock screen, which is the only place this text is read
+    # (the Block Kit field already guards the title separately). Chase 2026-08-06.
+    named = safe_text(draft.contact_name, 120)
+    title = safe_text(draft.contact_title, 120)
     contact = (
-        f"Contact: {safe_text(draft.contact_name, 120)}, "
-        f"{safe_text(draft.contact_title, 120)} — {safe_text(draft.contact_email, 254)}."
+        f"Contact: {f'{named}, {title}' if title else named} — "
+        f"{safe_text(draft.contact_email, 254)}."
         if draft.contact_name
         else f"Official general mailbox: {safe_text(draft.contact_email, 254)}."
     )

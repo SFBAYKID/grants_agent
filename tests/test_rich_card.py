@@ -182,3 +182,19 @@ def test_context_link_element_respects_aggregate_limit() -> None:
     contexts = [block for block in rendered.blocks if block["type"] == "context"]
     assert contexts
     assert len(contexts[0]["elements"][0]["text"]) <= card.MAX_CONTEXT
+
+
+def test_untitled_contact_renders_no_dangling_comma() -> None:
+    """A verified contact without a job title must not render "Name, — email".
+
+    contact_evidence routinely verifies a named person whose title is absent (prod
+    lead #1603, Hoxie School District No 46, 2026-08-06). The comma belongs to the
+    title, so it may only appear when a title does. This text IS the notification and
+    screen-reader surface, so a broken line here is what a rep reads on their phone.
+    """
+    untitled = card.render(_snapshot(contact_title=""))
+    assert ", —" not in untitled.text
+    assert "Contact: Jon Smith — jon@montebello.k12.ca.us." in untitled.text
+
+    titled = card.render(_snapshot(contact_title="IT Director"))
+    assert "Contact: Jon Smith, IT Director — jon@montebello.k12.ca.us." in titled.text
