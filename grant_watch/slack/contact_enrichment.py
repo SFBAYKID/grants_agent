@@ -39,6 +39,12 @@ class ContactOutcome:
     email: str = ""
     phone: str = ""
     source_url: str = ""
+    # The ORGANIZATION's main line, verified verbatim on its own page. Deliberately
+    # a separate field from `phone`: `phone` belongs to the named person, and a
+    # LinkedIn-sourced person has no phone of their own. Merging the two would put a
+    # district switchboard next to a person's name and read as their direct number —
+    # a rule-1 fabrication built out of two true facts.
+    org_phone: str = ""
 
 
 def enrich_lead_contact(

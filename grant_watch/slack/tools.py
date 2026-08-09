@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import sys
 import traceback
@@ -275,6 +276,38 @@ def salesforce_lookup(
     return header + "\n" + "\n".join(lines) + extra + qualifier
 
 
+# The ONLY tools whose output may legitimately carry a <grant-crm-action> marker.
+# conversation.py turns that marker into a real, primary-styled "Confirm in
+# Salesforce" button in Grant's voice, and it harvests it from TOOL RESULTS — so any
+# tool that returns attacker-controlled text could mint one. web_search returns page
+# titles and snippets verbatim from arbitrary sites; a page titled with the marker
+# produced a live approval button carrying attacker-chosen text, and because the
+# marker is stripped before the model sees it, Grant could not tell anyone it
+# happened. Everything outside this set is sanitized at the run_tool boundary.
+_ACTION_PRODUCING_TOOLS = frozenset(
+    {
+        "salesforce_campaign_create_preview",
+        "salesforce_campaign_members_preview",
+        "salesforce_campaign_batch_preview",
+        "salesforce_contact_record_preview",
+    }
+)
+
+_CRM_ACTION_MARKER_RE = re.compile(
+    r"<grant-crm-action>.*?</grant-crm-action>", re.DOTALL
+)
+
+
+def strip_action_markers(text: str) -> str:
+    """Remove any CRM action marker from untrusted tool output.
+
+    Deliberately removes rather than escapes: a marker in text Grant did not mint
+    has no honest meaning, and leaving a visible fragment would only invite the
+    model to narrate it to the rep as though it were real.
+    """
+    return _CRM_ACTION_MARKER_RE.sub("", text)
+
+
 def _crm_action_result(
     action_id: str, nonce: str, preview: str, expires_at: str
 ) -> str:
@@ -486,7 +519,7 @@ def _log_tool_failure(tool: str) -> None:
     traceback.print_exc()
 
 
-def run_tool(
+def _dispatch_tool(
     name: str,
     args: dict[str, Any],
     on_progress: Progress | None = None,
@@ -623,3 +656,34 @@ def run_tool(
             args, requester_slack, workspace, channel, thread_ts
         ), None
     return f"ERROR: unknown tool {name}", None
+
+
+def run_tool(
+    name: str,
+    args: dict[str, Any],
+    on_progress: Progress | None = None,
+    requester_slack: str = "",
+    workspace: str = "",
+    channel: str = "",
+    thread_ts: str = "",
+) -> tuple[str, GeneratedArtifact | None]:
+    """Dispatch one tool call, then sanitize its text before anything else sees it.
+
+    This is a trust boundary, not a formatting step. conversation.py harvests
+    <grant-crm-action> markers out of TOOL RESULTS and grant.py renders them as real
+    Salesforce approval buttons, so a tool that returns text from the open web could
+    otherwise mint a button in Grant's voice. Only _ACTION_PRODUCING_TOOLS may carry a
+    marker out of here; every other tool's output is stripped, whatever it contains.
+    """
+    text, artifact = _dispatch_tool(
+        name,
+        args,
+        on_progress,
+        requester_slack=requester_slack,
+        workspace=workspace,
+        channel=channel,
+        thread_ts=thread_ts,
+    )
+    if name not in _ACTION_PRODUCING_TOOLS:
+        text = strip_action_markers(text)
+    return text, artifact
