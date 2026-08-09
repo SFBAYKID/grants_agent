@@ -82,6 +82,13 @@ CAMPAIGN_BATCH_TOOL_SCHEMA: dict[str, Any] = {
                             "minItems": 1,
                             "maxItems": 3,
                         },
+                        "expected_total_organizations": {
+                            "type": "integer",
+                            "description": "For batch 2 and later ONLY: the total "
+                            "organization count the FIRST batch reported. It is "
+                            "checked, and a mismatch refuses rather than risking a "
+                            "silently skipped organization.",
+                        },
                         "slice_index": {
                             "type": "integer",
                             "minimum": 0,
@@ -230,6 +237,9 @@ def salesforce_campaign_batch_preview(
                 state=str(target.get("state", "")),
                 grades=tuple(str(item) for item in target.get("grades", []) or []),
                 slice_index=int(target.get("slice_index", 0) or 0),
+                expected_total_organizations=int(
+                    target.get("expected_total_organizations", 0) or 0
+                ),
             )
         )
     try:

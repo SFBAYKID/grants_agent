@@ -21,6 +21,13 @@ class CampaignTargetRequest:
     # "refine", which the tool's own filters (state + tier) cannot express. Slices
     # are cut from ONE ordered selection so an organization lands in exactly one.
     slice_index: int = 0
+    # The organization count the FIRST batch reported. Slices are cut by position
+    # from a selection recomputed on every call, so if a lead leaves the set in
+    # between — marked dead, regraded — every later organization shifts down one
+    # place and the one on the boundary is silently never added. Passing the number
+    # back makes that drift an explicit refusal instead of a silent gap. Zero means
+    # "first batch, nothing to check against".
+    expected_total_organizations: int = 0
 
 
 @dataclass(frozen=True)

@@ -548,6 +548,14 @@ def _prepare_campaign_batch(
             // MAX_ACTION_ORGANIZATIONS,
         )
         slice_index = max(0, int(request.slice_index))
+        expected_total = int(request.expected_total_organizations)
+        if slice_index > 0 and expected_total and expected_total != total_organizations:
+            raise ValueError(
+                f"{state} had {expected_total} organizations when batch 1 was "
+                f"prepared and has {total_organizations} now, so the batches no "
+                "longer line up and one could be skipped entirely. Start the "
+                "batches again from the first one."
+            )
         if slice_index >= slice_count:
             raise ValueError(
                 f"{state} has {total_organizations} organizations, which is "

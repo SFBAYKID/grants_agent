@@ -190,3 +190,81 @@ def test_a_successful_request_records_the_attempt_too(tmp_path: Path) -> None:
     assert row["batch_id"] == prepared.batch_id
     assert row["failure_kind"] is None
     conn.close()
+
+
+def test_a_shifted_selection_refuses_instead_of_skipping_an_organization(
+    tmp_path: Path,
+) -> None:
+    """Slices are cut by POSITION from a selection recomputed on every call.
+
+    If a lead leaves the set between batch 1 and batch 2 — marked dead, regraded —
+    every later organization shifts down one place, so the one on the boundary moves
+    into the window already written and is silently never added. Campaign writes are
+    armed in production, and the gap would be invisible. Passing the first batch's
+    total back turns that into an explicit refusal.
+    """
+    conn = db.connect(tmp_path / "batch.db")
+    _insert_leads(conn, "IL", LeadGrade.GOLD, 201, 0)
+    first = prepare_campaign_batch(
+        conn,
+        BatchGateway(),
+        "TWORK",
+        "CGRANTS",
+        "123.4",
+        "UREP",
+        (
+            CampaignTargetRequest(
+                _link("Campaign", CAMPAIGNS["IL"][0]), "IL", ("gold",)
+            ),
+        ),
+    )
+    assert "201 organizations in total" in first.summary
+
+    # A rep marks one lead dead between the two batches.
+    conn.execute("UPDATE leads SET status='dead' WHERE id=(SELECT MIN(id) FROM leads)")
+    conn.commit()
+
+    with pytest.raises(ValueError, match="no longer line up"):
+        prepare_campaign_batch(
+            conn,
+            BatchGateway(),
+            "TWORK",
+            "CGRANTS",
+            "123.4",
+            "UREP",
+            (
+                CampaignTargetRequest(
+                    _link("Campaign", CAMPAIGNS["IL"][0]),
+                    "IL",
+                    ("gold",),
+                    slice_index=1,
+                    expected_total_organizations=201,
+                ),
+            ),
+        )
+    conn.close()
+
+
+def test_an_unchanged_selection_still_slices_normally(tmp_path: Path) -> None:
+    """The guard must not block the ordinary case it exists to protect."""
+    conn = db.connect(tmp_path / "batch.db")
+    _insert_leads(conn, "IL", LeadGrade.GOLD, 201, 0)
+    second = prepare_campaign_batch(
+        conn,
+        BatchGateway(),
+        "TWORK",
+        "CGRANTS",
+        "123.4",
+        "UREP",
+        (
+            CampaignTargetRequest(
+                _link("Campaign", CAMPAIGNS["IL"][0]),
+                "IL",
+                ("gold",),
+                slice_index=1,
+                expected_total_organizations=201,
+            ),
+        ),
+    )
+    assert "batch 2 of 2" in second.summary
+    conn.close()
