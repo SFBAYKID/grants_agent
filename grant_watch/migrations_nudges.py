@@ -121,3 +121,24 @@ def migration_34_capability_asks(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_capability_asks_open "
         "ON capability_asks(state, capability)"
     )
+
+
+def migration_35_capability_ask_correction(conn: sqlite3.Connection) -> None:
+    """Carry a correction alongside an ask Grant answered with a false promise.
+
+    Reopening an ask says "I couldn't do that then, I can now". For most asks that is
+    the whole truth. For some it is not: Grant told a rep "I'll keep watching these
+    states and flag new awards here as they land", had no such capability, and never
+    contacted her again. Saying only "I couldn't do it then" would be technically
+    true and quietly misleading — it omits that she was told it was handled.
+
+    A correction is stored verbatim rather than generated, so the sentence that
+    admits the error is written by a person and reviewed before it is sent. This is
+    forward-only as a separate migration rather than an edit to 34, because 34 is
+    already committed and the discipline is worth more than the saved column.
+    """
+    existing = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(capability_asks)")
+    }
+    if "correction" not in existing:
+        conn.execute("ALTER TABLE capability_asks ADD COLUMN correction TEXT")

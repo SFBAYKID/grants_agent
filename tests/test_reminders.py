@@ -339,3 +339,83 @@ def test_the_follow_up_quotes_the_person_verbatim(tmp_path: Path) -> None:
     assert f"<@{REP}>" in text
     assert "couldn't do it then" in text
     conn.close()
+
+
+# --- Truncated model output -------------------------------------------------------
+
+
+def test_a_cut_off_answer_never_leaks_raw_json_to_a_rep() -> None:
+    """A rep really received a Slack message starting `{"intent": "question"...`.
+
+    When the model hits its token ceiling part-way through the required envelope, the
+    JSON does not parse — and the fallback used to pass the raw text straight through
+    as if it were prose. Internal scaffolding in a colleague's thread is a product
+    defect; the half-sentence it ends on is worse, because it reads as a finished
+    answer and is not one.
+    """
+    from grant_watch.slack import conversation
+
+    truncated = (
+        '```json\n{"intent": "question", "reply": "Both Excel files are done — '
+        "Illinois Silver (18 rows) and Texas Silver (20 rows) are attached. I also "
+        "tried building the campaign member previews since those campaigns are "
+        "confirmed. Texas Grant 2026 matched 2 existing records but the o"
+    )
+    out = conversation._parse_final(truncated)
+
+    assert '"intent"' not in out["reply"], "raw JSON envelope reached the user"
+    assert '"reply"' not in out["reply"]
+    assert "```json" not in out["reply"]
+    # The useful prose survives...
+    assert "Illinois Silver (18 rows)" in out["reply"]
+    # ...but it stops at a finished sentence and says it was cut short.
+    assert "but the o" not in out["reply"], "reply still ends mid-word"
+    assert "ran out of room" in out["reply"]
+
+
+def test_plain_prose_is_still_passed_through_untouched() -> None:
+    """The salvage path must not swallow a model that simply answered in prose."""
+    from grant_watch.slack import conversation
+
+    out = conversation._parse_final("Found 12 leads in Texas. Want the list?")
+    assert out["reply"] == "Found 12 leads in Texas. Want the list?"
+
+
+def test_a_complete_envelope_is_unaffected() -> None:
+    """The ordinary path stays exactly as it was."""
+    from grant_watch.slack import conversation
+
+    out = conversation._parse_final('{"intent": "question", "reply": "All good."}')
+    assert out == {"intent": "question", "reply": "All good."}
+
+
+def test_a_broken_promise_is_admitted_not_softened(tmp_path: Path) -> None:
+    """Where Grant SAID the thing was handled, "I couldn't do it then" is not enough.
+
+    Grant told a rep "I'll keep watching these states and flag new awards here as
+    they land." It had no per-user watch and never contacted her again. Reopening
+    that ask with the neutral capability line would be technically true and quietly
+    misleading — it omits that she was told it was taken care of. Rule 1 applies to
+    Grant's account of its own conduct, not only to lead data.
+    """
+    from grant_watch.slack import nudges
+
+    conn = _conn(tmp_path)
+    _ask(
+        conn,
+        capability="reminders",
+        ask_text="Can you contact me on Slack for any grants awarded in Tx, AR, OK",
+        correction="I told you I'd keep watching those states. That wasn't true.",
+    )
+    capability_asks.mark_available(conn, "reminders")
+    candidate = [
+        c
+        for c in nudges.candidates(conn, datetime.now(timezone.utc))
+        if c.subject_kind == "capability_now_available"
+    ][0]
+    text = nudges.build_message(candidate)
+
+    assert "That wasn't true." in text
+    assert "I couldn't do it then" not in text, (
+        "the neutral line survived alongside the correction, softening the admission"
+    )

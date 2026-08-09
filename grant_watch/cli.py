@@ -497,6 +497,47 @@ def cmd_capability(capability: str, dry_run: bool) -> int:
     return 0
 
 
+def cmd_capability_seed(path: str, dry_run: bool) -> int:
+    """Load recorded unmet asks from an evidence file.
+
+    Seeding is separated from `capability --execute` on purpose. This only records
+    that somebody asked for something; declaring the capability live — the act that
+    actually causes Grant to message a real colleague — stays a second, deliberate
+    step.
+    """
+    import json
+
+    from . import capability_asks
+
+    body = json.loads(Path(path).read_text())
+    conn = db.connect_readonly() if dry_run else db.connect()
+    added = skipped = 0
+    for ask in body.get("asks", []):
+        if dry_run:
+            print(f"  would record {ask['who']}: {ask['ask_text'][:70]}")
+            added += 1
+            continue
+        result = capability_asks.record(
+            conn,
+            slack_user=str(ask["slack_user"]),
+            audience=str(ask["audience"]),
+            thread_ts=str(ask["thread_ts"]),
+            message_ts=str(ask["message_ts"]),
+            ask_text=str(ask["ask_text"]),
+            capability=str(ask["capability"]),
+            asked_at=str(ask["asked_at"]),
+            recorded_by=f"seed:{Path(path).name}",
+            evidence_url=str(ask.get("evidence_url", "")),
+            correction=str(ask.get("correction", "")),
+        )
+        if result is None:
+            skipped += 1
+        else:
+            added += 1
+    print(f"capability-seed: {added} recorded, {skipped} already on file")
+    return 0
+
+
 def cmd_slack_failures(mark_reviewed: str = "") -> int:
     """List unresolved Slack turns or mark one manually reconciled without replay."""
     conn = db.connect() if mark_reviewed else db.connect_readonly()
@@ -650,6 +691,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="actually mark it available; without it this only previews",
     )
+    p_seed = sub.add_parser(
+        "capability-seed", help="record unmet asks from an evidence file"
+    )
+    p_seed.add_argument("path", help="JSON evidence file of verbatim unmet asks")
+    p_seed.add_argument(
+        "--execute", action="store_true", help="actually record; default previews"
+    )
     p_followups = sub.add_parser(
         "salesforce-followups", help="check Grant-created Campaign Leads for follow-up"
     )
@@ -703,6 +751,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "remind":
         # Same default as nudge: never send because someone forgot a flag.
         return cmd_remind(dry_run=not args.execute)
+    if args.command == "capability-seed":
+        return cmd_capability_seed(args.path, dry_run=not args.execute)
     if args.command == "capability":
         return cmd_capability(args.name, dry_run=not args.execute)
     if args.command == "salesforce-followups":

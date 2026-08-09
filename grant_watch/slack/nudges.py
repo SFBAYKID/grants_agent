@@ -258,6 +258,7 @@ def _capability_asks(conn: sqlite3.Connection) -> list[NudgeCandidate]:
                 observed={
                     "ask_text": str(row["ask_text"] or ""),
                     "capability": str(row["capability"] or ""),
+                    "correction": str(row["correction"] or ""),
                     "asked_on": asked_at.astimezone(BUSINESS_TZ).strftime("%-d %B")
                     if asked_at
                     else "",
@@ -472,7 +473,13 @@ def _capability_message(candidate: NudgeCandidate, mention: str) -> str:
         asked = asked[:160].rsplit(" ", 1)[0] + "…"
     opener = f"back on {when}," if when else "a while back,"
     quoted = f'you asked: "{asked}".' if asked else "you asked me for this."
-    return f"{mention}{opener} {quoted} I couldn't do it then. {offer}"
+    # A correction REPLACES "I couldn't do it then". That sentence is true but
+    # incomplete where Grant did not merely fail — it said the thing was handled.
+    # Reporting only the capability gap would quietly omit the broken promise, which
+    # is rule 1 applied to Grant's own conduct rather than to a lead.
+    correction = str(candidate.observed.get("correction") or "").strip()
+    admission = correction if correction else "I couldn't do it then."
+    return f"{mention}{opener} {quoted} {admission} {offer}"
 
 
 def run(

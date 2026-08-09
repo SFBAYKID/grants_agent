@@ -59,6 +59,7 @@ def record(
     recorded_by: str,
     evidence_url: str = "",
     available_since: str | None = None,
+    correction: str = "",
 ) -> int | None:
     """Record one unmet ask. Returns None when this ask is already on file.
 
@@ -75,8 +76,9 @@ def record(
         cur = conn.execute(
             """INSERT INTO capability_asks
                  (slack_user,audience,thread_ts,message_ts,asked_at,ask_text,
-                  capability,available_since,state,evidence_url,recorded_by,created_at)
-               VALUES (?,?,?,?,?,?,?,?,'open',?,?,?)""",
+                  capability,available_since,state,evidence_url,recorded_by,
+                  correction,created_at)
+               VALUES (?,?,?,?,?,?,?,?,'open',?,?,?,?)""",
             (
                 slack_user,
                 audience,
@@ -88,6 +90,7 @@ def record(
                 available_since,
                 evidence_url,
                 recorded_by,
+                correction.strip(),
                 _now(),
             ),
         )

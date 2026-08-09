@@ -22,6 +22,7 @@ from .migrations_reminders import migration_33_reminders_and_optouts
 from .migrations_nudges import (
     migration_30_followup_nudges,
     migration_34_capability_asks,
+    migration_35_capability_ask_correction,
 )
 from .migrations_zoominfo import migration_29_vendor_contacts_and_credits
 from .migrations_rich import (
@@ -694,6 +695,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         34,
         "asks Grant could not satisfy, closable by a shipped capability",
         migration_34_capability_asks,
+    ),
+    Migration(
+        35,
+        "a correction to deliver with a reopened ask",
+        migration_35_capability_ask_correction,
     ),
 )
 
