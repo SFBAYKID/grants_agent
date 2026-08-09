@@ -498,7 +498,7 @@ def _materialize_target_action(
     return action
 
 
-def prepare_campaign_batch(
+def _prepare_campaign_batch(
     conn: sqlite3.Connection,
     gateway: SalesforceCampaignGateway,
     workspace: str,
@@ -776,3 +776,118 @@ def prepare_campaign_batch(
         tuple(actions),
         "partial_by_user" if allow_resolved_only and blocked else "approval_ready",
     )
+
+
+def _record_attempt(
+    conn: sqlite3.Connection,
+    *,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+    requests: tuple[CampaignTargetRequest, ...],
+) -> str:
+    """Persist that this attempt STARTED, before anything can refuse it.
+
+    Deliberately the very first thing that happens. Every validation failure below
+    raises before the manifest is written, so without this row a refused request
+    leaves no trace at all — which is exactly what made an SDR's dead-end invisible
+    afterwards, and what stops a follow-up worker from ever noticing it.
+    """
+    attempt_id = str(uuid.uuid4())
+    payload = [
+        {
+            "campaign_link": item.campaign_link,
+            "state": item.state,
+            "grades": list(item.grades),
+            "slice_index": item.slice_index,
+        }
+        for item in requests
+    ]
+    with conn:
+        conn.execute(
+            """INSERT INTO crm_campaign_attempts
+                 (id,workspace,channel,thread_ts,requested_by,request_json,state,
+                  started_at)
+               VALUES (?,?,?,?,?,?, 'started', ?)""",
+            (
+                attempt_id,
+                workspace,
+                channel,
+                thread_ts,
+                requester,
+                _stable_json(payload),
+                iso_timestamp(now_utc()),
+            ),
+        )
+    return attempt_id
+
+
+def _close_attempt(
+    conn: sqlite3.Connection,
+    attempt_id: str,
+    *,
+    state: str,
+    batch_id: str = "",
+    failure: BaseException | None = None,
+) -> None:
+    """Record how the attempt ended, including WHY when it was refused."""
+    with conn:
+        conn.execute(
+            """UPDATE crm_campaign_attempts
+                  SET state=?,batch_id=?,failure_kind=?,failure_detail=?,finished_at=?
+                WHERE id=?""",
+            (
+                state,
+                batch_id or None,
+                type(failure).__name__ if failure is not None else None,
+                str(failure)[:400] if failure is not None else None,
+                iso_timestamp(now_utc()),
+                attempt_id,
+            ),
+        )
+
+
+def prepare_campaign_batch(
+    conn: sqlite3.Connection,
+    gateway: SalesforceCampaignGateway,
+    workspace: str,
+    channel: str,
+    thread_ts: str,
+    requester: str,
+    requests: tuple[CampaignTargetRequest, ...],
+    *,
+    allow_org_leads: bool = False,
+    allow_resolved_only: bool = False,
+) -> PreparedCampaignBatch:
+    """Freeze and resolve a multi-Campaign request, recording the attempt either way.
+
+    A thin durable wrapper: the attempt row is written first and closed last, so a
+    refusal is as visible in the database as a success. The refusal itself still
+    propagates unchanged — callers and their error messages are unaffected.
+    """
+    attempt_id = _record_attempt(
+        conn,
+        workspace=workspace,
+        channel=channel,
+        thread_ts=thread_ts,
+        requester=requester,
+        requests=requests,
+    )
+    try:
+        prepared = _prepare_campaign_batch(
+            conn,
+            gateway,
+            workspace,
+            channel,
+            thread_ts,
+            requester,
+            requests,
+            allow_org_leads=allow_org_leads,
+            allow_resolved_only=allow_resolved_only,
+        )
+    except BaseException as exc:
+        _close_attempt(conn, attempt_id, state="failed", failure=exc)
+        raise
+    _close_attempt(conn, attempt_id, state="prepared", batch_id=prepared.batch_id)
+    return prepared

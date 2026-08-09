@@ -126,3 +126,67 @@ def test_a_slice_beyond_the_end_is_refused_rather_than_returning_nothing(
                 ),
             ),
         )
+
+
+def test_a_refused_request_leaves_a_durable_record(tmp_path: Path) -> None:
+    """The Nelly failure mode: "I asked, it refused, nothing happened anywhere".
+
+    Every validation failure raises before the manifest is written, so a refused
+    request used to leave NO row at all — the only trace was the Slack transcript.
+    That is why the dead-end was invisible afterwards, and why a follow-up worker
+    could never notice it.
+    """
+    conn = db.connect(tmp_path / "batch.db")
+    _insert_leads(conn, "IL", LeadGrade.GOLD, 1, 0)
+    with pytest.raises(ValueError):
+        prepare_campaign_batch(
+            conn,
+            BatchGateway(),
+            "TWORK",
+            "CGRANTS",
+            "123.4",
+            "UREP",
+            (
+                CampaignTargetRequest(
+                    _link("Campaign", CAMPAIGNS["IL"][0]),
+                    "IL",
+                    ("gold",),
+                    slice_index=9,
+                ),
+            ),
+        )
+    row = conn.execute("SELECT * FROM crm_campaign_attempts").fetchone()
+    assert row is not None
+    assert row["state"] == "failed"
+    assert row["requested_by"] == "UREP"
+    assert row["failure_kind"] == "ValueError"
+    assert "does not exist" in str(row["failure_detail"])
+    # The raw request is kept, so a human can see exactly what was asked for.
+    assert '"slice_index": 9' in str(row["request_json"]) or '"slice_index":9' in str(
+        row["request_json"]
+    )
+    conn.close()
+
+
+def test_a_successful_request_records_the_attempt_too(tmp_path: Path) -> None:
+    """Success and refusal must be equally visible, or counting is meaningless."""
+    conn = db.connect(tmp_path / "batch.db")
+    _insert_leads(conn, "IL", LeadGrade.GOLD, 1, 0)
+    prepared = prepare_campaign_batch(
+        conn,
+        BatchGateway(),
+        "TWORK",
+        "CGRANTS",
+        "123.4",
+        "UREP",
+        (
+            CampaignTargetRequest(
+                _link("Campaign", CAMPAIGNS["IL"][0]), "IL", ("gold",)
+            ),
+        ),
+    )
+    row = conn.execute("SELECT * FROM crm_campaign_attempts").fetchone()
+    assert row["state"] == "prepared"
+    assert row["batch_id"] == prepared.batch_id
+    assert row["failure_kind"] is None
+    conn.close()

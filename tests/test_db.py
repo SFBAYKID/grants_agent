@@ -137,7 +137,8 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
     # 14-26 add rich cards; 27 adds exact verified Salesforce Campaign batches;
     # 28 enforces one ready Campaign-creation preview per requester/thread;
     # 29 adds typed contact provenance and the ZoomInfo credit ledger;
-    # 30 adds the one-shot proactive follow-up nudge ledger.
+    # 30 adds the one-shot proactive follow-up nudge ledger;
+    # 31 records every campaign batch attempt, including the failures.
     assert versions == [
         1,
         2,
@@ -166,6 +167,7 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
         28,
         29,
         30,
+        31,
     ]
     crm_tables = {
         row[0]
