@@ -112,6 +112,55 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-09, later)
+
+- `verified` 2026-08-09 **ZOOMINFO WORKS END TO END, PROVEN BY A REAL PAID CALL.** Free
+  preview of Twin Rivers Unified returned 25 people (24 with email, 19 with a phone, 13
+  do-not-call) for ZERO credits; a paid pull of exactly ONE record returned Robert Wilcox,
+  Interim Chief Technology Officer, for 1 credit (1000 → 999). He is DNC-flagged, so his
+  number was withheld while his email was kept; he stored as `vendor_licensed`, never
+  `verified`; the ledger settled reserved=1 billed=1. Two bugs NO stubbed test could have
+  caught, because the stub answers whatever the code asks: (1) Okta REFUSES a
+  client_credentials grant naming no scope — the 400 reads exactly like a bad secret;
+  (2) **`directPhone` is NOT LICENSED on this plan**, and asking for it 400s the WHOLE
+  batch rather than omitting one column. Search still reports `has_direct_phone`, so a
+  direct line can be seen to EXIST while being unavailable to buy — never promise one.
+  Mobile numbers ARE licensed. The vendor's error body is now carried into the exception;
+  losing it is what made the first failure look like an auth problem.
+- `verified` 2026-08-09 SALESFORCE READ PATH LIVE against production: `lookup()` returned
+  five owner-attributed Lead matches, and SOQL confirmed **"California Grant 2026" holds
+  exactly 13 members** — Grant's 2026-08-06 write, verified independently of the thread
+  audit. Nelly's **"California Grant 2026 - Batch 2" is still at 0 leads.** The 12
+  organization-only Leads Grant created carry NO email and NO phone, which is precisely
+  the gap ZoomInfo now fills.
+- `verified` 2026-08-09 SHIPPED (local, branch `review/rich-award-card-campaign-20260723`,
+  **16 commits, NONE DEPLOYED**): campaign slicing past 200 (a tier is cut into ordered
+  batches, partition proven disjoint, no migration needed); card threads are no longer
+  tool-dead; `fetch_url` with an untrusted-content frame, https-only, visible truncation,
+  per-URL dedup, and a tool-loop TERMINATION so injected page text has no turn left to be
+  obeyed in; ZoomInfo's two Slack tools; a deterministic removal refusal ahead of the
+  model; CAPABILITY BOUNDARIES in the system prompt; and the **nudge system** (migration
+  30) — four subjects, one nudge per subject ever, threaded replies only, claims
+  re-verified inside the reservation, dry-run by default on a read-only connection,
+  deliberately NOT in cron. `pytest` 1109 passed / 77 skipped; ruff + health clean;
+  migrations reach schema 30 with integrity ok and no FK violations.
+- `needs-testing` 2026-08-09 **THE PRODUCTION DEPLOY IS BLOCKED** — the permission
+  classifier refused the guardian launch, so production is still `90f0420` and everything
+  above is local only. Two env vars MUST be set as part of that deploy or things break:
+  `GRANT_SALESFORCE_WRITE_CHANNEL_IDS=C01DGT9D11D,C0B02721MNK` (the allowlist now fails
+  CLOSED, and the droplet has no such variable, so campaign writes stop without it) and
+  `ZOOMINFO_MONTHLY_CREDITS=1000` (the ledger refuses every paid pull when unset).
+  Migration 29 mutates data (the provenance backfill) and needs the backup-first protocol.
+- `needs-testing` 2026-08-09 the live Slack workflow test in `C0B02721MNK` has NOT run,
+  because the production bot already listens there and a second local bot would double-
+  reply — so it must follow the deploy, not precede it.
+- `needs-testing` 2026-08-09 STILL OPEN, with designs but no code: the M1 pacing fix (four
+  proactive senders, one atomic primitive; `drip --force` currently bypasses the cap
+  entirely), a durable record for batch attempts that fail BEFORE `_insert_manifest`
+  (seven raise sites persist nothing, which is why Nelly's dead-end is invisible to SQL),
+  a campaign-status tool so "who's on that campaign?" can be answered, human-asserted
+  contact facts, and Jocelyn's missing `reps.json` entry.
+
 ## Current status (2026-08-09)
 
 - `verified` 2026-08-09 **THE BIGGEST CAUSE OF SDR CONFUSION IS NOT A GRANT BUG — IT IS

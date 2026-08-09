@@ -17,7 +17,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-import pytest
 
 from grant_watch import db
 from grant_watch.slack import nudges
