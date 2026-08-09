@@ -118,6 +118,66 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-09, follow-ups + email)
+
+- `verified` 2026-08-09 **THE JULY DEAD-ENDS, ROOT-CAUSED FROM THE REAL CHANNEL.** A
+  full read of `C01DGT9D11D` (Grant joined 07-19; 6 humans, 19 threads) found **26
+  unmet asks** and, more importantly, that **13 of 19 threads DEAD-ENDED**. Nelly is
+  the power user (91 messages) and her last message was never answered; Jocelyn and
+  Brett each used Grant once and never returned. Grant's LAST words in the channel
+  were a false capability claim. Evidence file with verbatim quotes + permalinks:
+  `data/capability_asks/unmet_asks_20260809.json`.
+- `verified` 2026-08-09 **GRANT DID NOT FABRICATE CONTACTS.** The worst hypothesis —
+  five named LinkedIn people invented on 07-23 and reported as "saved to the lead",
+  then reported two weeks later as never found — was investigated in production and
+  **ruled out**: all five are real rows (ids 47,52,53,55,56) with distinct profile
+  URLs, written in a batch dated by three independent orderings to the exact minute
+  of the message. The 08-06 message was a true report of a `CompletedPaidCall` crash
+  (fixed 3adebba) described in words that implied the RECORDS were empty. `contacts`
+  ids run 1..85 with **zero gaps** and there are no triggers, so nothing was ever
+  deleted. Residual defect, now fixed: re-enrichment accumulates several
+  `linkedin_only` rows per lead and row order decided which human a rep saw — one
+  production lead holds both a Teacher and an Assistant Superintendent.
+  `_best_linkedin_contact` now ranks by decision-maker title, then any title, then id.
+- `verified` 2026-08-09 **A RAW JSON ENVELOPE REACHED A REP.** `_parse_final` treated
+  a truncated envelope as prose and passed it through, so a rep received a message
+  starting `{"intent": "question", "reply": "Both Excel files are done` ending
+  mid-word; three others were cut mid-sentence. A failed parse now distinguishes
+  "spoke prose" from "was cut off", salvages the reply, trims to a finished sentence,
+  and says there was more. `max_tokens` 1500 → 3000.
+- `verified` 2026-08-09 **REMINDERS, OPT-OUT, AND EMAIL** (migrations 33-35, schema
+  → 35). `notify/resend_client.py` sends via Resend using a **sending-only key scoped
+  to monarchconnected.com**. THE GUARDRAIL IS THE SIGNATURE: `send_to_rep` takes a
+  SLACK USER ID and resolves it through the reviewed roster itself — no parameter
+  anywhere accepts an address, so no prompt or scraped page can aim Grant's mail at
+  an outside inbox. A test asserts on the SIGNATURE so a refactor cannot loosen it.
+  First real email `verified` sent to chase@ (Resend id `6ed37271…`). `stop_followups`
+  is a first-class tool; an `all` opt-out silences reminders AND nudges, because
+  someone who asks for quiet means everywhere.
+- `verified` 2026-08-09 **THE NUDGE WORKER WAS DESTROYING ITS OWN BACKLOG.** It wrote
+  a PERMANENT suppression for every reason including `channel_guard_active` — a Slack
+  outage — so one run during an outage would have silently burned **22** pending
+  follow-ups with nothing in the output to say so. Only `PERMANENT_SUPPRESSIONS` are
+  recorded now. Separately, `DROP_AFTER` 5 → 14 days: the eligible window was only
+  three days wide, and 28 of 36 due subjects were already unreachable the day the
+  feature shipped.
+- `verified` 2026-08-09 THREE NEW FOLLOW-UP KINDS. `capability_now_available` reopens
+  an ask when the feature ships, quoting the person verbatim; its clock starts at the
+  SHIP, not the ask, so an old ask is not stale — no bigger `DROP_AFTER` could fix
+  that, because the gap grows a day every day. `card_escalated` DMs the manager once
+  after 4 days (roster `manager: true`, fails closed if zero or several rows carry
+  it). `thread_abandoned` reopens on GRANT'S OWN admission of failure
+  (`needs_reconciliation`), never if the person posted again. Card follow-ups now
+  address the rep the card actually tagged, via the SAME verified-source gate the card
+  used. Where Grant made a FALSE PROMISE ("I'll keep watching these states"), the
+  reopened ask carries a written `correction` instead of the neutral line.
+- `needs-testing` 2026-08-09: **no nudge, escalation, reminder or capability follow-up
+  has been delivered live.** `followup_nudges` and `reminders` are empty in production;
+  no `nudge` cron line exists; production asks are NOT seeded. LinkedIn connection
+  messages (Chase asked) are NOT built. The 07-20 "367 gold California" figure told to
+  Chase matches nothing in the database (true: 49 raw / 14 searchable) and was never
+  corrected in-channel.
+
 ## Current status (2026-08-09, live-tested)
 
 - `verified` 2026-08-09 SIX PLAYGROUND THREADS driven as a real user, deliberately messy.
