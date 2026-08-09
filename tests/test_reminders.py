@@ -1,0 +1,341 @@
+"""Reminders, the opt-out that must always win, and email that cannot go astray.
+
+The July failure these close: a rep asked Grant to email her a list and the thread
+died, because nothing could outlive a conversation and nothing could send mail. The
+risk introduced by fixing that is the mirror image — an agent that can schedule
+messages and send email is an agent that can nag someone who asked it to stop, or mail
+a school administrator without approval. These tests pin both directions.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from grant_watch import capability_asks, db, reminders
+from grant_watch.notify import resend_client
+
+REP = "U0REP"
+# Chase, from config/reps.json — the one identity certain to be on the roster.
+ROSTERED_REP = "U01DPJVURHU"
+OTHER = "U0OTHER"
+CHANNEL = "C0TEST"
+THREAD = "1700000000.000100"
+
+
+def _conn(tmp_path: Path) -> sqlite3.Connection:
+    """A throwaway migrated database."""
+    return db.connect(tmp_path / "r.db")
+
+
+def _soon() -> datetime:
+    """A due time comfortably in the future."""
+    return datetime.now(timezone.utc) + timedelta(days=1)
+
+
+def _make(conn: sqlite3.Connection, **kw: object) -> int:
+    """Create one reminder with sensible defaults."""
+    params: dict[str, object] = {
+        "requested_by_slack": REP,
+        "audience": CHANNEL,
+        "thread_ts": THREAD,
+        "subject": "the Texas RFPs",
+        "due_at": _soon(),
+    }
+    params.update(kw)
+    return reminders.create(conn, **params)  # type: ignore[arg-type]
+
+
+def test_a_reminder_survives_the_conversation(tmp_path: Path) -> None:
+    """The whole point: an ask that outlives the thread it was made in."""
+    conn = _conn(tmp_path)
+    reminder_id = _make(conn)
+    mine = reminders.for_user(conn, REP)
+    assert [item.reminder_id for item in mine] == [reminder_id]
+    assert mine[0].subject == "the Texas RFPs"
+    conn.close()
+
+
+def test_stop_means_stop_everywhere(tmp_path: Path) -> None:
+    """ "Stop reminding me" is not "cancel reminder #4".
+
+    Someone who asks for quiet means every proactive channel, so an `all` opt-out has
+    to satisfy the nudge worker's check too. Scoping it narrowly would leave Grant
+    technically compliant and practically still nagging.
+    """
+    conn = _conn(tmp_path)
+    _make(conn)
+    reminders.set_optout(conn, REP, scope="all", channel=CHANNEL, thread_ts=THREAD)
+
+    assert reminders.is_opted_out(conn, REP, scope="reminders") is True
+    assert reminders.is_opted_out(conn, REP, scope="nudges") is True
+    assert reminders.for_user(conn, REP) == [], "opting out left reminders running"
+    assert reminders.is_opted_out(conn, OTHER) is False
+    conn.close()
+
+
+def test_a_new_reminder_is_refused_after_someone_opts_out(tmp_path: Path) -> None:
+    """Cancelling what exists is not enough if the next ask re-arms it."""
+    conn = _conn(tmp_path)
+    reminders.set_optout(conn, REP)
+    with pytest.raises(reminders.OptedOut):
+        _make(conn)
+    conn.close()
+
+
+def test_someone_can_turn_follow_ups_back_on(tmp_path: Path) -> None:
+    """An opt-out is a preference, not a punishment."""
+    conn = _conn(tmp_path)
+    reminders.set_optout(conn, REP)
+    reminders.clear_optout(conn, REP)
+    assert reminders.is_opted_out(conn, REP) is False
+    assert _make(conn) > 0
+    conn.close()
+
+
+def test_only_the_owner_can_cancel_their_reminder(tmp_path: Path) -> None:
+    """A shared channel means anyone can see it; that is not permission to change it."""
+    conn = _conn(tmp_path)
+    reminder_id = _make(conn)
+    assert reminders.cancel(conn, reminder_id, OTHER) is False
+    assert len(reminders.for_user(conn, REP)) == 1
+    assert reminders.cancel(conn, reminder_id, REP) is True
+    conn.close()
+
+
+def test_one_occurrence_can_only_be_delivered_once(tmp_path: Path) -> None:
+    """The reservation is the idempotency guarantee, not a bookkeeping detail.
+
+    A worker that crashes between sending and recording will re-enter with the same
+    reminder still due. If the second reserve succeeded, the rep gets the message
+    twice — which is the failure mode that makes people mute a bot for good.
+    """
+    conn = _conn(tmp_path)
+    _make(conn)
+    reminder = reminders.due(conn, datetime.now(timezone.utc) + timedelta(days=2))[0]
+    assert reminders.reserve(conn, reminder, "slack") is not None
+    assert reminders.reserve(conn, reminder, "slack") is None, "double delivery"
+    # A different channel for the same occurrence is a separate delivery and allowed.
+    assert reminders.reserve(conn, reminder, "email") is not None
+    conn.close()
+
+
+def test_a_weekly_reminder_keeps_its_day_when_the_worker_runs_late(
+    tmp_path: Path,
+) -> None:
+    """Stepping from `now` instead of the due time silently walks the weekday.
+
+    A weekly reminder set for Friday, delivered at 09:05 because the worker ran late,
+    would land the following Friday at 09:05 — and drift again every week until it
+    was arriving on Tuesday. Stepping from the DUE time keeps it anchored.
+    """
+    conn = _conn(tmp_path)
+    due = datetime.now(timezone.utc) - timedelta(hours=3)
+    conn.execute(
+        "INSERT INTO reminders (requested_by_slack,audience,thread_ts,subject,"
+        "search_spec,cadence,deliver_via,next_due_at,state,created_at,updated_at) "
+        "VALUES (?,?,?,'weekly thing','{}','weekly','slack',?,'active',?,?)",
+        (REP, CHANNEL, THREAD, due.isoformat(), due.isoformat(), due.isoformat()),
+    )
+    conn.commit()
+    reminder = reminders.due(conn, datetime.now(timezone.utc))[0]
+    reminders.advance(conn, reminder)
+    following = reminders.for_user(conn, REP)[0].next_due_at
+    assert following == due + timedelta(days=7)
+    assert following.weekday() == due.weekday()
+    conn.close()
+
+
+def test_a_one_off_reminder_retires_instead_of_repeating(tmp_path: Path) -> None:
+    """`once` has to mean once even though the row is still there afterwards."""
+    conn = _conn(tmp_path)
+    _make(conn, cadence="once")
+    reminder = reminders.due(conn, datetime.now(timezone.utc) + timedelta(days=2))[0]
+    reminders.advance(conn, reminder)
+    assert reminders.for_user(conn, REP) == []
+    assert len(reminders.for_user(conn, REP, state="completed")) == 1
+    conn.close()
+
+
+def test_a_stored_search_cannot_smuggle_arguments_into_the_worker(
+    tmp_path: Path,
+) -> None:
+    """THE INJECTION CASE. A frozen spec is model-written JSON that gets splatted
+    into a real function call at delivery time, long after anyone reviewed it.
+
+    Without the allowlist, a spec carrying `db_path` would point the reminder's search
+    at another database, and `requester_slack` would let it act as somebody else. The
+    thaw has to be narrower than the freeze.
+    """
+    hostile = {
+        "state": "TX",
+        "db_path": "/etc/passwd",
+        "requester_slack": "U0ADMIN",
+        "export": "google_sheet",
+        "with_contacts": True,
+        "limit": 9999,
+    }
+    safe = reminders.search_kwargs(hostile)
+    assert set(safe) == {"state", "limit"}
+    assert safe["state"] == "TX"
+    assert safe["limit"] == reminders.MAX_REMINDER_ROWS, (
+        "an unbounded limit got through"
+    )
+
+
+def test_a_recurring_reminder_stops_on_its_own(tmp_path: Path) -> None:
+    """Something nobody ever engages with should expire, not run forever."""
+    conn = _conn(tmp_path)
+    reminder_id = _make(conn, cadence="daily")
+    for index in range(reminders.MAX_OCCURRENCES):
+        conn.execute(
+            "INSERT INTO reminder_deliveries (reminder_id,occurrence_key,channel,"
+            "state,reserved_at) VALUES (?,?,'slack','delivered',?)",
+            (reminder_id, f"k{index}", "2026-01-01T00:00:00+00:00"),
+        )
+    conn.commit()
+    reminder = reminders.due(conn, datetime.now(timezone.utc) + timedelta(days=2))[0]
+    reminders.advance(conn, reminder)
+    assert reminders.for_user(conn, REP) == []
+    conn.close()
+
+
+# --- Email ------------------------------------------------------------------------
+
+
+def test_grant_cannot_email_anyone_who_is_not_a_rostered_rep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The guardrail that keeps a school administrator out of Grant's reach.
+
+    Outreach to a prospect is Persequor's job and needs a human tap (Constitution rule
+    10). This transport exists only to send a rep their own results, so an unknown
+    Slack id has to refuse rather than fall back to anything.
+    """
+    monkeypatch.setenv("RESEND_API_KEY", "test-key")
+    monkeypatch.setenv("RESEND_FROM_EMAIL", "grant@example.test")
+    monkeypatch.delenv("OUTREACH_TEST_EMAIL", raising=False)
+    with pytest.raises(resend_client.RecipientNotAllowed):
+        resend_client.send_to_rep("U-NOT-A-REP", "subject", "body")
+
+
+def test_the_transport_exposes_no_way_to_name_a_recipient() -> None:
+    """The guardrail is structural, so assert on the STRUCTURE.
+
+    Every other test here could be satisfied by a validation check that a later
+    refactor quietly loosens. This one fails if anyone ever adds an address
+    parameter — the point is that steering Grant's mail is not expressible, not that
+    it is currently rejected.
+    """
+    import inspect
+
+    for name in ("send_to_rep", "recipient_for"):
+        params = set(inspect.signature(getattr(resend_client, name)).parameters)
+        assert not params & {"to", "email", "recipient", "address", "to_email"}, (
+            f"{name} accepts a caller-supplied address; the roster is bypassable"
+        )
+
+
+def test_email_is_off_rather_than_broken_when_it_is_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No key must mean an honest refusal, never a silent no-op that reads as sent."""
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.setenv("RESEND_FROM_EMAIL", "grant@example.test")
+    assert resend_client.is_configured() is False
+    # A REAL rostered id, so this proves the config gate rather than tripping the
+    # recipient gate first — the recipient check runs earlier, deliberately, so that
+    # an unknown address is refused whether or not email is switched on.
+    with pytest.raises(resend_client.EmailNotConfigured):
+        resend_client.send_to_rep(ROSTERED_REP, "subject", "body")
+
+
+# --- Capability asks --------------------------------------------------------------
+
+
+def _ask(conn: sqlite3.Connection, **kw: object) -> int | None:
+    """Record one unmet ask with defaults."""
+    params: dict[str, object] = {
+        "slack_user": REP,
+        "audience": CHANNEL,
+        "thread_ts": THREAD,
+        "message_ts": "1700000000.000200",
+        "ask_text": "just email me the 29 texas ones",
+        "capability": "email_results",
+        "asked_at": "2026-07-24T18:00:00+00:00",
+        "recorded_by": "test",
+    }
+    params.update(kw)
+    return capability_asks.record(conn, **params)  # type: ignore[arg-type]
+
+
+def test_an_unmet_ask_is_inert_until_the_capability_ships(tmp_path: Path) -> None:
+    """Recording an ask must not by itself schedule a message to a colleague."""
+    from grant_watch.slack import nudges
+
+    conn = _conn(tmp_path)
+    _ask(conn)
+    found = nudges.candidates(conn, datetime.now(timezone.utc))
+    assert [c for c in found if c.subject_kind == "capability_now_available"] == []
+
+    assert capability_asks.mark_available(conn, "email_results") == 1
+    found = nudges.candidates(conn, datetime.now(timezone.utc))
+    reopened = [c for c in found if c.subject_kind == "capability_now_available"]
+    assert len(reopened) == 1
+    assert reopened[0].target_slack == REP
+    assert reopened[0].anchor_ts == THREAD
+    conn.close()
+
+
+def test_a_months_old_ask_is_not_stale_once_the_capability_lands(
+    tmp_path: Path,
+) -> None:
+    """The clock starts at the SHIP, not the ask — the whole design of this kind.
+
+    Anchoring staleness to the ask date would make every historical ask permanently
+    stale the moment it was recorded, and no bigger DROP_AFTER fixes that, because
+    the gap grows by a day every day.
+    """
+    from grant_watch.slack import nudges
+
+    conn = _conn(tmp_path)
+    _ask(conn, asked_at="2026-01-05T18:00:00+00:00")
+    capability_asks.mark_available(conn, "email_results")
+    now = datetime.now(timezone.utc)
+    candidate = [
+        c
+        for c in nudges.candidates(conn, now)
+        if c.subject_kind == "capability_now_available"
+    ][0]
+    assert nudges.suppress_reason(conn, candidate, now) != "stale"
+    conn.close()
+
+
+def test_the_same_ask_is_only_recorded_once(tmp_path: Path) -> None:
+    """Asking twice in one thread is one person wanting one thing."""
+    conn = _conn(tmp_path)
+    assert _ask(conn) is not None
+    assert _ask(conn) is None
+    conn.close()
+
+
+def test_the_follow_up_quotes_the_person_verbatim(tmp_path: Path) -> None:
+    """This message claims what a named colleague said, so it must not paraphrase."""
+    from grant_watch.slack import nudges
+
+    conn = _conn(tmp_path)
+    _ask(conn)
+    capability_asks.mark_available(conn, "email_results")
+    candidate = [
+        c
+        for c in nudges.candidates(conn, datetime.now(timezone.utc))
+        if c.subject_kind == "capability_now_available"
+    ][0]
+    text = nudges.build_message(candidate)
+    assert "just email me the 29 texas ones" in text
+    assert f"<@{REP}>" in text
+    assert "couldn't do it then" in text
+    conn.close()

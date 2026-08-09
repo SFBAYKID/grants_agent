@@ -34,7 +34,6 @@ from .salesforce_campaign_tools import (
 from .source_status import source_inventory_status
 from .research_tools import (  # re-export: every tools.<name> call site is unchanged
     MAX_FETCH_CHARS,  # noqa: F401 — re-exported for callers and tests
-    MAX_FETCHES_PER_TURN,  # noqa: F401 — re-exported for callers and tests
     fetch_url,
     record_contact_fact,
     salesforce_campaign_status,
@@ -700,6 +699,28 @@ def _dispatch_tool(
         except Exception as exc:
             _log_tool_failure("zoominfo_enrich_contacts")
             return f"ERROR: ZoomInfo pull failed ({type(exc).__name__}).", None
+    if name in {
+        "reminder_set",
+        "reminder_list",
+        "reminder_cancel",
+        "stop_followups",
+        "email_results",
+    }:
+        from . import reminder_tools
+
+        if name == "reminder_set":
+            return reminder_tools.reminder_set(
+                args, requester_slack, channel, thread_ts
+            ), None
+        if name == "reminder_list":
+            return reminder_tools.reminder_list(requester_slack), None
+        if name == "reminder_cancel":
+            return reminder_tools.reminder_cancel(args, requester_slack), None
+        if name == "stop_followups":
+            return reminder_tools.stop_followups(
+                args, requester_slack, channel, thread_ts
+            ), None
+        return reminder_tools.email_results(args, requester_slack), None
     if name == "fetch_url":
         return fetch_url(str(args.get("url", "")), p), None
     if name == "record_contact_fact":

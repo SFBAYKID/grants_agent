@@ -370,3 +370,83 @@ def test_something_genuinely_ancient_is_still_dropped(tmp_path: Path) -> None:
         == "stale"
     )
     conn.close()
+
+
+def test_a_slack_outage_does_not_permanently_destroy_the_backlog(
+    tmp_path: Path,
+) -> None:
+    """THE BUG THIS CLOSES, found by measuring the real queue against production.
+
+    `_record` writes the row whose uniqueness key retires a subject FOREVER under this
+    policy version, and the worker was writing it for EVERY suppression — including
+    `channel_guard_active`, which is a Slack outage that clears on its own. So a
+    single run during an outage silently and permanently burned every pending
+    follow-up in that channel: 22 subjects, in the measured case, with nothing in the
+    output to say it had happened.
+
+    A transient reason must leave no trace, so the subject is still there when Slack
+    comes back.
+    """
+    conn = _conn(tmp_path)
+    _expired_preview(conn, NOW - timedelta(days=1))
+    db.set_channel_guard(
+        conn,
+        CHANNEL,
+        "backoff",
+        "ratelimited",
+        available_at=(NOW + timedelta(hours=2)).isoformat(),
+    )
+    client = _Client()
+
+    assert nudges.run(client, conn, now=NOW) == "skip: nothing to follow up on"
+    assert client.posts == []
+    burned = conn.execute("SELECT COUNT(*) FROM followup_nudges").fetchone()[0]
+    assert burned == 0, (
+        "a transient Slack outage wrote a permanent suppression and destroyed the "
+        "subject; it can never be nudged again"
+    )
+
+    # With the guard gone, the very same subject is still reachable.
+    conn.execute("DELETE FROM notification_outbox WHERE lead_id IS NULL")
+    conn.commit()
+    assert "nudged" in nudges.run(client, conn, now=NOW)
+    assert len(client.posts) == 1
+    conn.close()
+
+
+def test_a_permanent_reason_is_still_recorded_once_and_retires_the_subject(
+    tmp_path: Path,
+) -> None:
+    """The other half: not recording transient reasons must not stop recording real
+    ones, or every stale subject would be re-examined forever."""
+    conn = _conn(tmp_path)
+    _expired_preview(conn, NOW - timedelta(days=90))  # far past DROP_AFTER
+    assert nudges.run(_Client(), conn, now=NOW) == "skip: nothing to follow up on"
+    row = conn.execute("SELECT state,suppress_reason FROM followup_nudges").fetchone()
+    assert (row["state"], row["suppress_reason"]) == ("suppressed", "stale")
+    conn.close()
+
+
+def test_someone_who_opted_out_is_not_nudged_and_is_not_burned(
+    tmp_path: Path,
+) -> None:
+    """Opting out silences Grant without destroying the work.
+
+    `opted_out` is transient by the same argument as the outage: the person can ask
+    for follow-ups back, and if the subject had been retired meanwhile there would be
+    nothing left to tell them about.
+    """
+    from grant_watch import reminders
+
+    conn = _conn(tmp_path)
+    _expired_preview(conn, NOW - timedelta(days=1))
+    reminders.set_optout(conn, REP, scope="all")
+    client = _Client()
+
+    assert nudges.run(client, conn, now=NOW) == "skip: nothing to follow up on"
+    assert client.posts == []
+    assert conn.execute("SELECT COUNT(*) FROM followup_nudges").fetchone()[0] == 0
+
+    reminders.clear_optout(conn, REP)
+    assert "nudged" in nudges.run(client, conn, now=NOW)
+    conn.close()

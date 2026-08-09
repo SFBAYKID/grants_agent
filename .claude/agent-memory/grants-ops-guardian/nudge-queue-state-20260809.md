@@ -5,6 +5,11 @@ metadata:
   type: project
 ---
 
+**SUPERSEDED IN PART, same day:** `DROP_AFTER` was raised 5d → 14d by
+[[deploy-26153bd-drop-after-14d]]. Production eligibility went 8 → 14. The playground did **not**
+recover — its newest subject is 22 days old, so all 18 stay `stale` and the "no way to exercise a
+nudge in the playground" conclusion below still holds, for a bigger margin than it first appeared.
+
 First read of the production nudge queue, read-only, right after [[deploy-beb0520-nudge-force]].
 `followup_nudges` was **0 rows** — no nudge has ever been sent, so nothing was blocked by the
 one-shot rule. Every observation below is `verified` from a `connect_readonly()` walk using the real

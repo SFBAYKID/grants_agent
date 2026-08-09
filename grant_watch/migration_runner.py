@@ -56,3 +56,22 @@ def apply_migrations(
                 raise
     finally:
         conn.execute("PRAGMA foreign_keys=ON")
+
+
+def execute_script(conn: sqlite3.Connection, script: str) -> None:
+    """Execute a multi-statement script without sqlite3's implicit commit behavior.
+
+    Shared by every migration module. It lives here rather than in `migrations.py`
+    because `migrations.py` imports the split-out migration modules, so anything they
+    both need has to sit below both of them or the import cycles.
+    """
+    statement = ""
+    for line in script.splitlines():
+        statement += f"{line}\n"
+        if sqlite3.complete_statement(statement):
+            sql = statement.strip()
+            if sql:
+                conn.execute(sql)
+            statement = ""
+    if statement.strip():
+        raise ValueError("migration SQL ended with an incomplete statement")

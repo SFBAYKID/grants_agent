@@ -10,6 +10,8 @@ Usage (from the repo root, venv active):
     python -m grant_watch.cli outreach-retry [--dry-run]
     python -m grant_watch.cli salesforce-sync [--limit N] [--dry-run]
     python -m grant_watch.cli nudge [--dry-run | --execute]
+    python -m grant_watch.cli remind [--dry-run | --execute]
+    python -m grant_watch.cli capability <name> [--execute]
     python -m grant_watch.cli salesforce-followups [--dry-run] [--smoke]
     python -m grant_watch.cli slack-failures [--mark-reviewed EVENT_ID]
 
@@ -33,6 +35,7 @@ from dotenv import load_dotenv
 
 from . import db, scoring
 from .config import primary_channel_id
+from .migrations_nudges import CAPABILITY_KINDS
 from .models import RawItem, RunStats
 from .sources import POLLERS, sam_gov
 
@@ -452,6 +455,48 @@ def cmd_nudge(dry_run: bool, force: bool = False) -> int:
     return 1 if outcome.startswith("nudge failed") else 0
 
 
+def cmd_remind(dry_run: bool) -> int:
+    """Deliver reminders that have come due, over Slack and/or email.
+
+    Same dry-run discipline as `nudge`: a preview opens a READ-ONLY connection so an
+    accidental write raises instead of quietly happening.
+    """
+    from slack_sdk import WebClient
+
+    from . import reminder_worker
+
+    client = None if dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    conn = db.connect_readonly() if dry_run else db.connect()
+    outcome = reminder_worker.run(client, conn, dry_run=dry_run)
+    print(f"remind: {outcome}")
+    return 1 if "failed" in outcome else 0
+
+
+def cmd_capability(capability: str, dry_run: bool) -> int:
+    """Declare a capability live so every ask waiting on it can be reopened.
+
+    Deliberately a separate operator act rather than a side effect of deploying: the
+    code shipping and the team being told about it are different decisions, and the
+    second one sends messages to real people.
+    """
+    from . import capability_asks
+
+    conn = db.connect_readonly() if dry_run else db.connect()
+    if dry_run:
+        waiting = [
+            a for a in capability_asks.open_asks(conn) if a.capability == capability
+        ]
+        print(f"capability {capability}: {len(waiting)} open asks would be reopened")
+        for ask in waiting:
+            print(
+                f"  #{ask.ask_id} <@{ask.slack_user}> in {ask.audience}: {ask.ask_text[:90]}"
+            )
+        return 0
+    count = capability_asks.mark_available(conn, capability)
+    print(f"capability {capability}: {count} asks reopened")
+    return 0
+
+
 def cmd_slack_failures(mark_reviewed: str = "") -> int:
     """List unresolved Slack turns or mark one manually reconciled without replay."""
     conn = db.connect() if mark_reviewed else db.connect_readonly()
@@ -582,6 +627,29 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip the business-hours window only; caps and dedup still apply",
     )
+    p_remind = sub.add_parser(
+        "remind", help="deliver reminders a rep asked for that have come due"
+    )
+    p_remind.add_argument("--dry-run", action="store_true")
+    p_remind.add_argument(
+        "--execute",
+        action="store_true",
+        help="actually send; without it this is a dry run",
+    )
+    p_capability = sub.add_parser(
+        "capability",
+        help="declare a capability live, reopening every ask that was waiting on it",
+    )
+    p_capability.add_argument(
+        "name",
+        choices=list(CAPABILITY_KINDS),
+        help="which capability now exists",
+    )
+    p_capability.add_argument(
+        "--execute",
+        action="store_true",
+        help="actually mark it available; without it this only previews",
+    )
     p_followups = sub.add_parser(
         "salesforce-followups", help="check Grant-created Campaign Leads for follow-up"
     )
@@ -632,6 +700,11 @@ def main(argv: list[str] | None = None) -> int:
         # Default to a dry run: a command that posts to a team channel should never
         # do so because someone forgot a flag.
         return cmd_nudge(dry_run=not args.execute, force=bool(args.force))
+    if args.command == "remind":
+        # Same default as nudge: never send because someone forgot a flag.
+        return cmd_remind(dry_run=not args.execute)
+    if args.command == "capability":
+        return cmd_capability(args.name, dry_run=not args.execute)
     if args.command == "salesforce-followups":
         return cmd_salesforce_followups(args.dry_run, args.smoke)
     if args.command == "slack-failures":

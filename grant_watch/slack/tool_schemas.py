@@ -424,3 +424,133 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
 ]
+
+# --- Reminders, opt-outs, and email -----------------------------------------------
+# These four exist because a rep asked Grant to email her a list in July and the
+# thread simply stopped. The schemas are written for the way people actually ask:
+# short, casual, and without stating a delivery channel or a date format.
+REMINDER_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    {
+        "name": "reminder_set",
+        "description": (
+            "Hold on to something and come back to the rep about it later. Use this "
+            "whenever someone asks to be reminded, chased, pinged, or followed up "
+            "with — 'remind me Friday', 'check back with me next week', 'don't let "
+            "me forget these'. If they want the actual leads sent, put the search "
+            "in search_spec and it re-runs when the reminder fires, so they get "
+            "current data rather than a stale copy."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subject": {
+                    "type": "string",
+                    "description": "Plain words for what this is about, as the rep "
+                    "would say it: 'the Texas RFPs', 'Bellaire follow-up'.",
+                },
+                "when": {
+                    "type": "string",
+                    "description": "When to send it, as YYYY-MM-DD HH:MM. Interpreted "
+                    "as Pacific. Resolve relative asks ('tomorrow', 'Friday') to a "
+                    "real date yourself. Must be in the future.",
+                },
+                "cadence": {
+                    "type": "string",
+                    "enum": ["once", "daily", "weekly"],
+                    "description": "Default once. Only repeat if they asked for it.",
+                },
+                "deliver_via": {
+                    "type": "string",
+                    "enum": ["slack", "email", "both"],
+                    "description": "Default slack. Use email only if they asked for "
+                    "email.",
+                },
+                "search_spec": {
+                    "type": "object",
+                    "description": "Optional search_leads filters (state, grade, "
+                    "program, open_only...). Re-run at delivery so the reminder "
+                    "carries fresh results.",
+                },
+            },
+            "required": ["subject", "when"],
+        },
+    },
+    {
+        "name": "reminder_list",
+        "description": (
+            "Show the rep every reminder Grant is currently holding for them. Use "
+            "for 'what have you got for me', 'what am I on the hook for', or before "
+            "cancelling one so they can pick."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "reminder_cancel",
+        "description": (
+            "Cancel one reminder by number, or all of them. Use for 'drop that "
+            "reminder', 'cancel the Texas one'. If they want ALL follow-ups to stop "
+            "— including proactive nudges — use stop_followups instead."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "reminder_id": {"type": "integer"},
+                "all": {"type": "boolean", "description": "Cancel every reminder."},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "stop_followups",
+        "description": (
+            "Switch off ALL of Grant's proactive messages to this person — reminders "
+            "and nudges alike — and cancel their running reminders. Use this the "
+            "moment someone signals they want the chasing to stop: 'stop reminding "
+            "me', 'leave me alone', 'unsubscribe', 'stop pinging me'. Never argue "
+            "with it and never ask them to confirm. Set resume=true to turn "
+            "follow-ups back on if they later ask for them."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "resume": {
+                    "type": "boolean",
+                    "description": "True to turn follow-ups back ON.",
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["all", "reminders", "nudges"],
+                    "description": "Default all. Only narrow it if they were "
+                    "specific about which kind they want stopped.",
+                },
+                "note": {"type": "string", "description": "Their reason, if given."},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "email_results",
+        "description": (
+            "Email the requester a list of leads right now. Use when someone asks "
+            "for results by email — 'just email me these', 'send me that list', "
+            "'shoot it over'. Goes only to the requester's own reviewed Monarch "
+            "address; Grant cannot email anyone else, and never a lead contact. "
+            "Prefer offering a Salesforce campaign first — a campaign is something "
+            "they can work, an email is something they have to retype."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string", "description": "Email subject line."},
+                "search_spec": {
+                    "type": "object",
+                    "description": "search_leads filters describing exactly the set "
+                    "they asked for.",
+                },
+            },
+            "required": ["search_spec"],
+        },
+    },
+]
+
+TOOL_SCHEMAS.extend(REMINDER_TOOL_SCHEMAS)

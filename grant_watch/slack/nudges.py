@@ -30,7 +30,7 @@ from typing import Any
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-from .. import db
+from .. import db, reminders
 from ..migrations_nudges import NUDGE_SUBJECT_KINDS
 from ..presentation import display_entity_name
 from .drip import PT as BUSINESS_TZ
@@ -53,6 +53,10 @@ GRACE = {
     "crm_batch_blocked": timedelta(days=1),
     "crm_batch_partial": timedelta(days=2),
     "card_unengaged": timedelta(days=2),
+    # No grace. The other kinds wait to see whether a human quietly finishes the work
+    # anyway; there is nothing to wait for here, because the event being reported is
+    # that Grant itself gained an ability.
+    "capability_now_available": timedelta(0),
 }
 # How long a subject stays worth mentioning. Five days made the eligible window only
 # THREE days wide (grace takes the first two), which had a consequence nobody
@@ -64,6 +68,27 @@ GRACE = {
 # still recent enough that a rep recognises what is being asked about, and wide enough
 # that a one-a-day cap can actually drain a queue.
 DROP_AFTER = timedelta(days=14)
+
+# A BIGGER CONSTANT IS NOT ALWAYS THE FIX. Widening the window above rescues stalled
+# work, but it cannot rescue a queue that STOPPED BEING FED: the playground's newest
+# subject was already 22 days old when the 14-day window shipped, and the threshold
+# needed to reach it grows by a day every day. That is a receding target, and the
+# temptation is to keep raising the number until the test passes.
+#
+# `capability_now_available` sidesteps it by measuring from the right event instead.
+# Its clock starts when the CAPABILITY shipped, not when the ask was made — see
+# `_capability_asks`, which uses `available_since` as the stall time. "You asked me in
+# July to email you those leads and I couldn't — I can now" is exactly as true four
+# months later as it was the next morning, so the ask's age is simply not what
+# staleness means for this kind. No special horizon is needed once the clock is
+# anchored correctly.
+
+# Suppression reasons that are FACTS ABOUT THE SUBJECT and will never stop being
+# true. Only these may be written to the ledger, because that write is permanent:
+# the uniqueness key retires the subject under this policy version forever.
+PERMANENT_SUPPRESSIONS = frozenset(
+    {"stale", "resolved_since_queued", "engaged_since_queued", "lead_parked"}
+)
 
 
 @dataclass(frozen=True)
@@ -202,10 +227,54 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
     return out
 
 
+def _capability_asks(conn: sqlite3.Connection) -> list[NudgeCandidate]:
+    """Asks Grant refused for want of a feature that now exists.
+
+    `stalled_at` is `available_since` — WHEN THE CAPABILITY SHIPPED, not when the
+    person asked. That is what makes this kind work without a special staleness
+    horizon: the thing worth reporting is the change in what Grant can do, so the
+    clock starts there. Anchoring it to the ask date instead would have made every
+    historical ask permanently stale on the day it was recorded.
+    """
+    rows = conn.execute(
+        """SELECT * FROM capability_asks
+            WHERE state='open' AND available_since IS NOT NULL
+            ORDER BY asked_at"""
+    ).fetchall()
+    out: list[NudgeCandidate] = []
+    for row in rows:
+        shipped = _parse(row["available_since"])
+        if shipped is None:
+            continue
+        asked_at = _parse(row["asked_at"])
+        out.append(
+            NudgeCandidate(
+                subject_kind="capability_now_available",
+                subject_id=str(row["id"]),
+                audience=str(row["audience"]),
+                target_slack=str(row["slack_user"] or ""),
+                anchor_ts=str(row["thread_ts"] or ""),
+                stalled_at=shipped,
+                observed={
+                    "ask_text": str(row["ask_text"] or ""),
+                    "capability": str(row["capability"] or ""),
+                    "asked_on": asked_at.astimezone(BUSINESS_TZ).strftime("%-d %B")
+                    if asked_at
+                    else "",
+                    "evidence_url": str(row["evidence_url"] or ""),
+                },
+            )
+        )
+    return out
+
+
 def candidates(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandidate]:
     """Every piece of unfinished work Grant can honestly ask about, oldest first."""
     found = (
-        _abandoned_previews(conn) + _stalled_batches(conn) + _unengaged_cards(conn, now)
+        _abandoned_previews(conn)
+        + _stalled_batches(conn)
+        + _unengaged_cards(conn, now)
+        + _capability_asks(conn)
     )
     ready = [
         item
@@ -230,6 +299,10 @@ def suppress_reason(
         return "stale"
     if db.channel_guard(conn, candidate.audience) is not None:
         return "channel_guard_active"
+    if candidate.target_slack and reminders.is_opted_out(
+        conn, candidate.target_slack, scope="nudges"
+    ):
+        return "opted_out"
     if candidate.subject_kind == "crm_preview_expired":
         row = conn.execute(
             "SELECT state FROM crm_actions WHERE id=?", (candidate.subject_id,)
@@ -244,6 +317,12 @@ def suppress_reason(
             "blocked_resolution",
             "partial_by_user",
         }:
+            return "resolved_since_queued"
+    if candidate.subject_kind == "capability_now_available":
+        row = conn.execute(
+            "SELECT state FROM capability_asks WHERE id=?", (candidate.subject_id,)
+        ).fetchone()
+        if row is None or str(row["state"]) != "open":
             return "resolved_since_queued"
     if candidate.subject_kind == "card_unengaged":
         engaged = conn.execute(
@@ -345,6 +424,8 @@ def build_message(candidate: NudgeCandidate) -> str:
             f"{mention}we only added the ones I could match here — the rest never "
             "made it. Want me to have another go at them?"
         )
+    if candidate.subject_kind == "capability_now_available":
+        return _capability_message(candidate, mention)
     entity = display_entity_name(str(candidate.observed.get("entity_name") or ""))
     subject = entity or "that lead"
     return (
@@ -352,6 +433,46 @@ def build_message(candidate: NudgeCandidate) -> str:
         "logged on it — though that's only what I can see. I can find a contact or "
         "drop it."
     )
+
+
+# What Grant can now do, phrased as the offer it is. Keyed by capability so the
+# sentence stays tied to the thing that actually shipped.
+_CAPABILITY_OFFER = {
+    "email_results": "I can email you a list now — want me to send it?",
+    "campaign_load": (
+        "I can build the Salesforce campaign now and add them for you — want me to?"
+    ),
+    "reminders": (
+        "I can hold on to that now and come back to you — want me to set it up?"
+    ),
+    "contact_supplied": (
+        "I can record what you tell me now, tagged as coming from you — want to "
+        "give it to me again?"
+    ),
+}
+
+
+def _capability_message(candidate: NudgeCandidate, mention: str) -> str:
+    """Reopen an ask Grant had to refuse, quoting the person back to themselves.
+
+    The quote is the evidence. This message makes a claim about something a named
+    colleague said weeks ago, and the honest way to make that claim is to show the
+    words rather than summarise them — a paraphrase that drifts is Grant putting
+    words in someone's mouth, which is rule 1 pointed at a person instead of a lead.
+    """
+    asked = str(candidate.observed.get("ask_text") or "").strip()
+    when = str(candidate.observed.get("asked_on") or "").strip()
+    offer = _CAPABILITY_OFFER.get(
+        str(candidate.observed.get("capability") or ""),
+        "I can do that now — want me to?",
+    )
+    # Long asks are trimmed at a word boundary; the permalink in the ledger keeps the
+    # full message one click away, so nothing is lost by not pasting all of it.
+    if len(asked) > 160:
+        asked = asked[:160].rsplit(" ", 1)[0] + "…"
+    opener = f"back on {when}," if when else "a while back,"
+    quoted = f'you asked: "{asked}".' if asked else "you asked me for this."
+    return f"{mention}{opener} {quoted} I couldn't do it then. {offer}"
 
 
 def run(
@@ -379,7 +500,15 @@ def run(
             continue
         reason = suppress_reason(conn, candidate, current)
         if reason:
-            if not dry_run:
+            # ONLY a permanent reason may be written. `_record` inserts the row whose
+            # uniqueness key retires this subject forever, and two of the reasons are
+            # transient: `channel_guard_active` is a Slack outage, `opted_out` can be
+            # reversed. Recording those would mean one bad afternoon — or one rep
+            # asking for quiet and later changing their mind — silently destroying
+            # every pending follow-up in that channel, with nothing to show it had
+            # happened. Measured on production, a single run during an outage would
+            # have burned 22 subjects permanently.
+            if not dry_run and reason in PERMANENT_SUPPRESSIONS:
                 _record(conn, candidate, current, state="suppressed", reason=reason)
             continue
         waiting = pacing_reason(conn, candidate, current, force=force)

@@ -34,6 +34,16 @@ NUDGE_SUBJECT_KINDS = (
     "crm_batch_blocked",  # a batch stopped for records a human must resolve
     "crm_batch_partial",  # the rep chose to proceed with only the resolved subset
     "card_unengaged",  # a daily card drew no reply, reaction, or CRM action
+    "capability_now_available",  # someone asked for something Grant could not do yet
+)
+
+# What a rep asked for that Grant had to refuse. The value is the CAPABILITY, not the
+# wording, so one shipped feature can close every ask that was waiting on it.
+CAPABILITY_KINDS = (
+    "email_results",  # "just email me these" — no transport existed
+    "campaign_load",  # "put these on a campaign" — the batch path was unreachable
+    "reminders",  # "remind me about this" — nothing outlived the conversation
+    "contact_supplied",  # a rep gave a fact and Grant refused to record it
 )
 
 NUDGE_STATES = ("reserved", "delivered", "unknown", "suppressed", "dropped")
@@ -70,4 +80,44 @@ def migration_30_followup_nudges(conn: sqlite3.Connection) -> None:
     conn.execute(
         """CREATE INDEX IF NOT EXISTS ix_followup_nudges_target
            ON followup_nudges(target_slack, state, reserved_at)"""
+    )
+
+
+def migration_34_capability_asks(conn: sqlite3.Connection) -> None:
+    """Record asks Grant could not satisfy, so a shipped feature can close them.
+
+    WHY A TABLE AND NOT A LOG SCAN. The alternative was to re-read Slack history and
+    pattern-match refusals, which would make Grant's follow-ups depend on matching its
+    own past prose — brittle, and unable to distinguish "I can't send email" from "I
+    couldn't find an email". A row is written at the moment of refusal, by the code
+    that knows exactly which capability was missing.
+
+    `evidence_url` is the Slack permalink to the human's actual message. Every
+    follow-up this feeds is a claim about something a named person said on a date, so
+    the claim ships with its receipt and a human can check it in one click.
+
+    The UNIQUE key is (audience, message_ts, capability): one ask, one capability, one
+    follow-up — a rep who asks twice in one thread is not chased twice.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS capability_asks (
+              id INTEGER PRIMARY KEY,
+              slack_user TEXT NOT NULL,
+              audience TEXT NOT NULL,
+              thread_ts TEXT NOT NULL,
+              message_ts TEXT NOT NULL,
+              asked_at TIMESTAMP NOT NULL,
+              ask_text TEXT NOT NULL,
+              capability TEXT NOT NULL,
+              available_since TIMESTAMP,
+              state TEXT NOT NULL DEFAULT 'open',
+              evidence_url TEXT,
+              recorded_by TEXT NOT NULL,
+              created_at TIMESTAMP NOT NULL,
+              UNIQUE(audience, message_ts, capability)
+            )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_capability_asks_open "
+        "ON capability_asks(state, capability)"
     )

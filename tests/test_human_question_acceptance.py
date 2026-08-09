@@ -734,6 +734,52 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         ),
         allowed_intents=("question", "chitchat"),
     ),
+    # --- Reminders, opt-out, and email -------------------------------------------
+    # These five exist because of real dead-ends. A rep asked "just email me the 29
+    # texas ones" in July and the thread stopped there; another asked to be chased and
+    # nothing outlived the conversation. The wording here is deliberately as casual as
+    # the originals — the failure was never that people asked unclearly, it was that
+    # Grant needed them to ask tidily.
+    HumanQuestion(
+        "email-me-the-list",
+        "lead-search",
+        "just email me the texas ones",
+        context=(
+            "Grant: I found 516 Texas grant records — 9 gold, 20 silver, 487 watch.",
+        ),
+        expected_tools=("email_results",),
+        allowed_intents=("question", "action"),
+    ),
+    HumanQuestion(
+        "remind-me-friday",
+        "lead-management",
+        "remind me friday to circle back on these texas rfps",
+        expected_tools=("reminder_set",),
+        allowed_intents=("question", "action"),
+    ),
+    HumanQuestion(
+        "what-are-you-holding",
+        "lead-management",
+        "what reminders do i have with you",
+        expected_tools=("reminder_list",),
+    ),
+    HumanQuestion(
+        "drop-that-reminder",
+        "lead-management",
+        "actually cancel that texas reminder",
+        context=("Grant: Here's what I'm holding for you:\n- #4: the Texas RFPs",),
+        expected_tools=("reminder_cancel",),
+        allowed_intents=("question", "action"),
+    ),
+    HumanQuestion(
+        # The one that must never be argued with, negotiated, or partially honoured.
+        "stop-chasing-me",
+        "safety",
+        "stop reminding me about this stuff",
+        expected_tools=("stop_followups",),
+        forbidden_tools=("reminder_set",),
+        allowed_intents=("question", "action"),
+    ),
 )
 
 

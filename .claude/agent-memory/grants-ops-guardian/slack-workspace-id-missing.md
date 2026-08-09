@@ -1,6 +1,6 @@
 ---
 name: slack-workspace-id-missing
-description: SLACK_WORKSPACE_ID has never existed in the droplet .env, so every rich-card button click refuses; plus the proof techniques (run_bot.sh exports .env, so /proc/environ is authoritative)
+description: SLACK_WORKSPACE_ID has never existed in the droplet .env, so every rich-card button click refuses — but it gates ONLY campaign/actions.py, NOT the salesforce_confirm button; plus the proof techniques (run_bot.sh exports .env, so /proc/environ is authoritative)
 metadata:
   type: project
 ---
@@ -16,6 +16,21 @@ the key is added AND the bot is restarted.
 **Why:** the key was added to `.env.example` with the rich-card feature but never propagated to the
 droplet during the 2026-07-24 (`e8ecf0c`) or 2026-08-05 enable. Nothing tested a live button click,
 so the gap survived the enable checklist.
+
+**SCOPE CORRECTED 2026-08-09 (config audit at `26153bd`, still absent — 32 prod keys, not one of
+them this).** The gate is narrower than this memory implied. `_authorized_snapshot` is called from
+**exactly two places, both in `campaign/actions.py` (lines 167 and 285)** — the rich-card actions.
+`grep -rn 'SLACK_WORKSPACE_ID|expected_workspace'` over `grant_watch/` returns only
+`actions.py:46-48` plus a comment in `card.py:331`. The Salesforce **`salesforce_confirm` /
+`salesforce_cancel`** buttons (`grant.py:119`/`141` → `salesforce_campaigns.py:707 confirm_action`)
+do **NOT** touch it. So the missing key does not block the campaign confirm flow — do not report it
+as breaking "every button".
+
+**And today it is moot for rich cards anyway:** per the `card.py:331` comment, Chase removed the
+"Not relevant" button on 2026-08-06, and `rich_persequor_draft` is unreachable because
+`leads.nces_website` has no writer — so **every card currently renders with NO actions block at
+all**. `rich_card_actions` is still **0 rows**. Two independent reasons the rich-card control
+surface is dead; adding `SLACK_WORKSPACE_ID` alone would fix neither.
 
 **How to apply:** the fix is `.env` append + bot restart — an `.env` edit alone is NOT enough
 (long-lived bot). When enabling any feature whose code reads a NEW env var, diff the code's
