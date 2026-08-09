@@ -112,6 +112,41 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-09, evening)
+
+- `verified` 2026-08-09 EVERY NEW SURFACE EXERCISED THROUGH GRANT'S REAL DISPATCH PATH,
+  not just as modules. `zoominfo_contact_preview` on lead #1 returned 3 people at
+  Birmingham Community Charter High School for ZERO credits — and independently
+  surfaced **Vic Chalabian, Manager of Information Technology Systems**, the same
+  person the 2026-07-16 core verifier found on that school's own staff directory. Two
+  sources, one answer, arrived at separately. All 3 are DNC-flagged, so their numbers
+  would be withheld. `fetch_url` read a real ojp.gov page (9,549 chars) carrying its
+  untrusted-content frame, and refused `http://` and `file://`. The nudge worker run
+  against a production-shaped database found 2 candidates and SUPPRESSED BOTH as
+  `stale` — which is precisely the guard that stops a months-old preview becoming
+  Grant's first ever proactive message, the failure the critic predicted.
+- `verified` 2026-08-09 PRODUCTION UPDATE, STAGED. Stage 1 preflight confirmed the
+  baseline exactly (revision `90f0420`, schema 28, `integrity_check` ok, exactly the two
+  approved FK orphans, listener PID 1227) and took both rollback artifacts (DB
+  `63add322…fa6f`, code `62502a70…2140`). Stage 2 set the two required variables —
+  `GRANT_SALESFORCE_WRITE_CHANNEL_IDS=C01DGT9D11D,C0B02721MNK` and
+  `ZOOMINFO_MONTHLY_CREDITS=1000` — `.env` sha `5cb3d3b1…9df0` → `f4abd546…2a99`,
+  57 → 66 lines, prefix proven byte-identical, listener and crontab untouched. The
+  guardian CORRECTED my own arithmetic in that instruction (the block is 9 lines, not
+  8) rather than trimming authorized content to make a derived check pass — the right
+  call, and worth keeping as the standard.
+- `verified` 2026-08-09 ALSO FIXED THIS SESSION: `drip --force` bypassed the daily cap
+  entirely (`should_post` returned "forced" before `pacing_ok` ran), so the one command
+  an operator reaches for during an incident was the only unbounded path; fixing it
+  exposed a second live defect where an `unrenderable` quarantine — written BEFORE any
+  Slack call — counted against the cap, so one malformed lead row silenced the product
+  for a day and reported it as "daily cap reached". Campaign attempts are now recorded
+  durably (migration 31) so a refused request is as visible as a successful one — the
+  gap that made Nelly's dead-end invisible. Jocelyn was added to `reps.json` after
+  verifying her mailbox against an exact ACTIVE Salesforce User, ending three failed
+  exports. OregonBuys' withdrawn PDF now reports `SourceDocumentMoved` instead of a
+  bare 404 on every poll, with NO guessed replacement URL.
+
 ## Current status (2026-08-09, later)
 
 - `verified` 2026-08-09 **ZOOMINFO WORKS END TO END, PROVEN BY A REAL PAID CALL.** Free
