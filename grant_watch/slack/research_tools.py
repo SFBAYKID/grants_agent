@@ -245,10 +245,15 @@ def salesforce_campaign_status(name_or_link: str) -> str:
         )
     )
     try:
+        # COUNT(Id), NOT COUNT(). A bare SELECT COUNT() puts its total in the
+        # response's totalSize and returns ZERO records, so counting rows reported
+        # "0 members" for a Campaign that really had 13 — a false statement about a
+        # rep's CRM, which Grant then reasoned on top of. COUNT(Id) comes back as a
+        # normal AggregateResult row carrying the number.
         rows, _host = salesforce.readonly_soql(
-            f"SELECT COUNT() FROM CampaignMember WHERE CampaignId='{campaign_id}'"
+            f"SELECT COUNT(Id) c FROM CampaignMember WHERE CampaignId='{campaign_id}'"
         )
-        live = str(len(rows)) if rows else "0"
+        live = int(rows[0]["c"]) if rows else 0
         live_note = f"{live} member(s) on it right now (live from Salesforce)"
     except Exception:  # noqa: BLE001 — a read failure must not fake a count
         live_note = "I couldn't read the live member count from Salesforce just now"

@@ -75,8 +75,13 @@ def test_the_live_count_and_grants_own_count_are_reported_separately(
 ) -> None:
     """Both numbers appear, and the reply says they can legitimately differ."""
     _stub_campaign(monkeypatch)
+    # The REAL shape of an aggregate response: one AggregateResult row carrying the
+    # number. The old stub returned 13 empty dicts, which made a row-counting bug
+    # pass — live, that bug reported "0 members" for a Campaign holding 13.
     monkeypatch.setattr(
-        salesforce, "readonly_soql", lambda q: ([{}] * 13, "https://x.test")
+        salesforce,
+        "readonly_soql",
+        lambda q: ([{"attributes": {"type": "AggregateResult"}, "c": 13}], "https://x"),
     )
     out = tools.salesforce_campaign_status("California Grant 2026")
     assert "13 member(s) on it right now" in out
@@ -105,7 +110,7 @@ def test_grant_does_not_claim_to_have_added_anyone_without_a_confirmed_write(
 ) -> None:
     """An empty ledger must read as "I haven't confirmed adding anyone"."""
     _stub_campaign(monkeypatch)
-    monkeypatch.setattr(salesforce, "readonly_soql", lambda q: ([{}] * 5, "h"))
+    monkeypatch.setattr(salesforce, "readonly_soql", lambda q: ([{"c": 5}], "h"))
     out = tools.salesforce_campaign_status("California Grant 2026")
     assert "has not confirmed adding anyone" in out
 
@@ -125,3 +130,28 @@ def test_an_unknown_campaign_is_an_honest_miss(monkeypatch: pytest.MonkeyPatch) 
     _stub_campaign(monkeypatch, matches=0)
     out = tools.salesforce_campaign_status("Nonexistent Campaign")
     assert "No Salesforce Campaign matches" in out
+
+
+def test_the_member_count_query_uses_an_aggregate_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare SELECT COUNT() returns ZERO records — its total lives in totalSize.
+
+    Counting rows on that query reported "0 members" for a Campaign that really held
+    13, and Grant then reasoned confidently on top of the false zero ("someone must
+    have removed them"). Found only by running it against production; the original
+    stub returned 13 empty dicts and made the bug pass.
+    """
+    _stub_campaign(monkeypatch)
+    seen: dict[str, str] = {}
+
+    def capture(query: str) -> Any:
+        """Record the SOQL the tool actually sends."""
+        seen["q"] = query
+        return [{"c": 7}], "h"
+
+    monkeypatch.setattr(salesforce, "readonly_soql", capture)
+    out = tools.salesforce_campaign_status("California Grant 2026")
+    assert "COUNT(Id)" in seen["q"]
+    assert "COUNT()" not in seen["q"]
+    assert "7 member(s) on it right now" in out
