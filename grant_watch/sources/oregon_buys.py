@@ -17,6 +17,7 @@ import re
 from datetime import date, datetime
 
 import pdfplumber
+import requests
 
 from ..models import (
     DatePrecision,
@@ -110,6 +111,33 @@ def parse_pdf(pdf_bytes: bytes, today: date | None = None) -> list[RawItem]:
     return out
 
 
+class SourceDocumentMoved(RuntimeError):
+    """The published document this source parses is no longer at its URL.
+
+    Distinct from a transient fetch failure on purpose: a 404 will not fix itself,
+    and a human has to find where the publication went. Retrying it every poll is
+    noise that buries the errors that ARE actionable.
+    """
+
+
 def poll() -> list[RawItem]:
-    """Fetch and parse Oregon DAS's public seven-day selected-bids publication."""
-    return parse_pdf(polite_get(PDF_URL).content)
+    """Fetch and parse Oregon DAS's public seven-day selected-bids publication.
+
+    A 404 is reported as SourceDocumentMoved rather than a bare HTTPError. Oregon
+    removed this PDF (confirmed 2026-08-09: the document 404s while the ORBuys site
+    itself still serves 200), so the poller has returned zero items on every run
+    since. No replacement URL is guessed here — inventing a source is how a poller
+    starts reporting somebody else's data as Oregon's.
+    """
+    try:
+        response = polite_get(PDF_URL)
+    except requests.HTTPError as exc:
+        status = getattr(exc.response, "status_code", None)
+        if status == 404:
+            raise SourceDocumentMoved(
+                f"Oregon DAS no longer publishes {PDF_URL} — the seven-day bid PDF "
+                "has moved or been withdrawn, and a human needs to locate its "
+                "replacement before this source can return anything."
+            ) from exc
+        raise
+    return parse_pdf(response.content)
