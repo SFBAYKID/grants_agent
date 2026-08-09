@@ -15,13 +15,19 @@ from pathlib import Path
 import pytest
 
 from grant_watch import db, migrations
+from grant_watch.migrations import MIGRATIONS
+
+# The current head version. Asserting a literal here made every new migration fail
+# three tests whose subject is data preservation, not the version number.
+HEAD_VERSION = MIGRATIONS[-1].version
 
 
 def test_fresh_database_reaches_v28_with_all_rich_tables(tmp_path: Path) -> None:
     """A brand-new database applies every migration through 28."""
     conn = db.connect(tmp_path / "fresh.db")
     assert (
-        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 28
+        conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
+        == HEAD_VERSION
     )
     for table in (
         "rich_card_snapshots",
@@ -96,14 +102,14 @@ def _at_v13(path: Path) -> sqlite3.Connection:
 def test_upgrade_from_each_supported_historical_schema(
     tmp_path: Path, version: int
 ) -> None:
-    """Every ledger version that existed upgrades to v28 with integrity intact."""
+    """Every ledger version that existed upgrades to head with integrity intact."""
     path = tmp_path / f"v{version}.db"
     historical = _at_version(path, version)
     historical.close()
     upgraded = db.connect(path)
     assert (
         upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-        == 28
+        == HEAD_VERSION
     )
     assert upgraded.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
@@ -132,7 +138,7 @@ def test_v13_upgrade_preserves_posts_ids_and_engagement(tmp_path: Path) -> None:
     upgraded = db.connect(path)
     assert (
         upgraded.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-        == 28
+        == HEAD_VERSION
     )
     assert (
         upgraded.execute("SELECT kind FROM posts WHERE id=42").fetchone()[0] == "nugget"

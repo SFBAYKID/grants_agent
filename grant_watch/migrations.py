@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from .migration_runner import apply_migrations as _run_migrations
 from .migrations_campaign_batch import migration_27_exact_campaign_batches
 from .migrations_campaign_preview import migration_28_single_ready_campaign_creation
+from .migrations_zoominfo import migration_29_vendor_contacts_and_credits
 from .migrations_rich import (
     migration_23_rich_snapshot_truth_and_retry_link,
     migration_24_atomic_proactive_daily_slots,
@@ -963,6 +964,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         28,
         "one ready Salesforce Campaign creation per thread",
         migration_28_single_ready_campaign_creation,
+    ),
+    Migration(
+        29,
+        "typed contact provenance and the ZoomInfo credit ledger",
+        migration_29_vendor_contacts_and_credits,
     ),
 )
 

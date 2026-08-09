@@ -7,6 +7,10 @@ import sqlite3
 from grant_watch import migrations
 from grant_watch.migrations_campaign_batch import migration_27_exact_campaign_batches
 
+# Head version, so adding a migration does not fail a row-preservation test whose
+# subject is that no rows were lost, not which version is current.
+HEAD_VERSION = migrations.MIGRATIONS[-1].version
+
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     """Return SQLite column names for one test table."""
@@ -84,7 +88,7 @@ def test_sanitized_production_v13_history_upgrades_without_losing_rows() -> None
         for row in conn.execute(
             "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
         )
-    ] == [28]
+    ] == [HEAD_VERSION]
     assert {
         "approved_org_count",
         "approved_selection_hash",
