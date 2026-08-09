@@ -112,6 +112,61 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-09)
+
+- `verified` 2026-08-09 **A WEB PAGE COULD MINT A SALESFORCE APPROVAL BUTTON.** Found by
+  architectural-critic review of a proposed `fetch_url` tool; REPRODUCED end to end before
+  fixing. `conversation.py:851` harvests `<grant-crm-action>` markers out of TOOL RESULTS,
+  not just model text, and `grant.py` renders each as a real primary-styled "Confirm in
+  Salesforce" button in Grant's voice. `web_search` returns page titles/snippets verbatim,
+  so a page TITLED with the marker produced a live button with attacker-chosen text. This
+  needed no new tool — it was reachable in production. The click always failed closed
+  (`confirm_action` refuses an unknown action_id) so NO CRM write was possible; the harm is
+  a phishing surface in `C01DGT9D11D`, and it is SILENT (the marker is stripped before the
+  model sees it, so Grant cannot report it). FIXED **bb4e0c9**: `run_tool` is now a trust
+  boundary — only the four preview tools may carry a marker out of it; every other tool's
+  output is stripped. NOT deployed. `needs-testing` in production.
+- `verified` 2026-08-09 the two things Grant told SDR Nelly were both TRUE REPORTS OF A
+  LYING TOOL SURFACE, not hallucinations. (a) "I can only enrich up to 100 organizations
+  per pull" came straight off the `search_leads` schema, which said `limit` (max 100) was
+  what `with_contacts` enriches; the real cap is `MAX_ENRICH_ROWS = 10`, applied
+  independently. (b) "none of my sources ever carry phone numbers" — phone IS extracted,
+  page-verified and stored in `contacts.phone`, but `_CONTACT_COLUMNS` never included it.
+  FIXED **d1a83ff** (descriptions now interpolate the enforcing constant so prose cannot
+  drift) and **ca94286** (phone surfaced). Same commit fixes a PRE-EXISTING production
+  defect: `salesforce_contact_records` silently fell back to the org's main line for a
+  Lead's `Phone` with no disclosure, so an SDR dialled a switchboard believing it was the
+  named person — worst for LinkedIn-sourced people, who never have a direct line at all.
+  `choose_phone` now mirrors `choose_email`'s labelling; person and org numbers stay in
+  SEPARATE fields end to end.
+- `verified` 2026-08-09 **3adebba** a re-enriched lead reported "error" instead of its real
+  outcome: the paid ledger is per lead but only `verified`/`not_found` short-circuit ahead
+  of it, so a fallback ending re-hit `paid_calls` and raised `CompletedPaidCall`.
+- `verified` 2026-08-09 ZoomInfo transport landed (**e074b62**), NOT wired into enrichment.
+  Durable credential (client id + secret) is in both `.env`s; the 24h access token was
+  removed as dead weight. Contact SEARCH is FREE and returns `hasEmail`/`hasDirectPhone`/
+  `hasMobilePhone` plus DO-NOT-CALL flags, so a rep can be quoted an exact cost before any
+  credit is spent; ENRICH bills 1 credit per returned record, caps at 25/call, and a
+  NO_MATCH is free. Cloudflare 1010-blocks the default python-requests User-Agent on both
+  hosts — the UA header is load-bearing. Coverage measured live, credit-free, **n=20**
+  (NOT a rate): 11/13 gold districts and 6/7 of Nelly's nonprofits have contacts; ~75% of
+  tech/ops titles have an email, ~61% a mobile; small rural districts (Hoxie AR) are the
+  gap. `enrich_contacts` is `needs-testing` — deliberately never called, because it bills.
+- `needs-testing` 2026-08-09 FOUR OPEN ITEMS, all with a full critic-validated design and
+  none implemented — see the session report: (1) campaign auto-chunking past 200, which
+  must use SIBLING batches with `parent_batch_id`, NOT a UNIQUE-constraint change (that
+  needs a table rebuild with live FK children on a DB whose rollback is restore-from-
+  backup); (2) the `search_request_id` snapshot wired into the batch tool, which the critic
+  rates the real fix for Nelly and needs no migration; (3) the M1 pacing defect, now
+  measured WORSE than recorded — production is rich-enabled, and the rich→daily fallback
+  reaches legacy `pacing_ok`, which counts neither `salesforce_followup_state` nor
+  `proactive_daily_slots`, so a follow-up and a fallback card can BOTH post on a
+  one-post day; (4) ZoomInfo wiring, blocked on a typed contact-provenance model
+  (`db.save_contact` takes `contact_status` as a PARAMETER — one string literal launders
+  vendor data into `verified` and onward to Persequor) and a written DNC compliance answer.
+- `needs-testing` 2026-08-09 CLAUDE.md is ~820 lines against the 1000 cap. Split the dated
+  entries into `docs/status_log.md` BEFORE the next incident, not during one.
+
 ## Current status (2026-08-06)
 
 - `verified` 2026-08-06 **THE RICH CARD HAD NEVER POSTED — NOT ONCE.** Chase reported
