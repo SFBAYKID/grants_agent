@@ -315,3 +315,71 @@ def test_billable_records_counts_only_full_matches() -> None:
     assert zoominfo.billable_records(details) == 1
     assert build("FULL_MATCH").matched is True
     assert build("NO_MATCH").matched is False
+
+
+def test_the_token_request_names_a_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Okta 400s a client_credentials grant with no scope.
+
+    Found only by a live run: every stubbed test passed while the real token endpoint
+    refused, and the 400 reads exactly like a bad secret, so the failure sent a live
+    test chasing the credential instead of the request.
+    """
+    _configure(monkeypatch)
+    seen: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: Any) -> _Response:
+        """Capture the form body sent to the token endpoint."""
+        seen["data"] = kwargs.get("data") or {}
+        return _Response({"access_token": "tok", "expires_in": 86400})
+
+    monkeypatch.setattr(zoominfo.requests, "post", fake_post)
+    zoominfo._auth()
+    assert seen["data"]["grant_type"] == "client_credentials"
+    assert seen["data"]["scope"] == zoominfo.TOKEN_SCOPE
+    assert "api:data:contact" in zoominfo.TOKEN_SCOPE
+
+
+def test_the_enrich_field_list_excludes_the_unlicensed_direct_phone() -> None:
+    """One disallowed field 400s the WHOLE batch, not just that column.
+
+    This account's plan does not license directPhone, and asking for it fails every
+    record in the request. Search still reports has_direct_phone, so a direct line
+    can be seen to exist while being unavailable to buy.
+    """
+    assert "directPhone" not in zoominfo.ENRICH_OUTPUT_FIELDS
+    assert "mobilePhone" in zoominfo.ENRICH_OUTPUT_FIELDS
+    assert "email" in zoominfo.ENRICH_OUTPUT_FIELDS
+
+
+def test_a_vendor_error_body_survives_into_the_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A swallowed 400 body is indistinguishable from bad credentials."""
+    _configure(monkeypatch)
+
+    class _Bad:
+        """A 400 carrying the vendor's explanation."""
+
+        status_code = 400
+        text = '{"detail":"OutputFields invalid or disallowed"}'
+
+        def raise_for_status(self) -> None:
+            """Raise with the response attached, the way requests does."""
+            error = requests.HTTPError("400")
+            error.response = self  # type: ignore[assignment]
+            raise error
+
+        def json(self) -> dict[str, Any]:
+            """Never reached — raise_for_status fires first."""
+            return {}
+
+    def fake_post(url: str, **kwargs: Any) -> Any:
+        """Serve a token, then a 400 with a diagnostic body."""
+        if url == zoominfo.TOKEN_URL:
+            return _Response({"access_token": "tok", "expires_in": 86400})
+        return _Bad()
+
+    monkeypatch.setattr(zoominfo.requests, "post", fake_post)
+    with pytest.raises(zoominfo.ZoomInfoUnavailable) as excinfo:
+        zoominfo.search_contacts("Some District")
+    assert "OutputFields invalid or disallowed" in str(excinfo.value)

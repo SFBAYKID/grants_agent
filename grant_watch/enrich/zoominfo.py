@@ -52,13 +52,19 @@ MAX_SEARCH_PAGE_SIZE = 100
 
 # Fields asked of the paid enrich endpoint. Kept explicit so the cost of a call is
 # auditable from source and no one silently widens it.
+#
+# `directPhone` is DELIBERATELY ABSENT: this account's plan does not license it, and
+# asking for it makes the WHOLE request a 400 — one disallowed field fails every
+# record in the batch, not just that column (`verified` live 2026-08-09, the API says
+# "OutputFields invalid or disallowed. Please contact your ZoomInfo Account Manager").
+# Search still reports has_direct_phone, so a direct line can be seen to EXIST while
+# being unavailable to buy; the preview must never promise one.
 ENRICH_OUTPUT_FIELDS = (
     "id",
     "firstName",
     "lastName",
     "jobTitle",
     "email",
-    "directPhone",
     "mobilePhone",
     "companyName",
     "directPhoneDoNotCall",
@@ -67,6 +73,12 @@ ENRICH_OUTPUT_FIELDS = (
 )
 
 _TOKEN_MARGIN_S = 300.0  # refresh early; a token that expires mid-batch costs a retry
+
+# Okta REFUSES a client_credentials grant that names no scope — the token endpoint
+# answers 400, which reads exactly like a bad secret and sent one live test chasing
+# the credential instead of the request. Only what this module actually calls is
+# requested; the app also grants intent/news/scoops, which nothing here uses.
+TOKEN_SCOPE = "api:data:contact api:data:company"
 
 
 class ZoomInfoConfigurationError(ValueError):
@@ -239,7 +251,7 @@ def _auth(force: bool = False) -> str:
     try:
         response = requests.post(
             TOKEN_URL,
-            data={"grant_type": "client_credentials"},
+            data={"grant_type": "client_credentials", "scope": TOKEN_SCOPE},
             headers={
                 "Authorization": f"Basic {basic}",
                 "Content-Type": "application/x-www-form-urlencoded",
@@ -283,8 +295,14 @@ def _post(
         response.raise_for_status()
         body: dict[str, Any] = response.json()
     except requests.RequestException as exc:
+        detail = ""
+        response = getattr(exc, "response", None)
+        if response is not None:
+            # The vendor names the offending field here; without it a 400 is
+            # indistinguishable from bad credentials.
+            detail = f": {response.text[:300]}"
         raise ZoomInfoUnavailable(
-            f"ZoomInfo request to {path} failed ({type(exc).__name__})"
+            f"ZoomInfo request to {path} failed ({type(exc).__name__}){detail}"
         ) from exc
     return body
 
