@@ -432,6 +432,39 @@ def _extract_pending_actions(text: str) -> tuple[str, list[dict[str, str]]]:
     return clean, actions
 
 
+_BAD_LEAD_RE = re.compile(
+    r"\b(?:bad lead|mark (?:it|this).*bad|kill (?:it|this lead)|"
+    r"irrelevant lead|not a (?:good|real) lead)\b"
+)
+# A negator immediately before the phrase inverts it: "that's NOT a bad lead".
+# Scoped to the text preceding the match so the phrase "not a good lead" — which is
+# itself a bad-lead assertion — is not read as its own negation.
+_NEGATOR_RE = re.compile(
+    r"\b(?:not|isn'?t|wasn'?t|aren'?t|ain'?t|never)\b[^.?!]{0,24}$"
+)
+# Questions ABOUT a classification, as opposed to requests to apply one. "can you
+# mark this a bad lead?" is a request and is deliberately absent from this list.
+_QUESTIONING_RE = re.compile(r"^\s*(?:why|what|how|is|are|was|were|did|does|do)\b")
+
+
+def _asserts_bad_lead(current: str) -> bool:
+    """True only when the text ASSERTS a lead is bad, destroying it.
+
+    `bad_lead` sets leads.status='dead' and scores -8, so a false positive silently
+    destroys inventory. Matching the phrase alone did exactly that: "that's not a bad
+    lead" and "why did you call this a bad lead?" both contain it and both mean the
+    opposite, and the override fired even when the model had read the sentence
+    correctly. Bias is deliberate — failing to catch a genuine kill request costs one
+    repeated message, while a false positive costs a lead nobody can get back.
+    """
+    match = _BAD_LEAD_RE.search(current)
+    if match is None:
+        return False
+    if _NEGATOR_RE.search(current[: match.start()]):
+        return False
+    return not _QUESTIONING_RE.match(current)
+
+
 def _normalize_action_intent(
     user_text: str,
     thread_context: list[str] | None,
@@ -440,13 +473,7 @@ def _normalize_action_intent(
     """Enforce action intent gates independently of model classification."""
     current = user_text.strip().lower()
     intent = str(output.get("intent") or "question")
-    explicit_bad = bool(
-        re.search(
-            r"\b(?:bad lead|mark (?:it|this).*bad|kill (?:it|this lead)|"
-            r"irrelevant lead|not a (?:good|real) lead)\b",
-            current,
-        )
-    )
+    explicit_bad = _asserts_bad_lead(current)
     if intent == "bad_lead" and not explicit_bad:
         output["intent"] = "question"
     elif explicit_bad:

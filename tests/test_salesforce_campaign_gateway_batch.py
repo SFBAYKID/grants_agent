@@ -71,3 +71,47 @@ def test_bulk_organization_resolution_honors_salesforce_pagination(
     people, accounts = resolved["springfield school district|IL"]
     assert len(people) == 1 and accounts == []
     assert "query/next" in paths
+
+
+def test_a_lightning_link_from_the_same_org_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Salesforce's own UI hands reps a lightning.force.com link.
+
+    Accepting only the My Domain host told three real users that their own
+    Salesforce link was "not from our configured org", while Grant found the very
+    same Campaign by name moments later. The alias is derived from the configured
+    host, so exactly one extra hostname is admitted.
+    """
+    monkeypatch.setenv(
+        "SALESFORCE_WRITE_MY_DOMAIN_URL", "https://monarch.my.salesforce.com"
+    )
+    lightning = (
+        f"https://monarch.lightning.force.com/lightning/r/Campaign/{CAMPAIGN_ID}/view"
+    )
+    assert campaigns.parse_record_link(lightning, {"Campaign"}) == (
+        "Campaign",
+        CAMPAIGN_ID,
+    )
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "evil.lightning.force.com",
+        "other.my.salesforce.com",
+        "monarch.my.salesforce.com.evil.test",
+        "monarch.lightning.force.com.evil.test",
+    ],
+)
+def test_no_other_host_may_impersonate_the_configured_org(
+    monkeypatch: pytest.MonkeyPatch, host: str
+) -> None:
+    """The alias must not become a pattern an attacker-supplied link can satisfy."""
+    monkeypatch.setenv(
+        "SALESFORCE_WRITE_MY_DOMAIN_URL", "https://monarch.my.salesforce.com"
+    )
+    with pytest.raises(ValueError, match="configured Salesforce org"):
+        campaigns.parse_record_link(
+            f"https://{host}/lightning/r/Campaign/{CAMPAIGN_ID}/view", {"Campaign"}
+        )

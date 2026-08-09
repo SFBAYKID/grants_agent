@@ -6,7 +6,6 @@ import os
 from datetime import datetime, timezone
 
 from .. import db
-from ..config import configured_channel_ids
 from .salesforce_campaign_gateway import SalesforceRecordRef
 
 
@@ -21,13 +20,17 @@ def iso_timestamp(value: datetime) -> str:
 
 
 def write_channel_allowed(channel: str) -> bool:
-    """Allow writes only in configured Grant channels, never arbitrary DMs/channels."""
+    """Allow production Salesforce writes ONLY in an explicitly listed channel.
+
+    This used to fall back to every channel Grant answers in when the allowlist was
+    empty, which made an unset variable WIDEN the write surface instead of closing
+    it. The consequence was not theoretical: adding a test channel to SLACK_CHANNEL_ID
+    so Grant would talk there also silently handed that channel authority to write to
+    the production CRM. An allowlist whose absence grants permission is not an
+    allowlist, so an empty value now means no channel may write.
+    """
     configured = os.environ.get("GRANT_SALESFORCE_WRITE_CHANNEL_IDS", "")
     values = {item.strip() for item in configured.split(",") if item.strip()}
-    if not values:
-        # No explicit write allowlist: fall back to EVERY configured Grant channel
-        # (SLACK_CHANNEL_ID may list several), never a single raw comma-joined string.
-        values = set(configured_channel_ids())
     return bool(channel and channel in values)
 
 

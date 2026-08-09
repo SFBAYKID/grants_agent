@@ -7,9 +7,9 @@ import sqlite3
 from grant_watch import migrations
 from grant_watch.migrations_campaign_batch import migration_27_exact_campaign_batches
 
-# Head version, so adding a migration does not fail a row-preservation test whose
-# subject is that no rows were lost, not which version is current.
-HEAD_VERSION = migrations.MIGRATIONS[-1].version
+# Hand-maintained head version — see tests/test_rich_migrations.py for why this is
+# a literal and not MIGRATIONS[-1].version.
+HEAD_VERSION = 29
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:

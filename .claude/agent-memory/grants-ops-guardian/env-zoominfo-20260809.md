@@ -16,7 +16,11 @@ is gone rather than left as dead weight. Backup `~/.env.bak.20260809T190530Z` (6
 
 **Status: still INERT.** `grep -rI ZOOMINFO` over the deployed tree (excl. `.venv`/`.git`/
 `__pycache__`/`.env*`) returns **ZERO** files, re-verified after op 2. Nothing reads these vars, so
-no restart was needed or done. Per the block's own comments the pair mints 24h bearer tokens on
+no restart was needed or done. **ROOT CAUSE ESTABLISHED 2026-08-09: the ZoomInfo CODE was never
+deployed.** `enrich/zoominfo.py`, `enrich/zoominfo_credits.py`, `enrich/zoominfo_enrichment.py` and
+`migrations_zoominfo.py` exist only in the local repo (commits `e074b62`/`35492ae`/`fcb1537`, all
+2026-08-09, after the 08-06 deploy of `90f0420`). So this is "credentials waiting on a deploy", not
+"a feature switched off" — see [[deployed-vs-local-drift-20260809]]. Per the block's own comments the pair mints 24h bearer tokens on
 demand at the Okta token endpoint, so nothing in `.env` expires any more.
 
 **How to apply — CURRENT baselines (these supersede op 1's `11447d92…`/53-line values):**

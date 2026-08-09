@@ -128,9 +128,28 @@ def _write_my_domain() -> str:
     )
 
 
-def _configured_host() -> str:
-    """Return the exact writer-org hostname allowed in pasted Salesforce links."""
-    return (urlparse(_write_my_domain()).hostname or "").lower()
+def _configured_hosts() -> frozenset[str]:
+    """Every hostname that provably belongs to the configured writer org.
+
+    Salesforce serves one org under two names, and its own UI hands the rep the
+    second one: `<instance>.my.salesforce.com` is the My Domain / API host, while
+    `<instance>.lightning.force.com` is what the address bar shows and what Copy
+    Link produces. Accepting only the first told three real users that their own
+    Salesforce link was "not from our configured org" — while Grant located the
+    very same Campaign by name seconds later.
+
+    The alias is DERIVED from the configured host by exact suffix substitution, so
+    this admits exactly one additional hostname, computed from local configuration.
+    It is not a pattern and cannot be widened by anything in a pasted link.
+    """
+    host = (urlparse(_write_my_domain()).hostname or "").lower()
+    if not host:
+        return frozenset()
+    hosts = {host}
+    suffix = ".my.salesforce.com"
+    if host.endswith(suffix):
+        hosts.add(f"{host[: -len(suffix)]}.lightning.force.com")
+    return frozenset(hosts)
 
 
 def validate_record_id(record_id: str, expected_sobject: str) -> str:
@@ -151,7 +170,7 @@ def validate_record_id(record_id: str, expected_sobject: str) -> str:
 def parse_record_link(link: str, allowed_sobjects: set[str]) -> tuple[str, str]:
     """Validate hostname, Lightning object path, and Salesforce record prefix."""
     parsed = urlparse(link.strip())
-    if not parsed.hostname or parsed.hostname.lower() != _configured_host():
+    if not parsed.hostname or parsed.hostname.lower() not in _configured_hosts():
         raise ValueError("Salesforce link is not from the configured Salesforce org")
     match = re.search(
         r"/lightning/r/([A-Za-z][A-Za-z0-9_]*)/([A-Za-z0-9]{15,18})(?:/|$)",

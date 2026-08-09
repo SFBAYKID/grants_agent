@@ -158,11 +158,15 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "find_person_linkedin",
-        "description": "Find the likely decision-maker's LinkedIn profile (name, title, "
+        "description": "Find a decision-maker's LinkedIn profile (name, title, "
         "profile link) for an org — useful when the website has no email. "
         "Returns a PERSON to reach via LinkedIn, never an invented email. "
         "Pass lead_id when the org is a Grant lead so the person is saved as a "
-        "linkedin_only contact usable for a Salesforce record.",
+        "linkedin_only contact usable for a Salesforce record. If the rep named a "
+        "SPECIFIC person, put that name in person_name and the organization in "
+        "entity — never put a person's name in entity. With person_name set the "
+        "answer is that person or an honest not-found; it will not substitute "
+        "whoever happens to hold the role.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -171,6 +175,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "lead_id": {
                     "type": "integer",
                     "description": "Grant lead to attach the found person to",
+                },
+                "person_name": {
+                    "type": "string",
+                    "description": "the specific person the rep named, if any",
                 },
             },
             "required": ["entity", "state"],

@@ -423,15 +423,28 @@ def find_person_linkedin(
     state: str,
     on_progress: Progress | None = None,
     lead_id: int = 0,
+    person_name: str = "",
 ) -> str:
-    """LinkedIn profile of the likely decision-maker (name/title/link, no email).
+    """LinkedIn profile of a decision-maker (name/title/link, no email).
 
     When lead_id names a real Grant lead, the person is persisted as a
-    linkedin_only contact so a Salesforce record can later be built from it."""
+    linkedin_only contact so a Salesforce record can later be built from it.
+
+    person_name means the rep asked about a SPECIFIC human. The answer is then that
+    person or nobody: returning the next plausible profile would attribute a real
+    stranger to the name the rep typed, and persist them toward a CRM record."""
     from ..enrich import finder
 
-    person = finder.linkedin_person(entity, state, on_progress=on_progress)
+    person = finder.linkedin_person(
+        entity, state, on_progress=on_progress, person_name=person_name
+    )
     if person is None:
+        if person_name.strip():
+            return (
+                f"I couldn't confirm a LinkedIn profile for {person_name.strip()} at "
+                f"{entity}. I won't guess at someone else — searching by role instead "
+                "would give you a different person under their name."
+            )
         return "No clear LinkedIn profile found for their decision-maker."
     role = f", {person['title']}" if person["title"] else ""
     saved = ""
@@ -646,6 +659,7 @@ def _dispatch_tool(
                 str(args.get("state", "")),
                 p,
                 lead_id=int(args.get("lead_id", 0) or 0),
+                person_name=str(args.get("person_name", "")),
             ), None
         except Exception as exc:
             _log_tool_failure("find_person_linkedin")

@@ -72,18 +72,37 @@ def test_mention_gate_unconfigured_denies_all(
     assert _in_configured_channel(_mention(PROD)) is False
 
 
-def test_write_allowed_falls_back_to_all_configured_channels(
+def test_an_empty_write_allowlist_permits_no_channel_at_all(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without an explicit write allowlist, writes are allowed in EVERY configured
-    channel — not a single raw comma-joined string (the pre-fix bug)."""
+    """An unset allowlist must CLOSE the write surface, not open it everywhere.
+
+    This previously fell back to every channel Grant answers in, so an unset
+    variable granted production-CRM write authority to each of them. The practical
+    consequence: adding a test channel to SLACK_CHANNEL_ID so Grant would talk there
+    also, silently, let that channel write to production Salesforce. An allowlist
+    whose absence grants permission is not an allowlist.
+    """
     monkeypatch.delenv("GRANT_SALESFORCE_WRITE_CHANNEL_IDS", raising=False)
     monkeypatch.setenv("SLACK_CHANNEL_ID", f"{PROD},{PLAY}")
+    assert write_channel_allowed(PROD) is False
+    assert write_channel_allowed(PLAY) is False
+    assert write_channel_allowed("CZZUNLISTED") is False
+    assert write_channel_allowed("") is False
+    # A present-but-blank value is the same as unset, not "allow everything".
+    monkeypatch.setenv("GRANT_SALESFORCE_WRITE_CHANNEL_IDS", "   ")
+    assert write_channel_allowed(PROD) is False
+
+
+def test_the_write_allowlist_is_matched_per_channel_not_as_one_string(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The comma-joined value must never be treated as a single channel id."""
+    monkeypatch.setenv("GRANT_SALESFORCE_WRITE_CHANNEL_IDS", f"{PROD},{PLAY}")
     assert write_channel_allowed(PROD) is True
     assert write_channel_allowed(PLAY) is True
-    assert write_channel_allowed("CZZUNLISTED") is False
-    # The literal joined string must never be treated as one channel id.
     assert write_channel_allowed(f"{PROD},{PLAY}") is False
+    assert write_channel_allowed("CZZUNLISTED") is False
 
 
 def test_explicit_write_allowlist_overrides_channel_list(

@@ -17,9 +17,12 @@ import pytest
 from grant_watch import db, migrations
 from grant_watch.migrations import MIGRATIONS
 
-# The current head version. Asserting a literal here made every new migration fail
-# three tests whose subject is data preservation, not the version number.
-HEAD_VERSION = MIGRATIONS[-1].version
+# The head schema version, maintained BY HAND. Deriving it from MIGRATIONS[-1]
+# makes every assertion below tautological — MAX(version) from schema_migrations
+# cannot differ from the migration list while migrations apply at all. The literal
+# is the point: adding a migration must fail this file until someone bumps it
+# deliberately, which is the schema-change review gate.
+HEAD_VERSION = 29
 
 
 def test_fresh_database_reaches_v28_with_all_rich_tables(tmp_path: Path) -> None:
@@ -166,3 +169,14 @@ def test_new_columns_are_nullable_so_legacy_inserts_still_work(tmp_path: Path) -
     conn.commit()
     row = conn.execute("SELECT snapshot_id FROM posts WHERE ts='9.9'").fetchone()
     assert row["snapshot_id"] is None
+
+
+def test_the_migration_list_head_matches_this_module_s_literal() -> None:
+    """The one place the hand-maintained literal is checked against reality.
+
+    This is deliberately the ONLY link between the literal and the code. Adding a
+    migration fails here and nowhere else, forcing a human to look at the new
+    migration rather than letting three data-preservation tests silently re-point
+    themselves at whatever version happens to be current.
+    """
+    assert MIGRATIONS[-1].version == HEAD_VERSION

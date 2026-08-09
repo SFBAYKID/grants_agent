@@ -520,13 +520,48 @@ def find_contact(
     return None
 
 
+def _name_tokens(raw: str) -> list[str]:
+    """Lowercase alphabetic name tokens, with punctuation and honorifics dropped."""
+    cleaned = re.sub(r"[^a-z\s]", " ", raw.lower())
+    skip = {"dr", "mr", "mrs", "ms", "prof", "jr", "sr", "ii", "iii", "phd", "ed"}
+    return [token for token in cleaned.split() if token and token not in skip]
+
+
+def names_match(requested: str, found: str) -> bool:
+    """True only when a LinkedIn result plausibly IS the person who was named.
+
+    Surname must agree exactly and the first initial must agree, which admits
+    "Jane A. Smith" and "J. Smith" for "Jane Smith" while rejecting a different
+    person at the same organization. Deliberately strict: the cost of a false
+    positive is naming the WRONG REAL PERSON as an awardee's decision-maker and,
+    with a lead id supplied, persisting them toward a Salesforce person Lead.
+    """
+    wanted = _name_tokens(requested)
+    got = _name_tokens(found)
+    if not wanted or not got:
+        return False
+    if wanted[-1] != got[-1]:
+        return False
+    return wanted[0][:1] == got[0][:1]
+
+
 def linkedin_person(
-    entity: str, state: str, on_progress: Progress | None = None
+    entity: str,
+    state: str,
+    on_progress: Progress | None = None,
+    person_name: str = "",
 ) -> dict | None:
-    """Find the likely decision-maker's LinkedIn profile (name, title, url). No email
-    — LinkedIn is login-walled — so this returns a PERSON + profile link to reach out
-    through or verify, never a fabricated address. Parsed from the search result, which
-    for LinkedIn reads like 'Name - Title - Org | LinkedIn'."""
+    """Find a decision-maker's LinkedIn profile (name, title, url). No email —
+    LinkedIn is login-walled — so this returns a PERSON + profile link to reach out
+    through or verify, never a fabricated address. Parsed from the search result,
+    which for LinkedIn reads like 'Name - Title - Org | LinkedIn'.
+
+    When person_name is given the rep asked about a SPECIFIC human, and the result
+    must actually be them. Without that check this function answered "who works
+    here?" while the rep asked "where is Jane Smith?", returning a real but
+    different person under the name the rep supplied — a misattribution that a
+    following salesforce_contact_record_preview would write into the CRM.
+    """
     say = on_progress or _NOOP
     say("Checking LinkedIn")
     roles = (
@@ -534,7 +569,12 @@ def linkedin_person(
         if _org_kind(entity) == "city"
         else "technology director OR superintendent OR principal"
     )
-    query = f"site:linkedin.com/in {entity} {state} {roles}"
+    if person_name.strip():
+        # Search for the person, not for a role: the role terms would otherwise
+        # outrank the name and surface whoever holds the title instead.
+        query = f'site:linkedin.com/in "{person_name.strip()}" {entity} {state}'
+    else:
+        query = f"site:linkedin.com/in {entity} {state} {roles}"
     is_city = _org_kind(entity) == "city"
     try:
         results = _search(query, limit=5)
@@ -557,7 +597,13 @@ def linkedin_person(
             continue
         # Only return parts[0] when it actually reads as a person (H2) — a title-led
         # card must fall through to the next result, never become a "person" Lead.
-        if name and _looks_like_person_name(name):
-            say(f"Found {name} on LinkedIn")
-            return {"name": name, "title": role, "url": url}
+        if not (name and _looks_like_person_name(name)):
+            continue
+        # A named request must be answered by that person or by nobody. Returning
+        # the next plausible human would attribute a real stranger to the name the
+        # rep typed, which is worse than finding no one.
+        if person_name.strip() and not names_match(person_name, name):
+            continue
+        say(f"Found {name} on LinkedIn")
+        return {"name": name, "title": role, "url": url}
     return None

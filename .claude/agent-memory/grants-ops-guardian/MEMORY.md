@@ -36,3 +36,6 @@
 - [SLACK_WORKSPACE_ID never set](slack-workspace-id-missing.md) — every rich-card button refuses; .env+restart needed; run_bot.sh sources .env so /proc/environ is authoritative; render_inputs_json leaks PII
 - [Roster deploy 4c6a543 (Nelly)](roster-deploy-4c6a543.md) — LIVE 2026-08-06; ALWAYS gate a reps.json row on a prod Salesforce User.Email==1 probe first; reps.json re-read per call (no restart); .claude/agent-memory is not on the droplet
 - [ZoomInfo .env creds 2026-08-09](env-zoominfo-20260809.md) — durable CLIENT_SECRET replaced the dead token; still inert; baselines .env 5cb3d3b1…/57 lines, crontab 10 lines 575fbc7c…, PID 1227; pgrep -f self-matches over ssh
+- [Conversation audit 2026-08-09](conversation-audit-20260809.md) — every human thread graded; rival Monarch_Sales_Agent hijacks threads; CompletedPaidCall crash; lightning.force.com links rejected; PROD Salesforce campaign writes HAVE fired
+- [Deployed vs local drift 2026-08-09](deployed-vs-local-drift-20260809.md) — prod is byte-exact at 90f0420 (90/90 hashes); 8 commits undeployed incl. a security fix; ZoomInfo code never shipped
+- [Read-only DB forensics recipe](readonly-db-forensics-recipe.md) — `mode=ro` works on the hot WAL (zero writes); no `conversation_sessions` table; all 10 crontab lines characterized; OregonBuys 404s every poll

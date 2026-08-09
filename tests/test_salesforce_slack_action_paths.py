@@ -214,6 +214,9 @@ def action_app(
     conn = db.connect(tmp_path / "slack-actions.db")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setenv("SLACK_CHANNEL_ID", CHANNEL)
+    # Explicit now that an empty allowlist permits no channel: these tests are
+    # about approval semantics, and a separate suite covers channel policy.
+    monkeypatch.setenv("GRANT_SALESFORCE_WRITE_CHANNEL_IDS", CHANNEL)
     monkeypatch.setattr(grant, "App", FakeBoltApp)
     monkeypatch.setattr(db, "connect", lambda *_a, **_k: conn)
     monkeypatch.setattr(gateway_module, "requests", NoNetwork())
