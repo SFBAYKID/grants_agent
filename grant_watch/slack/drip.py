@@ -331,6 +331,7 @@ def pacing_ok(
     channel: str,
     now_utc: datetime,
     urgent: bool = False,
+    force: bool = False,
 ) -> tuple[bool, str]:
     """Cap + gap + today's slot (window handled separately so each rule tests cleanly).
 
@@ -364,6 +365,10 @@ def pacing_ok(
                 f"only {gap_min:.0f}m since last post (min {MIN_GAP_MINUTES}m)",
             )
     now_pt = now_utc.astimezone(PT)
+    if force:
+        # An operator override skips the day's TIMING, never its budget. The caps and
+        # the gap above have already been applied.
+        return True, "forced"
     if urgent:
         # An emergency may skip the day's random target, but NOT the start of the band.
         # Without this floor `urgent` reopened the 04:00 PT front-loading that the slot
@@ -385,12 +390,18 @@ def should_post(
     force: bool = False,
     urgent: bool = False,
 ) -> tuple[bool, str]:
-    """The full gate: window first, then pacing. Returns (go, reason)."""
-    if force:
-        return True, "forced"
-    if not in_window(now_utc):
+    """The full gate: window first, then pacing. Returns (go, reason).
+
+    `force` is the operator override for "post now" — it skips the business-hours
+    window and the day's randomized slot. It must NEVER skip the daily cap, and it
+    used to: this function returned "forced" before pacing_ok was called at all, so
+    the one command an operator reaches for during an incident was the only path
+    that could post an unbounded number of cards in a day, each @-mentioning a rep.
+    The budget is now applied to every path, and only the TIMING is overridable.
+    """
+    if not force and not in_window(now_utc):
         return False, "outside Mon-Fri 7am ET – 5pm PT window"
-    return pacing_ok(conn, channel, now_utc, urgent=urgent)
+    return pacing_ok(conn, channel, now_utc, urgent=urgent, force=force)
 
 
 def _is_exceptional(row: sqlite3.Row, today: date) -> bool:
@@ -660,9 +671,15 @@ def run_drip(
     conn: sqlite3.Connection,
     force: bool = False,
     dry_run: bool = False,
+    now: datetime | None = None,
 ) -> str:
-    """One cron tick: maybe post one thing. Returns a human-readable outcome."""
-    now = datetime.now(timezone.utc)
+    """One cron tick: maybe post one thing. Returns a human-readable outcome.
+
+    `now` is injectable so a test can express "the next day" rather than relying on
+    an override to skip the daily cap — matching salesforce_followups.run and
+    nudges.run, which both already take a clock.
+    """
+    now = now or datetime.now(timezone.utc)
     # A channel-level guard stops the tick before anything else. `blocked` means Slack
     # told us the channel or token is wrong and only an operator can clear it; without
     # this, every 30-minute tick failed identically and (before the release fix) ate a

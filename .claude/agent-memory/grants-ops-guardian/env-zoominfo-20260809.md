@@ -36,8 +36,12 @@ demand at the Okta token endpoint, so nothing in `.env` expires any more.
 - Listener PID 1227, started Sun Aug 9 03:55:01 2026, `.venv/bin/python -u -m grant_watch.slack.grant`.
 
 **LOCAL/DROPLET `.env` FILES ARE NOT COPIES OF EACH OTHER — never sync them wholesale.** The local
-repo `.env` is 69 lines and its prefix genuinely differs (e.g. `GRANT_SALESFORCE_WRITE_CHANNEL_IDS`
-is EMPTY locally, populated on the droplet). Only ever sync the NAMED BLOCK a task authorizes, and
+repo `.env` is 69 lines and its prefix genuinely differs. **CORRECTION 2026-08-09 (measured, this
+said the opposite): `GRANT_SALESFORCE_WRITE_CHANNEL_IDS` is ABSENT from the droplet `.env`
+entirely — 0 matching lines, and it is not among the droplet's 30 keys.** It is empty in the LOCAL
+`.env` and present only in `.env.example`. That matters: `254bd5c` makes the allowlist fail CLOSED,
+so setting it is a DEPLOY PREREQUISITE. `ZOOMINFO_MONTHLY_CREDITS` is likewise absent (the ledger
+refuses every paid pull when unset). Only ever sync the NAMED BLOCK a task authorizes, and
 prove the untouched prefix by hash. Local also carries 3 blank lines before the ZoomInfo header vs
 the droplet's 1 — deliberately NOT matched, because normalizing that whitespace would mutate the
 prefix and break the first-47 proof for a purely cosmetic gain.

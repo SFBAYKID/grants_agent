@@ -8,7 +8,7 @@ against a real database before it was fixed — none is speculative.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -62,8 +62,15 @@ def test_ambiguous_send_does_not_wedge_the_drip_forever(tmp_path: Path) -> None:
     # The ambiguous lead must never be retried...
     assert all(row["id"] != stuck for row in db.nugget_candidates(conn, "C1"))
     # ...but the queue must ADVANCE rather than stop.
+    #
+    # On the NEXT day, deliberately: an ambiguous send may in fact have reached
+    # Slack, so it holds today's budget on purpose — a duplicate card is worse than
+    # a late one. What must not happen is the stuck lead being re-picked forever.
     good = SlackClient()
-    outcome = drip.run_drip(good, "C1", conn, force=True)
+    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+    while tomorrow.astimezone(drip.PT).weekday() >= 5:
+        tomorrow += timedelta(days=1)
+    outcome = drip.run_drip(good, "C1", conn, force=True, now=tomorrow)
     assert outcome.startswith("posted"), (
         f"drip wedged after an ambiguous send: {outcome}"
     )
@@ -747,8 +754,15 @@ def test_diversity_falls_back_when_every_state_is_on_cooldown(tmp_path: Path) ->
     _mk_gold_state(conn, "AZ2", "AZ")
     client = _CountingClient()
     assert drip.run_drip(client, "C1", conn, force=True).startswith("posted")
+    # The SECOND card is the next day's — force overrides timing, never the daily
+    # cap, so a same-day repeat is correctly refused and would not test cooldown.
+    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+    while tomorrow.astimezone(drip.PT).weekday() >= 5:
+        tomorrow += timedelta(days=1)
     # only AZ left, and AZ was just shown -> cooldown drops, it still posts
-    assert drip.run_drip(client, "C1", conn, force=True).startswith("posted")
+    assert drip.run_drip(client, "C1", conn, force=True, now=tomorrow).startswith(
+        "posted"
+    )
 
 
 def test_recent_post_states_reads_the_join(tmp_path: Path) -> None:
@@ -758,3 +772,72 @@ def test_recent_post_states_reads_the_join(tmp_path: Path) -> None:
     db.record_post(conn, "nugget", a, "C1", "1.0", "award-brief")
     assert db.recent_post_states(conn, "C1", 5) == {"AZ"}
     assert db.recent_post_states(conn, "C1", 0) == set()
+
+
+def test_force_overrides_the_timing_but_never_the_daily_budget(tmp_path: Path) -> None:
+    """The operator override is the ONE path that used to have no cap at all.
+
+    should_post returned "forced" before pacing_ok was ever called, so `drip --force`
+    could post an unbounded number of cards in a day, each @-mentioning a rep. That
+    is exactly backwards: force exists to skip the business-hours window and the
+    day's randomized slot, not the budget.
+    """
+    conn = db.connect(tmp_path / "t.db")
+    mk_lead(
+        conn,
+        iid="A",
+        entity="First District",
+        start="2025-10-10",
+        end="2028-09-30",
+        backfill=True,
+    )
+    mk_lead(
+        conn,
+        iid="B",
+        entity="Second District",
+        start="2025-10-10",
+        end="2028-09-30",
+        backfill=True,
+    )
+    client = SlackClient()
+    assert drip.run_drip(client, "C1", conn, force=True).startswith("posted")
+    second = drip.run_drip(client, "C1", conn, force=True)
+    assert second.startswith("skip: daily cap reached")
+    assert client.calls == 1
+    conn.close()
+
+
+def test_a_lead_that_cannot_render_does_not_spend_the_day(tmp_path: Path) -> None:
+    """A quarantine happens BEFORE any Slack call, so it must not hold the budget.
+
+    The reservation is written before the render is attempted, and the cap counts
+    reservations. Counting an unrenderable one meant a single malformed lead row
+    silenced the product for a whole day and then reported it as "daily cap reached"
+    — a silent day indistinguishable from a quiet one.
+    """
+    conn = db.connect(tmp_path / "t.db")
+    bad = mk_lead(
+        conn,
+        iid="BAD",
+        entity="Bad District",
+        start="2025-10-10",
+        end="2028-09-30",
+        backfill=True,
+    )
+    mk_lead(
+        conn,
+        iid="OK",
+        entity="Good District",
+        start="2025-10-10",
+        end="2028-09-30",
+        backfill=True,
+    )
+    conn.execute("UPDATE leads SET entity_name='***' WHERE id=?", (bad,))
+    conn.commit()
+    client = SlackClient()
+    assert drip.run_drip(client, "C1", conn, force=True).startswith("quarantined:")
+    assert client.calls == 0
+    # The day is still available, because nothing was ever sent.
+    outcome = drip.run_drip(client, "C1", conn, force=True)
+    assert outcome.startswith("posted") and "Good District" in outcome
+    conn.close()

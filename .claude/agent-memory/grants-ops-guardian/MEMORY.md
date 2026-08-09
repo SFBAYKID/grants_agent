@@ -39,3 +39,4 @@
 - [Conversation audit 2026-08-09](conversation-audit-20260809.md) — every human thread graded; rival Monarch_Sales_Agent hijacks threads; CompletedPaidCall crash; lightning.force.com links rejected; PROD Salesforce campaign writes HAVE fired
 - [Deployed vs local drift 2026-08-09](deployed-vs-local-drift-20260809.md) — prod is byte-exact at 90f0420 (90/90 hashes); 8 commits undeployed incl. a security fix; ZoomInfo code never shipped
 - [Read-only DB forensics recipe](readonly-db-forensics-recipe.md) — `mode=ro` works on the hot WAL (zero writes); no `conversation_sessions` table; all 10 crontab lines characterized; OregonBuys 404s every poll
+- [Stage-1 preflight baseline 2026-08-09](stage1-preflight-baseline-20260809.md) — prod fingerprints at 90f0420/schema 28; DB+code rollback artifacts + sha256s; VACUUM INTO works on a read-only conn

@@ -160,10 +160,17 @@ def delivery_attempts_today(
     )
     start_utc = start_local.astimezone(timezone.utc)
     end_utc = (start_local + timedelta(days=1)).astimezone(timezone.utc)
+    # Count only reservations that MIGHT have reached Slack. 'delivered' did and
+    # 'unknown' may have, so both hold the day. 'unrenderable' and 'rejected'
+    # provably did not — the first failed before any Slack call, the second was
+    # refused by Slack itself — and counting them spent the day's only card on a
+    # message no human ever saw, reporting it afterwards as "daily cap reached".
+    # One malformed lead row could therefore silence the product for a day.
     return list(
         conn.execute(
             """SELECT * FROM notification_outbox
                WHERE audience=? AND lead_id IS NOT NULL
+                 AND state NOT IN ('unrenderable','rejected')
                  AND created_at>=? AND created_at<?
                ORDER BY created_at, id""",
             (channel, start_utc.isoformat(), end_utc.isoformat()),

@@ -63,7 +63,10 @@ def test_pacing_hard_cutoff_and_weekday_slot() -> None:
     conn.row_factory = sqlite3.Row
     conn.executescript(
         "CREATE TABLE posts(id INTEGER,channel TEXT,posted_at TEXT);"
-        "CREATE TABLE notification_outbox(id INTEGER,lead_id INTEGER,audience TEXT,created_at TEXT);"
+        # `state` mirrors the real schema: the daily-cap count excludes reservations
+        # that provably never reached Slack, so a stub without it cannot exercise it.
+        "CREATE TABLE notification_outbox(id INTEGER,lead_id INTEGER,"
+        "audience TEXT,created_at TEXT,state TEXT);"
         "CREATE TABLE proactive_daily_slots(audience TEXT,local_date TEXT,delivery_kind TEXT,delivery_key TEXT,reserved_at TEXT);"
     )
     before = datetime(2026, 7, 22, 16, 0, tzinfo=timezone.utc)  # 09:00 PT
@@ -86,7 +89,10 @@ def test_force_never_bypasses_one_message_daily_cap() -> None:
     conn.row_factory = sqlite3.Row
     conn.executescript(
         "CREATE TABLE posts(id INTEGER,channel TEXT,posted_at TEXT);"
-        "CREATE TABLE notification_outbox(id INTEGER,lead_id INTEGER,audience TEXT,created_at TEXT);"
+        # `state` mirrors the real schema: the daily-cap count excludes reservations
+        # that provably never reached Slack, so a stub without it cannot exercise it.
+        "CREATE TABLE notification_outbox(id INTEGER,lead_id INTEGER,"
+        "audience TEXT,created_at TEXT,state TEXT);"
         "CREATE TABLE proactive_daily_slots(audience TEXT,local_date TEXT,delivery_kind TEXT,delivery_key TEXT,reserved_at TEXT);"
     )
     conn.execute("INSERT INTO posts VALUES (1,'C','2026-07-22T17:00:00+00:00')")
