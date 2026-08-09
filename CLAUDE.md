@@ -112,6 +112,47 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-09, deployed + live-tested)
+
+- `verified` 2026-08-09 **PRODUCTION IS LIVE ON `fe56807`, SCHEMA 31.** Deployed in three
+  guardian stages (preflight+backup → env vars → code+restart) with a **~4 second
+  outage**. Listener PID 1227 → **12836**, one clean boot, zero tracebacks.
+  `integrity_check` ok; `foreign_key_check` returns exactly the two approved
+  `source_observations` orphans and no new ones. Migration 29's provenance backfill
+  landed EXACTLY as predicted from the pre-measured counts: `page_verified` **19**,
+  `linkedin_claimed` **36**, NULL **26**, `vendor_licensed` **0**. All four new tables
+  exist and were empty. `.env` and crontab byte-identical. The write allowlist was
+  proven BEHAVIORALLY (by calling `write_channel_allowed`) to be exactly
+  `C01DGT9D11D,C0B02721MNK` and nothing wider. Rollback artifacts retained at
+  `backups/stage1-preflight-20260809T210645Z/` and `stage3-premigration-…`.
+- `verified` 2026-08-09 **THE FULL WORKFLOW WAS DRIVEN LIVE IN THE PLAYGROUND** as Chase.
+  "Do you have leads in Nebraska?" → 93 leads, honestly refused to dump them in-thread;
+  "just the gold ones" → 3 leads WITH lead ids, amounts, spend windows and USASpending
+  verification links; "add them to a campaign" → asked which campaign rather than
+  guessing; a create preview rendered with owner resolved from the roster, an explicit
+  "No Leads or Campaign Members will be added in this step", an expiry, and working
+  **Confirm/Cancel buttons**. The button was NOT clicked — that gate needs a human, and
+  a Block Kit click cannot be driven from here. **ZoomInfo ran end to end in Slack**:
+  the free preview quoted 25 people and their exact cost without spending anything, and
+  an approved 2-record pull stored David Davis (Director, Technology) with his number
+  while **withholding James Todd's mobile because he is do-not-call** — the safety
+  property, live, in front of a rep. All three edge cases Chase named behaved: "delete
+  that campaign" got an honest create-only refusal naming the real alternatives; a
+  LinkedIn search for an invented person refused to substitute a real stranger under
+  her name; and a phone number typed into chat was refused as evidence.
+- `needs-testing` 2026-08-09 FOUR COMMITS ARE AHEAD OF PRODUCTION (the deploy pinned
+  `fe56807`): the `salesforce_campaign_status` tool and its tests, plus two doc commits.
+  "Who's on that campaign?" therefore still cannot be answered live until a follow-up
+  deploy. Also NOT exercised: the Confirm button, `nudge --execute`, and any rich-card
+  button.
+- `needs-testing` 2026-08-09 the real-model acceptance matrix
+  (`GRANT_LLM_ACCEPTANCE=1`, default-SKIPPED) is **22 failed / 58 passed**. This is NOT
+  a regression from this session's work: five sampled failures reproduce IDENTICALLY at
+  the pre-session commit `90f0420`, and three others flipped between runs, so the suite
+  is partly non-deterministic and was already failing. It is worth fixing — a
+  default-skipped, flaky, failing acceptance suite gives false confidence — but it is
+  its own body of work.
+
 ## Current status (2026-08-09, evening)
 
 - `verified` 2026-08-09 EVERY NEW SURFACE EXERCISED THROUGH GRANT'S REAL DISPATCH PATH,

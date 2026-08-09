@@ -14,8 +14,15 @@ retained, `ZOOMINFO_ACCESS_TOKEN` DELETED, `ZOOMINFO_CLIENT_SECRET` added. Chase
 client secret from the ZoomInfo DevPortal, so the Okta access token (24h life, expired 2026-08-10)
 is gone rather than left as dead weight. Backup `~/.env.bak.20260809T190530Z` (600, sha == pre-image).
 
-**Status: still INERT.** `grep -rI ZOOMINFO` over the deployed tree (excl. `.venv`/`.git`/
-`__pycache__`/`.env*`) returns **ZERO** files, re-verified after op 2. Nothing reads these vars, so
+**STATUS SUPERSEDED 2026-08-09T21:28Z — NO LONGER INERT.** Stage 3 shipped `fe56807`, so the
+ZoomInfo code (`enrich/zoominfo*.py`, `migrations_zoominfo.py`) IS now deployed, migration 29 created
+`zoominfo_credit_periods`/`zoominfo_credit_spends` (both EMPTY), and the restart put
+`ZOOMINFO_MONTHLY_CREDITS=1000` + `GRANT_SALESFORCE_WRITE_CHANNEL_IDS` into the live process environ.
+**Listener PID is now 12836, not 1227.** See [[deploy-fe56807-stage3]]. The paragraph below is the
+PRE-Stage-3 record.
+
+**Status at the time: still INERT.** `grep -rI ZOOMINFO` over the deployed tree (excl. `.venv`/`.git`/
+`__pycache__`/`.env*`) returned **ZERO** files, re-verified after op 2. Nothing read these vars, so
 no restart was needed or done. **ROOT CAUSE ESTABLISHED 2026-08-09: the ZoomInfo CODE was never
 deployed.** `enrich/zoominfo.py`, `enrich/zoominfo_credits.py`, `enrich/zoominfo_enrichment.py` and
 `migrations_zoominfo.py` exist only in the local repo (commits `e074b62`/`35492ae`/`fcb1537`, all
@@ -48,7 +55,10 @@ keeps its old environ until Stage 3, which is the intended behaviour.
   observed before AND after, untouched. Still DRIFT from the 5-line `70e309aa…` baseline of
   2026-08-06 and its 10 lines have STILL never been inspected; characterize them read-only before
   relying on any crontab assumption ([[codex-parallel-writer-forensics]]).
-- Listener PID 1227, started Sun Aug 9 03:55:01 2026, `.venv/bin/python -u -m grant_watch.slack.grant`.
+- Listener PID 1227, started Sun Aug 9 03:55:01 2026 — **STALE: replaced by PID 12836 at
+  2026-08-09 14:28:06 PT by the Stage-3 restart** ([[deploy-fe56807-stage3]]).
+- The crontab's 10 lines HAVE now been characterized read-only — see
+  [[readonly-db-forensics-recipe]]; Stage 3 left them byte-identical (`575fbc7c…1a72`).
 
 **A stated line-count expectation is a DERIVED claim; the block text is the AUTHORITATIVE one.**
 Stage 2's instruction said "expect 57 + 8 = 65 lines" while the verbatim block it also mandated

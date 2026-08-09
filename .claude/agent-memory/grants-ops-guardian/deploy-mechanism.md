@@ -32,6 +32,30 @@ confirm the CODE on disk (grep a known new symbol), not just the revision file. 
 
 **Proven full-tree rsync recipe (2026-07-16: 3d653c6 → 25513bc; re-proven 2026-07-17: 25513bc → 9db96d0, 9db96d0 → 36d2470, 36d2470 → 6ea70f2, 6ea70f2 → c714b01, and c714b01 → 50acadd, and 2026-07-17 ed261ff → e6df182 = 14 files [15 delta minus `.env.example`, which the `.env.*` exclude correctly skips], zero deletions each time; Chase-approved, all verified):**
 
+**2026-08-09 — THREE REUSABLE RSYNC/VERIFY GOTCHAS (from the fe56807 deploy, [[deploy-fe56807-stage3]]):**
+- **The itemize direction character depends on the transfer, and grepping the wrong one is a SILENT
+  FALSE PASS.** A laptop→droplet rsync itemizes changed files as `<f…` (sending), but a
+  **droplet-LOCAL** rsync (staging dir → live tree, the sanctioned artifact shape) itemizes them as
+  **`>f…`** (receiving). A checker grepping `^<f` reported `TRANSFER_COUNT=0 / ADD_COUNT=0` on a run
+  that was really moving 54 files — the same family as the "0-files-compared PASS" trap. Never trust
+  a zero from a pattern you have not seen match; always ALSO print a catch-all of lines matching
+  none of your patterns, which is what exposed it here.
+- **Add `--no-times` to the checksum rsync.** With `-c` the transfer decision is content-based, so
+  mtimes are not needed for correctness. Without it, ~827 content-IDENTICAL files were itemized
+  `.f..t……` and would have had their mtimes rewritten — pointless writes that also destroy the
+  `find -cnewer` ground-truth check and the forensic mtimes of files the deploy does not touch
+  (cf. [[pycache-purge-destroys-forensics]]). With `-c -a --no-times` the itemize collapsed to
+  exactly the 54 real changes and `find -cnewer` matched them 1:1.
+- **`load_dotenv()` raises `AssertionError` inside a `python - <<'PY'` stdin heredoc.** `find_dotenv()`
+  walks `frame.f_back` to locate the caller's file; a stdin script has no such frame, so it asserts.
+  Pass the path explicitly (`load_dotenv("/home/grantwatch/grants_agent/.env")`) or run a real file.
+  Also: running a real file from OUTSIDE the repo puts the SCRIPT's dir on `sys.path`, not the cwd —
+  `PYTHONPATH=/home/grantwatch/grants_agent` is required or `import grant_watch` fails. Related but
+  distinct from [[oneoff-scripts-need-load-dotenv]].
+- **Verify a config allowlist BEHAVIORALLY.** Rather than string-matching the `.env` line, call the
+  real predicate (`write_channel_allowed`) against the allowed ids AND against a truncated prefix, a
+  lowercased copy, an unlisted id and `""` — that proves "nothing wider" in a way a grep cannot.
+
 **2026-07-23 264b0e2 → 99c0240 (34-file, all verified) — "drip-honesty-and-guards" branch, no migration:**
 Third add-shaped deploy; retained backup method (RETIRED `cp -a` full-tree NOT used). Coordinator's
 "16 changed files" = the `grant_watch/` SUBSET (14 mods + 2 adds); the FULL tracked delta ex `.claude/`
