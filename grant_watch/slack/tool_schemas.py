@@ -172,6 +172,21 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "salesforce_campaign_status",
+        "description": "READ-ONLY answer to 'who's on that campaign?' or 'did that "
+        "work?'. Returns TWO numbers that must never be merged: how many members the "
+        "Campaign has RIGHT NOW in Salesforce, and how many organizations GRANT "
+        "confirmed adding, plus the ones it could not add and why. They can differ "
+        "legitimately because people add and remove members outside Grant. Never "
+        "answer this question from memory of what you did earlier in the thread — "
+        "call this tool.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name_or_link": {"type": "string"}},
+            "required": ["name_or_link"],
+        },
+    },
+    {
         "name": "salesforce_campaign_members_preview",
         "description": "Prepare, but DO NOT execute, an exact preview for adding a "
         "frozen list of Grant lead IDs to a human-confirmed Campaign. "

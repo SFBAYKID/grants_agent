@@ -709,6 +709,13 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         allowed_intents=("question", "chitchat"),
     ),
     HumanQuestion(
+        "campaign-status-after-add",
+        "salesforce-read",
+        "Who's on the California Grant 2026 campaign now? Did that actually work?",
+        expected_tools=("salesforce_campaign_status",),
+        allowed_intents=("question", "chitchat"),
+    ),
+    HumanQuestion(
         "campaign-cancel-preview",
         "salesforce-write",
         "Cancel it. Do not write anything to Salesforce.",
