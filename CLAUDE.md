@@ -118,6 +118,54 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-09, final)
+
+- `verified` 2026-08-09 **CHASE'S "RIGID, PROGRAMMATIC" FAILURE IS FIXED AND PROVEN LIVE.**
+  Grant refused a phone number a rep typed into chat because it had not come from a
+  source Grant pulled. That was the honesty rule pointed at the wrong case — it exists
+  to stop Grant INVENTING a contact and calling it discovered, never to stop a person
+  telling Grant something true. The rule is now ATTRIBUTION, not refusal: a supplied
+  fact is stored as its own `human_asserted` row with who said it and when.
+  Live in production: *"ok david davis direct line is 308-555-0142, add it to that
+  scottsbluff lead"* → *"Done — saved on the Scottsbluff Public School lead, logged as
+  supplied by you today."* No lead id, no structure, "that scottsbluff lead" resolved
+  from thread context. Messy input also proven: *"whos the tech drector at medicine
+  valley"* (two typos, partial name) returned Scott Trimble, Superintendent,
+  page-verified with email and phone, plus an honest "no dedicated Technology Director
+  listed".
+- `verified` 2026-08-09 **THE FIRST VERSION OF THAT FIX WAS WORSE THAN THE REFUSAL**, and
+  the architectural-critic EXECUTED the exploit rather than describing it. Filling empty
+  fields on the contact the rep named left the row still reading
+  `contact_status='verified'` while carrying a value nobody checked — and `grant.py`
+  selects the Persequor outreach brief's contact on exactly that status, so a typed
+  number would have been EMAILED TO A SCHOOL ADMINISTRATOR as Grant's own verified
+  finding. The trigger is the likely case, not an edge one: a staff directory with a
+  name, title and phone but no email is common. Fixed by always inserting a separate
+  row. Twelve further findings fixed in the same pass, including: `provenance` was
+  populated by a ONE-SHOT backfill so every contact created afterwards had it NULL and
+  the guard protecting page-verified evidence was blind; the confirmation was built
+  from the ARGUMENTS so a dropped field was still reported as recorded; and the removal
+  refusal was disarmed by any additive word anywhere ("delete that campaign AND add the
+  new one"). All mutation-proven.
+- `verified` 2026-08-09 SELF-CAUGHT BY LIVE TESTING: the new campaign-status tool
+  reported **"0 members"** for a Campaign holding 13, because a bare `SELECT COUNT()`
+  returns its total in `totalSize` and ZERO rows. Grant then reasoned confidently on top
+  of the false zero and told a rep someone must have removed them. The unit test MASKED
+  it by stubbing thirteen empty dicts. `COUNT(Id)` fixed it; a second test pins the
+  query text, because the two implementations are indistinguishable from output alone.
+  The false claim was corrected in the Slack thread.
+- `verified` 2026-08-09 A TEST WROTE TO THE DEVELOPER'S OWN DATABASE. `db.connect` binds
+  its default AT IMPORT TIME, so monkeypatching `db.DEFAULT_DB_PATH` does nothing and a
+  bare `db.connect()` kept opening the real file — migrating it and leaving rows. Rows
+  removed; an autouse conftest guard now FAILS any test that opens the real database via
+  `connect` or `connect_readonly`, and it immediately caught three more.
+- `verified` 2026-08-09 PRODUCTION IS ON `2239a18` AT SCHEMA 32 after five staged
+  deploys today (`90f0420`→`fe56807`→`3cf9df0`→`2239a18`), outages of ~4s, ~2s and ~1s.
+  Migration 32's provenance split landed exactly as pre-measured: page_verified 19,
+  linkedin_claimed 36, vendor_licensed 2, NULL 26. Pinning by hash proved load-bearing
+  TWICE — once catching a dirty working tree carrying an unfinished migration, once
+  catching two commits landing mid-sync.
+
 ## Current status (2026-08-09, deployed + live-tested)
 
 - `verified` 2026-08-09 **PRODUCTION IS LIVE ON `fe56807`, SCHEMA 31.** Deployed in three
