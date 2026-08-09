@@ -501,3 +501,94 @@ def test_enrich_reuses_existing_verified_without_researching(
     monkeypatch.setattr(finder, "find_contact", fail)
     outcome = tools.enrich_lead_contact(conn, lead_id)
     assert outcome.status == "verified" and outcome.email == "ssmith@crschools.org"
+
+
+def test_second_pass_over_a_fallback_outcome_reports_it_instead_of_erroring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A re-enriched lead must report what the first pass found, never "error".
+
+    The paid-attempt ledger is per lead, but only the `verified` and `not_found`
+    endings short-circuit ahead of it. A lead whose first pass ended in a FALLBACK
+    outcome therefore reached the ledger again on every later pass, raised
+    CompletedPaidCall, and rendered as a bare "error" cell in the search grid —
+    reporting failure for enrichment that had genuinely succeeded.
+
+    The second pass here installs stubs that RAISE, so any attempt to redo the paid
+    discovery fails the test rather than silently passing.
+    """
+    from grant_watch.enrich import organization_profile
+
+    conn, lead_id = _lead(tmp_path)
+
+    class _Profile:
+        general_email = ""
+        source_url = ""
+        phone = ""
+
+    monkeypatch.setattr(finder, "find_contact", lambda *a, **k: None)
+    monkeypatch.setattr(
+        finder,
+        "linkedin_person",
+        lambda *a, **k: {
+            "name": "Dana Reyes",
+            "title": "Director of Technology",
+            "url": "https://linkedin.com/in/danareyes",
+        },
+    )
+    monkeypatch.setattr(
+        organization_profile, "enrich_org_profile", lambda *a, **k: _Profile()
+    )
+    first = tools.enrich_lead_contact(conn, lead_id)
+    assert first.status == "linkedin_only"
+    assert first.name == "Dana Reyes"
+
+    def _must_not_run(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the paid discovery chain must not run a second time")
+
+    monkeypatch.setattr(finder, "find_contact", _must_not_run)
+    monkeypatch.setattr(finder, "linkedin_person", _must_not_run)
+    monkeypatch.setattr(organization_profile, "enrich_org_profile", _must_not_run)
+    second = tools.enrich_lead_contact(conn, lead_id)
+    assert second.status == "linkedin_only"
+    assert second.name == "Dana Reyes"
+    assert second.source_url == "https://linkedin.com/in/danareyes"
+    conn.close()
+
+
+def test_second_pass_recalls_an_org_mailbox_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The org-mailbox ending is reconstructed from the persisted profile columns."""
+    from grant_watch.enrich import organization_profile
+
+    conn, lead_id = _lead(tmp_path)
+
+    class _Profile:
+        general_email = "info@crsd401.test"
+        source_url = "https://crsd401.test/contact"
+        phone = ""
+
+    monkeypatch.setattr(finder, "find_contact", lambda *a, **k: None)
+    monkeypatch.setattr(finder, "linkedin_person", lambda *a, **k: None)
+
+    def _write_profile(conn_: sqlite3.Connection, lid: int, *a: object) -> _Profile:
+        conn_.execute(
+            "UPDATE leads SET org_general_email=?,org_profile_source_url=? WHERE id=?",
+            (_Profile.general_email, _Profile.source_url, lid),
+        )
+        conn_.commit()
+        return _Profile()
+
+    monkeypatch.setattr(organization_profile, "enrich_org_profile", _write_profile)
+    assert tools.enrich_lead_contact(conn, lead_id).status == "org_email"
+
+    def _must_not_run(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the paid discovery chain must not run a second time")
+
+    monkeypatch.setattr(finder, "find_contact", _must_not_run)
+    monkeypatch.setattr(organization_profile, "enrich_org_profile", _must_not_run)
+    second = tools.enrich_lead_contact(conn, lead_id)
+    assert second.status == "org_email"
+    assert second.email == "info@crsd401.test"
+    conn.close()

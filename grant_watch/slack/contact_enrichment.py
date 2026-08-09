@@ -72,6 +72,9 @@ def enrich_lead_contact(
         c["contact_status"] == "not_found" for c in db.contacts_for_lead(conn, lead_id)
     ):
         return ContactOutcome("not_found")
+    recalled = _recall_prior_outcome(conn, lead, lead_id)
+    if recalled is not None:
+        return recalled
 
     def discover() -> ContactOutcome:
         """Run every paid fallback only after the outer durable reservation."""
@@ -115,6 +118,60 @@ def enrich_lead_contact(
         )
     except finder.SourceUnreachable:
         return ContactOutcome("unreachable")
+    except paid_calls.CompletedPaidCall:
+        # Belt-and-braces behind _recall_prior_outcome: the ledger says this lead's
+        # paid pass already ran, so re-spending is forbidden. Report whatever that
+        # pass stored rather than an "error" cell that misreports a real success.
+        return _recall_prior_outcome(conn, lead, lead_id) or ContactOutcome("not_found")
+
+
+def _recall_prior_outcome(
+    conn: sqlite3.Connection, lead: sqlite3.Row, lead_id: int
+) -> ContactOutcome | None:
+    """Rebuild a completed FALLBACK outcome from the evidence that pass persisted.
+
+    The paid-attempt ledger is keyed per lead, but the two guards above it only cover
+    the `verified` and `not_found` endings. A lead whose first pass ended in a fallback
+    (linkedin_only / linkedin_org_email / org_email) therefore fell through to
+    paid_calls.execute on every later pass, raised CompletedPaidCall, and surfaced in
+    the search grid as a bare "error" — reporting a failure for enrichment that had
+    actually succeeded, and inviting a human to re-run work that can never re-run.
+
+    Reconstruct instead, from exactly what the first pass wrote: the linkedin_only
+    contact row and the organization profile columns. Returns None when neither
+    exists, so a genuine first pass is never short-circuited.
+    """
+    linkedin = next(
+        (
+            row
+            for row in db.contacts_for_lead(conn, lead_id)
+            if row["contact_status"] == "linkedin_only"
+        ),
+        None,
+    )
+    general_email = str(lead["org_general_email"] or "")
+    profile_source = str(lead["org_profile_source_url"] or "")
+    if linkedin is not None and general_email:
+        return ContactOutcome(
+            "linkedin_org_email",
+            str(linkedin["name"] or ""),
+            str(linkedin["title"] or ""),
+            general_email,
+            "",
+            str(linkedin["source_url"] or ""),
+        )
+    if linkedin is not None:
+        return ContactOutcome(
+            "linkedin_only",
+            str(linkedin["name"] or ""),
+            str(linkedin["title"] or ""),
+            "",
+            "",
+            str(linkedin["source_url"] or ""),
+        )
+    if general_email:
+        return ContactOutcome("org_email", "", "", general_email, "", profile_source)
+    return None
 
 
 def _fallback_contact(
