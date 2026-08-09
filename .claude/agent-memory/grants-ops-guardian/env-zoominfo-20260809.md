@@ -1,6 +1,6 @@
 ---
 name: env-zoominfo-20260809
-description: ZoomInfo creds on tenant .env — durable CLIENT_ID+CLIENT_SECRET replaced the dead 24h access token 2026-08-09; still inert (no code reads them); CURRENT baselines .env sha 5cb3d3b1…/57 lines, crontab 10 lines 575fbc7c…, listener PID 1227
+description: ZoomInfo creds on tenant .env — durable CLIENT_ID+CLIENT_SECRET replaced the dead 24h access token 2026-08-09; still inert (no code reads them); CURRENT baselines after Stage 2 .env sha f4abd546…/66 lines/32 keys, crontab 10 lines 575fbc7c…, listener PID 1227
 metadata:
   type: project
 ---
@@ -23,17 +23,38 @@ deployed.** `enrich/zoominfo.py`, `enrich/zoominfo_credits.py`, `enrich/zoominfo
 "a feature switched off" — see [[deployed-vs-local-drift-20260809]]. Per the block's own comments the pair mints 24h bearer tokens on
 demand at the Okta token endpoint, so nothing in `.env` expires any more.
 
-**How to apply — CURRENT baselines (these supersede op 1's `11447d92…`/53-line values):**
-- `.env`: sha256 `5cb3d3b158cb9356a6ea3cd1a2ab084a5902e3e7ef3648f057ca6f5e87fd9df0`, **57 lines,
-  2754 bytes**, mode 600 grantwatch:grantwatch. Structure: 47 prefix lines
-  (sha `b3f338ff5c42161194c6df8ee5dc1bf323dcfb0613a33a256ad034806cfc3bff`, UNCHANGED across both
-  ops) + blank line 48 + 9-line ZoomInfo block starting line 49
-  (sha `5c6404a942fe7ea3d12bba49d3c1c2bb24c5c30639d5528fac83da306ff1f699` = 7 comments + 2 vars).
+**Op 3, 2026-08-09T21:12Z (Stage 2 of the 90f0420→3915b11 deploy)** — appended a 9-line block
+(1 blank + 6 comments + 2 vars) setting the two DEPLOY PREREQUISITES below. Both values non-secret.
+Backup `~/backups/env.bak.stage2-20260809T211228Z` (600, sha == pre-image). No restart: PID 1227
+keeps its old environ until Stage 3, which is the intended behaviour.
+
+**How to apply — CURRENT baselines (these supersede op 1's `11447d92…`/53-line and op 2's
+`5cb3d3b1…`/57-line values):**
+- `.env`: sha256 `f4abd546713728f3aaf979cbb69e9d931f60718574968a20885554ac538d2a99`, **66 lines,
+  3334 bytes, 32 keys**, mode 600 grantwatch:grantwatch. Structure: 47 prefix lines
+  (sha `b3f338ff5c42161194c6df8ee5dc1bf323dcfb0613a33a256ad034806cfc3bff`, UNCHANGED across all
+  three ops) + blank line 48 + 9-line ZoomInfo block at 49–57
+  (sha `5c6404a942fe7ea3d12bba49d3c1c2bb24c5c30639d5528fac83da306ff1f699` = 7 comments + 2 vars)
+  + 9-line Stage-2 block at 58–66
+  (sha `94c6ce2f0ac8df2c81d79d28de2ab1d544bea8240306cdbe17e3d2d27236cedf`). The first 57 lines still
+  hash to op 2's whole-file sha `5cb3d3b1…9df0` — that identity is the cheapest proof an append
+  touched nothing pre-existing, and it only holds because the file ends in `0a`. **Check the last
+  byte (`tail -c 1 | od -An -tx1`) before any append**: without a trailing newline an append silently
+  fuses onto the final var.
+- `GRANT_SALESFORCE_WRITE_CHANNEL_IDS=C01DGT9D11D,C0B02721MNK` (prod + playground) and
+  `ZOOMINFO_MONTHLY_CREDITS=1000` are now SET — the two prerequisites recorded below as absent are
+  satisfied as of op 3.
 - crontab: 10 lines, sha `575fbc7ce7c7dc24dc2e806fe15ff37c9db98808d269b31ff1eb67aed0041a72` —
   observed before AND after, untouched. Still DRIFT from the 5-line `70e309aa…` baseline of
   2026-08-06 and its 10 lines have STILL never been inspected; characterize them read-only before
   relying on any crontab assumption ([[codex-parallel-writer-forensics]]).
 - Listener PID 1227, started Sun Aug 9 03:55:01 2026, `.venv/bin/python -u -m grant_watch.slack.grant`.
+
+**A stated line-count expectation is a DERIVED claim; the block text is the AUTHORITATIVE one.**
+Stage 2's instruction said "expect 57 + 8 = 65 lines" while the verbatim block it also mandated
+("including the blank line") was 9 lines → 66. Trimming the blank line to satisfy the arithmetic
+would have mutated authorized content to make a check pass. Correct order: append verbatim, prove
+prefix-sha + block-sha + total lines, and report the corrected count. Count the leading blank line.
 
 **LOCAL/DROPLET `.env` FILES ARE NOT COPIES OF EACH OTHER — never sync them wholesale.** The local
 repo `.env` is 69 lines and its prefix genuinely differs. **CORRECTION 2026-08-09 (measured, this

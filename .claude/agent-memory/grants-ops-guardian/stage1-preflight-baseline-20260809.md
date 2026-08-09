@@ -46,3 +46,9 @@ guarantee extends to backups. Verify the COPY (integrity + schema + row counts),
 
 See [[deployed-vs-local-drift-20260809]] for what is undeployed; [[env-zoominfo-20260809]] for the
 two env-var deploy prerequisites, both confirmed ABSENT from the droplet in this preflight.
+
+**SUPERSEDED IN PART — Stage 2 executed 2026-08-09T21:12Z.** The `.env` fingerprint above
+(`5cb3d3b1…9df0` / 57 lines) is now the PRE-image only; live is `f4abd546…2a99` / 66 lines / 32
+keys, because `GRANT_SALESFORCE_WRITE_CHANNEL_IDS` and `ZOOMINFO_MONTHLY_CREDITS` were appended.
+Everything else here — revision 90f0420, schema 28, PID 1227, crontab `575fbc7c…1a72`, both
+rollback artifacts — is UNCHANGED and still the Stage 3 baseline.
