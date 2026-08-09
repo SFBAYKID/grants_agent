@@ -419,3 +419,66 @@ def test_a_broken_promise_is_admitted_not_softened(tmp_path: Path) -> None:
     assert "I couldn't do it then" not in text, (
         "the neutral line survived alongside the correction, softening the admission"
     )
+
+
+# --- Choosing between stored contacts ---------------------------------------------
+
+
+def test_the_better_of_two_stored_contacts_is_the_one_shown(tmp_path: Path) -> None:
+    """A real production lead holds a Teacher AND an Assistant Superintendent.
+
+    Each enrichment pass writes whoever LinkedIn returned that day, so a lead
+    accumulates several linkedin_only rows. Picking the first one meant row order
+    decided which human a rep was handed — and on that lead the better contact was
+    the second row. This chooses between things Grant already verified; it must never
+    merge two rows into one person.
+    """
+    from grant_watch.slack.contact_enrichment import _best_linkedin_contact
+
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url) "
+        "VALUES ('s','1','Mammoth Unified School District','CA','u')"
+    )
+    lead_id = int(conn.execute("SELECT id FROM leads").fetchone()["id"])
+    db.save_linkedin_contact(
+        conn, lead_id, "John Simeon", "Teacher", "https://linkedin.test/in/js"
+    )
+    db.save_linkedin_contact(
+        conn,
+        lead_id,
+        "Lyle Tavernier",
+        "Assistant Superintendent",
+        "https://linkedin.test/in/lt",
+    )
+    best = _best_linkedin_contact(db.contacts_for_lead(conn, lead_id))
+    assert best is not None
+    assert best["name"] == "Lyle Tavernier", (
+        "row order decided the contact instead of who a rep would actually call"
+    )
+    conn.close()
+
+
+def test_an_untitled_contact_never_beats_a_titled_one(tmp_path: Path) -> None:
+    """Two production rows have an empty title; those must not outrank a real one."""
+    from grant_watch.slack.contact_enrichment import _best_linkedin_contact
+
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url) "
+        "VALUES ('s','1','Birmingham Community Charter','CA','u')"
+    )
+    lead_id = int(conn.execute("SELECT id FROM leads").fetchone()["id"])
+    db.save_linkedin_contact(
+        conn, lead_id, "Ari Bennett", "", "https://linkedin.test/in/ab"
+    )
+    db.save_linkedin_contact(
+        conn, lead_id, "Dana Reyes", "Director of Technology", "https://li.test/in/dr"
+    )
+    # Insert an untitled row LAST, so recency alone would pick the wrong person.
+    db.save_linkedin_contact(
+        conn, lead_id, "Sam Later", "", "https://linkedin.test/in/sl"
+    )
+    best = _best_linkedin_contact(db.contacts_for_lead(conn, lead_id))
+    assert best is not None and best["name"] == "Dana Reyes"
+    conn.close()

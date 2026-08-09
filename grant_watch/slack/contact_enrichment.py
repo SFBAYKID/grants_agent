@@ -133,6 +133,37 @@ def enrich_lead_contact(
         return _recall_prior_outcome(conn, lead, lead_id) or ContactOutcome("not_found")
 
 
+def _best_linkedin_contact(rows: list[sqlite3.Row]) -> sqlite3.Row | None:
+    """Pick the most useful stored LinkedIn contact, not whichever row came back first.
+
+    A lead can accumulate SEVERAL linkedin_only rows: each enrichment pass writes what
+    it found that day, and LinkedIn does not return the same person twice running. One
+    production lead holds both a Teacher and an Assistant Superintendent for the same
+    district, and which one a rep saw was decided by nothing more than row order. That
+    is a lead-quality signal being thrown away by an implementation detail.
+
+    Ranking is deliberately shallow and explainable: a title Monarch actually sells to
+    beats any other title, any title beats none, and otherwise the later row wins.
+    `contacts` has no timestamp column, so "later" means a higher id — reliable here
+    because ids are gapless and assigned as max(rowid)+1, and stated rather than
+    assumed. This CHOOSES between things Grant already verified; it never merges two
+    rows into one person, which would invent a contact out of two true ones.
+    """
+    from ..enrich.zoominfo_enrichment import DECISION_MAKER_TITLES
+
+    candidates = [row for row in rows if row["contact_status"] == "linkedin_only"]
+    if not candidates:
+        return None
+
+    def rank(row: sqlite3.Row) -> tuple[int, int, int]:
+        """Higher sorts better."""
+        title = str(row["title"] or "").strip().lower()
+        relevant = any(word in title for word in DECISION_MAKER_TITLES)
+        return (1 if relevant else 0, 1 if title else 0, int(row["id"]))
+
+    return max(candidates, key=rank)
+
+
 def _recall_prior_outcome(
     conn: sqlite3.Connection, lead: sqlite3.Row, lead_id: int
 ) -> ContactOutcome | None:
@@ -149,14 +180,7 @@ def _recall_prior_outcome(
     contact row and the organization profile columns. Returns None when neither
     exists, so a genuine first pass is never short-circuited.
     """
-    linkedin = next(
-        (
-            row
-            for row in db.contacts_for_lead(conn, lead_id)
-            if row["contact_status"] == "linkedin_only"
-        ),
-        None,
-    )
+    linkedin = _best_linkedin_contact(db.contacts_for_lead(conn, lead_id))
     general_email = str(lead["org_general_email"] or "")
     profile_source = str(lead["org_profile_source_url"] or "")
     org_phone = str(lead["org_phone"] or "")
