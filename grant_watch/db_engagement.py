@@ -178,6 +178,36 @@ def delivery_attempts_today(
     )
 
 
+def rejections_today(
+    conn: sqlite3.Connection, channel: str, now_utc: datetime | None = None
+) -> int:
+    """Count today's Slack-refused deliveries for one channel, Pacific.
+
+    These are deliberately excluded from the daily cap — Slack answered "no", no
+    human saw the card, so the day was not spent. That exclusion is right per
+    delivery, and dangerous in bulk: a renderer regression makes EVERY card fail the
+    same way, and with the cap not stopping it the drip would quarantine one gold
+    lead per 30-minute tick, roughly 26 a day, behind lines that read as routine.
+    The caller uses this to stop after a handful rather than draining the pool.
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+    local_date = now_utc.astimezone(ZoneInfo("America/Los_Angeles")).date()
+    start_local = datetime.combine(
+        local_date, time.min, tzinfo=ZoneInfo("America/Los_Angeles")
+    )
+    row = conn.execute(
+        """SELECT COUNT(*) FROM notification_outbox
+            WHERE audience=? AND lead_id IS NOT NULL AND state='rejected'
+              AND created_at>=? AND created_at<?""",
+        (
+            channel,
+            start_local.astimezone(timezone.utc).isoformat(),
+            (start_local + timedelta(days=1)).astimezone(timezone.utc).isoformat(),
+        ),
+    ).fetchone()
+    return int(row[0])
+
+
 def recent_post_states(conn: sqlite3.Connection, channel: str, limit: int) -> set[str]:
     """Return the distinct states of the most recent `limit` proactive posts in a channel.
 

@@ -841,3 +841,56 @@ def test_a_lead_that_cannot_render_does_not_spend_the_day(tmp_path: Path) -> Non
     outcome = drip.run_drip(client, "C1", conn, force=True)
     assert outcome.startswith("posted") and "Good District" in outcome
     conn.close()
+
+
+def test_repeated_slack_refusals_stop_draining_the_lead_pool(tmp_path: Path) -> None:
+    """A broken renderer must not quarantine a gold lead every thirty minutes.
+
+    Slack-refused deliveries deliberately do not spend the day's card — no human saw
+    anything, so the day is still available. Correct per delivery, dangerous in bulk:
+    invalid_blocks and blocks_too_long are content errors, so a renderer regression
+    makes EVERY card fail identically and each failure destroys a gold lead
+    permanently. Three in a day is a broken card, not three unlucky leads.
+    """
+    conn = db.connect(tmp_path / "t.db")
+    lead = mk_lead(conn, iid="A", start="2025-10-10", end="2028-09-30", backfill=True)
+    now = datetime.now(timezone.utc)
+    for index in range(drip.MAX_REJECTIONS_PER_DAY):
+        conn.execute(
+            """INSERT INTO notification_outbox
+                 (delivery_key,lead_id,audience,delivery_class,payload_json,state,
+                  attempts,available_at,created_at,updated_at)
+               VALUES (?,?,?,'proactive','{}','rejected',1,?,?,?)""",
+            (
+                f"refused-{index}",
+                lead,
+                "C1",
+                now.isoformat(),
+                now.isoformat(),
+                now.isoformat(),
+            ),
+        )
+    conn.commit()
+
+    ok, reason = drip.pacing_ok(conn, "C1", now)
+    assert ok is False
+    assert "refused by Slack today" in reason
+    conn.close()
+
+
+def test_one_or_two_refusals_do_not_stop_the_queue(tmp_path: Path) -> None:
+    """The floor must not become a new way to lose the day to a couple of bad rows."""
+    conn = db.connect(tmp_path / "t.db")
+    lead = mk_lead(conn, iid="A", start="2025-10-10", end="2028-09-30", backfill=True)
+    now = datetime.now(timezone.utc)
+    conn.execute(
+        """INSERT INTO notification_outbox
+             (delivery_key,lead_id,audience,delivery_class,payload_json,state,
+              attempts,available_at,created_at,updated_at)
+           VALUES ('refused-1',?, 'C1','proactive','{}','rejected',1,?,?,?)""",
+        (lead, now.isoformat(), now.isoformat(), now.isoformat()),
+    )
+    conn.commit()
+    ok, reason = drip.pacing_ok(conn, "C1", now)
+    assert "refused by Slack today" not in reason
+    conn.close()

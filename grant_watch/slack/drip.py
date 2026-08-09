@@ -69,6 +69,12 @@ _BULLETIN_OFFTOPIC_RE = re.compile(
 DAILY_CAP = 1  # normal hard cap; only an urgent/emergency card exceeds it
 ABSOLUTE_CAP = 2  # the daily card plus at most one emergency
 MIN_GAP_MINUTES = 90  # never two posts closer than this
+# Slack-refused deliveries do not spend the day's card — correct per delivery, since
+# no human saw anything. In bulk it is a hazard: a renderer regression makes every
+# card fail identically, and without a floor the drip would quarantine one gold lead
+# every 30 minutes until the window closed. Three in a day is a broken renderer, not
+# three unlucky leads.
+MAX_REJECTIONS_PER_DAY = 3
 BULLETIN_MAX_PER_DAY = 1
 PLATINUM_DAYS = 7  # a security grant awarded within ~a week — the cream (buy imminent)
 
@@ -343,6 +349,13 @@ def pacing_ok(
     `db.delivery_attempts_today`. Reservations are the fail-closed signal: they cannot be
     missing for a message that reached Slack.
     """
+    if db.rejections_today(conn, channel, now_utc) >= MAX_REJECTIONS_PER_DAY:
+        # Stop consuming inventory. Repeated identical refusals mean the CARD is
+        # broken, not the leads, and each one destroys a gold lead permanently.
+        return False, (
+            f"{MAX_REJECTIONS_PER_DAY} cards refused by Slack today — holding the "
+            "rest of the queue until someone looks at why"
+        )
     posts = db.posts_today(conn, channel, now_utc)
     attempts = db.delivery_attempts_today(conn, channel, now_utc)
     count = max(len(posts), len(attempts))
