@@ -50,6 +50,19 @@ trap for the rich path: a slot in 10:31–10:45 can only fire at the 11:00 tick,
 refused. (c) Routing revision: unmapped state renders NO line at all (`routing_line` =
 `mention_line`; the "unassigned territory" note is gone — Chase revised 2026-08-05).
 
+**Fallback path PROVEN live 2026-08-06 00:38 PT** (read-only check, Chase-ordered): `drip --dry-run
+--force` printed `drip[rich]: skip: no rich award card satisfies every evidence rule; falling back to
+the daily card` then a legacy nugget preview (Hoxie School District No 46, AR, $500,000 SVPP), exit 0 —
+the eligibility-miss fallback branch works against production data. Note: 7 verified+unexpired
+`contact_evidence` rows were NOT enough for a rich card; evidence rules gate on more than contact
+freshness, so "7 verified" does not predict a rich card. Reusable read-only pre-slot check (run all as
+one python via ssh stdin, DB `file:…?mode=ro`): replicate `delivery_attempts_today` (outbox WHERE
+audience=CHANNEL AND lead_id IS NOT NULL in the Pacific-day UTC window) + posts same window +
+`channel_guard` (delivery_key IN `channel-guard:blocked:C…`,`channel-guard:backoff:C…` AND
+available_at>now) — hand-writing "today" boundaries risks DST; compute via ZoneInfo like the code does.
+Remote non-interactive ssh cwd is $HOME: `.venv/bin/python` alone fails, use
+`/home/grantwatch/grants_agent/.venv/bin/python` or `cd` first.
+
 **Rollback if needed:** `~/pre-5f09200-overwritten.20260806T070958Z.tar.gz` (41 files, 199 KB) +
 `~/.deployed_revision.bak.20260806T070958Z`; also `rm` the 5 added files and purge `__pycache__`.
 DB untouched (schema stayed 28; dry-run verification used the read-only URI). Disk was 64% used /

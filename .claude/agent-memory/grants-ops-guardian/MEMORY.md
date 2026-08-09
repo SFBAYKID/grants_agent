@@ -26,3 +26,13 @@
 - [Rich-card deploy e8ecf0c](rich-card-deploy-e8ecf0c.md) — COMPLETED 2026-07-24 flag-OFF: tldextract 5.3.1 installed, migrations 14-26 applied (MAX 26, cron self-heal), bot pid 597044; buttons need tldextract (boot/cron don't); rollback snapshot at 20260724T214420Z
 - [Rich-card ENABLED 2026-08-05](rich-card-enable-20260805.md) — GRANT_RICH_CARD_ENABLED=1 LIVE (Chase waived shadow gate); crontab now 5 lines sha 70e309aa…; seed C2 resolved: 22 completed/3 indeterminate, 7 verified/15 not_found
 - [Deploy 5f09200 fallback+routing](deploy-5f09200-fallback-routing.md) — LIVE 2026-08-06 no-restart; AST-diff for "no migration" claims; --files-from surgical rsync; cutoff now 11:30, cutoff-miss falls back to daily
+- [Edit cards in place](edit-cards-in-place.md) — STANDING: fix a posted card with chat.update, never post a replacement; read-only conn, snapshot stays immutable
+- [First rich card posted](first-rich-card-posted.md) — 2026-08-06 ts 1786049660.891549; all 6 blocks accepted; Slack auto-linkifies emails to mailto in blocks AND text
+- [Feeder cron scheduling evidence](feeder-cron-scheduling-evidence.md) — poll really takes 9m10s; salesforce-sync's unordered LIMIT 500 churns ids 229-378 forever; most NCES-pending leads can never bind
+- [pycache purge destroys forensics](pycache-purge-destroys-forensics.md) — capture .pyc mtimes before a deploy purge when another writer may be active; purge still correct
+- [Deploy d66802b card comma](deploy-d66802b-card-comma.md) — 2-file surgical deploy, no restart (card.py outside the bot's import closure); 0-files-compared "PASS" trap; --post classifier-blocked
+- [One-offs need load_dotenv](oneoff-scripts-need-load-dotenv.md) — cwd does NOT load .env; only 3 entrypoints call load_dotenv(), so one-offs degrade silently and can still write state
+- [NCES binding blocks rich card](nces-binding-blocks-rich-card.md) — null nces_id ⇒ entity_kind_unsupported, always; USAspending "…NO 46" names never exact-match NCES LEA_NAME
+- [SLACK_WORKSPACE_ID never set](slack-workspace-id-missing.md) — every rich-card button refuses; .env+restart needed; run_bot.sh sources .env so /proc/environ is authoritative; render_inputs_json leaks PII
+- [Roster deploy 4c6a543 (Nelly)](roster-deploy-4c6a543.md) — LIVE 2026-08-06; ALWAYS gate a reps.json row on a prod Salesforce User.Email==1 probe first; reps.json re-read per call (no restart); .claude/agent-memory is not on the droplet
+- [ZoomInfo .env creds 2026-08-09](env-zoominfo-20260809.md) — durable CLIENT_SECRET replaced the dead token; still inert; baselines .env 5cb3d3b1…/57 lines, crontab 10 lines 575fbc7c…, PID 1227; pgrep -f self-matches over ssh

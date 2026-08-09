@@ -27,18 +27,22 @@ class _Response:
     """Minimal stand-in for requests.Response covering the client's usage."""
 
     def __init__(self, payload: dict[str, Any], status: int = 200) -> None:
+        """Record the payload and status this stub will replay."""
         self._payload = payload
         self.status_code = status
 
     def raise_for_status(self) -> None:
+        """Raise the way requests does on a 4xx/5xx status."""
         if self.status_code >= 400:
             raise requests.HTTPError(f"HTTP {self.status_code}")
 
     def json(self) -> dict[str, Any]:
+        """Return the canned response payload."""
         return self._payload
 
 
 def _configure(monkeypatch: pytest.MonkeyPatch, client_id: str = "cid") -> None:
+    """Set both ZoomInfo credentials so _auth can proceed."""
     monkeypatch.setenv("ZOOMINFO_CLIENT_ID", client_id)
     monkeypatch.setenv("ZOOMINFO_CLIENT_SECRET", "shhh")
 
@@ -68,6 +72,7 @@ def test_token_request_sends_the_cloudflare_user_agent(
     seen: dict[str, Any] = {}
 
     def fake_post(url: str, **kwargs: Any) -> _Response:
+        """Stand in for requests.post, capturing the outbound request."""
         seen["url"] = url
         seen["headers"] = kwargs.get("headers") or {}
         return _Response({"access_token": "tok", "expires_in": 86400})
@@ -87,6 +92,7 @@ def test_token_is_cached_and_reminted_when_the_credential_changes(
     calls: list[str] = []
 
     def fake_post(url: str, **kwargs: Any) -> _Response:
+        """Mint a distinct token per call so cache reuse is observable."""
         calls.append(url)
         return _Response({"access_token": f"tok{len(calls)}", "expires_in": 86400})
 
@@ -106,6 +112,7 @@ def test_transport_failure_raises_unavailable_not_an_empty_result(
     _configure(monkeypatch)
 
     def fake_post(url: str, **kwargs: Any) -> _Response:
+        """Fail every request the way a network outage would."""
         raise requests.ConnectionError("boom")
 
     monkeypatch.setattr(zoominfo.requests, "post", fake_post)
@@ -160,6 +167,7 @@ def test_search_parses_the_json_api_envelope_and_availability_flags(
     posts: list[tuple[str, dict[str, Any]]] = []
 
     def fake_post(url: str, **kwargs: Any) -> _Response:
+        """Serve a token, then a realistic search body, recording the request."""
         if url == zoominfo.TOKEN_URL:
             return _Response({"access_token": "tok", "expires_in": 86400})
         posts.append((url, kwargs.get("json") or {}))
@@ -183,7 +191,9 @@ def test_search_parses_the_json_api_envelope_and_availability_flags(
     assert "page%5Bsize%5D=5" in url
     assert body["data"]["type"] == "ContactSearch"
     # The flat body a naive client would send is a 400; the envelope is required.
-    assert body["data"]["attributes"]["companyName"] == "Imperial Unified School District"
+    assert (
+        body["data"]["attributes"]["companyName"] == "Imperial Unified School District"
+    )
     assert body["data"]["attributes"]["state"] == "CA"
 
 
@@ -194,6 +204,7 @@ def test_search_returns_empty_for_a_genuine_no_coverage_org(
     _configure(monkeypatch)
 
     def fake_post(url: str, **kwargs: Any) -> _Response:
+        """Serve a token, then an empty result set."""
         if url == zoominfo.TOKEN_URL:
             return _Response({"access_token": "tok", "expires_in": 86400})
         return _Response({"data": [], "meta": {"totalResults": 0}})
@@ -238,6 +249,7 @@ def test_quote_counts_exactly_what_a_pull_would_cost() -> None:
     """The number a rep approves must equal the number of credits at risk."""
 
     def build(email: bool, mobile: bool, dnc: bool) -> zoominfo.ZoomInfoContactMatch:
+        """Build one search match with the given availability flags."""
         return zoominfo.ZoomInfoContactMatch(
             person_id="1",
             first_name="A",
@@ -273,6 +285,7 @@ def test_enrich_of_nothing_makes_no_request_at_all(
     """An empty approval list must not authenticate, let alone bill."""
 
     def explode(*args: Any, **kwargs: Any) -> None:
+        """Fail if any HTTP call is attempted at all."""
         raise AssertionError("no HTTP call may happen for an empty enrich list")
 
     monkeypatch.setattr(zoominfo.requests, "post", explode)
@@ -283,6 +296,7 @@ def test_billable_records_counts_only_full_matches() -> None:
     """NO_MATCH and OPT_OUT are free; charging a rep for them would overstate spend."""
 
     def build(status: str) -> zoominfo.ZoomInfoContactDetail:
+        """Build one enrich detail row carrying the given match status."""
         return zoominfo.ZoomInfoContactDetail(
             person_id="1",
             first_name="A",

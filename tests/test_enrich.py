@@ -544,6 +544,7 @@ def test_second_pass_over_a_fallback_outcome_reports_it_instead_of_erroring(
     assert first.name == "Dana Reyes"
 
     def _must_not_run(*args: object, **kwargs: object) -> None:
+        """Fail the test if the paid discovery chain is re-entered."""
         raise AssertionError("the paid discovery chain must not run a second time")
 
     monkeypatch.setattr(finder, "find_contact", _must_not_run)
@@ -573,6 +574,7 @@ def test_second_pass_recalls_an_org_mailbox_outcome(
     monkeypatch.setattr(finder, "linkedin_person", lambda *a, **k: None)
 
     def _write_profile(conn_: sqlite3.Connection, lid: int, *a: object) -> _Profile:
+        """Persist the org profile the real enricher would write, then report it."""
         conn_.execute(
             "UPDATE leads SET org_general_email=?,org_profile_source_url=? WHERE id=?",
             (_Profile.general_email, _Profile.source_url, lid),
@@ -584,6 +586,7 @@ def test_second_pass_recalls_an_org_mailbox_outcome(
     assert tools.enrich_lead_contact(conn, lead_id).status == "org_email"
 
     def _must_not_run(*args: object, **kwargs: object) -> None:
+        """Fail the test if the paid discovery chain is re-entered."""
         raise AssertionError("the paid discovery chain must not run a second time")
 
     monkeypatch.setattr(finder, "find_contact", _must_not_run)

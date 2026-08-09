@@ -1,5 +1,7 @@
 # Memory index — architectural-critic (grants_agent)
 
+- [Tool-result CRM marker injection](tool-result-crm-marker-injection.md) — `<grant-crm-action>` is harvested from TOOL RESULTS; any tool returning raw external text can manufacture a Salesforce approval button
+- [Five-design review 2026-08-09](five-design-review-2026-08-09.md) — fetch_url / honesty fixes / campaign chunking / ZoomInfo / follow-ups: verdicts, M1 confirmed live, the inline-UNIQUE rebuild trap, the snapshot-id fix nobody proposed
 - [Persequor handoff is a no-op](persequor-handoff-noop.md) — shipped approve flow writes contacted/sent_at but Persequor verifiably drops bot mentions
 - [Workflow design review 2026-07](workflow-design-review-2026-07.md) — verdict + required changes for docs/workflow_design.md (request_id pinning, build-order reorder, stuck-state semantics)
 - [Grant on-chat search weak spots](grant-onchat-search-weakspots.md) — durable failure modes in search.py/conversation.py/tools.py/finder.py: prose-only turn state, non-deterministic top-N, not_found honesty gap, missing lead_id, sync handler, untested state machine
@@ -10,7 +12,8 @@
 - [Drip slot + gold pool reality](drip-slot-and-gold-pool.md) — slot collapses to 3 clock times, no missed-slot fallback (window clamp fixed 85295d7); pool = ~195 same-day SVPP then ~347 undated CA rows
 - [Soft state tags the wrong rep](soft-state-tags-the-wrong-rep.md) — RESOLVED by 85295d7's VERIFIED_STATE_SOURCES allowlist; the underlying `_row_state` prose inference is still wrong
 - [Drip wedge class: remaining paths](drip-wedge-class-remaining-paths.md) — RESOLVED (quarantine_lead, SlackApiError split, drip-blocked); kept for the pre-reservation-raise pattern
-- [Rich→daily fallback wiring](rich-daily-fallback-wiring.md) — 2026-08-05 exact-string fallback classifier: sound by enumeration, but 4/5 strings drift-untested; pacing_ok blind to slot rows (followups race); legacy leads burnable by invalid_blocks
+- [Rich→daily fallback wiring](rich-daily-fallback-wiring.md) — exact-string fallback classifier; drift risk CLOSED via shared _SKIP_* constants (verified 2026-08-06); pacing_ok blind to slot rows (followups race); legacy leads burnable by invalid_blocks
+- [Routing silence revision 5f09200](routing-silence-revision-5f09200.md) — approved; route block now conditional (blocks[1] may be award); silent mention-drop when conversations_members fails; stale routing.py docstring
 - [Rich award-card design review](rich-award-card-design-review.md) — pre-impl REJECT of docs/rich_award_card_design.md: freshness has no run-linkage schema, snapshot dedup defeats drift + policy-bump re-post, posts.kind CHECK repeat, mutable-pointer leak on thread path, not_relevant rollback double-post; local DB has ZERO verified award events
 - [Rich delivery has no resume path](rich-delivery-no-resume-path.md) — delivery.run attempts a stable award EXACTLY once, never resumes a reservation; so any "store X, reuse on retry" idempotency scheme (e.g. the image slack_file_id) is dead code, and a 2nd Slack write adds an ambiguous surface that must fall back to text, never burn the lead
 - [Authoritative-directory substring bind](authoritative-directory-substring-bind.md) — RESOLVED 2026-07-23 r2: exact query-value/path-segment match; draft-ready now requires EXACT_WEBSITE_PROVENANCE (nces), heuristic website capped at research-needed; tldextract eTLD+1 same-site. Kept for the substring-vs-exact lesson

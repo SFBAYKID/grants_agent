@@ -22,13 +22,12 @@ forces "skip: daily cap reached (1)", which never falls back. Releases
 posts+outbox but NOT `proactive_daily_slots`) therefore fails CLOSED, not open.
 
 **Durable weak spots — re-check these on any change to delivery.py / drip.py / followups:**
-1. **String drift is untested for 4 of 5 strings.** `tests/test_drip_card.py` compares the
-   classifier against ITS OWN literal copies; only the cutoff string is derivation-protected
-   and integration-tested against real `should_post` output. Rewording e.g.
-   "skip: no rich award card satisfies every evidence rule" in `run()` passes the whole
-   suite and silently kills the primary fallback → permanent cardless flag-on days, exit 0.
-   Fix: shared module-level outcome constants, or drive `run()` into each state and assert
-   `fallback_to_daily(actual)`.
+1. **CLOSED (verified 2026-08-06 against deployed 5f09200):** module-level `_SKIP_*`
+   constants in delivery.py are now the same objects at every `run()` return site
+   (lines 181/192/201/235) AND inside `_FALLBACK_EXACT`, so wording drift between the
+   producer and the classifier is structurally impossible; `tests/test_drip_card.py`'s
+   literal copies now actively pin the exact strings. The cutoff string stays derived
+   from `pacing.HARD_CUTOFF_PT` on both sides.
 2. **Legacy pacing is blind to slot rows.** Safe sequentially (see above), but
    `slack/salesforce_followups.py` uses `reserve_daily_slot` as its ONLY arbitration vs the
    drip when rich is enabled and writes neither posts nor outbox. A followup run CONCURRENT
@@ -47,6 +46,18 @@ posts+outbox but NOT `proactive_daily_slots`) therefore fails CLOSED, not open.
    cardless day, exit 0. No sweeper exists. See [[rich-delivery-no-resume-path]].
 6. The rich dry-run preview returns before veto/freeze/prior checks, so `--dry-run` can
    report "would post rich_award" on a tick whose real run would fall back to the daily card.
+
+**Full outcome-tree enumeration (2026-08-06, for Chase's "will the card fire" ask):** the
+ONLY leaf that ends a day cardless with routine exit-0 is legacy `pick()` returning None →
+"skip: nothing new worth saying" — reachable solely when gold+silver-RFP+bulletin pools are
+ALL empty (honest silence, data-unreachable while the ~500-lead gold backlog exists). Every
+other no-card leaf either recovers at a later same-day tick (backoff holds, legacy
+slot-target later than the current tick — the 11:30 rich-cutoff tick always falls back and
+satisfies any band target; clamp guarantees targets ≤16:30 are reachable) or exits non-zero
+(blocked/error/unknown/quarantined). Consumed-attempt leaves (quarantine/rejected/unknown)
+cap the REST of the day silent at exit 0, but only after one loud non-zero tick — by design.
+`quarantine_lead` writes a lead_id-bearing outbox row, so it counts toward
+`delivery_attempts_today` and burns the day's cap.
 
 No consumer reads `notification_outbox.payload_json` (grepped 2026-08-05), so the new
 "blocks" payload key is inert. Header labels ("GOLD · Verified award" etc.) are backed by

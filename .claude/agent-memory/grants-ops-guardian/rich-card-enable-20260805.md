@@ -30,8 +30,9 @@ Exact changes (both verified 2026-08-06T05:47–48Z, fail-closed diffs):
   (07:45 PT weekdays = after 07:00 poll, before the 10:00–10:45 rich slot). sha256
   `6275d5025455ddfa1af9dd44715fa13297b7a6a5374b9a9cf5bfc78769a44711` →
   `70e309aacb1631ad9492dc2290d62ef4aadd95aebccc8fc26c23d6261488876f`.
-  Backup `~/crontab.before.20260806T054829Z`. **Any future crontab check must expect 5 lines /
-  the 70e309aa… sha, not the old 4-line 6275d502… baseline.**
+  Backup `~/crontab.before.20260806T054829Z`. **STALE BASELINE — superseded:** by 2026-08-09 the
+  live crontab was 10 lines, sha `575fbc7c…041a72` (drift not made by the guardian; contents not yet
+  characterized). See [[env-zoominfo-20260809]] for the current baseline.
 - NO bot restart — verified unnecessary from source: `cli.cmd_drip` re-reads the flag per process;
   the listener never reads it; buttons bind to frozen snapshots; bot already runs 359c1e3 (PID 633555
   unchanged throughout).
