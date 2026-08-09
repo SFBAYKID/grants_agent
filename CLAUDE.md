@@ -118,6 +118,49 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-09, live-tested)
+
+- `verified` 2026-08-09 SIX PLAYGROUND THREADS driven as a real user, deliberately messy.
+  Nebraska (search → gold filter → campaign preview with working Confirm buttons → delete
+  refusal → ZoomInfo free preview + approved 2-record paid pull → LinkedIn misattribution
+  refusal → supplied phone recorded → campaign status). Michigan (*"hey do we have
+  anything good in michigan"*; *"whats the story with bellaire? are they a small
+  district"* → ~260 students, $1,900/student; *"yeah check salesforce for bellaire"* →
+  two matches flagged POSSIBLE not certain, health-centre one called out as probably
+  unrelated, working links, deferred to the existing owner). Texas (*"can u put together
+  a spreadsheet of all the open rfps"* → honest zero-result with real alternatives;
+  *"just email me the 29 texas ones"* → **Grant CORRECTED ITS OWN EARLIER NUMBER**
+  unprompted — "the real count is 516, not the 29 I mentioned earlier" — said plainly it
+  cannot send email, and attached `grant_search.xlsx` (73 KB) instead. That is the exact
+  dead-end that lost Kerry on 2026-07-24.) Ambiguity (*"go enrich this"* with no context
+  → ONE short question, "which lead do you mean?"; *"the bellaire one in michigan"* →
+  resolved, enriched, honest not_found, and volunteered the Salesforce ownership
+  conflict). And asked whether the Nebraska campaign existed → correctly said it did NOT
+  find it and asked for the exact name, rather than claiming a campaign whose Confirm
+  button was never clicked.
+- `verified` 2026-08-09 THE ATTRIBUTION SURFACES TO THE USER BY ITSELF: asked to recap,
+  Grant said the Scottsbluff phone is "David Davis's direct line, which you gave me and I
+  logged as supplied by you". That sentence is the whole point of `human_asserted`.
+- `verified` 2026-08-09 SALESFORCE CHECKED IN THE BROWSER, not just the API: "California
+  Grant 2026" opened in Lightning showing real Lead members (Birmingham Community
+  Charter, Montebello Unified, San Ysidro, Fairfax, Valle Lindo, Galt Joint Union).
+  ZoomInfo's own web app renders blank in that browser context, so its DATA was verified
+  against an INDEPENDENT source instead — Scottsbluff's own site lists "David Davis,
+  Director of Information Technology", corroborated by LinkedIn and a local newspaper.
+  Checking ZoomInfo's UI would only have been the same source twice.
+- `verified` 2026-08-09 **THE FOLLOW-UP WORKER COULD NOT WORK ITS OWN BACKLOG.** With a
+  2-day grace and a 5-day drop window the eligible slice was only THREE days wide, so
+  everything that accumulated while the feature was off aged out before the feature could
+  see it — 28 of 36 due subjects were already unreachable on the day it shipped, and all
+  18 PLAYGROUND subjects with them. `DROP_AFTER` widened to 14 days. A test pins the other
+  end so the worker does not become an archaeologist.
+- `verified` 2026-08-09 MY MESSAGES CANNOT WAKE GRANT WITHOUT AN @-MENTION, and that is a
+  harness artifact, NOT a product defect: messages sent through the Claude Slack app carry
+  an `app_id`, and `grant.py:295` deliberately ignores those (the guard that stops
+  bot-to-bot loops — the same guard that limited the damage from Monarch_Sales_Agent). A
+  human typing in a thread has no `app_id`, so plain replies work for real reps. Proven by
+  reading the raw Slack payload and by a plain reply from me being correctly ignored.
+
 ## Current status (2026-08-09, final)
 
 - `verified` 2026-08-09 **CHASE'S "RIGID, PROGRAMMATIC" FAILURE IS FIXED AND PROVEN LIVE.**
