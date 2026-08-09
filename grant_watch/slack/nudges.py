@@ -30,7 +30,7 @@ from typing import Any
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-from .. import db, reminders
+from .. import db, reminders, roster, territory
 from ..migrations_nudges import NUDGE_SUBJECT_KINDS
 from ..presentation import display_entity_name
 from .drip import PT as BUSINESS_TZ
@@ -57,7 +57,21 @@ GRACE = {
     # anyway; there is nothing to wait for here, because the event being reported is
     # that Grant itself gained an ability.
     "capability_now_available": timedelta(0),
+    # A manager hears about it only after the rep has had a fair run at it: the
+    # rep's own follow-up lands at 2 days, so 4 gives them two clear business days
+    # to answer before anyone else is told. Escalating sooner turns a nudge into
+    # telling on a colleague.
+    "card_escalated": timedelta(days=4),
+    # A day is long enough that someone who simply got pulled away has had a chance
+    # to come back on their own, and short enough that the thread is still live.
+    "thread_abandoned": timedelta(days=1),
 }
+
+# Kinds delivered as a DIRECT MESSAGE rather than a threaded reply. Everything else
+# in this worker is a reply in the thread the work lives in; an escalation is about
+# someone else's silence and does not belong in the channel where they can see it
+# being reported.
+DM_KINDS = frozenset({"card_escalated"})
 # How long a subject stays worth mentioning. Five days made the eligible window only
 # THREE days wide (grace takes the first two), which had a consequence nobody
 # intended: every subject that accumulated while this feature was switched off aged
@@ -198,7 +212,8 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
     message says "nothing has come back HERE", never "nobody followed up".
     """
     rows = conn.execute(
-        """SELECT p.id,p.channel,p.ts,p.posted_at,p.lead_id,l.entity_name,l.status
+        """SELECT p.id,p.channel,p.ts,p.posted_at,p.lead_id,
+                  l.entity_name,l.status,l.state,l.source,l.amount
              FROM posts p LEFT JOIN leads l ON l.id=p.lead_id
             WHERE p.lead_id IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM engagement e WHERE e.post_id=p.id)
@@ -209,21 +224,52 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
         posted = _parse(row["posted_at"])
         if posted is None or posted > now:
             continue
+        # WHO DID THE CARD ACTUALLY TAG? Recomputed through the SAME gate the card
+        # used, so the follow-up can only name a rep the card itself named. Using
+        # `owner_for_state` alone would tag people on cards that went out untagged,
+        # because an inferred state can own a territory but may never tag a human.
+        tagged = ""
+        if territory.state_is_verified(row["source"]):
+            tagged = territory.owner_for_state(row["state"]) or ""
+        observed = {
+            "entity_name": str(row["entity_name"] or ""),
+            "lead_status": str(row["status"] or ""),
+            "lead_id": int(row["lead_id"] or 0),
+            "amount_usd": int(row["amount"] or 0),
+            "channel": str(row["channel"] or ""),
+            "card_ts": str(row["ts"] or ""),
+            "tagged_slack": tagged,
+        }
         out.append(
             NudgeCandidate(
                 subject_kind="card_unengaged",
                 subject_id=str(row["id"]),
                 audience=str(row["channel"] or ""),
-                target_slack="",  # a card belongs to the channel, not one person
+                # A tagged card is one person's to answer; an untagged one belongs to
+                # the channel and is still asked about without naming anybody.
+                target_slack=tagged,
                 anchor_ts=str(row["ts"] or ""),
                 stalled_at=posted,
-                observed={
-                    "entity_name": str(row["entity_name"] or ""),
-                    "lead_status": str(row["status"] or ""),
-                    "lead_id": int(row["lead_id"] or 0),
-                },
+                observed=observed,
             )
         )
+        manager = roster.manager_slack_id()
+        # ESCALATION IS A SEPARATE SUBJECT so it carries its own grace, its own
+        # one-shot key, and its own opt-out check. It only exists when a specific
+        # person was asked and did not answer — an untagged card has nobody to
+        # escalate ABOUT, and telling a manager "nobody replied" is not actionable.
+        if tagged and manager and manager != tagged:
+            out.append(
+                NudgeCandidate(
+                    subject_kind="card_escalated",
+                    subject_id=str(row["id"]),
+                    audience=manager,
+                    target_slack=manager,
+                    anchor_ts=str(row["ts"] or ""),
+                    stalled_at=posted,
+                    observed=observed,
+                )
+            )
     return out
 
 
@@ -269,6 +315,53 @@ def _capability_asks(conn: sqlite3.Connection) -> list[NudgeCandidate]:
     return out
 
 
+def _abandoned_threads(conn: sqlite3.Connection) -> list[NudgeCandidate]:
+    """Conversations where Grant demonstrably failed to answer, and nobody came back.
+
+    THE SIGNAL IS GRANT'S OWN ADMISSION, not an inference about the human. A receipt
+    reaches `needs_reconciliation` when the turn's action or its final message did not
+    complete — the "I'm having trouble thinking right now" replies, the messages
+    truncated mid-word, the turns that produced nothing at all. Reading it this way
+    means the follow-up says "I didn't get back to you", which Grant can prove, rather
+    than "you didn't finish", which it cannot: the rep may well have gone and done the
+    work by hand.
+
+    Only the LATEST receipt in a thread qualifies. If the person sent anything
+    afterwards they came back on their own, and there is nothing to apologise for.
+    """
+    rows = conn.execute(
+        """SELECT r.event_id,r.channel,r.thread_ts,r.slack_user,r.received_at,r.error
+             FROM slack_event_receipts r
+            WHERE r.state='needs_reconciliation'
+              AND r.reviewed_at IS NULL
+              AND r.thread_ts IS NOT NULL
+              AND r.slack_user IS NOT NULL
+              AND NOT EXISTS (
+                    SELECT 1 FROM slack_event_receipts later
+                     WHERE later.channel=r.channel
+                       AND later.thread_ts=r.thread_ts
+                       AND later.received_at>r.received_at)
+            ORDER BY r.received_at DESC LIMIT 40"""
+    ).fetchall()
+    out: list[NudgeCandidate] = []
+    for row in rows:
+        received = _parse(row["received_at"])
+        if received is None:
+            continue
+        out.append(
+            NudgeCandidate(
+                subject_kind="thread_abandoned",
+                subject_id=str(row["event_id"]),
+                audience=str(row["channel"] or ""),
+                target_slack=str(row["slack_user"] or ""),
+                anchor_ts=str(row["thread_ts"] or ""),
+                stalled_at=received,
+                observed={"error": str(row["error"] or "")},
+            )
+        )
+    return out
+
+
 def candidates(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandidate]:
     """Every piece of unfinished work Grant can honestly ask about, oldest first."""
     found = (
@@ -276,6 +369,7 @@ def candidates(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandidate]:
         + _stalled_batches(conn)
         + _unengaged_cards(conn, now)
         + _capability_asks(conn)
+        + _abandoned_threads(conn)
     )
     ready = [
         item
@@ -427,8 +521,23 @@ def build_message(candidate: NudgeCandidate) -> str:
         )
     if candidate.subject_kind == "capability_now_available":
         return _capability_message(candidate, mention)
+    if candidate.subject_kind == "card_escalated":
+        return _escalation_message(candidate, mention)
+    if candidate.subject_kind == "thread_abandoned":
+        return (
+            f"{mention}I never got you a proper answer on this one, and it looks like "
+            "it stalled there. Want me to pick it back up?"
+        )
     entity = display_entity_name(str(candidate.observed.get("entity_name") or ""))
     subject = entity or "that lead"
+    if mention:
+        # The card named this person, so the follow-up asks THEM rather than the room.
+        # Addressing the channel about a card that pinged one rep produced a
+        # follow-up nobody owned, which is how nine cards drew no reply at all.
+        return (
+            f"{mention}still nothing back on {subject} — though that's only what I "
+            "can see here. Want me to find a contact, or shall I drop it?"
+        )
     return (
         f"Anyone want {subject}? Nothing's come back here and I've got no activity "
         "logged on it — though that's only what I can see. I can find a contact or "
@@ -528,11 +637,26 @@ def run(
         if client is None:
             return "skip: no Slack client configured"
         try:
-            response = client.chat_postMessage(
-                channel=candidate.audience,
-                thread_ts=candidate.anchor_ts,
-                text=text,
-            )
+            if candidate.subject_kind in DM_KINDS:
+                # A DM has no thread to reply into, so the card is linked instead.
+                # The permalink is fetched from Slack rather than assembled from a
+                # guessed workspace URL — a broken link in an escalation is worse
+                # than no link, because the whole message is "go look at this".
+                link = _permalink(
+                    client,
+                    str(candidate.observed.get("channel") or ""),
+                    str(candidate.observed.get("card_ts") or ""),
+                )
+                response = client.chat_postMessage(
+                    channel=candidate.audience,
+                    text=f"{text}\n{link}" if link else text,
+                )
+            else:
+                response = client.chat_postMessage(
+                    channel=candidate.audience,
+                    thread_ts=candidate.anchor_ts,
+                    text=text,
+                )
         except SlackApiError as exc:
             code = str(exc.response.get("error") or "")
             # A missing thread is permanent; anything else may or may not have
@@ -608,3 +732,45 @@ def _finish(
                 nudge_id,
             ),
         )
+
+
+def _escalation_message(candidate: NudgeCandidate, mention: str) -> str:
+    """Tell a manager one lead went unanswered — briefly, and without accusing anyone.
+
+    Chase asked for this and asked for it SHORT. The care needed is in what it does
+    not say: Grant sees Slack and its own tables, so "nothing's come back here" is
+    true and "she never followed up" is not — the rep may have phoned the district
+    from the car. Naming the money and the person is the point (it is what makes the
+    message actionable), so the sentence around them has to be exact.
+    """
+    entity = display_entity_name(str(candidate.observed.get("entity_name") or ""))
+    amount = int(candidate.observed.get("amount_usd") or 0)
+    who = str(candidate.observed.get("tagged_slack") or "")
+    money = f"${amount:,} " if amount > 0 else ""
+    owner = f"<@{who}>" if who else "the territory rep"
+    subject = entity or "a lead"
+    return (
+        f"{mention}heads up — {money}{subject} went to {owner} and nothing's come "
+        "back here since. Could just be handled offline. Want me to find a contact "
+        "and draft something?"
+    )
+
+
+def _permalink(client: WebClient, channel: str, message_ts: str) -> str:
+    """Slack's own permalink for one message, or "" when it cannot be obtained.
+
+    Asked of Slack rather than built from a workspace URL, because a hand-assembled
+    link that 404s turns an escalation into a dead end. Any failure degrades to no
+    link at all; the message still names the organization and the rep.
+    """
+    if not channel or not message_ts:
+        return ""
+    try:
+        return str(
+            client.chat_getPermalink(channel=channel, message_ts=message_ts).get(
+                "permalink"
+            )
+            or ""
+        )
+    except Exception:  # noqa: BLE001 — a missing link must never block the message
+        return ""

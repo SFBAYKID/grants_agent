@@ -450,3 +450,150 @@ def test_someone_who_opted_out_is_not_nudged_and_is_not_burned(
     reminders.clear_optout(conn, REP)
     assert "nudged" in nudges.run(client, conn, now=NOW)
     conn.close()
+
+
+def _card(
+    conn: sqlite3.Connection,
+    when: datetime,
+    *,
+    state: str = "PA",
+    source: str = "usaspending:svpp",
+    amount: int = 500000,
+) -> None:
+    """A posted card for a lead in one state, from one source."""
+    conn.execute(
+        "INSERT INTO leads (id,source,source_item_id,entity_name,state,detail_url,"
+        "amount,status) VALUES (900,?,'x','HOXIE SCHOOL DISTRICT',?,'u',?,'new')",
+        (source, state, amount),
+    )
+    conn.execute(
+        "INSERT INTO posts (id,channel,ts,posted_at,lead_id,kind) "
+        "VALUES (900,?,'800.1',?,900,'nugget')",
+        (CHANNEL, when.isoformat()),
+    )
+    conn.commit()
+
+
+def test_a_card_follow_up_asks_the_rep_the_card_actually_tagged(
+    tmp_path: Path,
+) -> None:
+    """A tagged card is one person's to answer, so the follow-up names them.
+
+    It previously addressed the channel, which is why a card that pinged a rep and
+    got no answer produced a follow-up nobody owned.
+    """
+    conn = _conn(tmp_path)
+    _card(conn, NOW - timedelta(days=3))  # PA -> Brett; usaspending:svpp is verified
+    found = [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_unengaged"
+    ]
+    assert found and found[0].target_slack == "U08C1NBH875"
+    assert "<@U08C1NBH875>" in nudges.build_message(found[0])
+    conn.close()
+
+
+def test_an_inferred_state_still_cannot_name_a_human(tmp_path: Path) -> None:
+    """The follow-up must use the SAME gate the card used.
+
+    `owner_for_state` alone would tag a rep on a card that went out UNTAGGED, because
+    a source that only inferred the state may never tag anybody. That would invent a
+    claim of ownership the card itself never made — and the aggregator really does
+    read "1600 Pennsylvania Avenue" as PA.
+    """
+    conn = _conn(tmp_path)
+    _card(conn, NOW - timedelta(days=3), source="rfp-aggregator")
+    found = [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_unengaged"
+    ]
+    assert found and found[0].target_slack == ""
+    assert "<@" not in nudges.build_message(found[0])
+    # And with nobody tagged there is nobody to escalate about.
+    assert not [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_escalated"
+    ]
+    conn.close()
+
+
+def test_the_manager_hears_about_it_only_after_the_rep_has_had_a_fair_run(
+    tmp_path: Path,
+) -> None:
+    """Escalating on day one turns a follow-up into telling on a colleague."""
+    conn = _conn(tmp_path)
+    _card(conn, NOW - timedelta(days=2))
+    assert not [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_escalated"
+    ], "the manager was told before the rep had a chance to answer"
+
+    conn.execute("DELETE FROM posts")
+    conn.execute("DELETE FROM leads")
+    _card(conn, NOW - timedelta(days=5))
+    escalations = [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_escalated"
+    ]
+    assert len(escalations) == 1
+    escalation = escalations[0]
+    # It is a DM to the manager, not a reply in the channel the rep can see.
+    assert escalation.audience == "U01DFJWQQJ3"
+    assert escalation.subject_kind in nudges.DM_KINDS
+    text = nudges.build_message(escalation)
+    assert "<@U01DFJWQQJ3>" in text
+    assert "$500,000" in text
+    assert "<@U08C1NBH875>" in text
+    # It reports Grant's own view and does not assert what the rep did.
+    assert "nothing's come back here" in text
+    for accusation in ("didn't follow up", "never followed up", "ignored"):
+        assert accusation not in text.lower()
+    conn.close()
+
+
+def test_an_abandoned_conversation_is_only_reopened_if_nobody_came_back(
+    tmp_path: Path,
+) -> None:
+    """The signal is Grant's own failed turn, not a judgement about the human.
+
+    And if the person sent anything afterwards they returned under their own steam,
+    so there is nothing to apologise for.
+    """
+    conn = _conn(tmp_path)
+    stalled = NOW - timedelta(days=2)
+    conn.execute(
+        "INSERT INTO slack_event_receipts (event_id,workspace,channel,thread_ts,"
+        "slack_user,state,received_at) VALUES ('ev1','T1',?,'700.1',?, "
+        "'needs_reconciliation',?)",
+        (CHANNEL, REP, stalled.isoformat()),
+    )
+    conn.commit()
+    found = [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "thread_abandoned"
+    ]
+    assert len(found) == 1
+    assert found[0].target_slack == REP
+    text = nudges.build_message(found[0])
+    assert "never got you a proper answer" in text
+    assert f"<@{REP}>" in text
+
+    # The rep posts again in the same thread: they came back, so drop it.
+    conn.execute(
+        "INSERT INTO slack_event_receipts (event_id,workspace,channel,thread_ts,"
+        "slack_user,state,received_at) VALUES ('ev2','T1',?,'700.1',?,'complete',?)",
+        (CHANNEL, REP, (stalled + timedelta(hours=1)).isoformat()),
+    )
+    conn.commit()
+    assert not [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "thread_abandoned"
+    ]
+    conn.close()
+
+
+def test_opting_out_silences_the_manager_escalation_too(tmp_path: Path) -> None:
+    """A manager who asked for quiet gets quiet, like anybody else."""
+    from grant_watch import reminders
+
+    conn = _conn(tmp_path)
+    _card(conn, NOW - timedelta(days=5))
+    reminders.set_optout(conn, "U01DFJWQQJ3", scope="all")
+    escalation = [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_escalated"
+    ][0]
+    assert nudges.suppress_reason(conn, escalation, NOW) == "opted_out"
+    conn.close()

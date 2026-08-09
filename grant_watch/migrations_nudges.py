@@ -35,6 +35,8 @@ NUDGE_SUBJECT_KINDS = (
     "crm_batch_partial",  # the rep chose to proceed with only the resolved subset
     "card_unengaged",  # a daily card drew no reply, reaction, or CRM action
     "capability_now_available",  # someone asked for something Grant could not do yet
+    "card_escalated",  # a tagged rep never answered; the manager is told once
+    "thread_abandoned",  # a human stopped mid-conversation and never came back
 )
 
 # What a rep asked for that Grant had to refuse. The value is the CAPABILITY, not the

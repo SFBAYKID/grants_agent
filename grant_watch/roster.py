@@ -49,3 +49,21 @@ def email_for_slack(slack_id: object) -> str | None:
     """Resolve an exact Slack id to its approved roster email."""
     wanted = str(slack_id or "").strip()
     return next((item.email for item in identities() if item.slack_id == wanted), None)
+
+
+def manager_slack_id() -> str | None:
+    """The Slack id an unanswered lead escalates to, or None when it is ambiguous.
+
+    Escalation tells a manager that a named colleague has not responded, so getting
+    it wrong is a message about the wrong person to the wrong person. Exactly one
+    roster row may carry `manager: true`; zero or several return None and the
+    escalation simply does not happen. Fail closed, never guess.
+    """
+    body = json.loads(REPS_PATH.read_text())
+    approved = {item.slack_id for item in identities()}
+    managers = [
+        str(raw.get("slack_id") or "")
+        for raw in body.get("reps", [])
+        if raw.get("manager") is True and str(raw.get("slack_id") or "") in approved
+    ]
+    return managers[0] if len(managers) == 1 else None
