@@ -271,10 +271,22 @@ def _sent_today(
 
 
 def pacing_reason(
-    conn: sqlite3.Connection, candidate: NudgeCandidate, now: datetime
+    conn: sqlite3.Connection,
+    candidate: NudgeCandidate,
+    now: datetime,
+    *,
+    force: bool = False,
 ) -> str:
-    """Why this nudge must wait, or '' when the caps allow it now."""
-    if not in_window(now):
+    """Why this nudge must wait, or '' when the caps allow it now.
+
+    `force` skips ONLY the business-hours window — the operator override for "send
+    it now", used to exercise this path outside a weekday. It deliberately does not
+    touch the one-shot rule, the suppression re-checks, or the daily caps: those are
+    what stop a nudge being wrong or being nagging, and an override that skipped them
+    would be testing something other than the real behaviour. Same shape as the drip's
+    force, which was fixed today for exactly the opposite reason.
+    """
+    if not force and not in_window(now):
         return "outside business hours"
     today = _sent_today(conn, candidate.audience, now)
     if len(today) >= MAX_NUDGES_PER_DAY:
@@ -338,6 +350,7 @@ def run(
     conn: sqlite3.Connection,
     *,
     dry_run: bool = False,
+    force: bool = False,
     now: datetime | None = None,
 ) -> str:
     """Deliver at most ONE nudge per invocation, reserving before Slack is called.
@@ -360,7 +373,7 @@ def run(
             if not dry_run:
                 _record(conn, candidate, current, state="suppressed", reason=reason)
             continue
-        waiting = pacing_reason(conn, candidate, current)
+        waiting = pacing_reason(conn, candidate, current, force=force)
         if waiting:
             return f"skip: {waiting}"
         text = build_message(candidate)

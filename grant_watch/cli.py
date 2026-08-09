@@ -434,7 +434,7 @@ def cmd_salesforce_followups(dry_run: bool, smoke: bool) -> int:
     return 1 if outcome.startswith("unknown:") else 0
 
 
-def cmd_nudge(dry_run: bool) -> int:
+def cmd_nudge(dry_run: bool, force: bool = False) -> int:
     """Deliver at most one proactive follow-up about work left unfinished.
 
     A dry run opens a READ-ONLY connection, so any accidental write raises rather
@@ -447,7 +447,7 @@ def cmd_nudge(dry_run: bool) -> int:
 
     client = None if dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     conn = db.connect_readonly() if dry_run else db.connect()
-    outcome = nudges.run(client, conn, dry_run=dry_run)
+    outcome = nudges.run(client, conn, dry_run=dry_run, force=force)
     print(f"nudge: {outcome}")
     return 1 if outcome.startswith("nudge failed") else 0
 
@@ -577,6 +577,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="actually post; without it this is a dry run",
     )
+    p_nudge.add_argument(
+        "--force",
+        action="store_true",
+        help="skip the business-hours window only; caps and dedup still apply",
+    )
     p_followups = sub.add_parser(
         "salesforce-followups", help="check Grant-created Campaign Leads for follow-up"
     )
@@ -626,7 +631,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "nudge":
         # Default to a dry run: a command that posts to a team channel should never
         # do so because someone forgot a flag.
-        return cmd_nudge(dry_run=not args.execute)
+        return cmd_nudge(dry_run=not args.execute, force=bool(args.force))
     if args.command == "salesforce-followups":
         return cmd_salesforce_followups(args.dry_run, args.smoke)
     if args.command == "slack-failures":

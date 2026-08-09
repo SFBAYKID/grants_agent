@@ -298,3 +298,43 @@ def test_every_declared_subject_kind_has_a_message(tmp_path: Path) -> None:
         message = nudges.build_message(candidate)
         assert len(message) > 40, kind
         assert "?" in message, kind
+
+
+def test_force_skips_the_window_but_not_the_one_shot_rule(tmp_path: Path) -> None:
+    """The operator override sends now — it does not make Grant nag.
+
+    force exists so this path can be exercised outside a weekday. It deliberately
+    skips ONLY the business-hours window: the one-shot rule, the suppression
+    re-checks and the daily caps are what stop a nudge being wrong or being
+    repetitive, and an override that skipped those would be testing something other
+    than the real behaviour.
+    """
+    conn = _conn(tmp_path)
+    saturday = datetime(2026, 8, 8, 18, 0, tzinfo=timezone.utc)  # 11:00 PT, a Saturday
+    _expired_preview(conn, saturday - timedelta(hours=6))
+    client = _Client()
+
+    assert "skip:" in nudges.run(client, conn, now=saturday)
+    assert client.posts == []
+
+    assert "nudged" in nudges.run(client, conn, force=True, now=saturday)
+    assert len(client.posts) == 1
+
+    # Still one-shot, even forced.
+    assert "nothing to follow up" in nudges.run(
+        client, conn, force=True, now=saturday + timedelta(hours=5)
+    )
+    assert len(client.posts) == 1
+    conn.close()
+
+
+def test_force_does_not_bypass_suppression(tmp_path: Path) -> None:
+    """A subject that resolved must stay silent however hard an operator pushes."""
+    conn = _conn(tmp_path)
+    _expired_preview(conn, NOW - timedelta(days=1))
+    conn.execute("UPDATE crm_actions SET state='complete' WHERE id='act-1'")
+    conn.commit()
+    client = _Client()
+    assert "nothing to follow up" in nudges.run(client, conn, force=True, now=NOW)
+    assert client.posts == []
+    conn.close()
