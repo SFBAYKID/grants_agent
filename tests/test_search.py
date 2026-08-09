@@ -776,11 +776,22 @@ def test_with_contacts_export_has_contact_columns(
     assert artifact is not None
     sheet = load_workbook(artifact.path).active
     header = [c.value for c in sheet[1]]
-    assert header[-4:] == list(
-        ("contact_name", "contact_title", "contact_email", "contact_status")
+    # Indexed BY NAME, not by position: the previous version asserted the last four
+    # headers and then located emails at `len(header) - 1`, so widening the contact
+    # columns silently moved the column it was reading.
+    assert header[-6:] == list(
+        (
+            "contact_name",
+            "contact_title",
+            "contact_email",
+            "contact_status",
+            "contact_phone",
+            "org_phone",
+        )
     )
+    email_column = header.index("contact_email") + 1
     emails = [
-        sheet.cell(row=r, column=len(header) - 1).value
+        sheet.cell(row=r, column=email_column).value
         for r in range(2, sheet.max_row + 1)
     ]
     assert any(e and "@" in str(e) for e in emails)

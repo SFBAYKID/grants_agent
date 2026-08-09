@@ -19,6 +19,7 @@ from ..record_semantics import semantics_for
 from .. import db
 from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact, make_spreadsheet
+from .search_enrichment import MAX_ENRICH_ROWS, _CONTACT_COLUMNS, _enrich_contacts
 from .search_presentation import contact_suffix as _contact_suffix
 from .search_presentation import entity_role_for_row as _entity_role_for_row
 from .search_presentation import grade_phrases as _grade_phrases
@@ -36,14 +37,6 @@ _NOOP: Progress = _noop
 
 MAX_INLINE_LIMIT = 100
 MAX_EXPORT_ROWS = 5_000
-MAX_ENRICH_ROWS = 10  # hard ceiling on per-search contact lookups (cost + latency)
-ENRICH_TIME_BUDGET_S = (
-    420.0  # stop enriching past this wall-clock; disclose the partial. Raised
-    # from 240 when the per-org fallback chain (LinkedIn + org mailbox) landed.
-)
-
-_CONTACT_COLUMNS = ("contact_name", "contact_title", "contact_email", "contact_status")
-
 _SEARCH_COLUMNS = (
     "source",
     "source_item_id",
@@ -342,48 +335,6 @@ def _export_kind(raw: str | bool) -> str:
     if raw is False or raw == "":
         return ""
     return _enum_value(ExportFormat, str(raw), "export format")
-
-
-def _enrich_contacts(
-    rows: list[sqlite3.Row],
-    db_target: Path | str,
-    requested_limit: int,
-    on_progress: Progress | None,
-) -> tuple[list[list[object]], str]:
-    """Find each shown org's best contact on ONE writable connection, honestly and
-    within a wall-clock budget. Returns per-row [name, title, email, status] cells (one
-    per input row, always) plus a disclosure note. Runs AFTER the read-only snapshot is
-    closed. Per-org failures degrade to an explicit cell, never sink the batch or
-    fabricate a contact; an unreachable source records nothing (retryable)."""
-    import time
-
-    from . import tools  # local import: avoids the tools<->search cycle at module load
-
-    say = on_progress or _NOOP
-    cells: list[list[object]] = []
-    conn = db.connect(db_target)
-    deadline = time.monotonic() + ENRICH_TIME_BUDGET_S
-    try:
-        for index, row in enumerate(rows, start=1):
-            if time.monotonic() > deadline:
-                cells.append(["", "", "", "not checked (time budget)"])
-                continue
-            say(f"Looking for contacts ({index}/{len(rows)})")
-            try:
-                outcome = tools.enrich_lead_contact(conn, int(row["id"]), say)
-                cells.append(
-                    [outcome.name, outcome.title, outcome.email, outcome.status]
-                )
-            except Exception:  # noqa: BLE001 — one org's failure must not sink the batch
-                cells.append(["", "", "", "error"])
-    finally:
-        conn.close()
-    note = (
-        f" (Contacts limited to the top {MAX_ENRICH_ROWS} to stay responsive.)"
-        if requested_limit > MAX_ENRICH_ROWS
-        else ""
-    )
-    return cells, note
 
 
 def search_leads(

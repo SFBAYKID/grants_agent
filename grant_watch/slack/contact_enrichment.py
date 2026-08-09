@@ -73,6 +73,7 @@ def enrich_lead_contact(
             c["email"] or "",
             c["phone"] or "",
             c["source_url"] or "",
+            str(lead["org_phone"] or ""),
         )
     if any(
         c["contact_status"] == "not_found" for c in db.contacts_for_lead(conn, lead_id)
@@ -110,6 +111,7 @@ def enrich_lead_contact(
             candidate.email,
             candidate.phone,
             candidate.source_url,
+            str(lead["org_phone"] or ""),
         )
 
     from ..campaign import paid_calls
@@ -157,6 +159,7 @@ def _recall_prior_outcome(
     )
     general_email = str(lead["org_general_email"] or "")
     profile_source = str(lead["org_profile_source_url"] or "")
+    org_phone = str(lead["org_phone"] or "")
     if linkedin is not None and general_email:
         return ContactOutcome(
             "linkedin_org_email",
@@ -165,6 +168,7 @@ def _recall_prior_outcome(
             general_email,
             "",
             str(linkedin["source_url"] or ""),
+            org_phone,
         )
     if linkedin is not None:
         return ContactOutcome(
@@ -174,9 +178,12 @@ def _recall_prior_outcome(
             "",
             "",
             str(linkedin["source_url"] or ""),
+            org_phone,
         )
     if general_email:
-        return ContactOutcome("org_email", "", "", general_email, "", profile_source)
+        return ContactOutcome(
+            "org_email", "", "", general_email, "", profile_source, org_phone
+        )
     return None
 
 
@@ -213,12 +220,17 @@ def _fallback_contact(
         )
     general_email = ""
     profile_source = ""
+    org_phone = ""
     try:
         profile = enrich_org_profile(conn, lead_id, on_progress)
         general_email = profile.general_email
         profile_source = profile.source_url
+        org_phone = profile.phone
     except Exception:  # noqa: BLE001 — org-profile misses degrade honestly too
         general_email = ""
+    # org_phone rides in its OWN field on every branch below. A LinkedIn-sourced
+    # person has no phone of their own, so putting the switchboard in `phone` would
+    # invent a direct line for exactly the people whose identity is least verified.
     if person is not None and general_email:
         return ContactOutcome(
             "linkedin_org_email",
@@ -227,6 +239,7 @@ def _fallback_contact(
             general_email,
             "",
             str(person["url"]),
+            org_phone,
         )
     if person is not None:
         return ContactOutcome(
@@ -236,8 +249,11 @@ def _fallback_contact(
             "",
             "",
             str(person["url"]),
+            org_phone,
         )
     if general_email:
-        return ContactOutcome("org_email", "", "", general_email, "", profile_source)
+        return ContactOutcome(
+            "org_email", "", "", general_email, "", profile_source, org_phone
+        )
     db.mark_contact_not_found(conn, lead_id)
     return ContactOutcome("not_found")

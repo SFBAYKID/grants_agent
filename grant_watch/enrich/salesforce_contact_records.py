@@ -201,6 +201,25 @@ def choose_email(contact: sqlite3.Row, lead: sqlite3.Row) -> tuple[str, str]:
     return "", ""
 
 
+def choose_phone(contact: sqlite3.Row, lead: sqlite3.Row) -> tuple[str, str]:
+    """Pick the best verified phone and label its kind: direct | org_general | ''.
+
+    The exact counterpart of choose_email, and it exists for the same reason. The
+    payload already fell back to the organization's main line when a person had no
+    direct number, but — unlike email — said nothing about it. An SDR opening that
+    Lead dialled a district switchboard believing it was the named person's line,
+    which is a claim no source supports. A LinkedIn-sourced person in particular
+    never has a phone of their own, so the fallback fired on exactly the contacts
+    whose identity was least verified.
+    """
+    if contact["phone"]:
+        return str(contact["phone"]), "direct"
+    org_phone = _lead_value(lead, "org_phone")
+    if org_phone:
+        return org_phone, "org_general"
+    return "", ""
+
+
 def _infer_industry(lead: sqlite3.Row) -> str:
     """Infer the CRM Industry only when the org type is unambiguous, else ''."""
     entity = str(lead["entity_name"] or "")
@@ -258,12 +277,11 @@ def contact_lead_payload(
     if email:
         payload["Email"] = email
     # Phone: the person's verified line if we have it, otherwise the org's main line.
-    person_phone = str(contact["phone"] or "")
-    org_phone = _lead_value(lead, "org_phone")
-    if person_phone:
-        payload["Phone"] = person_phone
-    elif org_phone:
-        payload["Phone"] = org_phone
+    # Salesforce Lead has one Phone field and no place to say whose line it is, so
+    # the kind is disclosed in the Note body instead (see grant_note_payload).
+    phone, _phone_kind = choose_phone(contact, lead)
+    if phone:
+        payload["Phone"] = phone
     if lead["state"] or _lead_value(lead, "org_state"):
         payload["State"] = str(lead["state"] or "") or _lead_value(lead, "org_state")
     # City: the org's mailing city (address) is preferred over the NCES office city.
@@ -357,9 +375,17 @@ def grant_note_payload(
         f"• Lead: {contact['name']}, {_contact_title_phrase(lead, contact)}",
         email_line,
     ]
-    phone = str(contact["phone"] or "") or _lead_value(lead, "org_phone")
+    phone, phone_kind = choose_phone(contact, lead)
     if phone:
-        lines.append(f"• Phone: {phone}")
+        lines.append(
+            {
+                "direct": f"• Phone: {phone} (direct, verified)",
+                "org_general": (
+                    f"• Phone: {phone} (organization main line — a direct number "
+                    f"for {contact['name']} was not found)"
+                ),
+            }.get(phone_kind, f"• Phone: {phone}")
+        )
     address = _address_line(lead)
     if address:
         lines.append(f"• Address: {address}")
@@ -516,12 +542,17 @@ def _preview_text(
             "direct": "Email (direct)",
             "general": "Email (org general — not the individual's)",
         }.get(email_kind, "Email")
+        _phone, phone_kind = choose_phone(contact, lead)
+        phone_label = {
+            "direct": "Phone (direct)",
+            "org_general": "Phone (org main line — not the individual's)",
+        }.get(phone_kind, "Phone")
         shown = [
             ("FirstName", "FirstName"),
             ("LastName", "LastName"),
             ("Title", "Title"),
             ("Email", email_label),
-            ("Phone", "Phone"),
+            ("Phone", phone_label),
             ("Company", "Company"),
             ("Street", "Street"),
             ("City", "City"),

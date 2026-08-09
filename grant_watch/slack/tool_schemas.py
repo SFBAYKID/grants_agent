@@ -16,7 +16,7 @@ from .salesforce_campaign_tools import (
     CAMPAIGN_BATCH_TOOL_SCHEMA,
     CAMPAIGN_CREATE_TOOL_SCHEMA,
 )
-from .search import MAX_ENRICH_ROWS
+from .search_enrichment import MAX_ENRICH_ROWS
 from .source_status import SOURCE_STATUS_TOOL_SCHEMA
 
 # Tool schemas passed to the Anthropic API (the model picks; we execute).

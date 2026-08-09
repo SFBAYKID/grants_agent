@@ -107,20 +107,29 @@ def entity_role_for_row(row: sqlite3.Row) -> str:
 
 
 def contact_suffix(cell: list[object]) -> str:
-    """Render one enriched contact cell [name, title, email, status] as a short inline
-    suffix for the summary — honest about not_found / unreachable, never fabricated."""
-    name, title, email, status = (list(cell) + ["", "", "", ""])[:4]
+    """Render one enriched contact cell as a short inline suffix for the summary —
+    honest about not_found / unreachable, never fabricated.
+
+    The cell is [name, title, email, status, phone, org_phone]. The two phone fields
+    stay separate all the way to the rendered line: `phone` is the named person's own
+    verified number, `org_phone` is the organization's switchboard, and the wording
+    below never lets the second be read as the first."""
+    name, title, email, status, phone, org_phone = (list(cell) + [""] * 6)[:6]
+    direct = f" · direct {phone}" if phone else ""
+    main_line = f" · main line {org_phone}" if org_phone else ""
     if status == "verified":
         who = f"{name} ({title})".strip()
-        return f" · contact: {who} {email}".rstrip()
+        return f" · contact: {who} {email}{direct}{main_line}".rstrip()
     if status == "linkedin_org_email":
         who = f"{name} ({title})".strip() if title else str(name)
-        return f" · contact: {who} via LinkedIn; org mailbox {email}"
+        return f" · contact: {who} via LinkedIn; org mailbox {email}{main_line}"
     if status == "linkedin_only":
         who = f"{name} ({title})".strip() if title else str(name)
-        return f" · contact: {who} via LinkedIn (no email verified)"
+        return f" · contact: {who} via LinkedIn (no email verified){main_line}"
     if status == "org_email":
-        return f" · contact: general mailbox {email} (no named person verified)"
+        return (
+            f" · contact: general mailbox {email} (no named person verified){main_line}"
+        )
     if status == "not_found":
         return " · contact: none found (site, LinkedIn, and org mailbox all checked)"
     if status == "unreachable":
