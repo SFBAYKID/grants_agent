@@ -62,9 +62,26 @@ def migration_32_human_asserted_contacts(conn: sqlite3.Connection) -> None:
     )
     _add_column(conn, "contacts", "asserted_by_slack_user TEXT")
     _add_column(conn, "contacts", "asserted_at TIMESTAMP")
-    # Carry forward what migration 29 established, so `provenance` is complete from
-    # the moment it exists and nothing has to consult two columns.
+    # `provenance` is AUTHORITATIVE from here on; `contact_provenance` is frozen
+    # legacy that nothing reads. Every writer in db_contacts.py now sets `provenance`
+    # at insert, so the column stays complete rather than depending on a one-shot
+    # backfill — which is what went wrong the first time: migration 29 filled
+    # `contact_provenance` once, every contact created afterwards had it NULL, and a
+    # guard reading it computed "not page-verified" for genuinely verified rows.
     conn.execute(
         "UPDATE contacts SET provenance=contact_provenance "
         "WHERE provenance IS NULL AND contact_provenance IS NOT NULL"
     )
+    # Rows created between migration 29 and this one have BOTH columns NULL, so the
+    # class has to be re-derived from the status they do carry — the same mapping
+    # migration 29 used, which is why repeating it is safe.
+    for status, value in (
+        ("verified", "page_verified"),
+        ("linkedin_only", "linkedin_claimed"),
+        ("vendor_licensed", "vendor_licensed"),
+    ):
+        conn.execute(
+            "UPDATE contacts SET provenance=? WHERE provenance IS NULL "
+            "AND contact_status=?",
+            (value, status),
+        )

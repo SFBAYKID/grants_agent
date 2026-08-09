@@ -126,7 +126,7 @@ def test_zoominfo_tools_say_so_honestly_when_unconfigured(
     monkeypatch.delenv("ZOOMINFO_CLIENT_ID", raising=False)
     monkeypatch.delenv("ZOOMINFO_CLIENT_SECRET", raising=False)
     assert tools.zoominfo_contact_preview(1).startswith("ERROR:")
-    assert tools.zoominfo_enrich_contacts(1, ["1"]).startswith("ERROR:")
+    assert tools.zoominfo_enrich_contacts(1, ["1"], "U0REP").startswith("ERROR:")
 
 
 def test_the_paid_pull_refuses_an_oversized_batch_before_spending(
@@ -141,7 +141,7 @@ def test_the_paid_pull_refuses_an_oversized_batch_before_spending(
         raise AssertionError("no vendor call may happen for an oversized batch")
 
     monkeypatch.setattr(zoominfo, "enrich_contacts", explode)
-    out = tools.zoominfo_enrich_contacts(1, [str(n) for n in range(30)])
+    out = tools.zoominfo_enrich_contacts(1, [str(n) for n in range(30)], "U0REP")
     assert out.startswith("ERROR:")
     assert "25" in out
 
@@ -167,7 +167,7 @@ def test_the_paid_pull_refuses_when_no_budget_is_configured(
         raise AssertionError("no vendor call may happen without a budget")
 
     monkeypatch.setattr(zoominfo, "enrich_contacts", explode)
-    out = tools.zoominfo_enrich_contacts(1, ["12345"])
+    out = tools.zoominfo_enrich_contacts(1, ["12345"], "U0REP")
     assert out.startswith("ERROR:")
     assert "budget" in out.lower()
 
@@ -207,3 +207,15 @@ def test_a_removal_request_is_refused_before_the_model_can_answer(ask: str) -> N
 def test_ordinary_requests_are_not_mistaken_for_removals(ask: str) -> None:
     """The guard must not swallow normal work — both halves have to match."""
     assert deterministic_reply(ask) is None
+
+
+def test_a_paid_pull_without_a_named_requester_is_refused() -> None:
+    """Money leaving the account must be attributable to a person.
+
+    The first real production spend recorded an empty requester because this
+    argument defaulted to "". It is now required AND checked, so the gap cannot
+    reopen by someone omitting it at a new call site.
+    """
+    out = tools.zoominfo_enrich_contacts(1, ["12345"], "")
+    assert out.startswith("ERROR:")
+    assert "who's asking" in out

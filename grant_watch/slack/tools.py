@@ -712,7 +712,6 @@ def _dispatch_tool(
                 title=str(args.get("title", "")),
                 email=str(args.get("email", "")),
                 phone=str(args.get("phone", "")),
-                contact_id=int(args.get("contact_id", 0) or 0),
             ), None
         except Exception as exc:
             _log_tool_failure("record_contact_fact")

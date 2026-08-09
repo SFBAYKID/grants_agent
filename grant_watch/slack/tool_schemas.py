@@ -58,16 +58,12 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "director is Y'. Do NOT refuse because the detail did not come from a "
         "source you pulled: the rep is the authority on what they tell you, and it "
         "is stored as supplied-by-them with the date, so nothing is passed off as "
-        "something you verified. Pass contact_id to attach it to a contact you "
-        "already found, or omit it to create a new one.",
+        "something you verified. It is saved as its own contact record alongside "
+        "anything already found, never written over evidence from a real page.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "lead_id": {"type": "integer"},
-                "contact_id": {
-                    "type": "integer",
-                    "description": "existing contact to attach the detail to",
-                },
                 "name": {"type": "string"},
                 "title": {"type": "string"},
                 "email": {"type": "string"},

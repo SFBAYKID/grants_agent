@@ -11,6 +11,7 @@ there, so existing `tools.<name>` call sites are unchanged.
 
 from __future__ import annotations
 
+import re
 import sys
 import traceback
 from collections.abc import Callable
@@ -93,7 +94,7 @@ def zoominfo_contact_preview(lead_id: int, job_title: str = "") -> str:
 
 
 def zoominfo_enrich_contacts(
-    lead_id: int, person_ids: list[str], requester_slack: str = ""
+    lead_id: int, person_ids: list[str], requester_slack: str
 ) -> str:
     """PAID ZoomInfo pull: one credit per returned record. Requires a human yes first.
 
@@ -105,6 +106,11 @@ def zoominfo_enrich_contacts(
 
     if not zoominfo.configured():
         return "ERROR: ZoomInfo isn't configured on this server."
+    if not requester_slack:
+        # Money leaving the account must be attributable. The first real production
+        # spend recorded an empty requester because this defaulted to "" and nobody
+        # noticed; a required argument plus this check makes that unrepeatable.
+        return "ERROR: I can't tell who's asking, so I won't spend credits."
     ids = [str(pid).strip() for pid in person_ids if str(pid).strip()]
     if not ids:
         return (
@@ -288,7 +294,6 @@ def record_contact_fact(
     title: str = "",
     email: str = "",
     phone: str = "",
-    contact_id: int = 0,
 ) -> str:
     """Store a contact detail the REP supplied, attributed to them.
 
@@ -296,49 +301,49 @@ def record_contact_fact(
     case. The rule stops Grant inventing a contact and calling it discovered; it was
     never meant to stop a person telling Grant something true. Recording who said it
     and when keeps the record honest without making the rep fight for it.
+
+    It lands as its OWN contact row rather than editing one Grant already verified —
+    an in-place edit left the row still reading `verified` while carrying a value
+    nobody checked, and a rep-typed email was proven to reach an outbound brief that
+    way. The reply is built from what the database actually wrote, never from the
+    arguments, so Grant cannot report storing something it dropped.
     """
     if not requester_slack:
         return "ERROR: I can't tell who's asking, so I won't attribute this to anyone."
     if not any((name, title, email, phone)):
         return "ERROR: nothing to record — give me a name, title, email or phone."
+    if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", email.strip()):
+        return (
+            f"ERROR: {email!r} doesn't look like an email address — check it and "
+            "send it again."
+        )
+    if phone and len(re.sub(r"\D", "", phone)) < 7:
+        return (
+            f"ERROR: {phone!r} doesn't look like a phone number — check it and send "
+            "it again."
+        )
     conn = db.connect()
-    if db.get_lead(conn, int(lead_id)) is None:
+    lead = db.get_lead(conn, int(lead_id))
+    if lead is None:
         return f"ERROR: I don't have a lead #{lead_id}."
-    try:
-        stored_id, refused = db.save_human_asserted_contact(
-            conn,
-            int(lead_id),
-            name=name,
-            title=title,
-            email=email,
-            phone=phone,
-            asserted_by=requester_slack,
-            contact_id=int(contact_id) or None,
-        )
-    except ValueError as exc:
-        return f"ERROR: {exc}"
-    # Echo the VALUES back, not just the field names: the rep is confirming Grant
-    # captured what they typed, and a bare "phone" tells them nothing about whether
-    # a digit was dropped.
-    saved = ", ".join(
-        f"{label} {value}"
-        for label, value in (
-            ("name", name),
-            ("title", title),
-            ("email", email),
-            ("phone", phone),
-        )
-        if value and label not in refused
+    values = {"name": name, "title": title, "email": email, "phone": phone}
+    stored_id, written = db.save_human_asserted_contact(
+        conn,
+        int(lead_id),
+        name=name,
+        title=title,
+        email=email,
+        phone=phone,
+        asserted_by=requester_slack,
     )
-    parts = [
-        f"Recorded on lead #{lead_id} (contact #{stored_id}): {saved}. "
-        f"Marked as supplied by <@{requester_slack}> today, so anyone looking at it "
-        "later can see where it came from."
-    ]
-    if refused:
-        parts.append(
-            f"I kept the existing {', '.join(refused)} — that value was verified on "
-            "the organization's own page, and I won't overwrite verified evidence. "
-            "Tell me to replace it and I'll add yours alongside instead."
-        )
-    return " ".join(parts)
+    if not written:
+        return "ERROR: nothing was recorded — give me a name, title, email or phone."
+    detail = ", ".join(f"{label} {values[label]}" for label in written)
+    # Name the ORGANISATION, not just an internal id: the rep cannot tell from
+    # "lead #1603" whether Grant resolved the district they meant.
+    entity = str(lead["entity_name"] or f"lead #{lead_id}")
+    return (
+        f"Got it — recorded against {entity}: {detail}. Saved as supplied by "
+        f"<@{requester_slack}> today, so anyone looking later can see where it came "
+        "from rather than assuming I verified it."
+    )

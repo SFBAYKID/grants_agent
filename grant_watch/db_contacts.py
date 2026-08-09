@@ -42,8 +42,8 @@ def save_contact(
     cur = conn.execute(
         """INSERT INTO contacts
              (lead_id,name,title,email,phone,source_url,confidence,contact_status,
-              official_domain,field_evidence_json)
-           VALUES (?,?,?,?,?,?,?,'verified',?,?)""",
+              official_domain,field_evidence_json,provenance)
+           VALUES (?,?,?,?,?,?,?,'verified',?,?,'page_verified')""",
         (
             lead_id,
             name,
@@ -87,8 +87,9 @@ def save_vendor_contact(
     cur = conn.execute(
         """INSERT INTO contacts
              (lead_id,name,title,email,phone,source_url,confidence,contact_status,
-              contact_provenance,do_not_call,vendor_person_id)
-           VALUES (?,?,?,?,?,'','medium','vendor_licensed','vendor_licensed',?,?)""",
+              contact_provenance,provenance,do_not_call,vendor_person_id)
+           VALUES (?,?,?,?,?,'','medium','vendor_licensed','vendor_licensed',
+                   'vendor_licensed',?,?)""",
         (
             lead_id,
             name,
@@ -112,47 +113,38 @@ def save_human_asserted_contact(
     email: str = "",
     phone: str = "",
     asserted_by: str,
-    contact_id: int | None = None,
 ) -> tuple[int, list[str]]:
-    """Record a contact fact a NAMED REP supplied. Returns (contact id, refused fields).
+    """Record a contact fact a NAMED REP supplied, ALWAYS as its own row.
+
+    Returns (contact id, list of fields actually written).
 
     Grant used to refuse these outright, which was the honesty rule applied to the
     wrong case: it exists to stop Grant INVENTING a contact and presenting it as
     discovered, not to stop a human telling Grant something true. A rep who types a
     number is the authority on it, so the honest response is to record WHO said it
-    and WHEN, and show that wherever the fact is shown. Attribution is the mechanism.
+    and WHEN. Attribution is the mechanism, not refusal.
 
-    The one thing it will not do is overwrite a value Grant verified verbatim on the
-    organization's own page — that would let a typo silently destroy real evidence.
-    Those fields come back in the refused list so the caller can say so out loud.
+    THIS NEVER EDITS AN EXISTING ROW, and that is the whole safety property. An
+    earlier version filled empty fields on the contact the rep named, which left the
+    row still reading `contact_status='verified'` while now carrying a value nobody
+    verified — a rep-typed email was proven to reach the Persequor outreach brief
+    that way, because grant.py selects the brief's contact on exactly that status.
+    A separate row cannot do that: `human_asserted` matches no `== 'verified'`
+    comparison anywhere. It also keeps attribution truthful, since
+    `asserted_by_slack_user` is per ROW — after an in-place edit you could no longer
+    tell which field the human supplied.
     """
     now = _now()
-    if contact_id is not None:
-        row = conn.execute(
-            "SELECT * FROM contacts WHERE id=? AND lead_id=?", (contact_id, lead_id)
-        ).fetchone()
-        if row is None:
-            raise ValueError(f"contact {contact_id} does not belong to lead {lead_id}")
-        page_verified = str(row["provenance"] or "") == "page_verified"
-        refused: list[str] = []
-        updates: dict[str, str] = {}
-        for column, value in (("email", email), ("phone", phone), ("title", title)):
-            if not value:
-                continue
-            existing = str(row[column] or "")
-            if existing and page_verified:
-                refused.append(column)
-                continue
-            updates[column] = value
-        if updates:
-            assignments = ",".join(f"{column}=?" for column in updates)
-            conn.execute(
-                f"UPDATE contacts SET {assignments},asserted_by_slack_user=?,"
-                "asserted_at=? WHERE id=?",
-                (*updates.values(), asserted_by, now, contact_id),
-            )
-            conn.commit()
-        return contact_id, refused
+    written = [
+        label
+        for label, value in (
+            ("name", name),
+            ("title", title),
+            ("email", email),
+            ("phone", phone),
+        )
+        if value
+    ]
     cur = conn.execute(
         """INSERT INTO contacts
              (lead_id,name,title,email,phone,source_url,confidence,contact_status,
@@ -161,7 +153,7 @@ def save_human_asserted_contact(
         (lead_id, name, title, email, phone, asserted_by, now),
     )
     conn.commit()
-    return int(cur.lastrowid), []
+    return int(cur.lastrowid), written
 
 
 def save_linkedin_contact(
@@ -177,8 +169,9 @@ def save_linkedin_contact(
     ownership is not verified, so contact_status is 'linkedin_only'."""
     cur = conn.execute(
         """INSERT INTO contacts
-             (lead_id,name,title,email,phone,source_url,confidence,contact_status)
-           VALUES (?,?,?,NULL,NULL,?,'medium','linkedin_only')""",
+             (lead_id,name,title,email,phone,source_url,confidence,contact_status,
+              provenance)
+           VALUES (?,?,?,NULL,NULL,?,'medium','linkedin_only','linkedin_claimed')""",
         (lead_id, name, title, profile_url),
     )
     conn.commit()

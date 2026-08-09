@@ -131,11 +131,25 @@ _ADDITIVE_RE = re.compile(
 
 
 def removal_request(user_text: str) -> bool:
-    """True when the rep is asking Grant to destroy or undo something."""
-    lowered = user_text.lower()
-    if _ADDITIVE_RE.search(lowered):
-        return False
-    return bool(_REMOVAL_VERB.search(lowered) and _REMOVAL_OBJECT.search(lowered))
+    """True when ANY clause of the message asks Grant to destroy or undo something.
+
+    Checked clause by clause, not message-wide. An earlier version returned False the
+    moment an additive verb appeared ANYWHERE, so "delete that campaign and add the
+    new one" or "can you fix this — remove those members" sailed past the guard on
+    the strength of one unrelated word. Splitting first means an additive verb only
+    excuses the clause it is actually in, and a removal anywhere still refuses.
+    """
+    clauses = re.split(
+        r"[,;.!?:]|\band\b|\bthen\b|\bbut\b|\balso\b|\n|—|--", user_text.lower()
+    )
+    for clause in clauses:
+        if not clause.strip():
+            continue
+        if _ADDITIVE_RE.search(clause):
+            continue
+        if _REMOVAL_VERB.search(clause) and _REMOVAL_OBJECT.search(clause):
+            return True
+    return False
 
 
 def deterministic_reply(

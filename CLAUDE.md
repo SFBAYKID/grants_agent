@@ -104,6 +104,12 @@ affect Chase's other projects.
 ## Working agreements
 
 - In **every** summary you give Chase, mark each claim `verified` / `assumed` / `needs-testing`.
+- **Style, reconciled 2026-08-09:** Grant's ALERTS and replies keep the existing rules —
+  paragraph spacing, no internal identifiers, no emoji. **Follow-up NUDGES are the
+  deliberate exception**: one short line, no paragraph spacing, and a light touch of
+  emoji is allowed. Chase's call, because reps were not replying to the formal wording
+  and a nudge that reads like a colleague poking you is the whole point. Recorded here
+  so the divergence is not silently "fixed" back.
 - Prefer **official APIs > published PDFs/pages > scraping portals.** Respect `robots.txt`; sleep
   between requests — these are government servers, do not hammer them.
 - Small commits per working increment; a `--dry-run` flag on anything that posts to Slack or drafts email.

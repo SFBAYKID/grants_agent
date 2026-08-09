@@ -86,5 +86,20 @@ def _never_touch_the_real_database(
             )
         return _real_connect(db_path, *args, **kwargs)
 
+    def guarded_readonly(db_path: object = None, *a: object, **k: object) -> object:
+        """Refuse a read-only connection to the real database as well.
+
+        It cannot corrupt anything, but a test that reads the developer's real leads
+        passes here and fails in CI — the same contamination, a different symptom.
+        """
+        if db_path is None or Path(str(db_path)).resolve() == real:
+            raise AssertionError(
+                f"{request.node.nodeid} tried to READ the real database at {real}. "
+                "Pass an explicit tmp_path."
+            )
+        return _real_readonly(db_path, *a, **k)
+
     _real_connect = db.connect
+    _real_readonly = db.connect_readonly
     monkeypatch.setattr(db, "connect", guarded)
+    monkeypatch.setattr(db, "connect_readonly", guarded_readonly)
