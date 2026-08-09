@@ -194,27 +194,6 @@ def test_later_target_failure_cancels_earlier_undelivered_action(
     )
 
 
-def test_batch_refuses_the_201st_unique_organization(tmp_path: Path) -> None:
-    """The Salesforce collection limit fails closed without truncating a selection."""
-    conn = db.connect(tmp_path / "batch.db")
-    _insert_leads(conn, "IL", LeadGrade.GOLD, 201, 0)
-    with pytest.raises(ValueError, match="201 unique organizations"):
-        prepare_campaign_batch(
-            conn,
-            BatchGateway(),
-            "TWORK",
-            "CGRANTS",
-            "123.4",
-            "UREP",
-            (
-                CampaignTargetRequest(
-                    _link("Campaign", CAMPAIGNS["IL"][0]), "IL", ("gold",)
-                ),
-            ),
-        )
-    assert conn.execute("SELECT COUNT(*) FROM crm_campaign_batches").fetchone()[0] == 0
-
-
 def test_success_without_readback_is_unknown_not_added(tmp_path: Path) -> None:
     """A successful POST cannot produce a positive result without Salesforce evidence."""
     conn = db.connect(tmp_path / "batch.db")

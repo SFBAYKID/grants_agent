@@ -14,6 +14,13 @@ class CampaignTargetRequest:
     campaign_link: str
     state: str
     grades: tuple[str, ...]
+    # Which 200-organization slice of this selection to prepare, zero-based.
+    # Salesforce accepts at most 200 records per collection call, and the selection
+    # for a whole state and tier is routinely larger — 347 for California silver,
+    # the request that dead-ended an SDR because the only advice on offer was
+    # "refine", which the tool's own filters (state + tier) cannot express. Slices
+    # are cut from ONE ordered selection so an organization lands in exactly one.
+    slice_index: int = 0
 
 
 @dataclass(frozen=True)

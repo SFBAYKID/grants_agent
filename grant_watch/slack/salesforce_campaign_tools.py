@@ -82,6 +82,17 @@ CAMPAIGN_BATCH_TOOL_SCHEMA: dict[str, Any] = {
                             "minItems": 1,
                             "maxItems": 3,
                         },
+                        "slice_index": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Zero-based batch number. Salesforce "
+                            "takes at most 200 organizations at a time, so a large "
+                            "state and tier is split into ordered batches. Omit "
+                            "(or 0) for the first; the preview tells you how many "
+                            "there are, and you run the next by asking for "
+                            "slice_index 1, then 2. NEVER tell the rep the campaign "
+                            "is complete until every batch has been approved.",
+                        },
                     },
                     "required": ["campaign_link", "state", "grades"],
                 },
@@ -218,6 +229,7 @@ def salesforce_campaign_batch_preview(
                 campaign_link=str(target.get("campaign_link", "")),
                 state=str(target.get("state", "")),
                 grades=tuple(str(item) for item in target.get("grades", []) or []),
+                slice_index=int(target.get("slice_index", 0) or 0),
             )
         )
     try:

@@ -359,9 +359,17 @@ def _target_summary(target: dict[str, object]) -> str:
     counts: dict[str, int] = defaultdict(int)
     for item in target["items"]:
         counts[str(item["resolution_state"])] += 1
+    slice_count = int(target.get("slice_count", 1) or 1)
+    position = ""
+    if slice_count > 1:
+        position = (
+            f" [batch {int(target.get('slice_index', 0)) + 1} of {slice_count}; "
+            f"{target.get('total_organizations')} organizations in total, "
+            f"{MAX_ACTION_ORGANIZATIONS} per batch]"
+        )
     summary = (
-        f"• {target['campaign'].name}: {target['source_row_count']} Grant rows, "
-        f"{len(target['items'])} unique organizations — "
+        f"• {target['campaign'].name}{position}: {target['source_row_count']} Grant "
+        f"rows, {len(target['items'])} unique organizations — "
         f"{counts['existing_record']} exact members, {counts['missing']} missing, "
         f"{counts['account_only']} Account-only, {counts['ambiguous']} ambiguous"
     )
@@ -522,11 +530,34 @@ def prepare_campaign_batch(
         organizations = _group_rows(rows)
         if not organizations:
             raise ValueError(f"No Grant leads matched {state} and {', '.join(grades)}")
-        if len(organizations) > MAX_ACTION_ORGANIZATIONS:
+        # Salesforce takes at most 200 records per collection call, and a whole
+        # state and tier is routinely larger. This used to raise, telling the rep to
+        # "refine the request" — advice this tool CANNOT take, because its only
+        # filters are state and grade and both were already at their finest. So the
+        # selection is cut into ordered slices instead, and the rep is told which
+        # one they are looking at and how many remain.
+        #
+        # Slices come from ONE grouped selection, computed once above: cutting per
+        # slice would let a lead added by the 07:00 poll shift membership between
+        # slice 1 and slice 2, so an organization could appear in both or neither.
+        # _group_rows returns a stable order, so slice boundaries are deterministic.
+        total_organizations = len(organizations)
+        slice_count = max(
+            1,
+            (total_organizations + MAX_ACTION_ORGANIZATIONS - 1)
+            // MAX_ACTION_ORGANIZATIONS,
+        )
+        slice_index = max(0, int(request.slice_index))
+        if slice_index >= slice_count:
             raise ValueError(
-                f"{state} has {len(organizations)} unique organizations; "
-                "refine the request below the 200-record Salesforce limit"
+                f"{state} has {total_organizations} organizations, which is "
+                f"{slice_count} batch(es) of {MAX_ACTION_ORGANIZATIONS}; "
+                f"batch {slice_index + 1} does not exist"
             )
+        window_start = slice_index * MAX_ACTION_ORGANIZATIONS
+        organizations = organizations[
+            window_start : window_start + MAX_ACTION_ORGANIZATIONS
+        ]
         bulk_resolver = getattr(gateway, "resolve_organizations", None)
         bulk_results = (
             bulk_resolver(
@@ -617,6 +648,9 @@ def prepare_campaign_batch(
                 "items": resolved_items,
                 "target_state": target_state,
                 "completion_mode": "full",
+                "slice_index": slice_index,
+                "slice_count": slice_count,
+                "total_organizations": total_organizations,
             }
         )
     blocked = any(
