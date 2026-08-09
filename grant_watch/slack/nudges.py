@@ -1,0 +1,451 @@
+"""Proactive follow-ups: Grant chasing work that was started and left unfinished.
+
+THE HONESTY BUDGET IS THE HARD PART. Silence in a Slack thread is not evidence that
+nobody acted — the rep may have phoned the district from the car, or done the work in
+Salesforce by hand. So a nudge never says "you didn't follow up". It says what Grant
+observed IN ITS OWN RECORDS, and then asks. The difference between those two sentences
+is the whole of rule 1 in a message that goes to a team channel.
+
+EVERY NUDGE IS A THREADED REPLY, never a new channel post. That is a product choice
+and a schema choice at once: it puts the nudge where the work already is, it lets a
+reply re-enter a live Grant thread for free, and it means a nudge needs neither a
+`posts` row nor a `proactive_daily_slots` claim — both of which carry CHECK constraints
+that would reject a new kind and require rebuilding a table with live foreign-key
+children.
+
+ONE NUDGE PER SUBJECT, EVER. Enforced by the schema, not by this worker. Grant has no
+evidence anyone read the first one, so a second is nagging; a rep who has deliberately
+parked something should not be asked about it again every morning.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, time, timedelta, timezone
+from typing import Any
+
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
+
+from .. import db
+from ..migrations_nudges import NUDGE_SUBJECT_KINDS
+from ..presentation import display_entity_name
+from .drip import PT as BUSINESS_TZ
+from .drip import in_window
+
+# Bumping this re-opens every subject for one more nudge under the new rules. It is
+# part of the schema's uniqueness key precisely so that is a deliberate act.
+POLICY_VERSION = "nudge-v1"
+
+# A nudge is a phone notification for whoever is mentioned, so it is capped even
+# though it does not consume the daily card slot.
+MAX_NUDGES_PER_DAY = 2
+MAX_NUDGES_PER_TARGET_PER_DAY = 1
+MIN_GAP = timedelta(hours=4)
+
+# How long after the work stalls Grant waits, and how long before it gives up. A
+# nudge about something from three weeks ago is noise, not help.
+GRACE = {
+    "crm_preview_expired": timedelta(hours=1),
+    "crm_batch_blocked": timedelta(days=1),
+    "crm_batch_partial": timedelta(days=2),
+    "card_unengaged": timedelta(days=2),
+}
+DROP_AFTER = timedelta(days=5)
+
+
+@dataclass(frozen=True)
+class NudgeCandidate:
+    """One piece of unfinished work, with the evidence its wording rests on."""
+
+    subject_kind: str
+    subject_id: str
+    audience: str
+    target_slack: str
+    anchor_ts: str
+    stalled_at: datetime
+    observed: dict[str, Any]
+
+    @property
+    def due_at(self) -> datetime:
+        """When this becomes worth mentioning."""
+        return self.stalled_at + GRACE.get(self.subject_kind, timedelta(days=1))
+
+    @property
+    def drop_after(self) -> datetime:
+        """After this it is stale; Grant drops it rather than posting late."""
+        return self.stalled_at + DROP_AFTER
+
+
+def _parse(value: object) -> datetime | None:
+    """Parse a stored ISO timestamp, returning None rather than guessing."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _abandoned_previews(conn: sqlite3.Connection) -> list[NudgeCandidate]:
+    """Previews a human was shown and never clicked.
+
+    `state='ready'` past `expires_at` means exactly that Grant offered a button and
+    the offer lapsed — NOT that the underlying work is undone. The wording downstream
+    is careful about that distinction.
+    """
+    rows = conn.execute(
+        """SELECT id,action_type,workspace,channel,thread_ts,requested_by,expires_at
+             FROM crm_actions
+            WHERE state='ready' AND expires_at IS NOT NULL"""
+    ).fetchall()
+    out: list[NudgeCandidate] = []
+    for row in rows:
+        expires = _parse(row["expires_at"])
+        if expires is None:
+            continue
+        out.append(
+            NudgeCandidate(
+                subject_kind="crm_preview_expired",
+                subject_id=str(row["id"]),
+                audience=str(row["channel"] or ""),
+                target_slack=str(row["requested_by"] or ""),
+                anchor_ts=str(row["thread_ts"] or ""),
+                stalled_at=expires,
+                observed={
+                    "action_type": str(row["action_type"] or ""),
+                    "expires_at": str(row["expires_at"] or ""),
+                },
+            )
+        )
+    return out
+
+
+def _stalled_batches(conn: sqlite3.Connection) -> list[NudgeCandidate]:
+    """Campaign batches that stopped for a human and never restarted."""
+    rows = conn.execute(
+        """SELECT id,channel,thread_ts,requested_by,state,updated_at,unique_org_count
+             FROM crm_campaign_batches
+            WHERE state IN ('blocked_resolution','partial_by_user')"""
+    ).fetchall()
+    out: list[NudgeCandidate] = []
+    for row in rows:
+        stalled = _parse(row["updated_at"])
+        if stalled is None:
+            continue
+        kind = (
+            "crm_batch_blocked"
+            if str(row["state"]) == "blocked_resolution"
+            else "crm_batch_partial"
+        )
+        out.append(
+            NudgeCandidate(
+                subject_kind=kind,
+                subject_id=str(row["id"]),
+                audience=str(row["channel"] or ""),
+                target_slack=str(row["requested_by"] or ""),
+                anchor_ts=str(row["thread_ts"] or ""),
+                stalled_at=stalled,
+                observed={"organizations": int(row["unique_org_count"] or 0)},
+            )
+        )
+    return out
+
+
+def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandidate]:
+    """Cards that drew no reply, no reaction, and no CRM action.
+
+    Grant knows only what happened in Slack and in its own tables. That is why the
+    message says "nothing has come back HERE", never "nobody followed up".
+    """
+    rows = conn.execute(
+        """SELECT p.id,p.channel,p.ts,p.posted_at,p.lead_id,l.entity_name,l.status
+             FROM posts p LEFT JOIN leads l ON l.id=p.lead_id
+            WHERE p.lead_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM engagement e WHERE e.post_id=p.id)
+            ORDER BY p.id DESC LIMIT 60"""
+    ).fetchall()
+    out: list[NudgeCandidate] = []
+    for row in rows:
+        posted = _parse(row["posted_at"])
+        if posted is None or posted > now:
+            continue
+        out.append(
+            NudgeCandidate(
+                subject_kind="card_unengaged",
+                subject_id=str(row["id"]),
+                audience=str(row["channel"] or ""),
+                target_slack="",  # a card belongs to the channel, not one person
+                anchor_ts=str(row["ts"] or ""),
+                stalled_at=posted,
+                observed={
+                    "entity_name": str(row["entity_name"] or ""),
+                    "lead_status": str(row["status"] or ""),
+                    "lead_id": int(row["lead_id"] or 0),
+                },
+            )
+        )
+    return out
+
+
+def candidates(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandidate]:
+    """Every piece of unfinished work Grant can honestly ask about, oldest first."""
+    found = (
+        _abandoned_previews(conn) + _stalled_batches(conn) + _unengaged_cards(conn, now)
+    )
+    ready = [
+        item
+        for item in found
+        if item.subject_kind in NUDGE_SUBJECT_KINDS
+        and item.anchor_ts
+        and item.audience
+        and item.due_at <= now
+    ]
+    return sorted(ready, key=lambda item: item.stalled_at)
+
+
+def suppress_reason(
+    conn: sqlite3.Connection, candidate: NudgeCandidate, now: datetime
+) -> str:
+    """Why this nudge must NOT be sent, or '' when it may go.
+
+    Re-checked immediately before the send, inside the reservation, so a subject that
+    resolved while it sat in the queue produces silence rather than a false claim.
+    """
+    if now > candidate.drop_after:
+        return "stale"
+    if db.channel_guard(conn, candidate.audience) is not None:
+        return "channel_guard_active"
+    if candidate.subject_kind == "crm_preview_expired":
+        row = conn.execute(
+            "SELECT state FROM crm_actions WHERE id=?", (candidate.subject_id,)
+        ).fetchone()
+        if row is None or str(row["state"]) != "ready":
+            return "resolved_since_queued"
+    if candidate.subject_kind.startswith("crm_batch"):
+        row = conn.execute(
+            "SELECT state FROM crm_campaign_batches WHERE id=?", (candidate.subject_id,)
+        ).fetchone()
+        if row is None or str(row["state"]) not in {
+            "blocked_resolution",
+            "partial_by_user",
+        }:
+            return "resolved_since_queued"
+    if candidate.subject_kind == "card_unengaged":
+        engaged = conn.execute(
+            "SELECT 1 FROM engagement WHERE post_id=? LIMIT 1",
+            (int(candidate.subject_id),),
+        ).fetchone()
+        if engaged is not None:
+            return "engaged_since_queued"
+        # A lead a human deliberately parked is not unfinished work.
+        if str(candidate.observed.get("lead_status") or "") in {
+            "dead",
+            "snoozed",
+            "contacted",
+            "not_relevant",
+        }:
+            return "lead_parked"
+    return ""
+
+
+def _sent_today(
+    conn: sqlite3.Connection, audience: str, now: datetime
+) -> list[sqlite3.Row]:
+    """Nudges already reserved or delivered in this Pacific day for one channel."""
+    local = now.astimezone(BUSINESS_TZ)
+    start = datetime.combine(local.date(), time.min, BUSINESS_TZ)
+    return list(
+        conn.execute(
+            """SELECT target_slack,reserved_at FROM followup_nudges
+                WHERE audience=? AND state IN ('reserved','delivered','unknown')
+                  AND reserved_at>=?""",
+            (audience, start.astimezone(timezone.utc).isoformat()),
+        )
+    )
+
+
+def pacing_reason(
+    conn: sqlite3.Connection, candidate: NudgeCandidate, now: datetime
+) -> str:
+    """Why this nudge must wait, or '' when the caps allow it now."""
+    if not in_window(now):
+        return "outside business hours"
+    today = _sent_today(conn, candidate.audience, now)
+    if len(today) >= MAX_NUDGES_PER_DAY:
+        return f"daily nudge cap reached ({MAX_NUDGES_PER_DAY})"
+    if (
+        candidate.target_slack
+        and sum(
+            1 for row in today if str(row["target_slack"]) == candidate.target_slack
+        )
+        >= MAX_NUDGES_PER_TARGET_PER_DAY
+    ):
+        return "already nudged this person today"
+    latest = max(
+        (_parse(row["reserved_at"]) for row in today if _parse(row["reserved_at"])),
+        default=None,
+    )
+    if latest is not None and now - latest < MIN_GAP:
+        return "too soon after the last nudge"
+    return ""
+
+
+def build_message(candidate: NudgeCandidate) -> str:
+    """One short, honest sentence plus a question.
+
+    Every clause is something Grant can point at in its own records. Nothing here
+    asserts what a human did or did not do outside Slack.
+    """
+    mention = f"<@{candidate.target_slack}> " if candidate.target_slack else ""
+    if candidate.subject_kind == "crm_preview_expired":
+        return (
+            f"{mention}I put a Salesforce preview together here and the approval "
+            "expired before anyone clicked it, so nothing was written.\n\n"
+            "Want me to rebuild it?"
+        )
+    if candidate.subject_kind == "crm_batch_blocked":
+        count = candidate.observed.get("organizations", 0)
+        return (
+            f"{mention}This campaign batch stopped before I could write anything — "
+            f"{count} organizations needed a decision in Salesforce first.\n\n"
+            "Want me to pick it back up, or skip the ones I couldn't match?"
+        )
+    if candidate.subject_kind == "crm_batch_partial":
+        return (
+            f"{mention}We ran this batch with only the organizations I could match, "
+            "so the rest were never added.\n\n"
+            "Want me to have another go at the ones that were left out?"
+        )
+    entity = display_entity_name(str(candidate.observed.get("entity_name") or ""))
+    subject = entity or "This one"
+    return (
+        f"{subject} hasn't had anything come back in this thread, and I haven't "
+        "recorded any activity on it either — though that only covers what I can "
+        "see.\n\n"
+        "Want me to find a contact, check Salesforce, or drop it?"
+    )
+
+
+def run(
+    client: WebClient | None,
+    conn: sqlite3.Connection,
+    *,
+    dry_run: bool = False,
+    now: datetime | None = None,
+) -> str:
+    """Deliver at most ONE nudge per invocation, reserving before Slack is called.
+
+    Ordering is guard → suppression → pacing → reserve → post, and the reservation is
+    committed BEFORE the Slack call so a crash mid-send cannot produce a second nudge
+    on the next tick. A dry run returns before any write.
+    """
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    for candidate in candidates(conn, current):
+        already = conn.execute(
+            """SELECT state FROM followup_nudges
+                WHERE subject_kind=? AND subject_id=? AND policy_version=?""",
+            (candidate.subject_kind, candidate.subject_id, POLICY_VERSION),
+        ).fetchone()
+        if already is not None:
+            continue
+        reason = suppress_reason(conn, candidate, current)
+        if reason:
+            if not dry_run:
+                _record(conn, candidate, current, state="suppressed", reason=reason)
+            continue
+        waiting = pacing_reason(conn, candidate, current)
+        if waiting:
+            return f"skip: {waiting}"
+        text = build_message(candidate)
+        if dry_run:
+            return f"[dry-run] would nudge {candidate.subject_kind}: {text}"
+        nudge_id = _record(conn, candidate, current, state="reserved", reason=None)
+        if client is None:
+            return "skip: no Slack client configured"
+        try:
+            response = client.chat_postMessage(
+                channel=candidate.audience,
+                thread_ts=candidate.anchor_ts,
+                text=text,
+            )
+        except SlackApiError as exc:
+            code = str(exc.response.get("error") or "")
+            # A missing thread is permanent; anything else may or may not have
+            # landed, and a nudge is never blind-retried.
+            state = "suppressed" if code == "thread_not_found" else "unknown"
+            _finish(conn, nudge_id, state=state, error=code)
+            return f"nudge failed ({code})"
+        except Exception as exc:  # noqa: BLE001 — ambiguity is preserved, not retried
+            _finish(conn, nudge_id, state="unknown", error=type(exc).__name__)
+            return f"nudge ambiguous ({type(exc).__name__})"
+        ts = str(response.get("ts") or "")
+        _finish(conn, nudge_id, state="delivered", error=None, slack_ts=ts)
+        return f"nudged {candidate.subject_kind} in {candidate.audience}"
+    return "skip: nothing to follow up on"
+
+
+def _record(
+    conn: sqlite3.Connection,
+    candidate: NudgeCandidate,
+    now: datetime,
+    *,
+    state: str,
+    reason: str | None,
+) -> str:
+    """Persist the reservation (or the suppression) before any Slack call."""
+    nudge_id = uuid.uuid4().hex
+    with conn:
+        conn.execute(
+            """INSERT INTO followup_nudges
+                 (id,subject_kind,subject_id,audience,target_slack,anchor_ts,
+                  policy_version,due_at,drop_after,state,suppress_reason,
+                  observed_json,delivery_key,reserved_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                nudge_id,
+                candidate.subject_kind,
+                candidate.subject_id,
+                candidate.audience,
+                candidate.target_slack,
+                candidate.anchor_ts,
+                POLICY_VERSION,
+                candidate.due_at.isoformat(),
+                candidate.drop_after.isoformat(),
+                state,
+                reason,
+                json.dumps(candidate.observed, sort_keys=True),
+                f"nudge:{candidate.subject_kind}:{candidate.subject_id}:{POLICY_VERSION}",
+                now.isoformat(),
+            ),
+        )
+    return nudge_id
+
+
+def _finish(
+    conn: sqlite3.Connection,
+    nudge_id: str,
+    *,
+    state: str,
+    error: str | None,
+    slack_ts: str = "",
+) -> None:
+    """Close out a reserved nudge with what actually happened."""
+    with conn:
+        conn.execute(
+            """UPDATE followup_nudges
+                  SET state=?,last_error=?,slack_ts=?,delivered_at=?
+                WHERE id=?""",
+            (
+                state,
+                error,
+                slack_ts or None,
+                datetime.now(timezone.utc).isoformat(),
+                nudge_id,
+            ),
+        )

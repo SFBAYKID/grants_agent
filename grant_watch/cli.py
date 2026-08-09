@@ -9,6 +9,7 @@ Usage (from the repo root, venv active):
     python -m grant_watch.cli drip-unblock [--channel ID]  # clear a channel-level block
     python -m grant_watch.cli outreach-retry [--dry-run]
     python -m grant_watch.cli salesforce-sync [--limit N] [--dry-run]
+    python -m grant_watch.cli nudge [--dry-run | --execute]
     python -m grant_watch.cli salesforce-followups [--dry-run] [--smoke]
     python -m grant_watch.cli slack-failures [--mark-reviewed EVENT_ID]
 
@@ -433,6 +434,24 @@ def cmd_salesforce_followups(dry_run: bool, smoke: bool) -> int:
     return 1 if outcome.startswith("unknown:") else 0
 
 
+def cmd_nudge(dry_run: bool) -> int:
+    """Deliver at most one proactive follow-up about work left unfinished.
+
+    A dry run opens a READ-ONLY connection, so any accidental write raises rather
+    than quietly happening — the discipline that `salesforce-sync --dry-run` lacked
+    until it was found spending live API calls.
+    """
+    from slack_sdk import WebClient
+
+    from .slack import nudges
+
+    client = None if dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    conn = db.connect_readonly() if dry_run else db.connect()
+    outcome = nudges.run(client, conn, dry_run=dry_run)
+    print(f"nudge: {outcome}")
+    return 1 if outcome.startswith("nudge failed") else 0
+
+
 def cmd_slack_failures(mark_reviewed: str = "") -> int:
     """List unresolved Slack turns or mark one manually reconciled without replay."""
     conn = db.connect() if mark_reviewed else db.connect_readonly()
@@ -549,6 +568,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="query Salesforce but write no local snapshots",
     )
+    p_nudge = sub.add_parser(
+        "nudge", help="follow up on work a rep started and left unfinished"
+    )
+    p_nudge.add_argument("--dry-run", action="store_true")
+    p_nudge.add_argument(
+        "--execute",
+        action="store_true",
+        help="actually post; without it this is a dry run",
+    )
     p_followups = sub.add_parser(
         "salesforce-followups", help="check Grant-created Campaign Leads for follow-up"
     )
@@ -595,6 +623,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_outreach_retry(args.dry_run)
     if args.command == "salesforce-sync":
         return cmd_salesforce_sync(args.limit, args.dry_run)
+    if args.command == "nudge":
+        # Default to a dry run: a command that posts to a team channel should never
+        # do so because someone forgot a flag.
+        return cmd_nudge(dry_run=not args.execute)
     if args.command == "salesforce-followups":
         return cmd_salesforce_followups(args.dry_run, args.smoke)
     if args.command == "slack-failures":
