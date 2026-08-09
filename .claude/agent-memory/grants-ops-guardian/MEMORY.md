@@ -43,4 +43,6 @@
 - [First ZoomInfo live spend](zoominfo-first-live-spend-20260809.md) — ledger correct (2 credits) but `requested_by` always ''; DNC suppression lives in save_vendor_contact; crm_campaign_attempts is batch-only; redaction regex ate ISO dates
 - [Deploy fe56807 Stage 3](deploy-fe56807-stage3.md) — LIVE 2026-08-09: schema 28→31, PID 12836, ~4s outage; migrations applied with the bot DOWN; allowlist proved behaviorally
 - [Deploy 3cf9df0 campaign-status](deploy-3cf9df0-campaign-status.md) — LIVE 2026-08-09 code-only, schema stayed 31, PID 14494; rsync needs `--no-perms`; pinned hash beat a dirty tree carrying an unfinished migration
-- [Deploy 2239a18 human-asserted (CURRENT PROD)](deploy-2239a18-human-asserted.md) — LIVE 2026-08-09 schema 31→32, PID 15679, ~1s outage; tools are 17 not the stated 18; backfill step-3 was a no-op; Chase committed twice mid-deploy
+- [Deploy 2239a18 human-asserted](deploy-2239a18-human-asserted.md) — LIVE 2026-08-09 schema 31→32, PID 15679, ~1s outage; tools are 17 not the stated 18; backfill step-3 was a no-op; Chase committed twice mid-deploy
+- [Deploy 70afa75 refusal ceiling (CURRENT PROD)](deploy-70afa75-refusal-ceiling.md) — LIVE 2026-08-09 code-only, schema stayed 32 (AST-proven), PID 16804, 2s outage; a same-day `-mmin 20` audit over-reaches into the prior deploy
+- [First human_asserted row verified](human-asserted-row-verified.md) — prod id 84 correct on every field; `verified` 19→20 was an UNRELATED lead; contacts has NO created_at; a deploy backup doubles as a forensic pre-state
