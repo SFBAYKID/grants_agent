@@ -72,9 +72,14 @@ def migration_32_human_asserted_contacts(conn: sqlite3.Connection) -> None:
         "UPDATE contacts SET provenance=contact_provenance "
         "WHERE provenance IS NULL AND contact_provenance IS NOT NULL"
     )
-    # Rows created between migration 29 and this one have BOTH columns NULL, so the
-    # class has to be re-derived from the status they do carry — the same mapping
-    # migration 29 used, which is why repeating it is safe.
+    # A row can still have BOTH columns NULL: `save_contact` (page-verified) set
+    # NEITHER until this change, so any contact discovered between migration 29 and
+    # now needs its class re-derived from the status it does carry. The vendor and
+    # LinkedIn cases are belt-and-braces — `save_vendor_contact` already wrote
+    # `contact_provenance`, so step 2 above claims those. Measured on production
+    # 2026-08-09 this loop matched ZERO rows, because no page-verified contact had
+    # been created in that window; it is correctness for other databases and for the
+    # next enrichment run, not a description of what happened here.
     for status, value in (
         ("verified", "page_verified"),
         ("linkedin_only", "linkedin_claimed"),

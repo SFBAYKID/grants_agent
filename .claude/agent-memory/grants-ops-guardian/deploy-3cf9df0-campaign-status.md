@@ -1,9 +1,13 @@
 ---
 name: deploy-3cf9df0-campaign-status
-description: Deploy fe56807→3cf9df0 on 2026-08-09 (CURRENT PROD) — code-only, schema stayed 31, PID 14494; the rsync --no-perms lesson and the dirty-working-tree near-miss
+description: Deploy fe56807→3cf9df0 on 2026-08-09 (SUPERSEDED by 2239a18) — code-only, schema stayed 31, PID 14494; the rsync --no-perms lesson and the dirty-working-tree near-miss
 metadata:
   type: project
 ---
+
+**SUPERSEDED 2026-08-09T22:23:49Z — production is now `2239a18` at schema 32, listener PID 15679.
+See [[deploy-2239a18-human-asserted]]. The record below is history; its rollback artifacts are
+still on disk.**
 
 **LIVE 2026-08-09T21:58:55Z.** Production moved `fe568077216c59fe7ec8dbe6197987e5753f6066` →
 `3cf9df0fc4b53820eea237279a59a4218731132e` (5 commits). Ships the read-only Slack tool
