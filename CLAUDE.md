@@ -114,6 +114,67 @@ affect Chase's other projects.
 
 ## Current status (2026-08-09)
 
+- `verified` 2026-08-09 **THE BIGGEST CAUSE OF SDR CONFUSION IS NOT A GRANT BUG — IT IS
+  ANOTHER BOT.** Read-only audit of all 89 Grant threads (15 in production) found
+  **`Monarch_Sales_Agent`** — the Monarch WEBSITE project's agent — is a member of
+  `C01DGT9D11D`, replies to Grant's own messages as though Grant were its user
+  ("What do you need, Grant?"), and repeatedly told **Nelly and Jocelyn that loading
+  leads into a Campaign is impossible and to use Data Loader — at the moment Grant was
+  successfully doing it.** Grant reads those posts as thread context and capitulates:
+  "Anything said earlier claiming I couldn't build the preview at all was wrong, my
+  apologies." Nelly's reply mid-thread: "What do you mean?" ACTION (Chase's call, not
+  taken): remove that bot from the channel or scope it away from Grant's threads.
+- `verified` 2026-08-09 THREAD AUDIT, six humans, 15 production threads. **Exactly ONE
+  genuine end-to-end success** (Nelly, 08-06, the production write above). The
+  dead-ends: contact enrichment returned "site unreachable" 4-of-5 and then 5-of-5 for
+  Brett; Kerry asked for 231 contacts and got a silent cap at 10/state plus "I'm having
+  trouble thinking right now", and never replied again; Kerry asked Grant to EMAIL the
+  results (it cannot); Chase hit `salesforce_lookup` refusing twice and said "Its okay
+  I can look it up myself"; Jocelyn's Google Sheet exports failed 3× because she is
+  **still not in `config/reps.json`** — the same roster trap that stopped Nelly at the
+  confirm button on 08-06 is armed for her today. `crm_actions`: 9 rows are `ready` and
+  were never clicked. `rich_card_actions` = 0 — **no human has ever clicked a rich-card
+  button.** `contacts` 81 rows: 19 verified (all with an email), 36 linkedin_only, 26
+  not_found — the no-fabrication invariant holds in the DATA.
+- `verified` 2026-08-09 the `CompletedPaidCall` crash was hitting REAL USERS: 12
+  unhandled tracebacks in `bot.log`, surfaced to Nelly as "the contact search errored
+  out … worth trying again a bit later" for four named leads. **Retry could never
+  succeed** — that sentence was false every time it was shown. Fixed locally in
+  **3adebba**; the deployed file still lacks the handler.
+- `verified` 2026-08-09 **`GRANT_SALESFORCE_WRITE_CHANNEL_IDS` DOES NOT EXIST in the
+  droplet `.env`.** With the old fail-open fallback that means the PLAYGROUND
+  `C0B02721MNK` currently has the same production-Salesforce write authority as
+  `C01DGT9D11D`. **254bd5c makes the allowlist fail CLOSED, so it is now a DEPLOY
+  PREREQUISITE: set `GRANT_SALESFORCE_WRITE_CHANNEL_IDS` before shipping that commit or
+  campaign writes stop entirely.**
+- `verified` 2026-08-09 production is cleanly at `90f0420` (90/90 `.py` files
+  byte-identical — the revision stamp is truthful), schema 28, `integrity_check` ok,
+  exactly the two known-and-approved `source_observations` FK orphans and no new ones,
+  listener PID 1227 up since 03:55 PT after a droplet reboot at 03:53. **Nine commits
+  from today are UNDEPLOYED**, including the security fix (bb4e0c9) and the live
+  user-facing crash fix (3adebba). Crontab finally characterized: 10 lines = 5 active
+  jobs + 5 comment lines, nothing unaccounted for; `nces-bind` has NEVER run (added
+  after Mon 08-03, first fire Mon 08-10). `salesforce-followups` is correctly still
+  commented out, but its comment ("subcommand absent") is STALE — the subcommand
+  exists; it must stay off for the M1 reason instead. **OregonBuys has 404'd 11 times**
+  — that poller has returned 0 items since the PDF moved.
+- `verified` 2026-08-09 **254bd5c** four guards, two of them live user-facing:
+  "this is not a bad lead" DESTROYED the lead (phrase matched without negation or
+  question handling, and the override beat the model); `find_person_linkedin` ignored a
+  requested person's name entirely and returned the first name-shaped result — a real
+  but DIFFERENT human under the name the rep typed, persisted toward a Salesforce Lead;
+  `write_channel_allowed` failed open; `lightning.force.com` links were rejected as
+  foreign though Salesforce's own UI produces them (blocked Nelly on three days).
+- `needs-testing` 2026-08-09 **A GRANT-CARD THREAD IS TOOL-DEAD** (`grant.py:496`):
+  inside a rich-card thread the only tool is `web_search`, so a rep cannot search,
+  check Salesforce, enrich, or add to a campaign in the one place leads arrive. The
+  frozen-snapshot rationale is sound but the remedy over-reaches. This blocks the card
+  follow-up work and Chase's "full workflow" requirement, and must be fixed FIRST.
+  Also open from the same review: `posts.kind` and `proactive_daily_slots.delivery_kind`
+  both carry CHECK constraints that exclude a nudge (design around them with threaded
+  replies rather than a third table rebuild); and the rich card currently renders with
+  NO buttons at all, so there is no click evidence a follow-up job could read.
+
 - `verified` 2026-08-09 **A WEB PAGE COULD MINT A SALESFORCE APPROVAL BUTTON.** Found by
   architectural-critic review of a proposed `fetch_url` tool; REPRODUCED end to end before
   fixing. `conversation.py:851` harvests `<grant-crm-action>` markers out of TOOL RESULTS,
@@ -358,7 +419,15 @@ affect Chase's other projects.
   2026-07-21 decision recorded below; `foreign_key_check` returns exactly those two and
   no new ones. **`SALESFORCE_CAMPAIGN_WRITES_ENABLED=1`** — production Campaign writes are
   ARMED (still gated per record by `verify_write_scope` + a requester-bound Slack button);
-  it was NOT changed by this deploy and no production Campaign write has fired.
+  it was NOT changed by this deploy. **CORRECTED 2026-08-09: "no production Campaign
+  write has fired" was true when written and is now FALSE.** On 2026-08-06T18:38:36Z
+  Nelly approved a write that created **13 organization-only Leads and 13 Campaign
+  Members in PRODUCTION** (`writer_is_sandbox=0`, org `00D41000002jIQ8EAM`), verified
+  from `crm_campaign_write_attempts` by the read-only thread audit. The five ledger
+  tables are therefore NO LONGER EMPTY: 2 batches, 2 targets, 28 items, 3 write
+  attempts, 1 approval attempt. The batch path itself dead-ended
+  (`blocked_resolution` → `partial_by_user`, 0 approved); the successful write came
+  through the non-batch member path.
   Outage was **25.5 minutes** (18:46:50 → 19:12:19 PT), not the ~15 estimated — the
   5.5-min keepalive drain plus per-step verification is the gap; budget 30.
   HONEST NOTES: (a) the guardian's own post-migration checker crashed with
