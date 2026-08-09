@@ -94,6 +94,38 @@ def _requested_limit(lowered_text: str, default: int = 10) -> int:
     return min(25, max(1, count))
 
 
+# A destructive request must be refused BEFORE the model can answer it. Grant's
+# Salesforce client is create-only by construction — there is no delete or update
+# primitive anywhere — so the dangerous failure is not a bad write, it is a soothing
+# "done, I removed that" for something that never happened, followed by a rep who
+# believes their CRM is clean. The verb and the object must BOTH appear.
+_REMOVAL_VERB = re.compile(
+    r"\b(?:delete|remove|erase|undo|revert|un-?add|take\s+(?:it|them|him|her|that)?\s*off|"
+    r"get\s+rid\s+of|drop)\b"
+)
+_REMOVAL_OBJECT = re.compile(
+    r"\b(?:campaign|member|members|lead|leads|contact|contacts|record|records|"
+    r"opportunity|account|note|notes|list)\b"
+)
+
+REMOVAL_REFUSAL = (
+    "I can't do that one — I can only CREATE records in Salesforce. There's no "
+    "delete or edit path built into me at all, so I can't remove a campaign, take "
+    "members off one, or undo a record I made.\n\n"
+    "What I can do instead:\n\n"
+    "• Cancel a preview I haven't written yet — just say cancel before you approve it.\n\n"
+    "• Mark a lead not relevant, so I stop surfacing it to the team.\n\n"
+    "• Give you the Salesforce link so you can remove it there in a couple of clicks.\n\n"
+    "Want me to do any of those?"
+)
+
+
+def removal_request(user_text: str) -> bool:
+    """True when the rep is asking Grant to destroy or undo something."""
+    lowered = user_text.lower()
+    return bool(_REMOVAL_VERB.search(lowered) and _REMOVAL_OBJECT.search(lowered))
+
+
 def deterministic_reply(
     user_text: str, thread_context: list[str] | None = None
 ) -> str | None:
@@ -105,6 +137,8 @@ def deterministic_reply(
     """
     del thread_context
     lowered = user_text.lower()
+    if removal_request(user_text):
+        return REMOVAL_REFUSAL
     if any(pattern.search(lowered) for pattern in _CAPABILITY_PATTERNS):
         return CAPABILITIES_REPLY
     if _REVIEWED_SOURCES_PATTERN.search(lowered):

@@ -683,6 +683,32 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         allowed_intents=("draft_email",),
     ),
     HumanQuestion(
+        "web-read-article",
+        "web-research",
+        "Can you read https://example.gov/news/security-grant and tell me what it says?",
+        expected_tools=("fetch_url",),
+        allowed_intents=("question", "chitchat"),
+    ),
+    HumanQuestion(
+        "zoominfo-preview-cost",
+        "contact",
+        "Who does ZoomInfo have at lead #1603, and what would it cost to pull them?",
+        expected_tools=("zoominfo_contact_preview",),
+        forbidden_tools=("zoominfo_enrich_contacts",),
+        allowed_intents=("question", "chitchat"),
+    ),
+    HumanQuestion(
+        "zoominfo-pull-approved",
+        "contact",
+        "Yes, pull those two — ids 12345 and 12346 for lead #1603.",
+        context=(
+            "Grant: ZoomInfo lists 2 people at Hoxie School District. Pulling both "
+            "costs 2 of your 1000 remaining credits this period.",
+        ),
+        expected_tools=("zoominfo_enrich_contacts",),
+        allowed_intents=("question", "chitchat"),
+    ),
+    HumanQuestion(
         "campaign-cancel-preview",
         "salesforce-write",
         "Cancel it. Do not write anything to Salesforce.",

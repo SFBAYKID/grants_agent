@@ -493,7 +493,6 @@ def _handle_drip_thread(
             workspace=workspace,
             channel=event["channel"],
             thread_ts=post["ts"],
-            allowed_tools=(frozenset({"web_search"}) if frozen is not None else None),
         )
     except Exception as exc:  # API down ≠ silence; reply honestly
         return status.finalize(

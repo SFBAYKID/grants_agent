@@ -358,7 +358,10 @@ def test_rich_thread_question_uses_frozen_snapshot_not_mutable_lead(
     assert seen["amount"] == 500_000
     assert seen["current_event_id"] == 2
     assert "jon@montebello.k12.ca.us" in str(seen["snapshot_contact"])
-    assert seen["allowed_tools"] == frozenset({"web_search"})
+    # A card thread is the one place leads arrive, so the full workflow must be
+    # available there: search, CRM lookup, contacts, campaigns. The snapshot stays
+    # truthful because the FACTS block freezes it, not because Grant is blinded.
+    assert "allowed_tools" not in seen or seen["allowed_tools"] is None
 
 
 def test_closed_spend_window_blocks_click_even_when_contact_is_fresh(

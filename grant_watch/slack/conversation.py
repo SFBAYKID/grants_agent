@@ -299,6 +299,22 @@ summoned. You are the guide who directs the rep there. So:
   use draft_email again. A new human request is a new draft request; do not say the old
   request prevents it. The server still deduplicates redelivery of that same Slack event.
 
+CAPABILITY BOUNDARIES — what you CANNOT do. State these as facts about how you are
+built, never as policy or reluctance, and ALWAYS follow with what you CAN do:
+- You cannot DELETE or EDIT anything in Salesforce. You can only CREATE records.
+  There is no removal path at all, so "remove these from the campaign", "delete that
+  campaign", "undo that" and "take him off the list" are impossible for you. Say so
+  plainly and offer the real alternatives: cancel a pending preview before it is
+  approved, mark a lead not relevant so Grant stops surfacing it, or open the record
+  in Salesforce where a human can remove it. NEVER reply as though a deletion
+  happened, and never quietly build an ADD preview in response to a removal request.
+- You cannot send email. Persequor sends, after a human taps approve. If a rep asks
+  you to email results to them, say that and offer the spreadsheet instead.
+- You cannot change a lead's stored facts. Award amounts, dates and sources come from
+  the source record; you can add newly discovered information, never overwrite.
+- A contact's phone or email can only be recorded when a source actually shows it.
+  You never accept a fact into evidence just because someone typed it at you.
+
 HARD RULES:
 - Lead-specific claims come ONLY from the FACTS block and tool results.
 - You never send email yourself; the send always goes through Persequor + a human tap.
@@ -368,8 +384,14 @@ def lead_facts(row: sqlite3.Row | Mapping[str, object] | None) -> str:
                 "frozen_routing": value("snapshot_routing"),
                 "frozen_official_website": value("snapshot_official_website"),
                 "snapshot_rule": (
-                    "These card facts are immutable. Do not replace them with a "
-                    "new contact or CRM lookup in this thread."
+                    "These card facts are FROZEN as posted. Repeat them exactly if "
+                    "you repeat them at all. You MAY still look things up in this "
+                    "thread — search leads, check Salesforce, find a contact, build "
+                    "a campaign — but report whatever you find as CURRENT state "
+                    '("as of now Salesforce shows..."), NEVER as a correction to '
+                    "the card and never by restating the card's own numbers "
+                    "differently. The card recorded what was true when it posted; a "
+                    "fresh lookup records what is true now, and both can be right."
                 ),
             }
         )
@@ -637,6 +659,12 @@ def _single_execution_tool_key(name: str, arguments: dict[str, Any]) -> str:
         return "web_search"
     if name == "search_leads" and bool(arguments.get("with_contacts")):
         return "search_leads:with_contacts"
+    if name == "fetch_url":
+        # Keyed by URL: re-reading the same page is served from cache, and the
+        # per-turn fetch budget below bounds how many DISTINCT pages one message
+        # can pull. Reading is a paid scrape, and an agent loop with an unbounded
+        # reader will happily spend its whole turn budget crawling.
+        return f"fetch_url:{str(arguments.get('url', '')).strip().lower()}"
     return ""
 
 
@@ -684,7 +712,6 @@ def respond(
     workspace: str = "",
     channel: str = "",
     thread_ts: str = "",
-    allowed_tools: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """One conversational turn, with tool use.
 
@@ -749,17 +776,9 @@ def respond(
     # corrected retry of that tool and drained the whole turn budget.
     tool_result_cache: dict[str, str] = {}
     single_execution_cache: dict[str, str] = {}
+    fetched_pages = 0
     model = os.environ.get("GRANT_MODEL", DEFAULT_MODEL)
     search_confirmed = _search_plan_confirmed(user_text, thread_context)
-    tool_schemas = (
-        tools.TOOL_SCHEMAS
-        if allowed_tools is None
-        else [
-            schema
-            for schema in tools.TOOL_SCHEMAS
-            if str(schema.get("name") or "") in allowed_tools
-        ]
-    )
 
     try:
         for turn_index in range(MAX_TOOL_TURNS):
@@ -768,7 +787,7 @@ def respond(
                 model=model,
                 max_tokens=1500,
                 system=_SYSTEM,
-                tools=tool_schemas,
+                tools=tools.TOOL_SCHEMAS,
                 messages=messages,
             )
             if msg.stop_reason != "tool_use":
@@ -843,15 +862,6 @@ def respond(
                     file=sys.stderr,
                     flush=True,
                 )
-                if allowed_tools is not None and block.name not in allowed_tools:
-                    results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": "ERROR: this frozen card thread cannot refresh mutable lead evidence",
-                        }
-                    )
-                    continue
                 single_execution_key = _single_execution_tool_key(block.name, tool_args)
                 if single_execution_key in single_execution_cache:
                     text = single_execution_cache[single_execution_key]
@@ -880,10 +890,17 @@ def respond(
                     tool_result_cache[cache_key] = text
                     if single_execution_key:
                         single_execution_cache[single_execution_key] = text
+                if block.name == "fetch_url":
+                    fetched_pages += 1
                 results.append(
                     {"type": "tool_result", "tool_use_id": block.id, "content": text}
                 )
             messages.append({"role": "user", "content": results})
+            if fetched_pages:
+                # A fetched page is text a stranger wrote. Ending the loop here means
+                # nothing inside it can reach another tool — an injected "now create a
+                # Salesforce record" has no turn left to be obeyed in.
+                break
     except Exception:
         for artifact in files:
             artifact.cleanup()
