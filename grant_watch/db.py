@@ -644,6 +644,49 @@ def save_contact(
     return int(cur.lastrowid)
 
 
+def save_vendor_contact(
+    conn: sqlite3.Connection,
+    lead_id: int,
+    name: str,
+    title: str,
+    email: str,
+    phone: str,
+    vendor_person_id: str,
+    *,
+    do_not_call: bool,
+) -> int:
+    """Store a LICENSED-VENDOR contact — never 'verified', whatever the vendor claims.
+
+    Distinct from save_contact because the evidence class differs and the difference
+    is load-bearing. finder's gate proves an email by finding it verbatim on the
+    organization's own page; a purchased record has no such page and cannot be
+    checked, so it gets its own status that no `== 'verified'` comparison can match.
+    That single fact is what keeps vendor data out of the Persequor brief and out of
+    a rich card.
+
+    A do-not-call flagged number is NOT stored in `phone` at all. Callers must not
+    "keep it for reference": every consumer of contacts.phone treats it as dialable,
+    and salesforce_contact_records copies it straight into a Lead's Phone field.
+    """
+    cur = conn.execute(
+        """INSERT INTO contacts
+             (lead_id,name,title,email,phone,source_url,confidence,contact_status,
+              contact_provenance,do_not_call,vendor_person_id)
+           VALUES (?,?,?,?,?,'','medium','vendor_licensed','vendor_licensed',?,?)""",
+        (
+            lead_id,
+            name,
+            title,
+            email,
+            "" if do_not_call else phone,
+            1 if do_not_call else 0,
+            vendor_person_id,
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
 def save_linkedin_contact(
     conn: sqlite3.Connection,
     lead_id: int,
