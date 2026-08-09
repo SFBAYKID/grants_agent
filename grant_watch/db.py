@@ -14,6 +14,13 @@ import sqlite3
 import uuid
 from pathlib import Path
 
+from .db_contacts import (  # re-export: every db.<name> call site is unchanged
+    mark_contact_not_found,  # noqa: F401
+    save_contact,  # noqa: F401
+    save_human_asserted_contact,  # noqa: F401
+    save_linkedin_contact,  # noqa: F401
+    save_vendor_contact,  # noqa: F401
+)
 from .db_common import (
     CRM_CONTEXT_SELECT as _CRM_CONTEXT_SELECT,
     LEAD_EVENT_SELECT as _LEAD_EVENT_SELECT,
@@ -603,116 +610,6 @@ def mark_surfaced(conn: sqlite3.Connection, lead_ids: list[int]) -> None:
     conn.executemany(
         "UPDATE leads SET status='surfaced' WHERE id=? AND status='new'",
         [(i,) for i in lead_ids],
-    )
-    conn.commit()
-
-
-# ---------------------------------------------------------------- contacts (Phase 2)
-
-
-def save_contact(
-    conn: sqlite3.Connection,
-    lead_id: int,
-    name: str,
-    title: str,
-    email: str,
-    phone: str,
-    source_url: str,
-    confidence: str,
-    official_domain: str = "",
-    field_evidence: dict[str, bool] | None = None,
-) -> int:
-    """Store a VERIFIED contact (finder.py's gate already ran). Returns contact id."""
-    cur = conn.execute(
-        """INSERT INTO contacts
-             (lead_id,name,title,email,phone,source_url,confidence,contact_status,
-              official_domain,field_evidence_json)
-           VALUES (?,?,?,?,?,?,?,'verified',?,?)""",
-        (
-            lead_id,
-            name,
-            title,
-            email,
-            phone,
-            source_url,
-            confidence,
-            official_domain or None,
-            json.dumps(field_evidence, sort_keys=True) if field_evidence else None,
-        ),
-    )
-    conn.commit()
-    return int(cur.lastrowid)
-
-
-def save_vendor_contact(
-    conn: sqlite3.Connection,
-    lead_id: int,
-    name: str,
-    title: str,
-    email: str,
-    phone: str,
-    vendor_person_id: str,
-    *,
-    do_not_call: bool,
-) -> int:
-    """Store a LICENSED-VENDOR contact — never 'verified', whatever the vendor claims.
-
-    Distinct from save_contact because the evidence class differs and the difference
-    is load-bearing. finder's gate proves an email by finding it verbatim on the
-    organization's own page; a purchased record has no such page and cannot be
-    checked, so it gets its own status that no `== 'verified'` comparison can match.
-    That single fact is what keeps vendor data out of the Persequor brief and out of
-    a rich card.
-
-    A do-not-call flagged number is NOT stored in `phone` at all. Callers must not
-    "keep it for reference": every consumer of contacts.phone treats it as dialable,
-    and salesforce_contact_records copies it straight into a Lead's Phone field.
-    """
-    cur = conn.execute(
-        """INSERT INTO contacts
-             (lead_id,name,title,email,phone,source_url,confidence,contact_status,
-              contact_provenance,do_not_call,vendor_person_id)
-           VALUES (?,?,?,?,?,'','medium','vendor_licensed','vendor_licensed',?,?)""",
-        (
-            lead_id,
-            name,
-            title,
-            email,
-            "" if do_not_call else phone,
-            1 if do_not_call else 0,
-            vendor_person_id,
-        ),
-    )
-    conn.commit()
-    return int(cur.lastrowid)
-
-
-def save_linkedin_contact(
-    conn: sqlite3.Connection,
-    lead_id: int,
-    name: str,
-    title: str,
-    profile_url: str,
-) -> int:
-    """Store a LinkedIn-sourced person: name/title/profile only, never an email.
-
-    Distinct from save_contact because the evidence class differs — a profile's
-    ownership is not verified, so contact_status is 'linkedin_only'."""
-    cur = conn.execute(
-        """INSERT INTO contacts
-             (lead_id,name,title,email,phone,source_url,confidence,contact_status)
-           VALUES (?,?,?,NULL,NULL,?,'medium','linkedin_only')""",
-        (lead_id, name, title, profile_url),
-    )
-    conn.commit()
-    return int(cur.lastrowid)
-
-
-def mark_contact_not_found(conn: sqlite3.Connection, lead_id: int) -> None:
-    """The honest outcome when enrichment finds nothing verifiable."""
-    conn.execute(
-        "INSERT INTO contacts (lead_id, contact_status) VALUES (?, 'not_found')",
-        (lead_id,),
     )
     conn.commit()
 

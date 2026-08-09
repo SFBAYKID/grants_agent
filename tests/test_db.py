@@ -138,7 +138,8 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
     # 28 enforces one ready Campaign-creation preview per requester/thread;
     # 29 adds typed contact provenance and the ZoomInfo credit ledger;
     # 30 adds the one-shot proactive follow-up nudge ledger;
-    # 31 records every campaign batch attempt, including the failures.
+    # 31 records every campaign batch attempt, including the failures;
+    # 32 lets a rep supply a contact fact, recorded with who said it.
     assert versions == [
         1,
         2,
@@ -168,6 +169,7 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
         29,
         30,
         31,
+        32,
     ]
     crm_tables = {
         row[0]

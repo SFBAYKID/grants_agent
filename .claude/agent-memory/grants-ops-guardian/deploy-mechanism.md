@@ -32,6 +32,13 @@ confirm the CODE on disk (grep a known new symbol), not just the revision file. 
 
 **Proven full-tree rsync recipe (2026-07-16: 3d653c6 → 25513bc; re-proven 2026-07-17: 25513bc → 9db96d0, 9db96d0 → 36d2470, 36d2470 → 6ea70f2, 6ea70f2 → c714b01, and c714b01 → 50acadd, and 2026-07-17 ed261ff → e6df182 = 14 files [15 delta minus `.env.example`, which the `.env.*` exclude correctly skips], zero deletions each time; Chase-approved, all verified):**
 
+**STANDING RSYNC FLAGS for the droplet-local checksum sync: `-cai --no-times --no-perms`** (preview
+deletions with `-cain --delete`, then omit `--delete` when the delta has none). `--no-perms` was added
+2026-08-09 ([[deploy-3cf9df0-campaign-status]]): `tar -x` of the artifact under the droplet's umask 002
+yields staging modes that differ from live, so WITHOUT it rsync emits permission-only (`.f...p.....`)
+changes outside the intended delta — in that deploy it would have added group-write to an executable,
+and "fixing" staging with `chmod -R go-w` flipped it to re-permissioning ~940 live files instead.
+
 **2026-08-09 — THREE REUSABLE RSYNC/VERIFY GOTCHAS (from the fe56807 deploy, [[deploy-fe56807-stage3]]):**
 - **The itemize direction character depends on the transfer, and grepping the wrong one is a SILENT
   FALSE PASS.** A laptop→droplet rsync itemizes changed files as `<f…` (sending), but a

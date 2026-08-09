@@ -120,9 +120,21 @@ REMOVAL_REFUSAL = (
 )
 
 
+# A request to ADD or CHANGE something is not a removal, even when it contains a
+# word like "update" or "replace". Checked first so "remove the old number and put
+# this one in" reads as the edit it is.
+_ADDITIVE_RE = re.compile(
+    # "record" is deliberately absent: it is a noun far more often than a verb here
+    # ("undo that record"), and treating it as additive turned a removal into an edit.
+    r"\b(?:add|store|save|set|update|change|replace|put|correct|fix)\b"
+)
+
+
 def removal_request(user_text: str) -> bool:
     """True when the rep is asking Grant to destroy or undo something."""
     lowered = user_text.lower()
+    if _ADDITIVE_RE.search(lowered):
+        return False
     return bool(_REMOVAL_VERB.search(lowered) and _REMOVAL_OBJECT.search(lowered))
 
 

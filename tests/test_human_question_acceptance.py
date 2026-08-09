@@ -716,6 +716,13 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         allowed_intents=("question", "chitchat"),
     ),
     HumanQuestion(
+        "record-supplied-phone",
+        "contact",
+        "her direct line is 308-555-0142, add it to lead #4897",
+        expected_tools=("record_contact_fact",),
+        allowed_intents=("question", "chitchat"),
+    ),
+    HumanQuestion(
         "campaign-cancel-preview",
         "salesforce-write",
         "Cancel it. Do not write anything to Salesforce.",

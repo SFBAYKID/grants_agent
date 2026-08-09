@@ -22,6 +22,23 @@ from grant_watch.slack.conversation import _single_execution_tool_key
 from grant_watch.slack.intent_router import deterministic_reply
 
 
+def _redirect_db(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
+    """Point every bare db.connect() at a throwaway file.
+
+    Patching db.DEFAULT_DB_PATH does NOT work: connect() binds its default at import
+    time. tests/conftest.py has the guard that catches the mistake.
+    """
+    from grant_watch import db as db_module
+
+    real = db_module.connect
+
+    def connect(db_path: object = None, *args: object, **kwargs: object) -> object:
+        """Open the throwaway file whenever no explicit path is given."""
+        return real(path if db_path is None else db_path, *args, **kwargs)
+
+    monkeypatch.setattr(db_module, "connect", connect)
+
+
 def test_fetch_url_refuses_anything_that_is_not_https() -> None:
     """No file://, no http://, no localhost — and it says why in plain words."""
     for target in ("http://example.test/x", "file:///etc/passwd", "ftp://x.test"):
@@ -136,7 +153,6 @@ def test_the_paid_pull_refuses_when_no_budget_is_configured(
     monkeypatch.setenv("ZOOMINFO_CLIENT_ID", "cid")
     monkeypatch.setenv("ZOOMINFO_CLIENT_SECRET", "secret")
     monkeypatch.delenv("ZOOMINFO_MONTHLY_CREDITS", raising=False)
-    monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "t.db")
     conn = db.connect(tmp_path / "t.db")
     conn.execute(
         "INSERT INTO leads (source,source_item_id,entity_name,detail_url) "
@@ -144,6 +160,7 @@ def test_the_paid_pull_refuses_when_no_budget_is_configured(
     )
     conn.commit()
     conn.close()
+    _redirect_db(monkeypatch, tmp_path / "t.db")
 
     def explode(ids: list[str]) -> list[Any]:
         """Fail if the vendor is contacted despite an unconfigured budget."""

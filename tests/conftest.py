@@ -54,3 +54,37 @@ def ca_grants_opportunities_csv() -> str:
 def ca_grants_awards_csv() -> str:
     """Recorded-shape California award rows with approved/denied/noise cases."""
     return (FIXTURES / "ca_grants_awards.csv").read_text()
+
+
+@pytest.fixture(autouse=True)
+def _never_touch_the_real_database(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    """Fail any test that opens the developer's actual grant_watch.db.
+
+    `db.connect(db_path=DEFAULT_DB_PATH)` binds its default AT IMPORT TIME, so
+    monkeypatching `db.DEFAULT_DB_PATH` does not redirect a bare `db.connect()` —
+    it silently keeps writing to the real file. A test doing that migrated this
+    developer's database to a new schema and left rows in it before anyone noticed,
+    which is exactly the kind of damage a suite is supposed to be incapable of.
+
+    Redirecting the default would hide the mistake; failing loudly makes the test
+    pass an explicit path, which is what it should have done.
+    """
+    from grant_watch import db
+
+    real = Path(db.DEFAULT_DB_PATH).resolve()
+
+    def guarded(db_path: object = None, *args: object, **kwargs: object) -> object:
+        """Refuse a connection to the real database, allow any other path."""
+        if db_path is None or Path(str(db_path)).resolve() == real:
+            raise AssertionError(
+                f"{request.node.nodeid} tried to open the real database at {real}. "
+                "Pass an explicit tmp_path, or monkeypatch db.connect — patching "
+                "db.DEFAULT_DB_PATH does NOT work, because connect() binds its "
+                "default at import time."
+            )
+        return _real_connect(db_path, *args, **kwargs)
+
+    _real_connect = db.connect
+    monkeypatch.setattr(db, "connect", guarded)

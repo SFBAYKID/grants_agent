@@ -221,3 +221,57 @@ def test_a_pull_larger_than_the_budget_is_refused_before_any_call(
         zoominfo_enrichment.apply_for_lead(conn, lead_id, ["1", "2", "3"])
     assert zoominfo_credits.remaining(conn) == 2
     conn.close()
+
+
+def test_a_paid_pull_records_who_asked_for_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Credit spend must be attributable to a person, not just to a lead.
+
+    requested_by was plumbed all the way from the tool into the ledger column and
+    then never populated, so the first real production spend recorded an empty
+    string — the ledger could account for the money but not for who asked.
+    """
+    monkeypatch.setenv("ZOOMINFO_MONTHLY_CREDITS", "50")
+    conn, lead_id = _lead(tmp_path)
+    monkeypatch.setattr(zoominfo, "enrich_contacts", lambda ids: [_detail()])
+
+    zoominfo_enrichment.apply_for_lead(conn, lead_id, ["1"], requested_by="U0REP")
+
+    row = conn.execute("SELECT requested_by FROM zoominfo_credit_spends").fetchone()
+    assert row["requested_by"] == "U0REP"
+    conn.close()
+
+
+def test_the_slack_tool_passes_the_requester_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gap was at the call site, so the call site is what this pins."""
+    from grant_watch import db as db_module
+    from grant_watch.slack import tools
+
+    monkeypatch.setenv("ZOOMINFO_MONTHLY_CREDITS", "50")
+    monkeypatch.setenv("ZOOMINFO_CLIENT_ID", "cid")
+    monkeypatch.setenv("ZOOMINFO_CLIENT_SECRET", "secret")
+    conn, lead_id = _lead(tmp_path)
+    conn.close()
+    real_connect = db_module.connect
+
+    def redirected(db_path: object = None, *a: object, **k: object) -> object:
+        """Send a bare db.connect() to the throwaway file."""
+        return real_connect(tmp_path / "z.db" if db_path is None else db_path, *a, **k)
+
+    monkeypatch.setattr(db_module, "connect", redirected)
+    monkeypatch.setattr(zoominfo, "enrich_contacts", lambda ids: [_detail()])
+
+    out, _artifact = tools.run_tool(
+        "zoominfo_enrich_contacts",
+        {"lead_id": lead_id, "person_ids": ["1"]},
+        requester_slack="U0REP",
+    )
+    assert not out.startswith("ERROR"), out
+
+    check = real_connect(tmp_path / "z.db")
+    row = check.execute("SELECT requested_by FROM zoominfo_credit_spends").fetchone()
+    assert row is not None and row["requested_by"] == "U0REP"
+    check.close()

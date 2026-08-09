@@ -23,11 +23,28 @@ from grant_watch.slack import tools
 CAMPAIGN_ID = "701000000000001"
 
 
+def _redirect_db(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
+    """Point every bare db.connect() at a throwaway file.
+
+    Patching db.DEFAULT_DB_PATH does NOT work: connect() binds its default at import
+    time, so a bare call keeps opening the real database. See tests/conftest.py.
+    """
+    from grant_watch import db as db_module
+
+    real = db_module.connect
+
+    def connect(db_path: object = None, *args: object, **kwargs: object) -> object:
+        """Open the throwaway file whenever no explicit path is given."""
+        return real(path if db_path is None else db_path, *args, **kwargs)
+
+    monkeypatch.setattr(db_module, "connect", connect)
+
+
 @pytest.fixture(autouse=True)
 def _local_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Point the tool at a throwaway database."""
-    monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "s.db")
     db.connect(tmp_path / "s.db").close()
+    _redirect_db(monkeypatch, tmp_path / "s.db")
 
 
 def _stub_campaign(monkeypatch: pytest.MonkeyPatch, matches: int = 1) -> None:

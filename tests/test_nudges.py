@@ -92,8 +92,8 @@ def test_the_message_reports_what_grant_saw_and_never_asserts_inaction(
     client = _Client()
     nudges.run(client, conn, now=NOW)
     text = str(client.posts[0]["text"]).lower()
-    assert "expired before anyone clicked" in text
-    assert "nothing was written" in text
+    assert "timed out before anyone hit the button" in text
+    assert "nothing got written" in text
     for forbidden in ("you didn't", "you did not", "you never", "you forgot"):
         assert forbidden not in text
     conn.close()
@@ -279,7 +279,7 @@ def test_a_card_nudge_names_no_one(tmp_path: Path) -> None:
     assert "nudged card_unengaged" in nudges.run(client, conn, now=NOW)
     text = str(client.posts[0]["text"])
     assert "<@" not in text
-    assert "only covers what I can see" in text
+    assert "only what I can see" in text
     conn.close()
 
 

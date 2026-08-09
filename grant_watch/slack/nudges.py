@@ -297,38 +297,39 @@ def pacing_reason(
 
 
 def build_message(candidate: NudgeCandidate) -> str:
-    """One short, honest sentence plus a question.
+    """One short, human line that is hard to ignore — and still only claims what
+    Grant actually observed.
 
-    Every clause is something Grant can point at in its own records. Nothing here
-    asserts what a human did or did not do outside Slack.
+    Length is the whole point. "Scottsbluff Public School still needs follow-up in
+    Salesforce" is easy to scroll past; a direct question with a name in it is not.
+    Reps were not replying to Grant, so these are written the way a colleague would
+    poke you — brief, a little wry, and always ending in something answerable with
+    one word. What they must never do is assert what a person did or did not do:
+    Grant cannot see a phone call, so it reports its own records and then asks.
     """
     mention = f"<@{candidate.target_slack}> " if candidate.target_slack else ""
     if candidate.subject_kind == "crm_preview_expired":
         return (
-            f"{mention}I put a Salesforce preview together here and the approval "
-            "expired before anyone clicked it, so nothing was written.\n\n"
-            "Want me to rebuild it?"
+            f"{mention}that Salesforce approval timed out before anyone hit the "
+            "button, so nothing got written. Want me to rebuild it? 🙂"
         )
     if candidate.subject_kind == "crm_batch_blocked":
         count = candidate.observed.get("organizations", 0)
         return (
-            f"{mention}This campaign batch stopped before I could write anything — "
-            f"{count} organizations needed a decision in Salesforce first.\n\n"
-            "Want me to pick it back up, or skip the ones I couldn't match?"
+            f"{mention}still stuck on this one — {count} organizations need a call "
+            "on how to match them. Want me to skip those and add the rest?"
         )
     if candidate.subject_kind == "crm_batch_partial":
         return (
-            f"{mention}We ran this batch with only the organizations I could match, "
-            "so the rest were never added.\n\n"
-            "Want me to have another go at the ones that were left out?"
+            f"{mention}we only added the ones I could match here — the rest never "
+            "made it. Want me to have another go at them?"
         )
     entity = display_entity_name(str(candidate.observed.get("entity_name") or ""))
-    subject = entity or "This one"
+    subject = entity or "that lead"
     return (
-        f"{subject} hasn't had anything come back in this thread, and I haven't "
-        "recorded any activity on it either — though that only covers what I can "
-        "see.\n\n"
-        "Want me to find a contact, check Salesforce, or drop it?"
+        f"Anyone want {subject}? Nothing's come back here and I've got no activity "
+        "logged on it — though that's only what I can see. I can find a contact or "
+        "drop it."
     )
 
 
