@@ -338,3 +338,35 @@ def test_force_does_not_bypass_suppression(tmp_path: Path) -> None:
     assert "nothing to follow up" in nudges.run(client, conn, force=True, now=NOW)
     assert client.posts == []
     conn.close()
+
+
+def test_the_eligible_window_is_wide_enough_to_drain_a_backlog(tmp_path: Path) -> None:
+    """A subject abandoned last week is still worth one question.
+
+    DROP_AFTER used to be 5 days, which — with a 2-day grace and a one-a-day cap —
+    left an eligible window only three days wide. Everything that piled up while the
+    feature was switched off aged out before the feature could look at it: measured
+    on production the day it shipped, 28 of 36 due subjects were already unreachable.
+    The worker would have said "nothing to follow up on" with a fortnight of
+    abandoned previews sitting in front of it.
+    """
+    conn = _conn(tmp_path)
+    _expired_preview(conn, NOW - timedelta(days=8))
+    client = _Client()
+    assert "nudged" in nudges.run(client, conn, force=True, now=NOW)
+    assert len(client.posts) == 1
+    conn.close()
+
+
+def test_something_genuinely_ancient_is_still_dropped(tmp_path: Path) -> None:
+    """Widening the window must not turn the worker into an archaeologist."""
+    conn = _conn(tmp_path)
+    _expired_preview(conn, NOW - timedelta(days=40))
+    client = _Client()
+    assert "nothing to follow up" in nudges.run(client, conn, force=True, now=NOW)
+    assert client.posts == []
+    assert (
+        conn.execute("SELECT suppress_reason FROM followup_nudges").fetchone()[0]
+        == "stale"
+    )
+    conn.close()

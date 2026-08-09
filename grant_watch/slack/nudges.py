@@ -54,7 +54,16 @@ GRACE = {
     "crm_batch_partial": timedelta(days=2),
     "card_unengaged": timedelta(days=2),
 }
-DROP_AFTER = timedelta(days=5)
+# How long a subject stays worth mentioning. Five days made the eligible window only
+# THREE days wide (grace takes the first two), which had a consequence nobody
+# intended: every subject that accumulated while this feature was switched off aged
+# past it before the feature could ever look at them. Measured on production the day
+# it shipped, 28 of 36 due subjects were ALREADY unreachable — the follow-up worker
+# could not work the very backlog it exists to work, and would have reported "nothing
+# to follow up on" while a fortnight of abandoned previews sat there. Fourteen days is
+# still recent enough that a rep recognises what is being asked about, and wide enough
+# that a one-a-day cap can actually drain a queue.
+DROP_AFTER = timedelta(days=14)
 
 
 @dataclass(frozen=True)
