@@ -97,5 +97,17 @@ Reported as empty rather than exercised with a synthesised message — a fake us
 would have written a fabricated memory about a colleague into the one table whose entire
 safety story is "only what they actually said".
 
+
+## Followed immediately by `cee19ee` (comment-only)
+
+**LIVE 2026-08-10T07:01:41Z, PID 37641 → 39941, 0.135 s outage.** One file,
+`grant_watch/slack/grant.py`, correcting the `_remember_from` comment to say the
+function uses the connection it is GIVEN and that `_converse_general` opens one
+because it has none in scope. **Proven comment-only by AST equality** between the two
+revisions (`ast.dump` identical) — the right instrument, since a textual diff cannot
+distinguish a comment edit from a code edit that happens to look like one. Schema
+stayed 39, closure 121/121, `.env` and crontab byte-identical, 0 tracebacks,
+watchdog tick confirmed at 07:03.
+
 Related: [[deploy-8cb557a-watchdog-boot-revert]], [[deploy-mechanism]],
 [[tenant-db-write-safety]], [[verify-the-premise-not-the-claim]], [[backups-retention]].

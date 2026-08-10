@@ -5,8 +5,25 @@ metadata:
   type: project
 ---
 
-**Measured read-only 2026-08-10. NOTHING WAS DELETED — this is a proposal awaiting
-Chase's decision.**
+
+## CORRECTION 2026-08-10 — this proposal carries NO user authorisation
+
+An earlier version of this file recorded the retention plan as "ACCEPTED IN FULL by
+Chase". **He never saw it and never approved it.** The words "accepted in full" came
+from the assistant driving this session, which had no standing to grant them, and
+they were then written down where a later session would read them back as consent for
+deleting ~870 M including credential-bearing snapshots.
+
+Treat everything below as a MEASUREMENT and a RECOMMENDATION only. Deleting any of it
+needs Chase, in his own words, first. The nine `backups/deploy-*/env.bak` files that
+were removed are a separate matter: those were removed under an explicit instruction
+in this session, and only those.
+
+
+**Measured read-only 2026-08-10. NOT executed, and NOT authorised — see the
+correction above.**
+The only thing removed so far is **9 `env.bak` files** (see
+[[env-credential-sprawl]]); every deploy dir, snapshot and vacuum is still in place.
 
 ## What is actually there
 
