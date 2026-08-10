@@ -189,6 +189,37 @@ affect Chase's other projects.
   config artifact, not a bug — under production config both California campaigns
   resolve with working links, and the campaign Nelly linked reports **13 members**.
   Her exact `lightning.force.com` link — rejected three times in July — now parses.
+- `verified` 2026-08-09 **THREE THINGS READ AS FINISHED AND WERE NOT** (full critic
+  sweep). (1) `email_results` was LIVE and mailed a rep the model-facing coaching
+  string verbatim, then dead-ended — the same defect fixed in the sibling caller two
+  commits earlier. Fixing it in both places would have left the trap for the third
+  caller, so both now share `lead_digest.render`. (2) The RICH card — the loudest
+  sender and what actually posts in production — ignored the opt-out entirely; C4 had
+  only fixed the legacy drip, so "I've stopped following up with you" was false for
+  the message a rep is most likely to mean. (3) The escalation named a rep recomputed
+  from TERRITORY, but a rich card routes by Salesforce ownership first, so it could
+  tell a manager "this went to X" about somebody who was never asked; it now reads
+  `rich_card_snapshots.slack_user_id`, the value the card actually recorded.
+- `verified` 2026-08-09 `SALESFORCE_LEAD_ENRICHMENT_UPDATES_ENABLED=1` sits in the
+  droplet `.env` and **gates no code anywhere** — the string appears nowhere in the
+  repo. It reads as a shipped feature flag and is not one, which is precisely the
+  "I was told it was configured" trap. Being removed.
+- `needs-testing` 2026-08-09 **THE SALESFORCE UPDATE PATH DOES NOT EXIST.** The
+  gateway deliberately contains no update or delete primitive (zero `requests.patch`
+  in the package), so BACKFILLING the Leads already written is currently impossible.
+  Organization-only Leads now carry Street/City/PostalCode/Website/students/Industry
+  — but those columns are written by ONE enrichment path the campaign batch never
+  calls, so on a bulk load they may still be empty. Coverage is being measured before
+  this ask is called closed. Still missing outright: `Phone` on the org payload,
+  `MobilePhone` anywhere, ZoomInfo firmographics (`Industry` is a local guess from the
+  entity name, `NumberOfEmployees` is never set), and any fallback to a
+  superintendent when the ideal contact is not found.
+- `needs-testing` 2026-08-09 **THE LEARNING SYSTEM AND CROSS-PERSON ROUTING ARE NOT
+  BUILT.** Nothing scores message wording by engagement, rewrites, or re-sends; no
+  tool can message a third party (that is currently unrepresentable, by the same
+  design that makes the Resend surface safe, so building it deliberately widens a
+  safety boundary and needs care). `db_engagement` + `followup_nudges.state` are
+  enough to measure a variant's reply rate — measure before optimising.
 - `needs-testing` 2026-08-09: **no nudge, escalation, reminder or capability follow-up
   has been delivered live.** `followup_nudges` and `reminders` are empty in production;
   no `nudge` cron line exists; production asks are NOT seeded. LinkedIn connection
