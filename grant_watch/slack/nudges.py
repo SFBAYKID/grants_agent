@@ -419,12 +419,21 @@ def suppress_reason(
         ).fetchone()
         if row is None or str(row["state"]) != "open":
             return "resolved_since_queued"
-    if candidate.subject_kind == "card_unengaged":
-        engaged = conn.execute(
-            "SELECT 1 FROM engagement WHERE post_id=? LIMIT 1",
-            (int(candidate.subject_id),),
-        ).fetchone()
-        if engaged is not None:
+        # THE OFFER MUST BE LIVE WHERE THE MESSAGE LANDS, not merely shipped in code.
+        # Reopening an ask apologises for a promise Grant did not keep and then makes
+        # a new one; if RESEND_API_KEY is missing on the droplet, that new promise
+        # fails the moment she says yes — a second broken promise to the same person
+        # in the same thread. Transient, because setting the variable fixes it.
+        if not _capability_is_live(str(candidate.observed.get("capability") or "")):
+            return "capability_not_ready"
+    # BOTH card kinds, not just the channel one. They are produced from the SAME post
+    # row and the same observations, so a guard written for one is a guard the other
+    # needs. Gating on the kind LABEL rather than the subject let a lead the rep had
+    # explicitly marked not_relevant be suppressed in the channel and STILL DM the
+    # manager that it had gone unanswered — the highest-consequence message in the
+    # system, about a colleague, saying something untrue.
+    if candidate.subject_kind in {"card_unengaged", "card_escalated"}:
+        if _card_was_acted_on(conn, candidate):
             return "engaged_since_queued"
         # A lead a human deliberately parked is not unfinished work.
         if str(candidate.observed.get("lead_status") or "") in {
@@ -435,6 +444,41 @@ def suppress_reason(
         }:
             return "lead_parked"
     return ""
+
+
+def _card_was_acted_on(conn: sqlite3.Connection, candidate: NudgeCandidate) -> bool:
+    """Whether anybody engaged with this card, by ANY route Grant can see.
+
+    `engagement` records replies and reactions, but a BUTTON CLICK writes nowhere
+    near it: the rich-card buttons write `rich_card_actions` (joined through a
+    snapshot on lead_id, not on the post) and a Salesforce approval writes
+    `crm_actions` in the card's own thread. Reading only `engagement` counted a card
+    whose button somebody had pressed as completely ignored — and then chased them
+    about it, and told their manager.
+    """
+    post_id = int(candidate.subject_id)
+    if conn.execute(
+        "SELECT 1 FROM engagement WHERE post_id=? LIMIT 1", (post_id,)
+    ).fetchone():
+        return True
+    lead_id = int(candidate.observed.get("lead_id") or 0)
+    if (
+        lead_id
+        and conn.execute(
+            """SELECT 1 FROM rich_card_actions a
+             JOIN rich_card_snapshots s ON s.id=a.snapshot_id
+            WHERE s.lead_id=? LIMIT 1""",
+            (lead_id,),
+        ).fetchone()
+    ):
+        return True
+    card_ts = str(candidate.observed.get("card_ts") or "")
+    return bool(
+        card_ts
+        and conn.execute(
+            "SELECT 1 FROM crm_actions WHERE thread_ts=? LIMIT 1", (card_ts,)
+        ).fetchone()
+    )
 
 
 def _sent_today(
@@ -774,3 +818,17 @@ def _permalink(client: WebClient, channel: str, message_ts: str) -> str:
         )
     except Exception:  # noqa: BLE001 — a missing link must never block the message
         return ""
+
+
+def _capability_is_live(capability: str) -> bool:
+    """Whether a capability can actually be honoured in THIS environment right now.
+
+    Shipping the code is not the same as the feature working: email needs a Resend
+    key on the machine that runs the worker. Anything without a runtime dependency
+    is live as soon as it is deployed.
+    """
+    if capability == "email_results":
+        from ..notify import resend_client
+
+        return resend_client.is_configured()
+    return True

@@ -159,7 +159,7 @@ def stop_followups(
             reminders.clear_optout(conn, requester_slack)
             return "Done — I'll follow up with you again when there's something."
         scope = str(args.get("scope", "all")).strip().lower() or "all"
-        reminders.set_optout(
+        cancelled = reminders.set_optout(
             conn,
             requester_slack,
             scope=scope,
@@ -171,10 +171,16 @@ def stop_followups(
         return f"ERROR: {exc}"
     finally:
         conn.close()
-    return (
-        "Done — I've stopped following up with you, and cancelled the reminders you "
-        "had running. Say the word if you want them back."
-    )
+    # Built from what the write ACTUALLY did. The old wording claimed cancelled
+    # reminders unconditionally, so someone who asked to stop only the nudges was
+    # told their reminders were off — and then kept receiving them.
+    what = {
+        "all": "I've stopped following up with you",
+        "reminders": "I've stopped the reminders",
+        "nudges": "I've stopped the proactive nudges — your reminders still run",
+    }[scope]
+    tail = f", and cancelled the {cancelled} you had running" if cancelled else ""
+    return f"Done — {what}{tail}. Say the word if you want them back."
 
 
 def email_results(args: dict[str, Any], requester_slack: str) -> str:

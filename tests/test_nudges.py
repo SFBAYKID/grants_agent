@@ -597,3 +597,56 @@ def test_opting_out_silences_the_manager_escalation_too(tmp_path: Path) -> None:
     ][0]
     assert nudges.suppress_reason(conn, escalation, NOW) == "opted_out"
     conn.close()
+
+
+def test_a_parked_lead_never_escalates_to_the_manager(tmp_path: Path) -> None:
+    """C1, reproduced by the critic and executed before it was fixed.
+
+    The channel nudge was correctly suppressed for a lead the rep had marked
+    not_relevant — and the manager was DM'd about it anyway, because the guard was
+    written against the KIND LABEL rather than the subject. That is the highest-
+    consequence message in the system saying something untrue about a colleague.
+    """
+    conn = _conn(tmp_path)
+    _card(conn, NOW - timedelta(days=6))
+    conn.execute("UPDATE leads SET status='not_relevant' WHERE id=900")
+    conn.commit()
+    for candidate in nudges.candidates(conn, NOW):
+        if candidate.subject_kind in {"card_unengaged", "card_escalated"}:
+            assert nudges.suppress_reason(conn, candidate, NOW) == "lead_parked", (
+                f"{candidate.subject_kind} was not suppressed for a parked lead"
+            )
+    client = _Client()
+    nudges.run(client, conn, now=NOW)
+    assert client.posts == [], "a parked lead produced a message"
+    conn.close()
+
+
+def test_a_clicked_button_counts_as_engagement(tmp_path: Path) -> None:
+    """A button click writes nowhere near `engagement`.
+
+    The rich-card buttons write `rich_card_actions` through a snapshot keyed on
+    lead_id, and an approval writes `crm_actions` in the card's thread. Reading only
+    `engagement` meant a card somebody had actually acted on was chased anyway.
+    """
+    conn = _conn(tmp_path)
+    _card(conn, NOW - timedelta(days=6))
+    conn.execute(
+        "INSERT INTO rich_card_snapshots (id,policy_version,audience,dedup_key,"
+        "lead_id,tier,entity_name,entity_kind,entity_kind_provenance,"
+        "routing_reason,fallback_text,render_inputs_json,created_at) "
+        "VALUES (1,'v1',?,'k',900,'gold','H','school','nces','territory','t','{}',?)",
+        (CHANNEL, NOW.isoformat()),
+    )
+    conn.execute(
+        "INSERT INTO rich_card_actions (id,snapshot_id,action,nonce,requester_slack,"
+        "state,created_at,updated_at) VALUES (1,1,'draft','n',?,'accepted',?,?)",
+        (REP, NOW.isoformat(), NOW.isoformat()),
+    )
+    conn.commit()
+    for candidate in nudges.candidates(conn, NOW):
+        if candidate.subject_kind in {"card_unengaged", "card_escalated"}:
+            assert (
+                nudges.suppress_reason(conn, candidate, NOW) == "engaged_since_queued"
+            )
+    conn.close()

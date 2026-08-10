@@ -172,21 +172,29 @@ def set_optout(
     if not slack_user:
         raise ValueError("an opt-out has to belong to someone")
     now = _now()
-    cur = conn.execute(
+    conn.execute(
         """INSERT INTO followup_optouts
              (slack_user,scope,active,requested_in_channel,requested_in_thread,
               note,created_at)
            VALUES (?,?,1,?,?,?,?)""",
         (slack_user, scope, channel, thread_ts, note, now),
     )
+    cancelled = 0
     if scope in {"all", "reminders"}:
-        conn.execute(
-            "UPDATE reminders SET state='cancelled', cancelled_by_slack=?, "
-            "cancelled_at=?, updated_at=? WHERE requested_by_slack=? AND state='active'",
-            (slack_user, now, now, slack_user),
+        cancelled = int(
+            conn.execute(
+                "UPDATE reminders SET state='cancelled', cancelled_by_slack=?, "
+                "cancelled_at=?, updated_at=? WHERE requested_by_slack=? "
+                "AND state='active'",
+                (slack_user, now, now, slack_user),
+            ).rowcount
         )
     conn.commit()
-    return int(cur.lastrowid)
+    # Returns WHAT HAPPENED, not the row id, because the caller's next act is to tell
+    # a human what happened. Grant used to say "I've cancelled the reminders you had
+    # running" unconditionally — so a nudges-only opt-out produced a confirmation
+    # that was simply false, and the reminders kept arriving afterwards.
+    return cancelled
 
 
 def clear_optout(conn: sqlite3.Connection, slack_user: str) -> int:
@@ -230,10 +238,22 @@ def create(
             "before a new one can be scheduled"
         )
     now = _now()
-    spec = json.dumps(
-        {k: v for k, v in (search_spec or {}).items() if k in SPEC_KEYS},
-        separators=(",", ":"),
-    )
+    kept = {k: v for k, v in (search_spec or {}).items() if k in SPEC_KEYS}
+    # THAW IT NOW, WHILE SOMEONE IS LISTENING. `search_kwargs` coerces types at
+    # DELIVERY time, days later, inside a cron worker — so a spec the model wrote as
+    # {"amount_min": "$500,000"} used to store fine and then raise every tick. The
+    # worker delivers oldest-first, so that one row sat permanently at the head of
+    # the queue and nothing behind it ever went out again: one bad reminder silently
+    # killed the whole feature. Failing here turns that into a sentence the rep reads
+    # while they can still restate the ask.
+    try:
+        search_kwargs(kept)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "I couldn't pin down the filters for that reminder — tell me the state or "
+            f"programme in plain words and I'll set it up ({exc})"
+        ) from exc
+    spec = json.dumps(kept, separators=(",", ":"))
     cur = conn.execute(
         """INSERT INTO reminders
              (requested_by_slack,audience,thread_ts,subject,search_spec,cadence,

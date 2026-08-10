@@ -27,7 +27,7 @@ from slack_sdk.errors import SlackApiError
 from . import reminders
 from .notify import resend_client
 from .presentation import for_human
-from .slack.search import search_leads
+from .slack.search import NO_MATCH_PREFIX, search_leads
 
 # One reminder per invocation, matching the nudge worker. The cron tick is every 30
 # minutes, so a backlog drains steadily rather than arriving as a burst of pings.
@@ -48,7 +48,29 @@ def _render(reminder: reminders.Reminder) -> tuple[str, str]:
     # A reminder posts this straight to a human with no model in between, so the
     # model-facing coaching has to come out. A live test in the playground posted
     # "Offer these to the user (with counts) and ask which to run" into a thread.
-    return (f"Reminder: {reminder.subject}", for_human(text))
+    body = for_human(text)
+
+    # A REMINDER MUST NEVER DEAD-END. The first one Chase received read: "No grants
+    # matched those filters. Nearby alternatives — without the state filter: 75
+    # matches." — and stopped. His response was the right one: why would the user
+    # need to know that? A message that reports a miss and offers nothing is a
+    # message people learn to ignore, which is how Grant lost its own team.
+    #
+    # So when the frozen search is empty, actually GO AND GET the nearest real
+    # leads rather than merely counting them, and hand over something workable.
+    if body.startswith(NO_MATCH_PREFIX):
+        broadened = {k: v for k, v in kwargs.items() if k != "state"}
+        if broadened != kwargs:
+            wider, _ = search_leads(**broadened)
+            wider = for_human(wider)
+            if not wider.startswith(NO_MATCH_PREFIX):
+                where = str(kwargs.get("state", "")).upper()
+                return (
+                    f"Reminder: {reminder.subject}",
+                    f"Nothing new in {where} today, but here's the closest I've "
+                    f"got:\n\n{wider}",
+                )
+    return (f"Reminder: {reminder.subject}", body)
 
 
 def _slack_text(reminder: reminders.Reminder, headline: str, body: str) -> str:
@@ -61,6 +83,14 @@ def _slack_text(reminder: reminders.Reminder, headline: str, body: str) -> str:
     parts = [f"{who}you asked me to remind you about {reminder.subject}."]
     if body:
         parts.append(body)
+    # ALWAYS END WITH SOMETHING THEY CAN DO. A reminder that stops after reporting
+    # is a dead end, and a dead end is a message nobody answers.
+    parts.append(
+        "Want me to put these on a Salesforce campaign, or find contacts for the "
+        "best few?"
+        if body
+        else "Want me to pick this up now?"
+    )
     if reminder.cadence != "once":
         parts.append(
             f'This repeats {reminder.cadence} — say "stop reminding me" any time '
@@ -168,7 +198,26 @@ def run(
             reminders.cancel(conn, reminder.reminder_id, reminder.requested_by_slack)
             results.append(f"#{reminder.reminder_id}: cancelled (opted out)")
             continue
-        headline, body = _render(reminder)
+        # ONE BAD REMINDER MUST NOT STOP THE REST. `due()` returns oldest-first, so
+        # anything that raises here sits permanently at the head of the queue and
+        # every later reminder — including ones with no search at all — never fires
+        # again. `create` now validates the spec, but this loop must survive whatever
+        # a pre-existing row, a schema change, or a source outage throws at it.
+        try:
+            headline, body = _render(reminder)
+        except Exception as exc:  # noqa: BLE001 — isolate the item, keep the queue
+            conn.execute(
+                "UPDATE reminders SET state='failed', last_error=?, updated_at=? "
+                "WHERE id=?",
+                (
+                    f"{type(exc).__name__}: {exc}"[:300],
+                    datetime.now(timezone.utc).isoformat(),
+                    reminder.reminder_id,
+                ),
+            )
+            conn.commit()
+            results.append(f"#{reminder.reminder_id}: failed ({type(exc).__name__})")
+            continue
         if dry_run:
             results.append(
                 f"[dry-run] #{reminder.reminder_id} via {reminder.deliver_via}: "

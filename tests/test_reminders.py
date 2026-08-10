@@ -31,6 +31,22 @@ def _conn(tmp_path: Path) -> sqlite3.Connection:
     return db.connect(tmp_path / "r.db")
 
 
+def _redirect(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
+    """Send bare db.connect() calls to the throwaway file.
+
+    The tools open their own connection via db.connect(), whose default is bound at
+    IMPORT time — patching db.DEFAULT_DB_PATH does nothing, which is how a test once
+    wrote to the developer's real database (see tests/conftest.py).
+    """
+    real = db.connect
+
+    def connect(db_path: object = None, *a: object, **k: object) -> object:
+        """Open the throwaway file when no explicit path is given."""
+        return real(path if db_path is None else db_path, *a, **k)
+
+    monkeypatch.setattr(db, "connect", connect)
+
+
 def _soon() -> datetime:
     """A due time comfortably in the future."""
     return datetime.now(timezone.utc) + timedelta(days=1)
@@ -575,4 +591,123 @@ def test_the_reminder_worker_itself_strips_the_coaching(tmp_path: Path) -> None:
     ):
         assert coaching not in body, f"model coaching reached the rep: {body}"
     assert "you asked me to remind you about gold leads in Texas" in body
+    conn.close()
+
+
+def test_a_narrow_opt_out_does_not_claim_to_have_stopped_reminders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C2, reproduced by the critic.
+
+    Asking to stop only the nudges inserted a nudges-scoped opt-out, cancelled NO
+    reminders — and returned "I've stopped following up with you, and cancelled the
+    reminders you had running" regardless. The reminders then kept arriving. A
+    confirmation has to be built from what the write actually did.
+    """
+    from grant_watch.slack import reminder_tools
+
+    conn = _conn(tmp_path)
+    _make(conn)
+    conn.close()
+    _redirect(monkeypatch, tmp_path / "r.db")
+
+    said = reminder_tools.stop_followups({"scope": "nudges"}, REP, CHANNEL, THREAD)
+    check = db.connect(tmp_path / "r.db")
+    still_running = reminders.for_user(check, REP)
+
+    assert still_running, "fixture is wrong — nothing was left to contradict"
+    assert "cancelled" not in said.lower(), (
+        f"claimed a cancellation that did not happen: {said}"
+    )
+    assert "reminders still run" in said
+    check.close()
+
+
+def test_a_full_opt_out_reports_the_real_number_cancelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other direction: when it DID cancel, say so, with the true count."""
+    from grant_watch.slack import reminder_tools
+
+    conn = _conn(tmp_path)
+    _make(conn, subject="one")
+    _make(conn, subject="two")
+    conn.close()
+    _redirect(monkeypatch, tmp_path / "r.db")
+
+    said = reminder_tools.stop_followups({}, REP, CHANNEL, THREAD)
+    assert "cancelled the 2" in said
+    check = db.connect(tmp_path / "r.db")
+    assert reminders.for_user(check, REP) == []
+    check.close()
+
+
+def test_a_spec_that_cannot_be_thawed_is_refused_when_it_is_set(
+    tmp_path: Path,
+) -> None:
+    """C3, reproduced by the critic: one bad spec wedged the entire queue forever.
+
+    `create` filtered keys but never type-checked values, and `search_kwargs` coerces
+    at DELIVERY time inside a cron worker. A model writing {"amount_min": "$500,000"}
+    for "over half a million" stored fine and then raised every tick — and because
+    `due()` returns oldest-first, that row sat permanently at the head and NOTHING
+    behind it ever went out again.
+    """
+    conn = _conn(tmp_path)
+    with pytest.raises(ValueError):
+        _make(conn, search_spec={"state": "TX", "amount_min": "$500,000"})
+    assert reminders.for_user(conn, REP) == []
+    conn.close()
+
+
+def test_one_broken_reminder_cannot_block_the_ones_behind_it(
+    tmp_path: Path,
+) -> None:
+    """Belt and braces for C3: a row that predates the validation must not wedge it.
+
+    `create` now refuses a bad spec, but a row written before that, or one whose
+    search breaks later, still has to fail alone. The queue is oldest-first, so
+    anything that raises at the head silently kills the whole feature.
+    """
+    from grant_watch import reminder_worker
+
+    posted: list[str] = []
+
+    class _Client:
+        """Records outgoing Slack text."""
+
+        def chat_postMessage(self, **kwargs: object) -> dict[str, object]:
+            """Capture one post."""
+            posted.append(str(kwargs.get("text", "")))
+            return {"ok": True, "ts": "1.1"}
+
+    conn = _conn(tmp_path)
+    older = datetime.now(timezone.utc) - timedelta(hours=2)
+    # Written straight to the table, bypassing `create` exactly as a legacy row would.
+    conn.execute(
+        "INSERT INTO reminders (requested_by_slack,audience,thread_ts,subject,"
+        "search_spec,cadence,deliver_via,next_due_at,state,created_at,updated_at) "
+        "VALUES (?,?,?,'poison','{\"amount_min\":\"$500,000\"}','once','slack',?,"
+        "'active',?,?)",
+        (REP, CHANNEL, THREAD, older.isoformat(), older.isoformat(), older.isoformat()),
+    )
+    conn.commit()
+    _make(
+        conn,
+        subject="the good one",
+        due_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+    )
+
+    # Two ticks: the poison row fails alone, the good one still gets delivered.
+    reminder_worker.run(_Client(), conn)
+    reminder_worker.run(_Client(), conn)
+
+    assert any("the good one" in text for text in posted), (
+        "a malformed reminder blocked every reminder behind it"
+    )
+    poisoned = conn.execute(
+        "SELECT state,last_error FROM reminders WHERE subject='poison'"
+    ).fetchone()
+    assert poisoned["state"] == "failed"
+    assert poisoned["last_error"], "the failure was not recorded anywhere"
     conn.close()

@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from drip_support import SlackClient, mk_lead, mk_rfp
-from grant_watch import db
+from grant_watch import db, territory
 from grant_watch.slack import drip
 
 
@@ -460,3 +460,37 @@ def test_urgent_card_still_waits_for_the_band_to_open(tmp_path: Path) -> None:
     noon = datetime(2026, 7, 22, 19, 0, tzinfo=timezone.utc)  # 12:00 PT
     go, _ = drip.pacing_ok(conn, "C1", noon, urgent=True)
     assert go
+
+
+def test_the_daily_card_stops_mentioning_a_rep_who_asked_grant_to_stop(
+    tmp_path: Path,
+) -> None:
+    """C4: the loudest sender ignored the opt-out entirely.
+
+    `stop_followups` promises to switch off ALL of Grant's proactive messages, and
+    `is_opted_out` was consulted by exactly two senders — not by the drip, whose
+    routing line is a literal @-mention and therefore a phone notification. That is
+    precisely what somebody means by "stop pinging me", so the promise was false.
+
+    The CARD still posts: the lead belongs to the channel, not to one person. Only
+    the mention is dropped.
+    """
+    from grant_watch import reminders
+    from grant_watch.slack import drip
+
+    conn = db.connect(tmp_path / "d.db")
+    lead_id = mk_lead(conn, iid="OPTOUT1", entity="Castle Rock School District 401")
+    conn.execute("UPDATE leads SET state='WA', source='webs' WHERE id=?", (lead_id,))
+    conn.commit()
+    owner = territory.owner_for_state("WA")
+    assert owner, "fixture needs a mapped state or it proves nothing"
+
+    before = drip.run_drip(None, "C1", conn, force=True, dry_run=True)
+    assert f"<@{owner}>" in before, "fixture never produced a mention to suppress"
+
+    reminders.set_optout(conn, owner, scope="all")
+    after = drip.run_drip(None, "C1", conn, force=True, dry_run=True)
+    assert f"<@{owner}>" not in after, "an opted-out rep was still @-mentioned"
+    # The lead itself is still surfaced to the channel.
+    assert "Castle Rock" in after
+    conn.close()

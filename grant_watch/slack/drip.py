@@ -38,7 +38,7 @@ from zoneinfo import ZoneInfo
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-from .. import db, scoring, territory
+from .. import db, scoring, territory, reminders
 from ..presentation import display_entity_name, plain_fragment, state_display_name
 from .drip_card import render_blocks
 from .search_presentation import record_link
@@ -755,6 +755,15 @@ def run_drip(
     # aggregator) can never tag a rep — see territory.VERIFIED_STATE_SOURCES.
     sentence = text
     routing = territory.routing_line(row["state"], row["source"])
+    # AN OPT-OUT HAS TO REACH THE LOUDEST SENDER TOO. The routing line is a literal
+    # @-mention, which is a phone notification — exactly the thing someone means when
+    # they say "stop pinging me". `stop_followups` promises to switch off ALL of
+    # Grant's proactive messages, and until now the daily card ignored it entirely,
+    # which made that promise false. The CARD still posts: the lead is the channel's,
+    # not one person's. Only the mention is dropped.
+    owner = territory.owner_for_state(row["state"])
+    if routing and owner and reminders.is_opted_out(conn, owner, scope="nudges"):
+        routing = ""
     source = source_line(row)
     text = sentence + routing + source
     # The same three strings, restyled into the rich-campaign Block Kit layout (Chase

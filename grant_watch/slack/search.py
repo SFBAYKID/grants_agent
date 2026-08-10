@@ -338,6 +338,12 @@ def _export_kind(raw: str | bool) -> str:
     return _enum_value(ExportFormat, str(raw), "export format")
 
 
+# Exported so a caller can DETECT a zero-result search without matching prose.
+# The reminder worker needs to know, because a reminder that says "no matches" and
+# stops is a dead end — see reminder_worker._render.
+NO_MATCH_PREFIX = "No grants matched those filters."
+
+
 def search_leads(
     state: str = "",
     org_type: str = "",
@@ -657,7 +663,7 @@ def search_leads(
                     else ""
                 )
                 return (
-                    "No grants matched those filters." + hint_note + reference_note,
+                    NO_MATCH_PREFIX + hint_note + reference_note,
                     None,
                 )
             if (

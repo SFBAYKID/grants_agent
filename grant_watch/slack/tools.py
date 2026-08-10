@@ -711,19 +711,17 @@ def _dispatch_tool(
     }:
         from . import reminder_tools
 
-        if name == "reminder_set":
-            return reminder_tools.reminder_set(
-                args, requester_slack, channel, thread_ts
+        # Every other tool group here has an error boundary; this one did not, so a
+        # model writing reminder_id: "the texas one" turned an int() ValueError into
+        # the whole turn dying as "I'm having trouble thinking right now" — the exact
+        # reply that ended four real conversations.
+        try:
+            return _run_reminder_tool(
+                reminder_tools, name, args, requester_slack, channel, thread_ts
             ), None
-        if name == "reminder_list":
-            return reminder_tools.reminder_list(requester_slack), None
-        if name == "reminder_cancel":
-            return reminder_tools.reminder_cancel(args, requester_slack), None
-        if name == "stop_followups":
-            return reminder_tools.stop_followups(
-                args, requester_slack, channel, thread_ts
-            ), None
-        return reminder_tools.email_results(args, requester_slack), None
+        except Exception as exc:  # noqa: BLE001 — a tool reports, it never kills a turn
+            _log_tool_failure(name)
+            return f"ERROR: {name} failed ({type(exc).__name__}).", None
     if name == "fetch_url":
         return fetch_url(str(args.get("url", "")), p), None
     if name == "record_contact_fact":
@@ -746,6 +744,30 @@ def _dispatch_tool(
             args, requester_slack, workspace, channel, thread_ts
         ), None
     return f"ERROR: unknown tool {name}", None
+
+
+def _run_reminder_tool(
+    reminder_tools: Any,
+    name: str,
+    args: dict[str, Any],
+    requester_slack: str,
+    channel: str,
+    thread_ts: str,
+) -> str:
+    """Dispatch one reminder/opt-out/email tool to its implementation."""
+    if name == "reminder_set":
+        return str(
+            reminder_tools.reminder_set(args, requester_slack, channel, thread_ts)
+        )
+    if name == "reminder_list":
+        return str(reminder_tools.reminder_list(requester_slack))
+    if name == "reminder_cancel":
+        return str(reminder_tools.reminder_cancel(args, requester_slack))
+    if name == "stop_followups":
+        return str(
+            reminder_tools.stop_followups(args, requester_slack, channel, thread_ts)
+        )
+    return str(reminder_tools.email_results(args, requester_slack))
 
 
 def run_tool(
