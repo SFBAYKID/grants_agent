@@ -171,6 +171,24 @@ affect Chase's other projects.
   address the rep the card actually tagged, via the SAME verified-source gate the card
   used. Where Grant made a FALSE PROMISE ("I'll keep watching these states"), the
   reopened ask carries a written `correction` instead of the neutral line.
+- `verified` 2026-08-09 **TOOL OUTPUT HAS TWO AUDIENCES — a durable rule.** A LIVE
+  playground reminder posted model-facing coaching straight to a human: "Offer these
+  to the user (with counts) and ask which to run; do not stop at a bare no-results
+  answer." Tool text is written FOR THE MODEL; the reminder worker posts it with no
+  model in between. Guidance is now wrapped in `presentation.model_note`; `for_model`
+  strips the delimiters (the model still gets the guidance) and `for_human` strips the
+  guidance entirely. ANY surface that shows tool text to a person unmediated MUST call
+  `for_human`. No unit test caught this — only posting a real message did. And the
+  first regression test I wrote for it exercised `for_human` directly and PASSED
+  against a worker that had reverted to raw text: it proved the sanitiser worked while
+  proving nothing about whether anyone called it. Mutation testing caught that; the
+  test now drives `run()`.
+- `verified` 2026-08-09 the LOCAL `.env` points Salesforce WRITES at the **monarchdev
+  sandbox** while production has no `SALESFORCE_WRITE_MY_DOMAIN_URL` and falls back to
+  the production reader. So `salesforce_campaign_search` finding nothing LOCALLY is a
+  config artifact, not a bug — under production config both California campaigns
+  resolve with working links, and the campaign Nelly linked reports **13 members**.
+  Her exact `lightning.force.com` link — rejected three times in July — now parses.
 - `needs-testing` 2026-08-09: **no nudge, escalation, reminder or capability follow-up
   has been delivered live.** `followup_nudges` and `reminders` are empty in production;
   no `nudge` cron line exists; production asks are NOT seeded. LinkedIn connection
