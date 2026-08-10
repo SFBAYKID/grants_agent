@@ -911,11 +911,17 @@ def search_leads(
         # model (and the pipeline) honest; a row without one says so plainly.
         # _record_link pins the URL to THIS award when the source supports it.
         record_url = _record_link(row)
-        source_link = (
-            f" · <{record_url}|verify this record>"
-            if record_url
-            else " · no source link on file"
-        )
+        # `<url|label>` IS SLACK MRKDWN, and `send_to_rep` posts a text-only payload,
+        # so in an email every row arrived carrying literal angle brackets and a pipe.
+        # The one element on this line that must survive intact is the honesty link —
+        # the thing a rep clicks to check Grant is not making the award up — and it
+        # was the element being mangled.
+        if not record_url:
+            source_link = " · no source link on file"
+        elif for_chat:
+            source_link = f" · <{record_url}|verify this record>"
+        else:
+            source_link = f" · verify this record: {record_url}"
         lines.append(
             f"- Lead #{row['id']} — {display_entity_name(row['entity_name'])} "
             f"({row['state'] or '?'}{location}, {role}) — "

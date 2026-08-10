@@ -586,3 +586,27 @@ def test_only_one_paid_bulk_pull_may_run_per_human_message() -> None:
 
     # The per-lead paid tool needs the same bound.
     assert _single_execution_tool_key("zoominfo_enrich_contacts", {"lead_id": 1})
+
+
+def test_an_emailed_row_carries_a_clickable_link_not_slack_markup() -> None:
+    """`<url|label>` is Slack mrkdwn, and `send_to_rep` posts a text-only payload.
+
+    So every emailed row arrived carrying literal angle brackets and a pipe. The one
+    element on that line that must survive intact is the honesty link — the thing a
+    rep clicks to check Grant is not making the award up — and it was the element
+    being mangled.
+    """
+    import re
+
+    from grant_watch import lead_digest
+    from grant_watch.slack.search import search_leads
+
+    email_body = lead_digest.render({"program": "SVPP", "limit": 3})
+    assert email_body, "no leads rendered; the assertion below would be vacuous"
+    assert not re.search(r"<https?://[^>]*\|", email_body), (
+        "raw Slack mrkdwn reached an inbox"
+    )
+    assert "verify this record" in email_body, "the honesty link vanished entirely"
+
+    chat_body, _ = search_leads(program="SVPP", limit=3)
+    assert re.search(r"<https?://[^>]*\|", chat_body), "Slack lost its clickable links"

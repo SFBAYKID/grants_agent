@@ -107,6 +107,18 @@ def cmd_watchdog(dry_run: bool) -> int:
             dry_run=dry_run,
         )
     )
+
+    # HOUSEKEEPING RIDES THE ONLY JOB THAT RUNS AROUND THE CLOCK, rather than earning
+    # its own cron line. `user_memory.purge` had NO caller anywhere outside tests, so
+    # six-month expiry was enforced only by `recall`'s filter — correct for what a
+    # person sees, and it left every lapsed row on disk forever. A cheap indexed
+    # DELETE is a fair passenger on a tick that already opens the database.
+    if not dry_run:
+        from . import user_memory
+
+        dropped = user_memory.purge(conn)
+        if dropped:
+            print(f"memory: purged {dropped} expired item(s)")
     return 0
 
 
