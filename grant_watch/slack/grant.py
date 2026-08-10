@@ -787,10 +787,15 @@ def _remember_from(
                 b.text for b in reply.content if getattr(b, "type", "") == "text"
             )
 
-        # The CALLER's connection, never a new one, and never closed here. Opening
-        # its own and closing it severed the handler's connection wherever
-        # `db.connect` hands back a shared handle — caught by two event-path tests
-        # that drive the real handler rather than the helper.
+        # Uses the connection it is GIVEN and closes nothing. An earlier version
+        # opened its own and closed it, which severed the handler's connection
+        # wherever `db.connect` hands back a shared handle — caught by two event-path
+        # tests that drive the real handler rather than the helper.
+        #
+        # Callers therefore own the lifetime. `_handle_drip_thread` passes the
+        # handler's own connection; `_converse_general` has none in scope and opens
+        # one for this call, matching the two adjacent `db.connect()` calls already
+        # there rather than inventing a third pattern.
         user_memory.capture(
             conn,
             slack_user=user,
