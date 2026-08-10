@@ -844,6 +844,12 @@ def _release(conn: sqlite3.Connection, nudge_id: int, *, error: str) -> None:
     conn.commit()
 
 
+# How long a delivered offer is still plausibly what someone is answering. Kerry
+# replied in three minutes; two days is generous, and keeps a stale hint from
+# steering an unrelated conversation weeks later.
+OFFER_STAYS_OPEN = timedelta(days=2)
+
+
 def pending_capability_offer(
     conn: sqlite3.Connection, audience: str, thread_ts: str
 ) -> str:
@@ -869,13 +875,20 @@ def pending_capability_offer(
     # "I don't know what was offered" is a valid answer and must never be an
     # exception: this runs inside a live reply, and a lookup that cannot resolve
     # should cost the person a slightly worse answer, never their whole turn.
+    # BOUNDED IN TIME. Nothing marks this row answered once the person replies, so
+    # without a horizon the hint is prepended to EVERY turn in that thread forever —
+    # and "yes, do that" about something else three weeks later would route back to
+    # the capability Grant once offered. An offer nobody answered within two days has
+    # lapsed, not stayed pending.
+    cutoff = (datetime.now(timezone.utc) - OFFER_STAYS_OPEN).isoformat()
     try:
         row = conn.execute(
             """SELECT observed_json FROM followup_nudges
                 WHERE audience=? AND anchor_ts=? AND state='delivered'
                   AND subject_kind='capability_now_available'
+                  AND delivered_at>?
                 ORDER BY delivered_at DESC LIMIT 1""",
-            (audience, thread_ts),
+            (audience, thread_ts, cutoff),
         ).fetchone()
     except Exception:  # noqa: BLE001 — see above; degrade, never raise
         return ""

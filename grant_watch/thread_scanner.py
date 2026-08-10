@@ -131,7 +131,15 @@ def quote_is_real(quote: str, transcript: ThreadTranscript) -> bool:
     needle = _norm(quote)
     if len(needle) < 8:
         return False
-    return any(needle in _norm(text) for text in transcript.human_texts())
+    # The SAME negation hole `user_memory` had, and the same consequence: this quote
+    # is repeated back to a named colleague weeks later as "you asked". A literal
+    # substring of "I don't want you to email me" is not something they asked for.
+    from .user_memory import inverts_meaning
+
+    return any(
+        needle in _norm(text) and not inverts_meaning(quote, text)
+        for text in transcript.human_texts()
+    )
 
 
 def canonical_capability(name: str, known: object) -> str:

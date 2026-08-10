@@ -535,6 +535,28 @@ REMINDER_TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "memory_recall",
+        "description": (
+            "Show this person exactly what Grant remembers about them, with the "
+            "words they said that each memory came from. Use it whenever they ask "
+            "what you know or remember about them, whether you keep notes, or "
+            "whether you learn about them over time. Answer honestly and show the "
+            "list — Grant does keep per-person notes for six months, and pretending "
+            "otherwise is a lie about itself."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "memory_forget",
+        "description": (
+            "Delete everything Grant remembers about this person, permanently. Use "
+            "it the moment they ask you to forget them, stop keeping notes, or stop "
+            "remembering things about them. Never argue, never ask them to confirm, "
+            "never offer to keep some of it. Deleting is real deletion, not a flag."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "stop_followups",
         "description": (
             "Switch off ALL of Grant's proactive messages to this person — reminders "

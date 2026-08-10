@@ -563,6 +563,21 @@ def _single_execution_tool_key(name: str, arguments: dict[str, Any]) -> str:
         # subject line could put six real emails in a colleague's inbox from one
         # sentence — and unlike a repeated search, none of them can be taken back.
         return "email_results"
+    if name == "zoominfo_fill_many" and bool(arguments.get("confirm")):
+        # ONE PAID BULK PULL PER TURN, whatever the arguments — and the reasoning
+        # written above for email applies here with more force, because money is less
+        # recoverable than an email.
+        #
+        # `MAX_CREDITS_PER_CALL = 40` bounds one CALL. It does not bound how many
+        # calls a turn may make: six tool turns, several blocks each, and the result
+        # cache keyed on exact arguments so varying `lead_ids` defeats it. One rep
+        # saying "fill in all the gold leads" could otherwise spend the month.
+        return "zoominfo_fill_many:confirm"
+    if name == "zoominfo_enrich_contacts":
+        # Same rule, smaller blast radius. Keyed without arguments deliberately: a
+        # model that varied the person ids would otherwise buy the same organization
+        # several times over in one turn.
+        return "zoominfo_enrich_contacts"
     return ""
 
 

@@ -354,3 +354,92 @@ def test_capture_rejects_a_kind_it_does_not_recognise(conn: sqlite3.Connection) 
         == 0
     )
     conn.close()
+
+
+@pytest.mark.parametrize(
+    ("said", "quote"),
+    [
+        ("I don't want you to email me the weekly list", "want you to email me"),
+        ("not interested in cameras for Fairfax", "interested in cameras for Fairfax"),
+        ("I can't cover Oklahoma anymore, only Texas", "cover Oklahoma anymore"),
+        ("I would never say we should drop Texas", "we should drop Texas"),
+    ],
+)
+def test_a_quote_that_inverts_the_meaning_is_refused(said: str, quote: str) -> None:
+    """Every one of these is a character-for-character substring of what they typed.
+
+    That is what makes them dangerous: the model is not disobeying its instructions,
+    a clause really was copied. The guard was measuring the wrong thing. These get
+    repeated back to a named colleague weeks later as "you mentioned".
+    """
+    assert not user_memory.evidence_supports(quote, said), (
+        f"stored {quote!r} as a quote from {said!r}"
+    )
+
+
+def test_ordinary_quoting_still_works() -> None:
+    """The negation guard must not make the feature useless."""
+    said = "I only cover Texas and Oklahoma, and my son has a lacrosse game"
+    assert user_memory.evidence_supports("I only cover Texas and Oklahoma", said)
+    assert user_memory.evidence_supports("my son has a lacrosse game", said)
+
+
+def test_a_fact_the_quote_says_nothing_about_is_refused(
+    conn: sqlite3.Connection,
+) -> None:
+    """`evidence` was checked against the message and `fact` against nothing.
+
+    But `fact` is what reaches the model and what Grant acts on; the quote sits
+    beside it as decoration. A long message admitted "Is leaving the company in
+    September" on the quote "about a lead" — both individually valid, jointly a
+    fabrication about a colleague's career.
+    """
+    said = "Can you look at the Fairfax one, I had a question about a lead there"
+    with pytest.raises(ValueError, match="does not support"):
+        user_memory.remember(
+            conn,
+            slack_user=KERRY,
+            kind="personal",
+            fact="Is leaving the company in September",
+            evidence="about a lead",
+            said=said,
+            now=NOW,
+        )
+    assert user_memory.recall(conn, KERRY, now=NOW) == []
+    conn.close()
+
+
+def test_an_expired_fact_can_be_learned_again(conn: sqlite3.Connection) -> None:
+    """UNIQUE outlives expiry, so a lapsed memory was permanent amnesia.
+
+    `recall` hid it and `remember` swallowed the IntegrityError, so a person could
+    repeat the exact thing they had said six months earlier and Grant would neither
+    know it nor be able to record it.
+    """
+    later = NOW + timedelta(days=200)
+    user_memory.remember(
+        conn,
+        slack_user=KERRY,
+        kind="territory",
+        fact="Covers Texas and Oklahoma only",
+        evidence="I only cover Texas and Oklahoma",
+        said=SAID,
+        now=NOW,
+    )
+    assert user_memory.recall(conn, KERRY, now=later) == [], "it should have lapsed"
+
+    user_memory.remember(
+        conn,
+        slack_user=KERRY,
+        kind="territory",
+        fact="Covers Texas and Oklahoma only",
+        evidence="I only cover Texas and Oklahoma",
+        said=SAID,
+        now=later,
+    )
+    live = user_memory.recall(conn, KERRY, now=later)
+    assert [m.fact for m in live] == ["Covers Texas and Oklahoma only"], (
+        "a lapsed memory could never be re-learned"
+    )
+    assert conn.execute("SELECT COUNT(*) FROM user_memory").fetchone()[0] == 1
+    conn.close()

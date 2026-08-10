@@ -249,3 +249,57 @@ def test_a_failed_repair_stays_visible_to_the_apology(conn: sqlite3.Connection) 
     )
     assert row["state"] == "processing"
     conn.close()
+
+
+def test_a_failed_READ_leaves_the_turn_visible_to_both_recovery_paths(
+    conn: sqlite3.Connection,
+) -> None:
+    """A transient 429 on the read must not be mistaken for "Grant answered".
+
+    `find_spinner` returned "" on SlackApiError, and the caller reads "" as answered
+    and closes the receipt. So one rate-limited read left the spinner on screen
+    forever AND permanently suppressed the apology — both recovery paths killed by a
+    failure that had nothing to do with either. The existing failure test covers only
+    `chat_update`; this is the read.
+    """
+    from slack_sdk.errors import SlackApiError
+
+    _receipt(conn)
+
+    class _CannotRead(_Slack):
+        """Slack refusing the thread read."""
+
+        def conversations_replies(self, **_kw: object) -> dict[str, object]:
+            """Refuse."""
+            raise SlackApiError("ratelimited", {"error": "ratelimited"})
+
+    out = watchdog.run(_CannotRead([]), conn, bot_id=BOT, dry_run=False, now=NOW)
+    assert "could not be read" in out, out
+    row = conn.execute("SELECT reviewed_at FROM slack_event_receipts").fetchone()
+    assert row["reviewed_at"] is None, (
+        "a receipt was retired because Slack was busy, killing both recovery paths"
+    )
+    assert watchdog.stuck_turns(conn, NOW), "the turn is no longer visible to a retry"
+    conn.close()
+
+
+def test_it_refuses_to_run_without_grants_identity(conn: sqlite3.Connection) -> None:
+    """An empty bot id matches every message, so the whole backlog reads as answered.
+
+    `find_spinner` only skips other people's messages when `bot_id` is truthy. With
+    "" the first message it sees is a human's, that is not a spinner, and every stuck
+    receipt is closed in a single run. An auth_test that returns no user_id is a
+    reason to do nothing.
+    """
+    _receipt(conn)
+    out = watchdog.run(
+        _Slack([{"user": "UHUMAN", "ts": "100.2", "text": "hi"}]),
+        conn,
+        bot_id="",
+        dry_run=False,
+        now=NOW,
+    )
+    assert "refusing" in out
+    row = conn.execute("SELECT reviewed_at FROM slack_event_receipts").fetchone()
+    assert row["reviewed_at"] is None
+    conn.close()

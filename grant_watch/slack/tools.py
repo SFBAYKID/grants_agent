@@ -538,6 +538,46 @@ def salesforce_contact_record_preview(
 MAX_CREDITS_PER_CALL = 40
 
 
+def _memory_tool(name: str, requester_slack: str) -> str:
+    """Show, or delete, what Grant remembers about the person asking.
+
+    WHY THIS IS NOT OPTIONAL. On 2026-08-10 Grant told a colleague, truthfully at the
+    time, "I don't secretly learn or build a profile on you over time." Memory shipped
+    the same day. Without a way to see or erase it, that sentence became false and
+    Grant had no way to know — which makes it a lie about itself, the one kind this
+    project treats as worse than a wrong lead.
+
+    Both operations are scoped to the CALLER by signature. Nothing here accepts
+    another person's id, so no prompt and no scraped page can aim it at a colleague.
+    """
+    from .. import db, user_memory
+
+    if not requester_slack:
+        return "ERROR: I can't check memories without knowing who's asking."
+    conn = db.connect()
+    if name == "memory_forget":
+        removed = user_memory.forget(conn, requester_slack)
+        return (
+            f"Deleted {removed} remembered item(s). Nothing is kept."
+            if removed
+            else "I wasn't holding anything about you."
+        )
+    memories = user_memory.recall(conn, requester_slack)
+    if not memories:
+        return (
+            "I'm not holding anything about you right now. I do keep short notes "
+            "when someone tells me something worth remembering, for six months."
+        )
+    lines = [
+        f"- {m.fact} — from your words: \u201c{m.evidence}\u201d ({m.kind})"
+        for m in memories
+    ]
+    return (
+        f"Here is everything I remember about you ({len(memories)} item(s)), and "
+        "where each came from:\n" + "\n".join(lines)
+    )
+
+
 def _zoominfo_fill_many(
     lead_ids: list[int], max_credits: int, confirm: bool, requester_slack: str
 ) -> str:
@@ -767,6 +807,13 @@ def _dispatch_tool(
         except Exception as exc:
             _log_tool_failure("zoominfo_enrich_contacts")
             return f"ERROR: ZoomInfo pull failed ({type(exc).__name__}).", None
+    if name in {"memory_recall", "memory_forget"}:
+        p("Checking what I remember")
+        try:
+            return _memory_tool(name, requester_slack), None
+        except Exception as exc:  # noqa: BLE001 — a tool reports, it never kills a turn
+            _log_tool_failure(name)
+            return f"ERROR: {name} failed ({type(exc).__name__}).", None
     if name == "zoominfo_fill_many":
         p("Pricing a bulk contact pull")
         try:

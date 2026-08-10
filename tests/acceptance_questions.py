@@ -692,6 +692,24 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         allowed_intents=("question", "chitchat"),
     ),
     HumanQuestion(
+        # Grant told a colleague "I don't secretly learn or build a profile on you
+        # over time" on the same day memory shipped. It has to be able to answer this
+        # by LOOKING, not from its own impression.
+        "memory-what-do-you-know",
+        "chitchat",
+        "what do you actually remember about me?",
+        expected_tools=("memory_recall",),
+        forbidden_tools=("memory_forget",),
+        allowed_intents=("question", "chitchat"),
+    ),
+    HumanQuestion(
+        "memory-forget-me",
+        "chitchat",
+        "stop keeping notes on me and delete what you have",
+        expected_tools=("memory_forget",),
+        allowed_intents=("question", "chitchat"),
+    ),
+    HumanQuestion(
         # Kerry's actual words, 23 July: "Do it for all". There was no way to say yes
         # — every contact had to be bought one lead at a time, so the ask died.
         "zoominfo-fill-many-priced",

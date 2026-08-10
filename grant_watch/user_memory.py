@@ -69,17 +69,160 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip().lower()
 
 
+# Words that reverse the clause that follows them. A substring check cannot see
+# them, which is how "I don't want you to email me" yields the quote "want you to
+# email me" — copied character-for-character, and the opposite of what she said.
+NEGATORS = frozenset(
+    {
+        "not",
+        "no",
+        "never",
+        "dont",
+        "don't",
+        "doesnt",
+        "doesn't",
+        "didnt",
+        "didn't",
+        "cant",
+        "can't",
+        "cannot",
+        "wont",
+        "won't",
+        "wouldnt",
+        "wouldn't",
+        "shouldnt",
+        "shouldn't",
+        "isnt",
+        "isn't",
+        "arent",
+        "aren't",
+        "stop",
+        "avoid",
+        "without",
+        "unless",
+        "rather",
+    }
+)
+
+# How far back to look for a negator. Far enough to catch "I would never say we
+# should drop Texas", short enough not to trip on an unrelated earlier clause.
+NEGATION_WINDOW = 4
+
+
+def _words(text: str) -> list[str]:
+    """Lowercased word tokens, punctuation stripped."""
+    return re.findall(r"[a-z0-9']+", _norm(text))
+
+
+def inverts_meaning(evidence: str, said: str) -> bool:
+    """Does the source negate the clause this quote was cut from?
+
+    THE FAILURE A SUBSTRING CHECK CANNOT SEE. Every one of these passed the literal
+    check while meaning the opposite of what the person said:
+
+        "I don't want you to email me the weekly list" -> "want you to email me…"
+        "not interested in cameras for Fairfax"        -> "interested in cameras…"
+        "I would never say we should drop Texas"       -> "we should drop Texas"
+
+    The model is not disobeying its instructions in any of those — a clause really
+    was copied verbatim. The guard was simply measuring the wrong thing.
+    """
+    source = _words(said)
+    quote = _words(evidence)
+    if not source or not quote:
+        return False
+    for start in range(len(source) - len(quote) + 1):
+        if source[start : start + len(quote)] != quote:
+            continue
+        window = source[max(0, start - NEGATION_WINDOW) : start]
+        if any(word in NEGATORS for word in window):
+            return True
+    return False
+
+
 def evidence_supports(evidence: str, said: str) -> bool:
-    """Is this evidence literally something the person typed?
+    """Is this evidence literally something the person typed, and not its opposite?
 
     The guard that separates remembering from inventing. A paraphrase that means the
     same thing is not acceptable: Grant will later say "you mentioned" and attach the
     words to a named colleague, possibly months later, possibly in front of others.
+
+    Nor is a true substring that reverses their meaning, which is the harder case and
+    the one a literal check was blind to.
     """
     needle = _norm(evidence)
     if len(needle) < MIN_EVIDENCE:
         return False
-    return needle in _norm(said)
+    if needle not in _norm(said):
+        return False
+    return not inverts_meaning(evidence, said)
+
+
+def fact_is_grounded(fact: str, evidence: str) -> bool:
+    """Does the quote actually support the claim being stored beside it?
+
+    `evidence` was validated against the message and `fact` against nothing at all —
+    yet `fact` is what reaches the model and what Grant acts on, while the quote sits
+    beside it as decoration. A 200-character message about a lead would admit
+    fact="Is leaving the company in September" on the quote "about a lead".
+
+    So the fact's content words have to appear in the quote. This deliberately allows
+    ordinary rewording — "Covers Texas and Oklahoma" from "I only cover Texas and
+    Oklahoma" — and refuses a claim the quote says nothing about.
+    """
+    stop = {
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "to",
+        "of",
+        "in",
+        "on",
+        "for",
+        "and",
+        "or",
+        "at",
+        "by",
+        "with",
+        "their",
+        "they",
+        "them",
+        "he",
+        "she",
+        "his",
+        "her",
+        "it",
+        "its",
+        "has",
+        "have",
+        "had",
+        "only",
+        "i",
+    }
+    claim = [w for w in _words(fact) if w not in stop and len(w) > 2]
+    if not claim:
+        return False
+    quoted = {q.rstrip("s") for q in _words(evidence)}
+    covered = sum(1 for word in claim if word.rstrip("s") in quoted)
+    if not covered:
+        return False
+    # TWO WEAK SIGNALS RATHER THAN ONE STRICT ONE, because a strict overlap ratio
+    # rejects ordinary rewording. "Also covers Louisiana" is a fair reading of "I
+    # picked up Louisiana last month" and shares exactly one content word; demanding
+    # more would force the fact to parrot the quote, which defeats the point of
+    # storing a fact at all.
+    #
+    # What must not pass is a claim the quote says nothing about — the 200-character
+    # message that admitted fact="Is leaving the company in September" on the quote
+    # "about a lead". That fails BOTH: no shared content word, and a quote far
+    # shorter than the claim it supposedly supports.
+    if len(_norm(evidence)) < len(_norm(fact)) * 0.5:
+        return False
+    return covered / len(claim) >= 0.33
 
 
 def remember(
@@ -109,8 +252,14 @@ def remember(
         raise ValueError("a memory needs something to remember")
     if not evidence_supports(evidence, said):
         raise ValueError(
-            "a memory must quote the person verbatim; "
-            "this evidence does not appear in what they said"
+            "a memory must quote the person verbatim and must not invert their "
+            "meaning; this evidence does not appear in what they said, or the "
+            "source negates it"
+        )
+    if not fact_is_grounded(fact, evidence):
+        raise ValueError(
+            "the quote does not support the fact being stored beside it; "
+            "quote the sentence the claim actually came from"
         )
     moment = now or _now()
     try:
@@ -132,7 +281,30 @@ def remember(
             ),
         )
     except sqlite3.IntegrityError:
-        return None  # already known; remembering twice is not new information
+        # Already on file — but "already" may mean an EXPIRED row. `UNIQUE(slack_user,
+        # kind, fact)` outlives the retention horizon, so a lapsed memory was
+        # invisible to `recall` AND could never be learned again: permanent amnesia
+        # about a thing the person had just repeated. The docstring's claim that a
+        # purge which never runs "costs disk, not correctness" was wrong.
+        #
+        # Re-arm the existing row instead. Same fact, same person, said again — that
+        # is the row being true once more, not a second memory.
+        cur = conn.execute(
+            """UPDATE user_memory
+                  SET recorded_at=?, expires_at=?, evidence=?, superseded_by=NULL
+                WHERE slack_user=? AND kind=? AND fact=? AND expires_at<=?""",
+            (
+                moment.isoformat(),
+                (moment + RETENTION).isoformat(),
+                evidence.strip(),
+                slack_user,
+                kind,
+                fact.strip(),
+                moment.isoformat(),
+            ),
+        )
+        conn.commit()
+        return None if cur.rowcount == 0 else -1
     conn.commit()
     return int(cur.lastrowid or 0)
 

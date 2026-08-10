@@ -117,19 +117,24 @@ def stuck_turns(conn: sqlite3.Connection, now: datetime) -> list[StuckTurn]:
     return out
 
 
-def find_spinner(client: WebClient, turn: StuckTurn, bot_id: str) -> str:
-    """The ts of Grant's stranded spinner in this thread, or "" if there is none.
+def find_spinner(client: WebClient, turn: StuckTurn, bot_id: str) -> str | None:
+    """Grant's stranded spinner ts, "" if it answered, or None if we could not look.
 
-    Returns empty when the thread's last Grant message is a real answer — the turn
-    may have completed and failed only to record it, and overwriting a good answer
-    with an apology would be strictly worse than doing nothing.
+    THREE OUTCOMES, NOT TWO. A `SlackApiError` on this READ used to return "", which
+    the caller reads as "Grant did answer" and closes the receipt. So one transient
+    429 — on a Tier-3 method, called once per stuck turn, up to 50 per run, with no
+    retry handler — left the spinner on screen forever AND permanently suppressed the
+    `thread_abandoned` apology, killing both recovery paths at once.
+
+    "I could not look" is not "there was nothing there", and the difference is the
+    only thing keeping a dead conversation visible to the next run.
     """
     try:
         replies = client.conversations_replies(
             channel=turn.channel, ts=turn.thread_ts, limit=100
         )
     except SlackApiError:
-        return ""
+        return None
     for message in reversed(replies.get("messages", []) or []):
         # Match on `user`, NOT `bot_id`. Grant's messages carry both — user
         # `U0BH0ESRJ4W` and bot `B0BH4C9098R` — and `auth_test()` returns the USER
@@ -167,10 +172,22 @@ def run(
     if client is None:
         return f"watchdog: {len(turns)} stuck, no Slack client configured"
 
+    # AN EMPTY BOT ID MATCHES EVERY MESSAGE. `find_spinner` skips messages whose
+    # author is not Grant only when `bot_id` is truthy, so with "" the first message
+    # it sees is a human's, that is not a spinner, and the whole backlog is closed as
+    # "already answered" in a single run. An `auth_test()` that returns no user_id is
+    # a reason to do nothing, not a reason to sweep.
+    if not bot_id:
+        return "watchdog: refusing to run without Grant's user id"
+
     repaired = 0
     answered = 0
+    unreachable = 0
     for turn in turns:
         spinner_ts = find_spinner(client, turn, bot_id)
+        if spinner_ts is None:
+            unreachable += 1
+            continue
         if not spinner_ts:
             # Grant did answer; the receipt is just wrong. Close it quietly so it
             # stops being counted as a dead thread.
@@ -189,9 +206,10 @@ def run(
         repaired += 1
 
     prefix = "[dry-run] " if dry_run else ""
+    unread = f", {unreachable} could not be read" if unreachable else ""
     return (
         f"{prefix}watchdog: {repaired} stranded spinner(s) replaced, "
-        f"{answered} already answered"
+        f"{answered} already answered{unread}"
     )
 
 

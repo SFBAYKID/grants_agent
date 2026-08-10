@@ -558,3 +558,31 @@ def test_the_bulk_tool_refuses_a_ceiling_the_model_invented(
     assert out.startswith("ERROR:")
     assert str(tools.MAX_CREDITS_PER_CALL) in out
     assert spent == []
+
+
+def test_only_one_paid_bulk_pull_may_run_per_human_message() -> None:
+    """The per-CALL cap does not bound how many calls a turn makes.
+
+    `MAX_CREDITS_PER_CALL = 40` limits one call. The agent loop runs six tool turns
+    with several blocks each, and the result cache is keyed on exact arguments — so
+    varying `lead_ids` defeats it. One rep saying "fill in all the gold leads" could
+    otherwise spend the month with nobody seeing a price.
+
+    The same rule already existed for `email_results`, with reasoning that applies
+    more forcefully here: money is less recoverable than an email.
+    """
+    from grant_watch.slack.conversation import _single_execution_tool_key
+
+    paid = _single_execution_tool_key("zoominfo_fill_many", {"confirm": True})
+    assert paid, "an unbounded number of paid bulk pulls may run in one turn"
+    # Keyed WITHOUT the arguments, so varying the lead set cannot buy a second run.
+    other = _single_execution_tool_key(
+        "zoominfo_fill_many", {"confirm": True, "lead_ids": [9, 9, 9]}
+    )
+    assert other == paid, "changing the lead ids bought another paid pull"
+
+    # Pricing is free and must stay repeatable.
+    assert _single_execution_tool_key("zoominfo_fill_many", {"confirm": False}) == ""
+
+    # The per-lead paid tool needs the same bound.
+    assert _single_execution_tool_key("zoominfo_enrich_contacts", {"lead_id": 1})
