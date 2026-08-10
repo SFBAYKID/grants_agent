@@ -74,7 +74,22 @@ def load(conn: sqlite3.Connection, path: Path) -> int:
             )
             added += 1
         except sqlite3.IntegrityError:
-            continue  # already on file; posting is what must not repeat
+            # Already on file. Revise it while it is still UNPOSTED — these words are
+            # authored and get corrected, and an overpromise found in review has to
+            # be fixable without minting a new slug and leaving the wrong text queued
+            # ahead of it. Once posted the row is frozen: people have read it, and
+            # editing history is its own kind of dishonesty.
+            conn.execute(
+                """UPDATE announcements SET body=?, capabilities=?, audience=?
+                    WHERE slug=? AND posted_at IS NULL""",
+                (
+                    text,
+                    ",".join(str(c) for c in item.get("capabilities", [])),
+                    str(item.get("audience") or ""),
+                    slug,
+                ),
+            )
+            continue
     conn.commit()
     return added
 

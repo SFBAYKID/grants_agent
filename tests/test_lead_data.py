@@ -676,3 +676,45 @@ def test_caching_never_mutates_the_shared_schema_list() -> None:
     conversation._cached_tools()
     assert not any("cache_control" in schema for schema in tools.TOOL_SCHEMAS)
     assert len(conversation._cached_tools()) == len(tools.TOOL_SCHEMAS)
+
+
+def test_an_unposted_update_can_be_corrected_but_a_posted_one_cannot(
+    tmp_path: Path,
+) -> None:
+    """A review found an overpromise; fixing it must not need a new slug.
+
+    Otherwise the wrong text stays queued AHEAD of the correction — the same trap as
+    the seeded apologies, where the file moved and the database did not. Once posted
+    the row freezes: people have read it, and quietly editing history is its own kind
+    of dishonesty.
+    """
+    from grant_watch import announce
+
+    conn = _conn(tmp_path)
+    folder = Path(tempfile.mkdtemp())
+
+    def write(body: str) -> Path:
+        """One authored file with a fixed slug."""
+        path = folder / f"{abs(hash(body))}.json"
+        path.write_text(
+            json.dumps(
+                {"announcements": [{"slug": "u1", "audience": CHANNEL, "body": body}]}
+            )
+        )
+        return path
+
+    announce.load(conn, write("I check back in on anything that goes quiet."))
+    announce.load(conn, write("From here on, I check back in."))
+    pending = announce.pending(conn)
+    assert pending is not None
+    assert pending.body == "From here on, I check back in.", "the fix never landed"
+    assert conn.execute("SELECT COUNT(*) FROM announcements").fetchone()[0] == 1
+
+    conn.execute("UPDATE announcements SET posted_at='2026-08-10T15:00:00+00:00'")
+    conn.commit()
+    announce.load(conn, write("Something completely different."))
+    row = conn.execute("SELECT body FROM announcements").fetchone()
+    assert row["body"] == "From here on, I check back in.", (
+        "a posted update was rewritten after people had read it"
+    )
+    conn.close()

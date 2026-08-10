@@ -1,9 +1,16 @@
 ---
 name: deploy-f894801-announce
-description: Deploy cadfefe→f894801 on 2026-08-10 (CURRENT PROD) — schema 37→38 (announcements), PID 32750, 0.48s outage, 13th cron line; and the finding that matters — the shortened follow-up wordings did NOT take effect because `correction` lives in the DB, and the announcement's email line is false for every rep but Chase
+description: Deploy cadfefe→f894801 on 2026-08-10 — schema 37→38 (announcements), PID 32750, 0.48s outage, 13th cron line; and the two findings it surfaced (corrections never re-seeded; the email line false for every rep but Chase), BOTH FIXED by 2159d67
 metadata:
   type: project
 ---
+
+> **SUPERSEDED AS CURRENT PROD by `2159d67` — see [[deploy-2159d67-resend-test-email]].**
+> Both findings below are **CLOSED**: `recipient_for()` now reads its own `RESEND_TEST_EMAIL`
+> (unset on the droplet), so all six reps resolve to their own mailbox; and `record()` now
+> UPDATEs `correction` on a duplicate, so the re-seed took Kerry's two from 118/177 chars to
+> **58/57**, and Monday's head message from 236 to **176**. `ask_text` still never moves.
+> The measurements below are the ORIGINAL ones, kept because they are why the fix exists.
 
 **LIVE 2026-08-10T04:34:55Z (droplet Sun 21:34:55 PT).** `cadfefe1ba0356495a2db16331d45186e1d54874`
 → `f894801e9d078547b74655059b40d7af152d99a4` (3 commits). Schema **37 → 38**. Listener
