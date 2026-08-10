@@ -342,13 +342,23 @@ def _abandoned_threads(conn: sqlite3.Connection) -> list[NudgeCandidate]:
     than "you didn't finish", which it cannot: the rep may well have gone and done the
     work by hand.
 
+    `processing` IS INCLUDED, AND THAT IS THE IMPORTANT HALF. `claim_slack_event`
+    writes that state before the work starts and `finish_slack_event` overwrites it
+    after — so a process that DIES mid-turn leaves it there permanently. Observed
+    live: a deploy restarted the listener 43 seconds into a question, and the thread
+    still shows a "Thinking…" spinner that will never resolve. Every recovery path in
+    the codebase looked only for `needs_reconciliation`, so that conversation was
+    invisible to all of them — the precise shape of dead-end that lost reps in July.
+    The grace period does the filtering: a turn takes seconds, so anything still
+    `processing` a day later is dead, not busy.
+
     Only the LATEST receipt in a thread qualifies. If the person sent anything
     afterwards they came back on their own, and there is nothing to apologise for.
     """
     rows = conn.execute(
         """SELECT r.event_id,r.channel,r.thread_ts,r.slack_user,r.received_at,r.error
              FROM slack_event_receipts r
-            WHERE r.state='needs_reconciliation'
+            WHERE r.state IN ('needs_reconciliation','processing')
               AND r.reviewed_at IS NULL
               AND r.thread_ts IS NOT NULL
               AND r.slack_user IS NOT NULL

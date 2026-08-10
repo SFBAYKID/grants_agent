@@ -863,3 +863,52 @@ def test_the_member_add_confirmation_carries_the_campaign_link() -> None:
 
     assert execution._campaign_link(_Broken(), "701UZ00000uW9jBYAS") == ""
     assert execution._campaign_link(None, "701UZ00000uW9jBYAS") == ""
+
+
+def test_a_turn_killed_by_a_restart_is_followed_up(tmp_path: Path) -> None:
+    """OBSERVED LIVE: a deploy restarted the bot 43 seconds into a question.
+
+    `claim_slack_event` writes state='processing' before the work starts and
+    `finish_slack_event` overwrites it after, so a process that DIES mid-turn leaves
+    it there forever. The Slack thread keeps a "Thinking…" spinner that never
+    resolves, and every recovery path in the codebase looked only for
+    `needs_reconciliation` — so that conversation was invisible to all of them. It is
+    exactly the silent dead-end that lost reps in July.
+    """
+    conn = _conn(tmp_path)
+    killed = NOW - timedelta(days=2)
+    conn.execute(
+        "INSERT INTO slack_event_receipts (event_id,workspace,channel,thread_ts,"
+        "slack_user,state,received_at) VALUES ('ev-killed','T1',?,'900.1',?,"
+        "'processing',?)",
+        (CHANNEL, REP, killed.isoformat()),
+    )
+    conn.commit()
+
+    found = [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "thread_abandoned"
+    ]
+    assert found, "a conversation killed by a restart is never followed up"
+    assert found[0].target_slack == REP
+    assert found[0].anchor_ts == "900.1"
+    conn.close()
+
+
+def test_a_turn_still_running_is_left_alone(tmp_path: Path) -> None:
+    """The grace period is what makes including `processing` safe.
+
+    A turn takes seconds. Chasing one that started a moment ago would have Grant
+    apologising for an answer it is still writing.
+    """
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO slack_event_receipts (event_id,workspace,channel,thread_ts,"
+        "slack_user,state,received_at) VALUES ('ev-live','T1',?,'901.1',?,"
+        "'processing',?)",
+        (CHANNEL, REP, (NOW - timedelta(minutes=2)).isoformat()),
+    )
+    conn.commit()
+    assert not [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "thread_abandoned"
+    ], "Grant apologised for an answer it was still writing"
+    conn.close()
