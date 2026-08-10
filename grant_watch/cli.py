@@ -13,6 +13,7 @@ Usage (from the repo root, venv active):
     python -m grant_watch.cli remind [--dry-run | --execute]
     python -m grant_watch.cli capability <name> [--execute]
     python -m grant_watch.cli nudge-report
+    python -m grant_watch.cli enrich-orgs [--grade gold] [--limit N] [--execute]
     python -m grant_watch.cli salesforce-followups [--dry-run] [--smoke]
     python -m grant_watch.cli slack-failures [--mark-reviewed EVENT_ID]
 
@@ -539,6 +540,19 @@ def cmd_capability_seed(path: str, dry_run: bool) -> int:
     return 0
 
 
+def cmd_enrich_orgs(grade: str, limit: int, dry_run: bool) -> int:
+    """Fill in organization details for leads that have none.
+
+    Dry-run by default: this spends Firecrawl credits, one live scrape per lead.
+    """
+    from . import org_backfill
+
+    conn = db.connect_readonly() if dry_run else db.connect()
+    outcome = org_backfill.run(conn, grade=grade, limit=limit, dry_run=dry_run)
+    print(f"enrich-orgs ({grade}): {outcome.summary()}")
+    return 0
+
+
 def cmd_nudge_report() -> int:
     """Show which follow-up wording gets answered more often."""
     from .slack import nudge_variants
@@ -703,6 +717,17 @@ def main(argv: list[str] | None = None) -> int:
         help="actually mark it available; without it this only previews",
     )
     sub.add_parser("nudge-report", help="reply rate per follow-up wording")
+    p_orgs = sub.add_parser(
+        "enrich-orgs",
+        help="fill in address/website/phone for leads that have none (spends credits)",
+    )
+    p_orgs.add_argument("--grade", default="gold", choices=["gold", "silver", "watch"])
+    p_orgs.add_argument("--limit", type=int, default=50)
+    p_orgs.add_argument(
+        "--execute",
+        action="store_true",
+        help="actually scrape; without it this only lists what would be done",
+    )
     p_seed = sub.add_parser(
         "capability-seed", help="record unmet asks from an evidence file"
     )
@@ -763,6 +788,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "remind":
         # Same default as nudge: never send because someone forgot a flag.
         return cmd_remind(dry_run=not args.execute)
+    if args.command == "enrich-orgs":
+        return cmd_enrich_orgs(args.grade, args.limit, dry_run=not args.execute)
     if args.command == "nudge-report":
         return cmd_nudge_report()
     if args.command == "capability-seed":

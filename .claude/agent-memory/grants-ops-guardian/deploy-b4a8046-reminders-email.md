@@ -1,6 +1,6 @@
 ---
 name: deploy-b4a8046-reminders-email
-description: Deploy 26153bd→b4a8046 on 2026-08-09 (CURRENT PROD) — schema 32→35, PID 22742, 6th cron line; and the .env line that BREAKS `source .env` because an unquoted display-name value contains a space and angle brackets
+description: Deploy 26153bd→b4a8046 on 2026-08-09 (SUPERSEDED by 14221fc) — schema 32→35, PID 22742, 6th cron line; and the .env line that BREAKS `source .env` because an unquoted display-name value contains a space and angle brackets (REPAIRED in the 14221fc deploy)
 metadata:
   type: project
 ---
@@ -32,6 +32,9 @@ Consequences, all measured:
 - **Recommended fix (NOT applied — the instruction was byte-identical append):** quote it,
   `RESEND_FROM_EMAIL="Name <addr@domain>"`, in the LOCAL repo `.env` first, then re-append.
   python-dotenv strips the quotes, so the value is unchanged.
+  **APPLIED 2026-08-09 in the 14221fc deploy — see [[deploy-14221fc-email-coaching-fix]].**
+  `sh -n .env` is now silent and `RESEND_FROM_EMAIL` IS in the live environ. The
+  prediction above held exactly; the fingerprints in this file are now superseded.
 
 **Lesson: before appending any `.env` value, test it as shell syntax, not just as dotenv.**
 `printf '%s\n' "$line" | sh -n /dev/stdin` catches it in one command. A value that dotenv
