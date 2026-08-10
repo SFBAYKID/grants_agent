@@ -25,6 +25,7 @@ import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from slack_sdk import WebClient
@@ -530,6 +531,23 @@ def _card_was_acted_on(conn: sqlite3.Connection, candidate: NudgeCandidate) -> b
     )
 
 
+def _target_local_hour(candidate: NudgeCandidate, now: datetime) -> int | None:
+    """The hour where the mentioned rep actually is, or None when it is unknown.
+
+    Unknown falls back to the shared window rather than blocking, so a rep with no
+    recorded zone behaves exactly as before.
+    """
+    if not candidate.target_slack:
+        return None
+    zone = roster.timezone_for_slack(candidate.target_slack)
+    if not zone:
+        return None
+    try:
+        return now.astimezone(ZoneInfo(zone)).hour
+    except (ValueError, KeyError):
+        return None
+
+
 def _sent_today(
     conn: sqlite3.Connection, audience: str, now: datetime
 ) -> list[sqlite3.Row]:
@@ -564,6 +582,18 @@ def pacing_reason(
     """
     if not force and not in_window(now):
         return "outside business hours"
+    # A NUDGE @-MENTIONS ONE PERSON, so the coast-to-coast window is the wrong test
+    # for it. `in_window` runs 7:00 Eastern to 17:00 Pacific — correct for a channel
+    # card that pings nobody, but it permits 20:00 Eastern, and a targeted nudge at
+    # 20:00 is a phone notification during someone's evening.
+    #
+    # Measured 2026-08-10: a send judged fine at 20:23 Pacific was 23:23 for Kerry,
+    # who is in America/New_York. `--force` deliberately does NOT skip this one —
+    # bypassing the shared window to run a test is defensible, waking a named person
+    # at 11pm is not, and the two should not be behind the same switch.
+    local = _target_local_hour(candidate, now)
+    if local is not None and not 8 <= local < 18:
+        return f"outside {candidate.target_slack}'s working hours"
     today = _sent_today(conn, candidate.audience, now)
     if len(today) >= MAX_NUDGES_PER_DAY:
         return f"daily nudge cap reached ({MAX_NUDGES_PER_DAY})"

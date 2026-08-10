@@ -1,5 +1,5 @@
 {
-  "_comment": "Slack id <-> rep mailbox map. Rows 1-4 mirror Persequor's verified roster (its integration response, 2026-07-13). Nelly added 2026-08-06 from the live Slack directory (users.info U04ASV42UJD), NOT from Persequor. Jocelyn added 2026-08-09: her Slack id came from the live directory and her mailbox was verified against an exact ACTIVE Salesforce User (SOQL: Jocelyn Dy, jocelyn@monarchconnected.com, IsActive=true) before the row was written \u2014 being absent had failed three of her Google Sheet exports and armed the same confirm-button refusal that stopped Nelly. A send_as is ALWAYS derived from this map \u2014 never typed free-form. Roster membership also authorizes creating Salesforce Leads owned by that person, so every row needs an exact active Salesforce User with the same email. `manager: true` marks who an unanswered lead escalates to (Chase, 2026-08-09: \"Since Anthony is the manager\"). Exactly one row may carry it; roster.manager_slack_id() fails closed and returns None if zero or several do, so a config mistake produces no escalation rather than a message to the wrong person.",
+  "_comment": "Slack id <-> rep mailbox map. Rows 1-4 mirror Persequor's verified roster (its integration response, 2026-07-13). Nelly added 2026-08-06 from the live Slack directory (users.info U04ASV42UJD), NOT from Persequor. Jocelyn added 2026-08-09: her Slack id came from the live directory and her mailbox was verified against an exact ACTIVE Salesforce User (SOQL: Jocelyn Dy, jocelyn@monarchconnected.com, IsActive=true) before the row was written \u2014 being absent had failed three of her Google Sheet exports and armed the same confirm-button refusal that stopped Nelly. A send_as is ALWAYS derived from this map \u2014 never typed free-form. Roster membership also authorizes creating Salesforce Leads owned by that person, so every row needs an exact active Salesforce User with the same email. `manager: true` marks who an unanswered lead escalates to (Chase, 2026-08-09: \"Since Anthony is the manager\"). Exactly one row may carry it; roster.manager_slack_id() fails closed and returns None if zero or several do, so a config mistake produces no escalation rather than a message to the wrong person. `timezone` is the rep's own IANA zone, used ONLY to decide when a nudge that @-mentions THEM may be sent. It is recorded only where it has been read from Slack's own user profile \u2014 Kerry's was resolved 2026-08-10 while checking whether a 20:23 PT send was civil; it was 23:23 for her. A rep with no entry falls back to the coast-to-coast window, which is the pre-existing behaviour, so an absent zone can never make Grant quieter than it was. NEVER guess one from a state or an area code.",
   "reps": [
     {
       "slack_id": "U01DPJVURHU",
@@ -14,7 +14,8 @@
     {
       "slack_id": "U01E908206M",
       "email": "kerry@monarchconnected.com",
-      "name": "Kerry"
+      "name": "Kerry",
+      "timezone": "America/New_York"
     },
     {
       "slack_id": "U01DFJWQQJ3",

@@ -67,3 +67,22 @@ def manager_slack_id() -> str | None:
         if raw.get("manager") is True and str(raw.get("slack_id") or "") in approved
     ]
     return managers[0] if len(managers) == 1 else None
+
+
+def timezone_for_slack(slack_id: object) -> str:
+    """The rep's own IANA timezone, or "" when it has not been verified.
+
+    Only ever populated from Slack's own user profile. An absent entry means the
+    caller falls back to the coast-to-coast window, so a missing zone can never make
+    Grant quieter than it already was — and never noisier either, since the fallback
+    is the existing behaviour. A zone guessed from a state or an area code would be
+    worse than none: it would look authoritative while being wrong for anyone who
+    moved.
+    """
+    wanted = str(slack_id or "").strip()
+    body = json.loads(REPS_PATH.read_text())
+    approved = {item.slack_id for item in identities()}
+    for raw in body.get("reps", []):
+        if str(raw.get("slack_id") or "") == wanted and wanted in approved:
+            return str(raw.get("timezone") or "")
+    return ""
