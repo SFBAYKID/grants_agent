@@ -22,7 +22,7 @@ from grant_watch.migrations import MIGRATIONS
 # cannot differ from the migration list while migrations apply at all. The literal
 # is the point: adding a migration must fail this file until someone bumps it
 # deliberately, which is the schema-change review gate.
-HEAD_VERSION = 36
+HEAD_VERSION = 37
 
 
 def test_fresh_database_reaches_v28_with_all_rich_tables(tmp_path: Path) -> None:

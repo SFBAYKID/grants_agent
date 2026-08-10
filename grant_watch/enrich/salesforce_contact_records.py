@@ -361,6 +361,12 @@ def contact_lead_payload(
     phone, _phone_kind = choose_phone(contact, lead)
     if phone:
         payload["Phone"] = phone
+    # Salesforce has a distinct MobilePhone field and reps treat the two very
+    # differently. A mobile used to be written into Phone, so a rep dialled what they
+    # believed was a desk line.
+    mobile = _row_value(contact, "mobile_phone")
+    if mobile:
+        payload["MobilePhone"] = mobile
     if lead["state"] or _lead_value(lead, "org_state"):
         payload["State"] = str(lead["state"] or "") or _lead_value(lead, "org_state")
     # City: the org's mailing city (address) is preferred over the NCES office city.

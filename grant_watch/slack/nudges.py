@@ -575,11 +575,21 @@ def build_message(candidate: NudgeCandidate, variant: str = "a") -> str:
         )
     if candidate.subject_kind == "crm_batch_blocked":
         count = candidate.observed.get("organizations", 0)
+        if variant == "b":
+            return (
+                f"{mention}{count} organizations on this one are waiting on a call "
+                "from you about how to match them. Shall I add the rest without them?"
+            )
         return (
             f"{mention}still stuck on this one — {count} organizations need a call "
             "on how to match them. Want me to skip those and add the rest?"
         )
     if candidate.subject_kind == "crm_batch_partial":
+        if variant == "b":
+            return (
+                f"{mention}the unmatched ones from this batch never made it into the "
+                "campaign. Want me to try them again?"
+            )
         return (
             f"{mention}we only added the ones I could match here — the rest never "
             "made it. Want me to have another go at them?"
@@ -616,6 +626,16 @@ def build_message(candidate: NudgeCandidate, variant: str = "a") -> str:
         return (
             f"{mention}still nothing back on {subject} — though that's only what I "
             "can see here. Want me to find a contact, or shall I drop it?"
+        )
+    if variant == "b":
+        # The untagged wording needed its own alternate too. Without one, the ledger
+        # recorded two labels carrying the SAME sentence — and because the whole
+        # live queue is untagged cards, `choose` would have declared a winner from
+        # pure noise after eight sends. That is the superstition this module's own
+        # docstring says it exists to prevent.
+        return (
+            f"{subject} is still unclaimed. Shall I track down a contact for it, or "
+            "let it go?"
         )
     return (
         f"Anyone want {subject}? Nothing's come back here and I've got no activity "

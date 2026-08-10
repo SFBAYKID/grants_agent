@@ -60,18 +60,28 @@ def candidates(
     are excluded here rather than paid for and discarded. An `unreachable` lead IS
     included: that outcome is explicitly retryable.
 
-    Ordered by AWARD AMOUNT, not by `lead_score` — that is a computed function in
-    `scoring.py`, not a column, and ordering by it in SQL fails outright. The money
-    is the honest proxy available here and puts the biggest opportunities first.
+    ONE ROW PER ORGANIZATION. The sweep pays per lead, and gold alone holds ~30
+    duplicated entity names — the first production run scraped Modesto City Schools
+    twice and Mt. Morris three times, buying the same page over and over. Grouping on
+    the canonical key means each organization is fetched once; the profile is stored
+    per lead, so the duplicates are picked up on a later pass rather than paid for
+    twice in this one.
+
+    ORDERING IS BY AWARD AMOUNT, and the honest caveat is that `amount` is NULL on
+    most gold rows, so in practice this degrades to id order. `lead_score` would be
+    the right key and cannot be used — it is a computed function in `scoring.py`, not
+    a column, and ordering by it in SQL fails outright. Said plainly rather than left
+    as a claim the data does not support.
     """
     return list(
         conn.execute(
-            """SELECT id, entity_name, state, amount
+            """SELECT MIN(id) AS id, entity_name, state, amount
                  FROM leads
                 WHERE lead_grade = ?
                   AND COALESCE(org_profile_status,'') <> 'found'
                   AND COALESCE(entity_name,'') <> ''
-                ORDER BY COALESCE(amount,0) DESC, id
+                GROUP BY COALESCE(NULLIF(canonical_entity_key,''), entity_name)
+                ORDER BY COALESCE(MAX(amount),0) DESC, MIN(id)
                 LIMIT ?""",
             (grade, max(1, limit)),
         )

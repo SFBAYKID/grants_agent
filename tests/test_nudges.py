@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 
+import pytest
+
 from grant_watch import db
 from grant_watch.slack import nudges
 
@@ -762,3 +764,82 @@ def test_a_reply_in_the_thread_marks_the_wording_answered(tmp_path: Path) -> Non
     stats = {s.variant: s for s in nudge_variants.stats(conn, "card_unengaged")}
     assert stats["a"].engaged == 1 and stats["a"].reply_rate == 1.0
     conn.close()
+
+
+@pytest.mark.parametrize(
+    ("kind", "target", "observed"),
+    [
+        ("card_unengaged", "", {"entity_name": "Wilder School District #133"}),
+        ("card_unengaged", REP, {"entity_name": "Wilder", "amount_usd": 450000}),
+        ("crm_batch_blocked", REP, {"organizations": 3}),
+        ("crm_batch_partial", REP, {}),
+        ("crm_preview_expired", REP, {}),
+        ("thread_abandoned", REP, {}),
+    ],
+)
+def test_every_wording_pair_is_actually_two_different_sentences(
+    kind: str, target: str, observed: dict[str, object]
+) -> None:
+    """A/B testing a sentence against ITSELF is worse than not testing at all.
+
+    Three of the five kinds returned byte-identical text for both labels, and the
+    untagged card — which is the entire live queue — was one of them. The ledger
+    would have filled with rows marked `a` and `b` carrying the same sentence,
+    `nudge-report` would have shown two reply rates as though they compared
+    wordings, and after MIN_SAMPLE sends `choose()` would have started preferring a
+    "winner" picked purely by noise. That is precisely the superstition
+    nudge_variants exists to prevent, built into the thing meant to prevent it.
+
+    Parametrised over the shapes that actually reach production, because the tagged
+    and untagged card paths are different branches and only one of them had a
+    second wording.
+    """
+    candidate = nudges.NudgeCandidate(
+        subject_kind=kind,
+        subject_id="1",
+        audience=CHANNEL,
+        target_slack=target,
+        anchor_ts="1.1",
+        stalled_at=NOW,
+        observed=observed,
+    )
+    first = nudges.build_message(candidate, "a")
+    second = nudges.build_message(candidate, "b")
+    assert first != second, (
+        f"{kind} (target={target or 'none'}) sends the same sentence for both "
+        "variants, so any reply-rate comparison between them is noise"
+    )
+    assert first.strip() and second.strip()
+
+
+def test_the_member_add_confirmation_carries_the_campaign_link() -> None:
+    """Chase had to ask "give me the link" after 13 leads were added.
+
+    The CREATE confirmation carried a link and the member-add one did not, so a
+    thread that had just written 13 records to Salesforce ended with the rep going
+    to hunt for them. A confirmation that reports work without a way to see it is
+    half a message.
+    """
+    from grant_watch.enrich import salesforce_campaign_execution as execution
+
+    class _Gateway:
+        """Only the link builder matters here."""
+
+        def lightning_link(self, sobject: str, record_id: str) -> str:
+            """Build a fake but well-formed record link."""
+            return f"https://writer.test/lightning/r/{sobject}/{record_id}/view"
+
+    link = execution._campaign_link(_Gateway(), "701UZ00000uW9jBYAS")
+    assert link.endswith("/lightning/r/Campaign/701UZ00000uW9jBYAS/view")
+
+    # A gateway that cannot build one must degrade, never raise: the write already
+    # succeeded and a missing link must not turn that into an error.
+    class _Broken:
+        """A gateway whose link builder fails."""
+
+        def lightning_link(self, sobject: str, record_id: str) -> str:
+            """Fail the way an expired token would."""
+            raise RuntimeError("token expired")
+
+    assert execution._campaign_link(_Broken(), "701UZ00000uW9jBYAS") == ""
+    assert execution._campaign_link(None, "701UZ00000uW9jBYAS") == ""

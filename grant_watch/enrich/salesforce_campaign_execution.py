@@ -607,8 +607,26 @@ def _excluded_organizations(conn: sqlite3.Connection, action_id: str) -> list[st
     return labels
 
 
+def _campaign_link(gateway: object | None, campaign_id: str) -> str:
+    """The Campaign's Lightning URL, or "" if it cannot be built.
+
+    Best-effort by design: a link is an aid, and failing to construct one must never
+    turn a successful, verified write into an error the rep has to interpret.
+    """
+    builder = getattr(gateway, "lightning_link", None)
+    if builder is None or not campaign_id:
+        return ""
+    try:
+        return str(builder("Campaign", campaign_id) or "")
+    except Exception:  # noqa: BLE001 — a missing link never fails a completed write
+        return ""
+
+
 def _finish_membership(
-    conn: sqlite3.Connection, action_id: str, campaign_id: str
+    conn: sqlite3.Connection,
+    action_id: str,
+    campaign_id: str,
+    gateway: object | None = None,
 ) -> ActionExecution:
     """Derive and persist an honest action state from verified item outcomes."""
     added, already, unresolved, failed, unknown = _result_counts(conn, action_id)
@@ -692,6 +710,13 @@ def _finish_membership(
         f"Salesforce campaign verification: {added} added, {already} already present, "
         f"{unresolved} unresolved, {failed} failed, {unknown} unknown."
     )
+    # ALWAYS HAND BACK THE LINK. Chase had to ask "give me the link" after 13 leads
+    # were added — the create confirmation carried one and this did not, so the
+    # thread ended with the rep going to look for the thing Grant had just written.
+    # A confirmation that reports work without a way to see it is half a message.
+    link = _campaign_link(gateway, campaign_id)
+    if link:
+        message += f"\nCampaign: {link}"
     if excluded:
         message += (
             f" Explicitly excluded/skipped before approval: {len(excluded)} — "
@@ -836,7 +861,7 @@ def execute_membership(
                            WHERE id=?""",
                         (item_id,),
                     )
-    return _finish_membership(conn, action_id, campaign_id)
+    return _finish_membership(conn, action_id, campaign_id, gateway)
 
 
 def reconcile_membership(
@@ -885,7 +910,7 @@ def reconcile_membership(
                        SET state='unknown',verification_state='unknown' WHERE id=?""",
                     (item["id"],),
                 )
-    result = _finish_membership(conn, str(action["id"]), campaign_id)
+    result = _finish_membership(conn, str(action["id"]), campaign_id, gateway)
     if result.state is not CampaignActionState.UNKNOWN:
         _close_reconciled_attempts(conn, str(action["id"]))
     return result

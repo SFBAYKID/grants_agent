@@ -70,6 +70,7 @@ def save_vendor_contact(
     vendor_person_id: str,
     *,
     do_not_call: bool,
+    mobile_phone: str = "",
 ) -> int:
     """Store a LICENSED-VENDOR contact — never 'verified', whatever the vendor claims.
 
@@ -83,12 +84,19 @@ def save_vendor_contact(
     A do-not-call flagged number is NOT stored in `phone` at all. Callers must not
     "keep it for reference": every consumer of contacts.phone treats it as dialable,
     and salesforce_contact_records copies it straight into a Lead's Phone field.
+
+    `mobile_phone` is kept SEPARATE from `phone` for the same reason the person's
+    line is kept separate from the organization's: they are different facts about
+    how to reach somebody, and Salesforce has a distinct field for each. Collapsing
+    them put a mobile into a Lead's Phone field, where every rep reads it as a desk
+    line.
     """
     cur = conn.execute(
         """INSERT INTO contacts
-             (lead_id,name,title,email,phone,source_url,confidence,contact_status,
-              contact_provenance,provenance,do_not_call,vendor_person_id)
-           VALUES (?,?,?,?,?,'','medium','vendor_licensed','vendor_licensed',
+             (lead_id,name,title,email,phone,mobile_phone,source_url,confidence,
+              contact_status,contact_provenance,provenance,do_not_call,
+              vendor_person_id)
+           VALUES (?,?,?,?,?,?,'','medium','vendor_licensed','vendor_licensed',
                    'vendor_licensed',?,?)""",
         (
             lead_id,
@@ -96,6 +104,10 @@ def save_vendor_contact(
             title,
             email,
             "" if do_not_call else phone,
+            # A do-not-call flag covers every number for that person, mobile
+            # included — withholding the desk line and keeping the mobile would
+            # defeat the whole point of honouring it.
+            "" if do_not_call else mobile_phone,
             1 if do_not_call else 0,
             vendor_person_id,
         ),

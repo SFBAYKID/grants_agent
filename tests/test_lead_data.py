@@ -212,3 +212,35 @@ def test_a_contact_with_no_source_page_does_not_claim_verification(
     assert "verified verbatim" not in sentence
     assert "unknown source" not in sentence
     conn.close()
+
+
+def test_the_sweep_pays_for_each_organization_once(tmp_path: Path) -> None:
+    """The first production run bought the same page three times.
+
+    Gold holds ~30 duplicated entity names, and the sweep pays per LEAD row, so
+    Modesto City Schools was scraped twice and Mt. Morris three times in a single
+    25-lead batch. Each organization should cost one fetch.
+    """
+    from grant_watch import org_backfill
+
+    conn = _conn(tmp_path)
+    for index, name in enumerate(
+        [
+            "MODESTO CITY SCHOOLS",
+            "MODESTO CITY SCHOOLS",
+            "MT MORRIS",
+            "MT MORRIS",
+            "MT MORRIS",
+            "GALT JOINT UNION",
+        ]
+    ):
+        conn.execute(
+            "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url,"
+            "lead_grade,canonical_entity_key,amount) VALUES ('s',?,?,'CA','u','gold',?,?)",
+            (str(index), name, name.lower().replace(" ", "") + "|ca", 100),
+        )
+    conn.commit()
+    picked = org_backfill.candidates(conn, grade="gold")
+    names = [row["entity_name"] for row in picked]
+    assert len(names) == len(set(names)) == 3, f"paid for a duplicate: {names}"
+    conn.close()

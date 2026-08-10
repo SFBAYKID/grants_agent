@@ -9,7 +9,7 @@ from grant_watch.migrations_campaign_batch import migration_27_exact_campaign_ba
 
 # Hand-maintained head version — see tests/test_rich_migrations.py for why this is
 # a literal and not MIGRATIONS[-1].version.
-HEAD_VERSION = 36
+HEAD_VERSION = 37
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:

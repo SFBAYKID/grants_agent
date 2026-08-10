@@ -25,7 +25,10 @@ from .migrations_nudges import (
     migration_35_capability_ask_correction,
     migration_36_nudge_message_variants,
 )
-from .migrations_zoominfo import migration_29_vendor_contacts_and_credits
+from .migrations_zoominfo import (
+    migration_29_vendor_contacts_and_credits,
+    migration_37_mobile_phone,
+)
 from .migrations_rich import (
     migration_14_run_confirmation_freshness,
     migration_15_rich_post_kind_and_snapshot_links,
@@ -706,6 +709,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         36,
         "which wording was sent, and whether it was answered",
         migration_36_nudge_message_variants,
+    ),
+    Migration(
+        37,
+        "a mobile number is its own fact, not 'the phone'",
+        migration_37_mobile_phone,
     ),
 )
 

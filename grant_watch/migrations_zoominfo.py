@@ -118,3 +118,21 @@ def migration_29_vendor_contacts_and_credits(conn: sqlite3.Connection) -> None:
         """CREATE INDEX IF NOT EXISTS ix_zoominfo_spends_period_state
            ON zoominfo_credit_spends(period, state)"""
     )
+
+
+def migration_37_mobile_phone(conn: sqlite3.Connection) -> None:
+    """Store a mobile number as its OWN fact, not as "the phone".
+
+    ZoomInfo returns `mobilePhone` and `directPhone` separately, and the enrichment
+    collapsed them with `mobile_phone or direct_phone` into a single `phone` column.
+    Salesforce then received a mobile in its `Phone` field, which every rep reads as
+    a desk line — the same class of error as putting a switchboard number next to a
+    person's name, which this repo already fixed once.
+
+    They are different facts about how to reach someone and are kept apart end to
+    end, so `Phone` and `MobilePhone` can each be populated with what they actually
+    mean, and neither is inferred from the other.
+    """
+    existing = {str(row[1]) for row in conn.execute("PRAGMA table_info(contacts)")}
+    if "mobile_phone" not in existing:
+        conn.execute("ALTER TABLE contacts ADD COLUMN mobile_phone TEXT")

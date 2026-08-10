@@ -53,4 +53,7 @@
 - [First human_asserted row verified](human-asserted-row-verified.md) — prod id 84 correct on every field; `verified` 19→20 was an UNRELATED lead; contacts has NO created_at; a deploy backup doubles as a forensic pre-state
 - [Dating undated contacts rows](dating-undated-contacts-rows.md) — bot.log tool-turn order ↔ search_requests.created_at pins an undated write to the minute; CompletedPaidCall = "errored out" on data that exists; no delete audit, zero id gaps
 - [Deploy 14221fc email-coaching fix (CURRENT PROD)](deploy-14221fc-email-coaching-fix.md) — LIVE 2026-08-09, schema stayed 35, PID 24507, ~3s outage; `.env` quote-in-place repair (line-set proof, not prefix-sha); 3 more dead SALESFORCE_* flags remain
-- [Org column coverage](org-column-coverage-20260810.md) — leads.org_* is ~0.2% populated (22/10,715 street); the Salesforce org-fields mapping ships INERT until enrichment backfills
+- [Org column coverage](org-column-coverage-20260810.md) — leads.org_* was ~0.2% populated; first enrich-orgs sweep took gold street 16→32; per-run yield + the dup-entity and ORDER BY traps
+- [Deploy d664548 follow-ups LIVE (CURRENT PROD)](deploy-d664548-followups-live.md) — LIVE 2026-08-09 schema 35→36, PID 25636, 0.76s outage; 12th cron line arms `nudge --execute`; first tick permanently burns 25 stale subjects
+- [Nudge A/B variants are inert](nudge-variant-ab-is-inert.md) — the ledger labels "a"/"b" for kinds whose two wordings are byte-IDENTICAL; nudge-report will compare nothing for untagged card_unengaged
+- [SSH rate limit + stdin traps](ssh-rate-limit-and-stdin-traps.md) — `ssh -n … < file` uploads an EMPTY file and exits 0; a burst of sessions gets port 22 REJECTED; multiplex with a SHORT ControlPath

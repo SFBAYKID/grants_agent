@@ -198,8 +198,11 @@ def apply_for_lead(
     for detail in details:
         if not detail.matched:
             continue  # NO_MATCH / OPT_OUT are free and assert nothing
-        number = detail.mobile_phone or detail.direct_phone
-        if detail.do_not_call and number:
+        # The two numbers stay APART. Collapsing them with `mobile or direct` put a
+        # mobile into a Salesforce Lead's Phone field, which every rep reads as a
+        # desk line — the same mistake as putting a switchboard beside a person's
+        # name, which this repo has already had to fix once.
+        if detail.do_not_call and (detail.mobile_phone or detail.direct_phone):
             suppressed += 1
         db.save_vendor_contact(
             conn,
@@ -207,9 +210,10 @@ def apply_for_lead(
             detail.display_name,
             detail.job_title,
             detail.email,
-            number,
+            detail.direct_phone,
             detail.person_id,
             do_not_call=detail.do_not_call,
+            mobile_phone=detail.mobile_phone,
         )
         stored += 1
     return ZoomInfoApplied(
