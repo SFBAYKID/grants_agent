@@ -833,6 +833,50 @@ def _release(conn: sqlite3.Connection, nudge_id: int, *, error: str) -> None:
     conn.commit()
 
 
+def pending_capability_offer(
+    conn: sqlite3.Connection, audience: str, thread_ts: str
+) -> str:
+    """The capability Grant OFFERED in this thread, if a follow-up is awaiting an answer.
+
+    WHY THIS EXISTS — the first proactive follow-up Grant ever sent, and what happened
+    three minutes later. It reached Kerry at 10:00 quoting her own July words, "Email
+    those to kerry@monarchconnected.com… I can now — want me to send it?" She replied
+    "Yes" at 10:03. Grant classified that as `draft_email` — PROSPECT outreach through
+    Persequor — and answered "Tell me the exact Lead number you want to use." She had
+    asked for her own spreadsheets and was handed a CRM question.
+
+    The misread is understandable and that is exactly why prose cannot fix it: her
+    quoted sentence CONTAINS an email address, so a model reading the thread sees a
+    request to email somebody. A bare "Yes" carries no words of its own to correct it.
+
+    So the offer is read from the ledger rather than inferred from the conversation.
+    `followup_nudges` already records what was delivered, to which thread; this is that
+    row, and it is the only honest source for "what did Grant just offer this person".
+    """
+    if not audience or not thread_ts:
+        return ""
+    # "I don't know what was offered" is a valid answer and must never be an
+    # exception: this runs inside a live reply, and a lookup that cannot resolve
+    # should cost the person a slightly worse answer, never their whole turn.
+    try:
+        row = conn.execute(
+            """SELECT observed_json FROM followup_nudges
+                WHERE audience=? AND anchor_ts=? AND state='delivered'
+                  AND subject_kind='capability_now_available'
+                ORDER BY delivered_at DESC LIMIT 1""",
+            (audience, thread_ts),
+        ).fetchone()
+    except Exception:  # noqa: BLE001 — see above; degrade, never raise
+        return ""
+    if row is None:
+        return ""
+    try:
+        observed = json.loads(str(row["observed_json"] or "{}"))
+    except json.JSONDecodeError:
+        return ""
+    return str(observed.get("capability") or "")
+
+
 def _record(
     conn: sqlite3.Connection,
     candidate: NudgeCandidate,

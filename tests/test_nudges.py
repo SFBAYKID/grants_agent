@@ -939,3 +939,56 @@ def test_a_bad_anchor_is_terminal_and_not_retried(tmp_path: Path) -> None:
     assert row["state"] == "suppressed"
     assert row["last_error"] == "invalid_thread_ts"
     conn.close()
+
+
+def test_the_thread_remembers_what_grant_offered(tmp_path: Path) -> None:
+    """Grant's first proactive follow-up, and the reply three minutes later.
+
+    It reached Kerry at 10:00 quoting her own July words — "Email those to
+    kerry@monarchconnected.com… I can now — want me to send it?" She said "Yes". Grant
+    classified that as prospect outreach and answered "Tell me the exact Lead number
+    you want to use." She had asked for her own spreadsheets.
+
+    Prose cannot fix this: her quoted sentence CONTAINS an email address, so the thread
+    genuinely looks like a request to email somebody, and a bare "Yes" has no words of
+    its own to correct it. The offer has to be read from the ledger instead.
+    """
+    conn = _conn(tmp_path)
+    _seed_capability_subject(conn)
+    sent: list[dict[str, object]] = []
+
+    class _Client:
+        """A Slack client that records the delivered nudge."""
+
+        def chat_postMessage(self, **kw: object) -> dict[str, object]:
+            """Accept and record."""
+            sent.append(kw)
+            return {"ts": "9.9"}
+
+    assert "nudged" in nudges.run(_Client(), conn, now=NOW)
+    row = conn.execute(
+        "SELECT audience,anchor_ts,state FROM followup_nudges"
+    ).fetchone()
+    assert row["state"] == "delivered"
+
+    offered = nudges.pending_capability_offer(
+        conn, str(row["audience"]), str(row["anchor_ts"])
+    )
+    assert offered == "campaign_load", (
+        "the thread cannot say what Grant offered, so a bare 'Yes' is unanswerable"
+    )
+
+    # A different thread must not inherit the offer.
+    assert nudges.pending_capability_offer(conn, str(row["audience"]), "999.9") == ""
+    # Nor a different channel.
+    assert nudges.pending_capability_offer(conn, "C0OTHER", str(row["anchor_ts"])) == ""
+    conn.close()
+
+
+def test_an_unresolvable_connection_costs_an_answer_not_the_turn(
+    tmp_path: Path,
+) -> None:
+    """This lookup runs inside a live reply; it must degrade, never raise."""
+    from types import SimpleNamespace
+
+    assert nudges.pending_capability_offer(SimpleNamespace(), "C1", "1.1") == ""
