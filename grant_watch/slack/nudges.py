@@ -35,6 +35,7 @@ from ..migrations_nudges import NUDGE_SUBJECT_KINDS
 from ..presentation import display_entity_name
 from .drip import PT as BUSINESS_TZ
 from .drip import in_window
+from . import nudge_variants
 
 # Bumping this re-opens every subject for one more nudge under the new rules. It is
 # part of the schema's uniqueness key precisely so that is a deliberate act.
@@ -72,6 +73,11 @@ GRACE = {
 # someone else's silence and does not belong in the channel where they can see it
 # being reported.
 DM_KINDS = frozenset({"card_escalated"})
+
+# The wordings a follow-up may use. Two, deliberately: enough to learn which reads
+# better, few enough that every one is written and reviewed by a person rather than
+# generated. See slack/nudge_variants.py for how one is chosen and measured.
+VARIANTS = ("a", "b")
 # How long a subject stays worth mentioning. Five days made the eligible window only
 # THREE days wide (grace takes the first two), which had a consequence nobody
 # intended: every subject that accumulated while this feature was switched off aged
@@ -545,7 +551,7 @@ def pacing_reason(
     return ""
 
 
-def build_message(candidate: NudgeCandidate) -> str:
+def build_message(candidate: NudgeCandidate, variant: str = "a") -> str:
     """One short, human line that is hard to ignore — and still only claims what
     Grant actually observed.
 
@@ -558,6 +564,11 @@ def build_message(candidate: NudgeCandidate) -> str:
     """
     mention = f"<@{candidate.target_slack}> " if candidate.target_slack else ""
     if candidate.subject_kind == "crm_preview_expired":
+        if variant == "b":
+            return (
+                f"{mention}that Salesforce approval expired before it was clicked — "
+                "nothing was written. Shall I rebuild it?"
+            )
         return (
             f"{mention}that Salesforce approval timed out before anyone hit the "
             "button, so nothing got written. Want me to rebuild it? 🙂"
@@ -578,6 +589,11 @@ def build_message(candidate: NudgeCandidate) -> str:
     if candidate.subject_kind == "card_escalated":
         return _escalation_message(candidate, mention)
     if candidate.subject_kind == "thread_abandoned":
+        if variant == "b":
+            return (
+                f"{mention}I dropped the ball on this one and never got you an "
+                "answer. Want me to have another go?"
+            )
         return (
             f"{mention}I never got you a proper answer on this one, and it looks like "
             "it stalled there. Want me to pick it back up?"
@@ -588,6 +604,15 @@ def build_message(candidate: NudgeCandidate) -> str:
         # The card named this person, so the follow-up asks THEM rather than the room.
         # Addressing the channel about a card that pinged one rep produced a
         # follow-up nobody owned, which is how nine cards drew no reply at all.
+        if variant == "b":
+            # Leads with the MONEY rather than the silence. Which of these gets
+            # answered more often is exactly what the variant ledger measures.
+            amount = int(candidate.observed.get("amount_usd") or 0)
+            money = f"${amount:,} " if amount > 0 else ""
+            return (
+                f"{mention}{money}{subject} is still sitting here — want me to find "
+                "you a contact for it?"
+            )
         return (
             f"{mention}still nothing back on {subject} — though that's only what I "
             "can see here. Want me to find a contact, or shall I drop it?"
@@ -660,6 +685,10 @@ def run(
     on the next tick. A dry run returns before any write.
     """
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    if not dry_run:
+        # Close the loop on earlier sends BEFORE choosing this one's wording, so the
+        # choice is made on the freshest evidence available.
+        nudge_variants.mark_engagement(conn)
     for candidate in candidates(conn, current):
         already = conn.execute(
             """SELECT state FROM followup_nudges
@@ -684,10 +713,13 @@ def run(
         waiting = pacing_reason(conn, candidate, current, force=force)
         if waiting:
             return f"skip: {waiting}"
-        text = build_message(candidate)
+        variant = nudge_variants.choose(conn, candidate.subject_kind, VARIANTS)
+        text = build_message(candidate, variant)
         if dry_run:
-            return f"[dry-run] would nudge {candidate.subject_kind}: {text}"
-        nudge_id = _record(conn, candidate, current, state="reserved", reason=None)
+            return f"[dry-run] would nudge {candidate.subject_kind} ({variant}): {text}"
+        nudge_id = _record(
+            conn, candidate, current, state="reserved", reason=None, variant=variant
+        )
         if client is None:
             return "skip: no Slack client configured"
         try:
@@ -738,6 +770,7 @@ def _record(
     *,
     state: str,
     reason: str | None,
+    variant: str = "",
 ) -> str:
     """Persist the reservation (or the suppression) before any Slack call."""
     nudge_id = uuid.uuid4().hex
@@ -746,8 +779,8 @@ def _record(
             """INSERT INTO followup_nudges
                  (id,subject_kind,subject_id,audience,target_slack,anchor_ts,
                   policy_version,due_at,drop_after,state,suppress_reason,
-                  observed_json,delivery_key,reserved_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  observed_json,delivery_key,reserved_at,variant)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 nudge_id,
                 candidate.subject_kind,
@@ -763,6 +796,7 @@ def _record(
                 json.dumps(candidate.observed, sort_keys=True),
                 f"nudge:{candidate.subject_kind}:{candidate.subject_id}:{POLICY_VERSION}",
                 now.isoformat(),
+                variant or None,
             ),
         )
     return nudge_id

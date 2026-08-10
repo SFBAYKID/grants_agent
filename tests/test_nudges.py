@@ -682,3 +682,83 @@ def test_the_escalation_names_the_rep_the_card_actually_routed_to(
     assert "<@U04ASV42UJD>" in text, "named the territory rep, not the routed one"
     assert "<@U08C1NBH875>" not in text, "named someone who was never asked"
     conn.close()
+
+
+def test_both_wordings_get_a_fair_sample_before_either_is_judged(
+    tmp_path: Path,
+) -> None:
+    """Measurement before optimisation.
+
+    A system that rewrites before it can measure is guessing with extra steps. While
+    a wording has fewer than MIN_SAMPLE sends the less-used one wins, so both
+    accumulate evidence rather than the first one taken becoming permanent.
+    """
+    from grant_watch.slack import nudge_variants
+
+    conn = _conn(tmp_path)
+    picks = []
+    for index in range(6):
+        variant = nudge_variants.choose(conn, "card_unengaged", nudges.VARIANTS)
+        picks.append(variant)
+        conn.execute(
+            "INSERT INTO followup_nudges (id,subject_kind,subject_id,audience,"
+            "target_slack,anchor_ts,policy_version,due_at,drop_after,state,"
+            "observed_json,delivery_key,reserved_at,delivered_at,variant) "
+            "VALUES (?,'card_unengaged',?,?,?,'1.1','v',?,?,'delivered','{}',?,?,?,?)",
+            (
+                f"n{index}",
+                str(index),
+                CHANNEL,
+                REP,
+                NOW.isoformat(),
+                NOW.isoformat(),
+                f"k{index}",
+                NOW.isoformat(),
+                NOW.isoformat(),
+                variant,
+            ),
+        )
+        conn.commit()
+    assert picks.count("a") == 3 and picks.count("b") == 3, (
+        f"one wording was starved of evidence: {picks}"
+    )
+    conn.close()
+
+
+def test_a_reply_in_the_thread_marks_the_wording_answered(tmp_path: Path) -> None:
+    """The only engagement signal Grant can honestly see is a reply it received.
+
+    It UNDERCOUNTS — a reply Grant never woke for leaves no receipt — and that is the
+    safe direction, because it can only make a wording look worse than it is.
+    """
+    from grant_watch.slack import nudge_variants
+
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO followup_nudges (id,subject_kind,subject_id,audience,"
+        "target_slack,anchor_ts,policy_version,due_at,drop_after,state,"
+        "observed_json,delivery_key,reserved_at,delivered_at,variant) "
+        "VALUES ('n1','card_unengaged','1',?,?,'700.1','v',?,?,'delivered','{}',"
+        "'k1',?,?,'a')",
+        (
+            CHANNEL,
+            REP,
+            NOW.isoformat(),
+            NOW.isoformat(),
+            NOW.isoformat(),
+            NOW.isoformat(),
+        ),
+    )
+    conn.commit()
+    assert nudge_variants.mark_engagement(conn) == 0, "nothing replied yet"
+
+    conn.execute(
+        "INSERT INTO slack_event_receipts (event_id,workspace,channel,thread_ts,"
+        "slack_user,state,received_at) VALUES ('e1','T1',?,'700.1',?,'complete',?)",
+        (CHANNEL, REP, (NOW + timedelta(minutes=5)).isoformat()),
+    )
+    conn.commit()
+    assert nudge_variants.mark_engagement(conn) == 1
+    stats = {s.variant: s for s in nudge_variants.stats(conn, "card_unengaged")}
+    assert stats["a"].engaged == 1 and stats["a"].reply_rate == 1.0
+    conn.close()

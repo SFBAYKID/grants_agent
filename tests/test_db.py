@@ -173,6 +173,7 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
         33,
         34,
         35,
+        36,
     ]
     crm_tables = {
         row[0]

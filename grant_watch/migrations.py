@@ -23,6 +23,7 @@ from .migrations_nudges import (
     migration_30_followup_nudges,
     migration_34_capability_asks,
     migration_35_capability_ask_correction,
+    migration_36_nudge_message_variants,
 )
 from .migrations_zoominfo import migration_29_vendor_contacts_and_credits
 from .migrations_rich import (
@@ -700,6 +701,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         35,
         "a correction to deliver with a reopened ask",
         migration_35_capability_ask_correction,
+    ),
+    Migration(
+        36,
+        "which wording was sent, and whether it was answered",
+        migration_36_nudge_message_variants,
     ),
 )
 

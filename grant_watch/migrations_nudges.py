@@ -150,3 +150,31 @@ def migration_35_capability_ask_correction(conn: sqlite3.Connection) -> None:
     }
     if "correction" not in existing:
         conn.execute("ALTER TABLE capability_asks ADD COLUMN correction TEXT")
+
+
+def migration_36_nudge_message_variants(conn: sqlite3.Connection) -> None:
+    """Record WHICH WORDING was sent, and whether the person answered it.
+
+    Chase's ask: "if a user does not respond to a message, the system should say to
+    itself, maybe I should write it differently next time." That is an optimisation
+    problem, and the honest first step is not an optimiser — it is a measurement.
+    Without these two columns there is no way to tell whether one wording does
+    better than another, so any rewriting would be superstition.
+
+    `variant` is the wording identifier chosen at send time. `engaged_at` is set when
+    a HUMAN posts in that thread after the nudge landed, which is the only engagement
+    signal Grant can honestly observe: a reply in the thread it spoke into. It is
+    deliberately NOT "the rep did the work" — they may have phoned the district — so
+    everything computed from this is a reply rate, never an outcome rate.
+    """
+    existing = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(followup_nudges)")
+    }
+    if "variant" not in existing:
+        conn.execute("ALTER TABLE followup_nudges ADD COLUMN variant TEXT")
+    if "engaged_at" not in existing:
+        conn.execute("ALTER TABLE followup_nudges ADD COLUMN engaged_at TIMESTAMP")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_nudges_variant "
+        "ON followup_nudges(subject_kind, variant, state)"
+    )

@@ -12,6 +12,7 @@ Usage (from the repo root, venv active):
     python -m grant_watch.cli nudge [--dry-run | --execute]
     python -m grant_watch.cli remind [--dry-run | --execute]
     python -m grant_watch.cli capability <name> [--execute]
+    python -m grant_watch.cli nudge-report
     python -m grant_watch.cli salesforce-followups [--dry-run] [--smoke]
     python -m grant_watch.cli slack-failures [--mark-reviewed EVENT_ID]
 
@@ -538,6 +539,16 @@ def cmd_capability_seed(path: str, dry_run: bool) -> int:
     return 0
 
 
+def cmd_nudge_report() -> int:
+    """Show which follow-up wording gets answered more often."""
+    from .slack import nudge_variants
+
+    conn = db.connect()
+    nudge_variants.mark_engagement(conn)
+    print(nudge_variants.report(conn))
+    return 0
+
+
 def cmd_slack_failures(mark_reviewed: str = "") -> int:
     """List unresolved Slack turns or mark one manually reconciled without replay."""
     conn = db.connect() if mark_reviewed else db.connect_readonly()
@@ -691,6 +702,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="actually mark it available; without it this only previews",
     )
+    sub.add_parser("nudge-report", help="reply rate per follow-up wording")
     p_seed = sub.add_parser(
         "capability-seed", help="record unmet asks from an evidence file"
     )
@@ -751,6 +763,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "remind":
         # Same default as nudge: never send because someone forgot a flag.
         return cmd_remind(dry_run=not args.execute)
+    if args.command == "nudge-report":
+        return cmd_nudge_report()
     if args.command == "capability-seed":
         return cmd_capability_seed(args.path, dry_run=not args.execute)
     if args.command == "capability":
