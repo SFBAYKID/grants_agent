@@ -152,7 +152,7 @@ def run(
         return FillOutcome(len(rows), 0, 0, 0)
 
     client = gateway or SalesforceCampaignGateway()
-    filled = complete = failed = 0
+    filled = complete = failed = elsewhere = 0
     for row in rows:
         fields = proposed_fields(conn, int(row["lead_id"]))
         if not fields:
@@ -164,7 +164,16 @@ def run(
             failed += 1
             print(f"  #{row['lead_id']}: {type(exc).__name__}")
             continue
-        if not result.success:
+        if result.error == "not in this org":
+            # NOT A FAILURE. `crm_action_items.salesforce_id` holds ids from both the
+            # production org and the monarchdev sandbox, so a sweep legitimately meets
+            # records that do not exist here and correctly skips them. Counting those
+            # as errors made `fill-leads` exit 1 on a run where every single real
+            # record was written perfectly — harmless today, and exactly the kind of
+            # thing that reads as a broken job the moment this goes in cron.
+            elsewhere += 1
+            print(f"  #{row['lead_id']}: skipped, {result.error}")
+        elif not result.success:
             failed += 1
             print(f"  #{row['lead_id']}: {result.error}")
         elif result.error and result.error.startswith("filled"):
@@ -172,4 +181,6 @@ def run(
             print(f"  #{row['lead_id']} {row['salesforce_id']}: {result.error}")
         else:
             complete += 1
+    if elsewhere:
+        print(f"  ({elsewhere} skipped as belonging to another Salesforce org)")
     return FillOutcome(len(rows), filled, complete, failed)

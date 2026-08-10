@@ -432,3 +432,37 @@ def test_marking_a_record_from_another_org_is_a_skip() -> None:
 
     assert result.error == "not in this org"
     assert fake.calls == ["GET"]
+
+
+def test_a_foreign_org_skip_does_not_make_fill_leads_exit_nonzero(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A run where every real record was written perfectly must exit 0.
+
+    The 8 ids belonging to the monarchdev sandbox were counted as errors, so a
+    flawless run reported failure. Harmless while a human reads the output, and
+    exactly the kind of thing that reads as a broken job once it goes in cron.
+    """
+    from grant_watch import db, salesforce_lead_fill
+    from grant_watch.enrich.salesforce_campaign_gateway import CreateResult
+
+    conn = db.connect(tmp_path / "x.db")
+    monkeypatch.setattr(
+        salesforce_lead_fill,
+        "linked_leads",
+        lambda _c, _l: [{"lead_id": 1, "salesforce_id": "00QVC00000abcde2AA"}],
+    )
+    monkeypatch.setattr(
+        salesforce_lead_fill, "proposed_fields", lambda _c, _l: {"Title": "CTO"}
+    )
+
+    class _Client:
+        """A gateway that only ever meets a foreign-org record."""
+
+        def fill_lead_blanks(self, record_id: str, fields: dict) -> CreateResult:
+            """Report the routine skip."""
+            return CreateResult(False, record_id, error="not in this org")
+
+    outcome = salesforce_lead_fill.run(conn, _Client(), limit=10, dry_run=False)
+    assert outcome.failed == 0, "a routine skip was counted as an error"
+    conn.close()
