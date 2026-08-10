@@ -9,10 +9,10 @@ on a read-only connection and therefore cannot mutate even SQLite sidecars.
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta, timezone
 
-from .. import scoring, territory
+from .. import scoring, territory, reminders
 from ..enrich.salesforce_activity import RECENT_ACTIVITY_DAYS
 from . import card, policy
 from .routing import OwnerEvidence, resolve
@@ -341,6 +341,18 @@ def _candidate(
         state_source=str(row["source"] or ""),
         channel_members=channel_members,
     )
+    # THE RICH CARD IS THE LOUDEST PROACTIVE MESSAGE GRANT SENDS, and it is what
+    # actually posts in production. The opt-out was wired into the legacy drip and
+    # the nudge worker but not here, so "I've stopped following up with you" was
+    # false for the very message a rep is most likely to have meant.
+    #
+    # The REASON is kept and only the mention is dropped: the card still goes to the
+    # channel because the lead belongs to the team, and the routing evidence stays on
+    # the snapshot so it is still auditable who it would have gone to.
+    if route.slack_user_id and reminders.is_opted_out(
+        conn, route.slack_user_id, scope="nudges"
+    ):
+        route = replace(route, slack_user_id="")
     confirmed_age = _age_days(evidence.last_confirmed_at, now)
     contact_age = _age_days(evidence.contact_last_verified_at, now)
     email_domain = (

@@ -91,8 +91,14 @@ def migration_34_capability_asks(conn: sqlite3.Connection) -> None:
     WHY A TABLE AND NOT A LOG SCAN. The alternative was to re-read Slack history and
     pattern-match refusals, which would make Grant's follow-ups depend on matching its
     own past prose — brittle, and unable to distinguish "I can't send email" from "I
-    couldn't find an email". A row is written at the moment of refusal, by the code
-    that knows exactly which capability was missing.
+    couldn't find an email". A row is written by the code that knows exactly which
+    capability was missing.
+
+    TWO WRITERS, and the difference matters. `slack/reminder_tools._remember_unmet`
+    files a row AT THE MOMENT OF REFUSAL, which is how this stays true going forward.
+    `cli capability-seed` files rows compiled by hand from Slack history, which is
+    how the asks that predate this table got in. A seeded row is not evidence Grant
+    noticed anything — its `recorded_by` says which it was.
 
     `evidence_url` is the Slack permalink to the human's actual message. Every
     follow-up this feeds is a claim about something a named person said on a date, so

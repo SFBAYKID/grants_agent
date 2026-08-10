@@ -16,10 +16,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from .. import db, reminders
+import sqlite3
+
+from .. import capability_asks, db, lead_digest, reminders
 from ..notify import resend_client
 from .drip import PT as BUSINESS_TZ
-from .search import search_leads
 
 # A reminder in the past would fire on the next tick, which is never what someone
 # means; the model is told to send a real future time and this catches the rest.
@@ -183,7 +184,38 @@ def stop_followups(
     return f"Done — {what}{tail}. Say the word if you want them back."
 
 
-def email_results(args: dict[str, Any], requester_slack: str) -> str:
+def _remember_unmet(
+    requester_slack: str, channel: str, thread_ts: str, capability: str, ask: str
+) -> None:
+    """Record an ask Grant could not satisfy, so shipping the feature reopens it.
+
+    Deliberately best-effort: failing to file a follow-up must never turn a clear
+    refusal into an error the rep has to decipher.
+    """
+    if not (requester_slack and channel and thread_ts):
+        return
+    conn = db.connect()
+    try:
+        capability_asks.record(
+            conn,
+            slack_user=requester_slack,
+            audience=channel,
+            thread_ts=thread_ts,
+            message_ts=thread_ts,
+            ask_text=ask or "asked me to email them a list",
+            capability=capability,
+            asked_at=datetime.now(timezone.utc).isoformat(),
+            recorded_by="refusal",
+        )
+    except (ValueError, sqlite3.Error):
+        return
+    finally:
+        conn.close()
+
+
+def email_results(
+    args: dict[str, Any], requester_slack: str, channel: str = "", thread_ts: str = ""
+) -> str:
     """Email the requester a set of search results, right now.
 
     This is the fix for the ask that dead-ended in July: a rep said "just email me
@@ -193,18 +225,34 @@ def email_results(args: dict[str, Any], requester_slack: str) -> str:
     if not requester_slack:
         return "ERROR: I can't email results without knowing who's asking."
     if not resend_client.is_configured():
+        # RECORD THE ASK, not just the refusal. This is the live writer the
+        # capability ledger was built for: the last time Grant could not email
+        # somebody, the ask died with the conversation and nobody ever came back to
+        # her. Recording it means shipping the capability reopens this thread.
+        _remember_unmet(
+            requester_slack,
+            channel,
+            thread_ts,
+            "email_results",
+            str(args.get("subject", "")).strip(),
+        )
         return (
             "ERROR: email isn't switched on for me yet — no Resend key is set. I can "
             "post the list right here instead, or build you a spreadsheet."
         )
     spec = dict(args.get("search_spec") or {})
     subject = str(args.get("subject", "")).strip() or "Your Grant lead list"
-    body, _artifact = search_leads(**reminders.search_kwargs(spec))
+    # THE SAME RENDERER THE REMINDER WORKER USES. This call site used to run
+    # search_leads directly, so it mailed a rep the model-facing coaching verbatim
+    # and dead-ended on a no-match — the exact defect that had just been fixed in
+    # the sibling caller. Sharing the renderer is what stops that recurring.
+    body = lead_digest.render(spec) or "I couldn't find anything matching that."
     try:
         outcome = resend_client.send_to_rep(
             requester_slack,
             subject,
-            f"{body}\n\n— Grant, Monarch Connected",
+            f"{body}\n\nWant these on a Salesforce campaign, or contacts for the "
+            "best few? Just reply in Slack.\n\n— Grant, Monarch Connected",
         )
     except resend_client.RecipientNotAllowed:
         return (

@@ -30,7 +30,7 @@ from typing import Any
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-from .. import db, reminders, roster, territory
+from .. import capability_asks, db, reminders, roster, territory
 from ..migrations_nudges import NUDGE_SUBJECT_KINDS
 from ..presentation import display_entity_name
 from .drip import PT as BUSINESS_TZ
@@ -213,8 +213,11 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
     """
     rows = conn.execute(
         """SELECT p.id,p.channel,p.ts,p.posted_at,p.lead_id,
-                  l.entity_name,l.status,l.state,l.source,l.amount
-             FROM posts p LEFT JOIN leads l ON l.id=p.lead_id
+                  l.entity_name,l.status,l.state,l.source,l.amount,
+                  s.slack_user_id AS snapshot_tagged
+             FROM posts p
+             LEFT JOIN leads l ON l.id=p.lead_id
+             LEFT JOIN rich_card_snapshots s ON s.id=p.snapshot_id
             WHERE p.lead_id IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM engagement e WHERE e.post_id=p.id)
             ORDER BY p.id DESC LIMIT 60"""
@@ -228,8 +231,15 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
         # used, so the follow-up can only name a rep the card itself named. Using
         # `owner_for_state` alone would tag people on cards that went out untagged,
         # because an inferred state can own a territory but may never tag a human.
-        tagged = ""
-        if territory.state_is_verified(row["source"]):
+        # PREFER WHAT THE CARD ACTUALLY RECORDED. A rich card routes through the
+        # Salesforce call owner, then the account owner, then the opportunity owner,
+        # and only THEN territory — so recomputing from the state alone can name a
+        # different person entirely. Telling a manager "this went to X and nothing
+        # came back" about someone who was never asked is the worst thing this
+        # feature could do, so the persisted value wins and the recomputation is only
+        # a fallback for legacy cards that carry no snapshot.
+        tagged = str(row["snapshot_tagged"] or "")
+        if not tagged and territory.state_is_verified(row["source"]):
             tagged = territory.owner_for_state(row["state"]) or ""
         observed = {
             "entity_name": str(row["entity_name"] or ""),
@@ -713,6 +723,10 @@ def run(
             return f"nudge ambiguous ({type(exc).__name__})"
         ts = str(response.get("ts") or "")
         _finish(conn, nudge_id, state="delivered", error=None, slack_ts=ts)
+        if candidate.subject_kind == "capability_now_available":
+            # We came back to them about it, so the ask is dealt with. Without this
+            # the register grows forever and `close()` had no caller at all.
+            capability_asks.close(conn, int(candidate.subject_id))
         return f"nudged {candidate.subject_kind} in {candidate.audience}"
     return "skip: nothing to follow up on"
 

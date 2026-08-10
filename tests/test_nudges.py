@@ -650,3 +650,35 @@ def test_a_clicked_button_counts_as_engagement(tmp_path: Path) -> None:
                 nudges.suppress_reason(conn, candidate, NOW) == "engaged_since_queued"
             )
     conn.close()
+
+
+def test_the_escalation_names_the_rep_the_card_actually_routed_to(
+    tmp_path: Path,
+) -> None:
+    """A rich card routes by Salesforce ownership FIRST, territory last.
+
+    Recomputing the rep from the state alone therefore names a different person for
+    any relationship-routed card — and telling a manager "this went to X and nothing
+    came back" about somebody who was never asked is the worst thing this feature
+    can do. The card records who it tagged; that value wins.
+    """
+    conn = _conn(tmp_path)
+    _card(conn, NOW - timedelta(days=5))  # state PA -> territory says Brett
+    conn.execute(
+        "INSERT INTO rich_card_snapshots (id,policy_version,audience,dedup_key,"
+        "lead_id,tier,entity_name,entity_kind,entity_kind_provenance,"
+        "routing_reason,fallback_text,render_inputs_json,slack_user_id,created_at) "
+        "VALUES (7,'v1',?,'k2',900,'gold','H','school','nces','sf_account_owner',"
+        "'t','{}',?,?)",
+        (CHANNEL, "U04ASV42UJD", NOW.isoformat()),
+    )
+    conn.execute("UPDATE posts SET snapshot_id=7 WHERE id=900")
+    conn.commit()
+
+    escalation = [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_escalated"
+    ][0]
+    text = nudges.build_message(escalation)
+    assert "<@U04ASV42UJD>" in text, "named the territory rep, not the routed one"
+    assert "<@U08C1NBH875>" not in text, "named someone who was never asked"
+    conn.close()

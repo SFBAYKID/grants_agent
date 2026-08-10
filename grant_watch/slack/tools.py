@@ -767,7 +767,7 @@ def _run_reminder_tool(
         return str(
             reminder_tools.stop_followups(args, requester_slack, channel, thread_ts)
         )
-    return str(reminder_tools.email_results(args, requester_slack))
+    return str(reminder_tools.email_results(args, requester_slack, channel, thread_ts))
 
 
 def run_tool(

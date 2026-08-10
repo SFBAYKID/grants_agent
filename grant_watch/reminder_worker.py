@@ -24,10 +24,8 @@ from datetime import datetime, timezone
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-from . import reminders
+from . import lead_digest, reminders
 from .notify import resend_client
-from .presentation import for_human
-from .slack.search import NO_MATCH_PREFIX, search_leads
 
 # One reminder per invocation, matching the nudge worker. The cron tick is every 30
 # minutes, so a backlog drains steadily rather than arriving as a burst of pings.
@@ -41,36 +39,10 @@ def _render(reminder: reminders.Reminder) -> tuple[str, str]:
     leads. When the spec is empty the reminder is a plain nudge about its subject and
     makes no claim about data at all.
     """
-    kwargs = reminders.search_kwargs(reminder.search_spec)
-    if not kwargs or set(kwargs) == {"limit"}:
-        return (f"Reminder: {reminder.subject}", "")
-    text, _artifact = search_leads(**kwargs)
-    # A reminder posts this straight to a human with no model in between, so the
-    # model-facing coaching has to come out. A live test in the playground posted
-    # "Offer these to the user (with counts) and ask which to run" into a thread.
-    body = for_human(text)
-
-    # A REMINDER MUST NEVER DEAD-END. The first one Chase received read: "No grants
-    # matched those filters. Nearby alternatives — without the state filter: 75
-    # matches." — and stopped. His response was the right one: why would the user
-    # need to know that? A message that reports a miss and offers nothing is a
-    # message people learn to ignore, which is how Grant lost its own team.
-    #
-    # So when the frozen search is empty, actually GO AND GET the nearest real
-    # leads rather than merely counting them, and hand over something workable.
-    if body.startswith(NO_MATCH_PREFIX):
-        broadened = {k: v for k, v in kwargs.items() if k != "state"}
-        if broadened != kwargs:
-            wider, _ = search_leads(**broadened)
-            wider = for_human(wider)
-            if not wider.startswith(NO_MATCH_PREFIX):
-                where = str(kwargs.get("state", "")).upper()
-                return (
-                    f"Reminder: {reminder.subject}",
-                    f"Nothing new in {where} today, but here's the closest I've "
-                    f"got:\n\n{wider}",
-                )
-    return (f"Reminder: {reminder.subject}", body)
+    return (
+        f"Reminder: {reminder.subject}",
+        lead_digest.render(reminder.search_spec),
+    )
 
 
 def _slack_text(reminder: reminders.Reminder, headline: str, body: str) -> str:
@@ -237,7 +209,25 @@ def run(
                 f"#{reminder.reminder_id} "
                 + _deliver_email(conn, reminder, headline, _email_body(reminder, body))
             )
-        reminders.advance(conn, reminder)
+        # ONLY RETIRE A REMINDER THAT ACTUALLY WENT OUT. `advance` marks a `once`
+        # reminder completed, so calling it after a failed Slack post meant Grant
+        # said "Reminder #7 set for Friday 9am", the post failed with
+        # channel_not_found, and the reminder died silently having never been
+        # delivered. A failure is recorded and left ACTIVE so the next tick retries
+        # it — the delivery ledger still stops a duplicate if it turns out the first
+        # attempt actually landed.
+        if any("delivered" in result for result in results[-2:]):
+            reminders.advance(conn, reminder)
+        else:
+            conn.execute(
+                "UPDATE reminders SET last_error=?, updated_at=? WHERE id=?",
+                (
+                    "; ".join(results[-2:])[:300],
+                    datetime.now(timezone.utc).isoformat(),
+                    reminder.reminder_id,
+                ),
+            )
+            conn.commit()
         sent += 1
     if not results:
         return "skip: nothing due"

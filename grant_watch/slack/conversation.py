@@ -151,6 +151,38 @@ def _looks_like_envelope(raw: str) -> bool:
     return head.startswith("{") and '"reply"' in raw
 
 
+_EMPTY_REPLY_FALLBACK = "Hmm, I fumbled that one — mind rephrasing?"
+
+# A sentence end is punctuation FOLLOWED BY WHITESPACE (or the very end). Matching a
+# bare "?" cut inside `…/award/ABC123?tab=transactions`, which is worse than a long
+# message: Grant's replies carry USASpending verification links, and a link truncated
+# at its query string is a dead receipt for a dollar figure. Requiring whitespace
+# after the mark also skips the "?" and "!" that appear mid-URL.
+_SENTENCE_END_RE = re.compile(r"[.!?](?=\s|$)")
+
+
+def _sentence_end(text: str) -> int:
+    """Index of the last sentence-ending punctuation, or -1.
+
+    Abbreviations are excluded by rejecting a full stop preceded by a single capital
+    letter — "the U.S. Department of Justice" must not be cut after "U.S.".
+    """
+    best = -1
+    for match in _SENTENCE_END_RE.finditer(text):
+        index = match.start()
+        if text[index] == "." and index >= 2 and text[index - 2] == ".":
+            continue  # inside an abbreviation like U.S.
+        if (
+            text[index] == "."
+            and index >= 1
+            and text[index - 1].isupper()
+            and (index < 2 or not text[index - 2].isalpha())
+        ):
+            continue
+        best = index
+    return best
+
+
 def _parse_final(raw: str) -> dict[str, Any]:
     """Extract the {intent, reply} JSON; degrade to an honest fallback, never to a
     wrong action."""
@@ -170,6 +202,11 @@ def _parse_final(raw: str) -> dict[str, Any]:
             intent = "question"
         if reply:
             return {"intent": intent, "reply": reply}
+        # A WELL-FORMED ENVELOPE WITH AN EMPTY REPLY WAS NOT TRUNCATED. Falling
+        # through to the salvage branch made Grant say "I got cut off before I could
+        # finish that one" when nothing had been cut off — a false statement — and
+        # threw away a real intent along with it.
+        return {"intent": intent, "reply": _EMPTY_REPLY_FALLBACK}
     except (ValueError, json.JSONDecodeError):
         pass
     # A FAILED PARSE HAS TWO CAUSES AND THEY NEED OPPOSITE HANDLING.
@@ -188,7 +225,7 @@ def _parse_final(raw: str) -> dict[str, Any]:
             # Trim to the last completed sentence so nothing ends mid-thought, then
             # say plainly that there was more. Never silently present a fragment as
             # the whole answer.
-            cut = max(salvaged.rfind(mark) for mark in (". ", ".\n", "!", "?"))
+            cut = _sentence_end(salvaged)
             if cut > 40:
                 salvaged = salvaged[: cut + 1]
             return {
@@ -451,6 +488,14 @@ def _single_execution_tool_key(name: str, arguments: dict[str, Any]) -> str:
         # can pull. Reading is a paid scrape, and an agent loop with an unbounded
         # reader will happily spend its whole turn budget crawling.
         return f"fetch_url:{str(arguments.get('url', '')).strip().lower()}"
+    if name == "email_results":
+        # ONE EMAIL PER TURN, whatever the arguments. Every other entry here is keyed
+        # so that a genuinely different request may run again; this one is not,
+        # because the side effect leaves the system. The agent loop runs up to
+        # MAX_TOOL_TURNS with several blocks per turn, so a model that varied the
+        # subject line could put six real emails in a colleague's inbox from one
+        # sentence — and unlike a repeated search, none of them can be taken back.
+        return "email_results"
     return ""
 
 

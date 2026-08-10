@@ -14,7 +14,13 @@ that drifts is Grant putting words in a person's mouth.
 `available_since` is the hinge. It stays NULL while the capability is missing, so the
 row is inert; setting it is what makes the ask eligible to be reopened, and it is set
 by `mark_available` when a feature actually ships. That is deliberately a separate,
-explicit act rather than a side effect of a code deploy.
+explicit act rather than a side effect of a code deploy — the code shipping and the
+team being told about it are different decisions, and only the second one messages
+real people.
+
+`close` is called when the follow-up is actually DELIVERED (see slack/nudges.run), so
+"we came back to them about this" is recorded rather than inferred from the one-shot
+key.
 """
 
 from __future__ import annotations

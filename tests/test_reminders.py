@@ -711,3 +711,173 @@ def test_one_broken_reminder_cannot_block_the_ones_behind_it(
     assert poisoned["state"] == "failed"
     assert poisoned["last_error"], "the failure was not recorded anywhere"
     conn.close()
+
+
+def test_the_email_surface_strips_coaching_exactly_like_the_slack_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The divergence that actually shipped, pinned so it cannot happen again.
+
+    `email_results` ran `search_leads` directly while the reminder worker had already
+    learned to strip model coaching and to broaden a zero-result search. A rep was
+    emailed the literal instruction "Offer these to the user (with counts) and ask
+    which to run", followed by nothing actionable. Both surfaces now share one
+    renderer; this asserts on the EMAIL path specifically.
+    """
+    from grant_watch.slack import reminder_tools
+
+    sent: list[tuple[str, str]] = []
+
+    def fake_send(slack_user: object, subject: str, body: str, **_: object) -> object:
+        """Capture what would have been mailed."""
+        sent.append((subject, body))
+
+        class _Outcome:
+            recipient = "rep@example.test"
+            email_id = "x"
+
+        return _Outcome()
+
+    monkeypatch.setattr(reminder_tools.resend_client, "is_configured", lambda: True)
+    monkeypatch.setattr(reminder_tools.resend_client, "send_to_rep", fake_send)
+    _redirect(monkeypatch, tmp_path / "e.db")
+
+    reminder_tools.email_results({"search_spec": {"state": "ZZ"}}, ROSTERED_REP)
+    assert sent, "nothing was sent"
+    _subject, body = sent[0]
+    for coaching in (
+        "Offer these to the user",
+        "do not stop at a bare",
+        "<model-note>",
+    ):
+        assert coaching not in body, f"scaffolding was emailed to a rep: {body}"
+    # And it does not dead-end.
+    assert "campaign" in body.lower()
+
+
+@pytest.mark.parametrize(
+    ("raw", "must_survive", "label"),
+    [
+        (
+            '```json\n{"intent":"question","reply":"Award confirmed. Verify it here: '
+            "https://usaspending.gov/award/ABC123?tab=transactions and the spend",
+            "https://usaspending.gov/award/ABC123?tab=transactions",
+            "a verification link must not be cut at its query string",
+        ),
+        (
+            '```json\n{"intent":"question","reply":"The award came from the U.S. '
+            "Department of Justice and covers cameras",
+            "U.S. Department of Justice",
+            "an abbreviation is not a sentence end",
+        ),
+    ],
+)
+def test_truncation_salvage_does_not_mangle_what_it_keeps(
+    raw: str, must_survive: str, label: str
+) -> None:
+    """Cutting at a bare "?" landed INSIDE a USASpending link.
+
+    Grant's replies carry verification links, and a link truncated at its query
+    string is a dead receipt for a dollar figure — worse than a long message,
+    because it looks checkable and is not.
+    """
+    from grant_watch.slack import conversation
+
+    reply = conversation._parse_final(raw)["reply"]
+    assert must_survive in reply, f"{label}: got {reply!r}"
+
+
+def test_an_empty_reply_is_not_reported_as_a_truncation() -> None:
+    """A well-formed envelope with an empty reply was NOT cut off.
+
+    Grant said "I got cut off before I could finish that one" when nothing had been,
+    and threw away a real intent doing it.
+    """
+    from grant_watch.slack import conversation
+
+    out = conversation._parse_final('{"intent":"snooze","reply":""}')
+    assert "cut off" not in out["reply"].lower()
+    assert out["intent"] == "snooze", "a real intent was discarded"
+
+
+def test_a_reminder_that_failed_to_send_is_not_marked_completed(
+    tmp_path: Path,
+) -> None:
+    """M3: a once-reminder was retired even when its Slack post failed.
+
+    Grant says "Reminder #7 set for Friday 9am". The post fails with
+    channel_not_found, `advance()` marks it completed, and the reminder dies having
+    never been delivered — invisibly, because nothing recorded why.
+    """
+    from slack_sdk.errors import SlackApiError
+
+    from grant_watch import reminder_worker
+
+    class _Failing:
+        """Slack rejecting every post."""
+
+        def chat_postMessage(self, **_: object) -> dict[str, object]:
+            """Fail the way Slack does."""
+            raise SlackApiError("nope", {"error": "channel_not_found"})
+
+    conn = _conn(tmp_path)
+    _make(conn, due_at=datetime.now(timezone.utc) - timedelta(minutes=1))
+    reminder_worker.run(_Failing(), conn)
+
+    row = conn.execute("SELECT state,last_error FROM reminders").fetchone()
+    assert row["state"] == "active", "a reminder that never sent was retired"
+    assert row["last_error"], "the failure was not recorded anywhere"
+    conn.close()
+
+
+def test_only_one_email_can_leave_per_turn() -> None:
+    """M2: the one tool whose side effect leaves the system had no per-turn key.
+
+    Every other entry is keyed so a genuinely different request may run again. This
+    one must not be: the agent loop runs several tool blocks per turn, so varying
+    the subject line could put six real emails in a colleague's inbox from one
+    sentence, and none of them can be recalled.
+    """
+    from grant_watch.slack import conversation
+
+    first = conversation._single_execution_tool_key(
+        "email_results", {"subject": "Texas", "search_spec": {"state": "TX"}}
+    )
+    second = conversation._single_execution_tool_key(
+        "email_results", {"subject": "Texas again", "search_spec": {"state": "CA"}}
+    )
+    assert first == second != "", "different arguments would send a second email"
+
+
+def test_a_refusal_records_the_ask_so_shipping_the_feature_reopens_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ledger's whole justification was a writer that did not exist.
+
+    `capability_asks.record` had exactly one caller — the manual seed command — so
+    the migration's claim that "a row is written at the moment of refusal" was false,
+    and the NEXT unmet ask would have been lost exactly as the last one was.
+    """
+    from grant_watch.slack import reminder_tools
+
+    conn = _conn(tmp_path)
+    conn.close()
+    _redirect(monkeypatch, tmp_path / "r.db")
+    monkeypatch.setattr(reminder_tools.resend_client, "is_configured", lambda: False)
+
+    said = reminder_tools.email_results(
+        {"subject": "the Texas ones", "search_spec": {"state": "TX"}},
+        ROSTERED_REP,
+        CHANNEL,
+        THREAD,
+    )
+    assert said.startswith("ERROR:")
+
+    check = db.connect(tmp_path / "r.db")
+    row = check.execute("SELECT * FROM capability_asks").fetchone()
+    assert row is not None, "the refusal recorded nothing; the next ask is lost"
+    assert row["capability"] == "email_results"
+    assert row["slack_user"] == ROSTERED_REP
+    assert row["recorded_by"] == "refusal"
+    assert row["available_since"] is None, "an unmet ask must start inert"
+    check.close()

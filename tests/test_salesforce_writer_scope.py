@@ -14,6 +14,7 @@ import pytest
 
 from grant_watch.enrich import salesforce_campaign_gateway as gateway_mod
 
+
 def test_writer_token_cache_is_scoped_to_configured_org(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
