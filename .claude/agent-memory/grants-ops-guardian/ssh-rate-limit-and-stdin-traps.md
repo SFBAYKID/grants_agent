@@ -31,6 +31,20 @@ next step hashed them. **Always `wc -c` the remote file after an stdin upload** 
 pre-image/target hash manifests are exactly the files whose emptiness would turn a
 "verified" deploy into an unchecked one.
 
+## 1b. Hand-escaped quoting inside an `ssh host "…"` string produces FALSE readings
+
+2026-08-09 (cadfefe deploy): a cleanup command embedded `pgrep -cf \x27grant_watch[.]slack[.]grant\x27`
+inside a double-quoted ssh argument. `\x27` is not a shell escape — the remote shell received a
+corrupted pattern, and the check printed **`PID_COUNT=0`** on a bot that was alive and healthy, plus
+`cut: the delimiter must be a single character` for the sha lines. A momentary "the bot is dead"
+scare, caused entirely by the transport.
+
+**Rule: any remote command containing quotes goes in a FILE and is run with `ssh host 'bash -s' <
+script.sh`.** Reserve inline `ssh host '…'` for single-quoted commands with no nested quoting. And
+when a check reports a zero, print the pattern it used alongside it (`pgrep -af` rather than bare
+`pgrep -cf`) so the zero can be judged rather than believed — the same "never trust a zero from a
+pattern you have not seen match" rule as the rsync itemize direction in [[deploy-mechanism]].
+
 ## 2. A burst of separate SSH sessions gets port 22 REJECTED (not timed out)
 
 After ~6 short-lived connections in ~5 minutes the droplet began answering with

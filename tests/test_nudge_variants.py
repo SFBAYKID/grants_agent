@@ -265,3 +265,30 @@ def test_two_slots_are_never_stacked_into_the_same_gap(tmp_path: Path) -> None:
         first = _dt.combine(_date(2026, 9, day), slots[0])
         second = _dt.combine(_date(2026, 9, day), slots[1])
         assert second - first >= gap, f"day {day}: {slots} are closer than {gap}"
+
+
+def test_no_slot_is_unreachable_for_an_eastern_rep(tmp_path: Path) -> None:
+    """The band has to clear the TIGHTEST recipient zone, not just the last cron tick.
+
+    The recipient gate is `8 <= local < 18`, so 15:00 Pacific is 18:00 Eastern and
+    already refused. A slot drawn at the old structural maximum was reachable by the
+    cron and unreachable by Kerry — the same silent hold, arriving from the other
+    end. Measured after the first version shipped.
+    """
+    from datetime import date as _date, datetime as _dt, time as _time
+    from zoneinfo import ZoneInfo
+
+    eastern = ZoneInfo("America/New_York")
+    pacific = ZoneInfo("America/Los_Angeles")
+    latest = _time(0, 0)
+    for day in range(1, 29):
+        for channel in (CHANNEL, "C01DGT9D11D"):
+            for slot in nudges.daily_slots(_date(2026, 9, day), channel):
+                latest = max(latest, slot)
+    local = (
+        _dt.combine(_date(2026, 9, 14), latest, tzinfo=pacific).astimezone(eastern).hour
+    )
+    assert local < 18, (
+        f"the latest slot {latest} PT is {local}:00 Eastern — already outside a "
+        "New York rep's working hours, so it can never be delivered to them"
+    )

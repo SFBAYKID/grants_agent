@@ -60,10 +60,16 @@ MIN_GAP = timedelta(hours=4)
 # against a cron that ran only at 09:15 and 14:15 — any slot after 14:15 was
 # unreachable, so more than half the band silently meant silence.
 #
-# The cron is therefore `*/30 8-15 * * 1-5` (last tick 15:30) and the band ends at
-# 15:00, leaving one spare tick. CHANGE THEM TOGETHER.
+# The cron is therefore `*/30 8-15 * * 1-5` (last tick 15:30). CHANGE THEM TOGETHER.
+#
+# The band ends at 14:30 rather than 15:00 for a SECOND reason, measured after the
+# first version shipped: the recipient's own working-hours gate is `8 <= local < 18`,
+# so for an Eastern rep 15:00 Pacific is 18:00 local and already refused. A slot
+# drawn at the structural maximum would have been unreachable for Kerry — the same
+# silent-hold class this band exists to avoid, arriving from the other end. 14:30 PT
+# is 17:30 Eastern, which leaves margin for the tightest zone on the roster.
 NUDGE_BAND_START_PT = time(8, 30)
-NUDGE_BAND_END_PT = time(15, 0)
+NUDGE_BAND_END_PT = time(14, 30)
 
 # How long after the work stalls Grant waits, and how long before it gives up. A
 # nudge about something from three weeks ago is noise, not help.

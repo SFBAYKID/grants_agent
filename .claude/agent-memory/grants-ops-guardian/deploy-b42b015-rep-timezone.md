@@ -1,6 +1,6 @@
 ---
 name: deploy-b42b015-rep-timezone
-description: Deploy e905cc2→b42b015 on 2026-08-09 (CURRENT PROD) — code-only, schema stayed 37, PID 31228, 0.35s outage; a nudge now refuses outside 08:00-18:00 in the MENTIONED rep's own zone, and --force does NOT skip it
+description: Deploy e905cc2→b42b015 on 2026-08-09 (SUPERSEDED by cadfefe) — code-only, schema stayed 37, PID 31228, 0.35s outage; a nudge now refuses outside 08:00-18:00 in the MENTIONED rep's own zone, and --force does NOT skip it
 metadata:
   type: project
 ---
@@ -76,6 +76,11 @@ carries `timezone` on **exactly one row** — `U01E908206M` / `America/New_York`
 Anthony, Nelly and Jocelyn have no key at all.
 
 ## Monday 09:15 PT WILL deliver, and what it costs
+
+**SUPERSEDED SAME DAY by [[deploy-cadfefe-nudge-slots]].** `cadfefe` added a per-day drawn slot and
+the cron became `*/30 8-15`, so 09:15 now returns `holding for today's 09:40 PT slot` and Monday's
+first delivery moved to **10:00 PT**. The permanent-retirement cost below (24 subjects on the first
+tick) still stands — it just lands at 10:00 rather than 09:15.
 
 Full chain at `2026-08-10T16:15:00Z` for the head: `suppress_reason=''`,
 `pacing_reason(force=False)=''`, `in_window=True`, and `run(dry_run=True, force=False)` renders the
