@@ -534,6 +534,54 @@ def salesforce_contact_record_preview(
     )
 
 
+def _zoominfo_fill_many(
+    lead_ids: list[int], max_credits: int, confirm: bool, requester_slack: str
+) -> str:
+    """Price, or buy, decision-maker contacts across several leads at once.
+
+    THE GAP THIS CLOSES. A rep asked "Do it for all" and there was no way to say yes:
+    every contact had to be bought one lead at a time through its own approval
+    conversation, so 997 of 1000 purchased credits sat unused beside 62 contacts with
+    no email, phone or mobile at all. The engine already existed as a CLI command;
+    reps do not have a terminal.
+
+    `confirm=false` runs only FREE searches and reports the exact bill, which is what
+    makes the approval real rather than a formality — the rep sees the number before
+    anyone spends it.
+    """
+    from .. import contact_fill, db
+
+    if not lead_ids:
+        return "ERROR: tell me which leads to fill."
+    if max_credits <= 0:
+        return "ERROR: I need a credit ceiling above zero before I can price this."
+
+    conn = db.connect()
+    remaining = contact_fill.remaining_credits(conn)
+    if max_credits > remaining:
+        return (
+            f"ERROR: that ceiling is {max_credits} credits but only {remaining} "
+            "remain this period. Lower it and I'll price the run."
+        )
+    outcome = contact_fill.fill_contacts(
+        conn,
+        lead_ids,
+        max_credits=max_credits,
+        dry_run=not confirm,
+        requested_by=requester_slack,
+    )
+    if not confirm:
+        return (
+            f"PRICED, NOTHING SPENT: {outcome.summary()}. "
+            f"{remaining} credits remain. "
+            f"{model_note('Show the rep this exact cost and ask for a yes before calling again with confirm=true.')}"
+        )
+    return (
+        f"BOUGHT: {outcome.summary()}. "
+        f"{contact_fill.remaining_credits(conn)} credits remain."
+    )
+
+
 def _log_tool_failure(tool: str) -> None:
     """Print the active exception to stderr so bot.log preserves the traceback.
 
@@ -702,6 +750,18 @@ def _dispatch_tool(
         except Exception as exc:
             _log_tool_failure("zoominfo_enrich_contacts")
             return f"ERROR: ZoomInfo pull failed ({type(exc).__name__}).", None
+    if name == "zoominfo_fill_many":
+        p("Pricing a bulk contact pull")
+        try:
+            return _zoominfo_fill_many(
+                [int(i) for i in (args.get("lead_ids") or [])],
+                int(args.get("max_credits", 0) or 0),
+                bool(args.get("confirm")),
+                requester_slack,
+            ), None
+        except Exception as exc:  # noqa: BLE001 — a tool reports, it never kills a turn
+            _log_tool_failure("zoominfo_fill_many")
+            return f"ERROR: bulk contact fill failed ({type(exc).__name__}).", None
     if name in {
         "reminder_set",
         "reminder_list",

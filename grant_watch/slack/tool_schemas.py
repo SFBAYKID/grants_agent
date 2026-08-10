@@ -116,6 +116,40 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "zoominfo_fill_many",
+        "description": "Buy decision-maker contacts for SEVERAL leads at once, "
+        "bounded by a credit ceiling. Use when a rep says 'do it for all' or 'fill "
+        "in the whole campaign' — the per-lead tools make that a conversation of "
+        "twenty turns, which is why nobody ever did it. Call it FIRST with "
+        "confirm=false: that runs only free searches and reports the exact credit "
+        "cost, who would be bought, and which leads have nobody. Show the rep that "
+        "cost and get an explicit yes before calling again with confirm=true. It "
+        "buys at most two people per organization, prefers technology and business "
+        "decision-makers, skips leads that already have a usable contact, and stops "
+        "at max_credits rather than going over.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "lead_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "description": "Grant lead ids to fill",
+                },
+                "max_credits": {
+                    "type": "integer",
+                    "description": "hard ceiling; the run stops rather than exceed it",
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "description": "false prices it for free; true spends the credits",
+                },
+            },
+            "required": ["lead_ids", "max_credits"],
+        },
+    },
+    {
         "name": "lead_stats",
         "description": "Return real lead counts from an allowlisted view, optionally "
         "grouped by source, state, program, grade, or status. Use for "

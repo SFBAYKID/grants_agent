@@ -692,6 +692,19 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         allowed_intents=("question", "chitchat"),
     ),
     HumanQuestion(
+        # Kerry's actual words, 23 July: "Do it for all". There was no way to say yes
+        # — every contact had to be bought one lead at a time, so the ask died.
+        "zoominfo-fill-many-priced",
+        "contact",
+        "Do it for all of them — leads 231 through 235.",
+        context=(
+            "Grant: Birmingham has no contact on file yet. ZoomInfo lists 25 people "
+            "there; pulling the two decision-makers would cost 2 credits.",
+        ),
+        expected_tools=("zoominfo_fill_many",),
+        allowed_intents=("question", "chitchat"),
+    ),
+    HumanQuestion(
         "campaign-status-after-add",
         "salesforce-read",
         "Who's on the California Grant 2026 campaign now? Did that actually work?",
