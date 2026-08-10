@@ -13,6 +13,7 @@ Usage (from the repo root, venv active):
     python -m grant_watch.cli remind [--dry-run | --execute]
     python -m grant_watch.cli capability <name> [--execute]
     python -m grant_watch.cli nudge-report
+    python -m grant_watch.cli fill-leads [--limit N] [--execute]
     python -m grant_watch.cli enrich-orgs [--grade gold] [--limit N] [--execute]
     python -m grant_watch.cli salesforce-followups [--dry-run] [--smoke]
     python -m grant_watch.cli slack-failures [--mark-reviewed EVENT_ID]
@@ -553,6 +554,20 @@ def cmd_enrich_orgs(grade: str, limit: int, dry_run: bool) -> int:
     return 0
 
 
+def cmd_fill_leads(limit: int, dry_run: bool) -> int:
+    """Fill blanks on Salesforce Leads Grant can honestly map to its own.
+
+    Never overwrites and never clears — the gateway reads each record first and
+    sends only genuinely empty fields.
+    """
+    from . import salesforce_lead_fill
+
+    conn = db.connect_readonly() if dry_run else db.connect()
+    outcome = salesforce_lead_fill.run(conn, limit=limit, dry_run=dry_run)
+    print(f"fill-leads: {outcome.summary()}")
+    return 1 if outcome.failed else 0
+
+
 def cmd_nudge_report() -> int:
     """Show which follow-up wording gets answered more often."""
     from .slack import nudge_variants
@@ -717,6 +732,16 @@ def main(argv: list[str] | None = None) -> int:
         help="actually mark it available; without it this only previews",
     )
     sub.add_parser("nudge-report", help="reply rate per follow-up wording")
+    p_fill = sub.add_parser(
+        "fill-leads",
+        help="fill EMPTY fields on the Salesforce Leads Grant put on a campaign",
+    )
+    p_fill.add_argument("--limit", type=int, default=25)
+    p_fill.add_argument(
+        "--execute",
+        action="store_true",
+        help="actually write; without it this only lists what would be filled",
+    )
     p_orgs = sub.add_parser(
         "enrich-orgs",
         help="fill in address/website/phone for leads that have none (spends credits)",
@@ -790,6 +815,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_remind(dry_run=not args.execute)
     if args.command == "enrich-orgs":
         return cmd_enrich_orgs(args.grade, args.limit, dry_run=not args.execute)
+    if args.command == "fill-leads":
+        return cmd_fill_leads(args.limit, dry_run=not args.execute)
     if args.command == "nudge-report":
         return cmd_nudge_report()
     if args.command == "capability-seed":

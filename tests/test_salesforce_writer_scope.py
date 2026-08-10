@@ -176,3 +176,118 @@ def test_writer_scope_rejects_oauth_host_redirect(
     monkeypatch.setenv("SALESFORCE_WRITE_EXPECT_SANDBOX", "1")
     with pytest.raises(PermissionError, match="does not match"):
         gateway.verify_write_scope()
+
+
+class _FillTransport:
+    """Records what a fill would actually send to Salesforce."""
+
+    def __init__(self, existing: dict[str, object]) -> None:
+        """Start from what the Lead already holds."""
+        self.existing = existing
+        self.patched: dict[str, object] | None = None
+
+    def get(self, url: str, **kwargs: object) -> object:
+        """Return the current field values."""
+        del url, kwargs
+        return _Response(200, self.existing)
+
+    def patch(self, url: str, **kwargs: object) -> object:
+        """Capture the write instead of performing it."""
+        del url
+        self.patched = dict(kwargs.get("json") or {})
+        return _Response(204, {})
+
+
+class _Response:
+    """Minimal requests-shaped response."""
+
+    def __init__(self, status: int, body: dict[str, object]) -> None:
+        """Hold a status and a JSON body."""
+        self.status_code = status
+        self._body = body
+        self.text = ""
+
+    def json(self) -> dict[str, object]:
+        """Return the body."""
+        return self._body
+
+
+def _gateway_with(
+    monkeypatch: pytest.MonkeyPatch, transport: _FillTransport
+) -> gateway_mod.SalesforceCampaignGateway:
+    """A gateway whose auth and scope checks are stubbed, transport captured."""
+    gateway = gateway_mod.SalesforceCampaignGateway()
+    monkeypatch.setattr(gateway, "_auth", lambda: ("tok", "https://writer.test"))
+    monkeypatch.setattr(gateway, "verify_write_scope", lambda: None)
+    monkeypatch.setattr(gateway_mod.requests, "get", transport.get)
+    monkeypatch.setattr(gateway_mod.requests, "patch", transport.patch)
+    return gateway
+
+
+def test_filling_a_lead_never_overwrites_a_field_that_has_a_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """THE safety property, and it is structural rather than a policy check.
+
+    Grant is create-only on purpose — that is why "delete that campaign" is
+    impossible rather than merely refused. This is the one narrow exception, and it
+    is shaped so it cannot destroy anything: the record is READ first and only
+    genuinely empty fields are sent, whatever the caller passes.
+    """
+    transport = _FillTransport(
+        {"Street": "204 W Forest Home Ave", "Title": "", "MobilePhone": None}
+    )
+    gateway = _gateway_with(monkeypatch, transport)
+
+    result = gateway.fill_lead_blanks(
+        "00Q2M000019GMBvUAO",
+        {
+            "Street": "SOMEWHERE ELSE",  # already set — must NOT be sent
+            "Title": "Director of Technology",  # empty — may be filled
+            "MobilePhone": "555-0100",  # null — may be filled
+        },
+    )
+    assert result.success
+    assert transport.patched == {
+        "Title": "Director of Technology",
+        "MobilePhone": "555-0100",
+    }, f"an existing value would have been overwritten: {transport.patched}"
+
+
+def test_filling_a_lead_cannot_touch_identity_or_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Company, OwnerId and Status change what a record IS and who owns it.
+
+    They are absent from the allowlist deliberately: filling them would silently
+    reassign a colleague's record.
+    """
+    transport = _FillTransport({"Company": "", "OwnerId": "", "Status": "", "City": ""})
+    gateway = _gateway_with(monkeypatch, transport)
+
+    gateway.fill_lead_blanks(
+        "00Q2M000019GMBvUAO",
+        {
+            "Company": "Hijacked Inc",
+            "OwnerId": "005000000000999",
+            "Status": "Closed",
+            "City": "Bellaire",
+        },
+    )
+    assert transport.patched == {"City": "Bellaire"}, (
+        f"a forbidden field reached Salesforce: {transport.patched}"
+    )
+
+
+def test_filling_a_lead_never_clears_anything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty proposed value must be dropped, never written as a blank."""
+    transport = _FillTransport({"Title": "", "City": ""})
+    gateway = _gateway_with(monkeypatch, transport)
+
+    result = gateway.fill_lead_blanks(
+        "00Q2M000019GMBvUAO", {"Title": "", "City": "   "}
+    )
+    assert transport.patched is None, "a blank was written into Salesforce"
+    assert result.success and "nothing to fill" in (result.error or "")

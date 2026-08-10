@@ -32,6 +32,28 @@ _ALLOWED_CREATE_OBJECTS = {
     "ContentNote",
     "ContentDocumentLink",
 }
+# THE ONLY Lead fields Grant may write into an EXISTING record, and only while they
+# are EMPTY. This is the narrowest possible breach of the create-only rule, shaped so
+# it cannot destroy anything: no field here is ever overwritten and nothing is ever
+# cleared. Name, Company, OwnerId and Status are deliberately ABSENT — those are
+# identity and workflow, and filling them would change what a record IS and who owns
+# it, rather than what is known about it.
+_ALLOWED_LEAD_FILL_FIELDS = frozenset(
+    {
+        "Street",
+        "City",
+        "State",
+        "PostalCode",
+        "Phone",
+        "MobilePhone",
+        "Email",
+        "Title",
+        "Website",
+        "Industry",
+        "Number_of_Students__c",
+    }
+)
+
 _ID_PREFIXES = {
     "Campaign": "701",
     "Lead": "00Q",
@@ -662,6 +684,68 @@ class SalesforceCampaignGateway:
     def create_lead(self, payload: dict[str, object]) -> CreateResult:
         """Create one person Lead through the single-record allowlisted path."""
         return self._create_one("Lead", payload)
+
+    def fill_lead_blanks(
+        self, record_id: str, proposed: dict[str, object]
+    ) -> CreateResult:
+        """Fill EMPTY fields on an existing Lead. Never overwrite, never clear.
+
+        WHY THIS EXISTS AT ALL. Grant is create-only by design, and that guarantee is
+        load-bearing — it is why "delete that campaign" is structurally impossible
+        rather than merely refused. But 13 of 14 leads in a real campaign matched
+        records that ALREADY existed in Salesforce, one of them imported in 2019 with
+        no title, no mobile and no notes. A rep opening it saw an empty record and had
+        to research an organization Grant had already researched.
+
+        THE SHAPE IS THE SAFETY, not a policy check. The record is READ first, and a
+        field is sent only when Salesforce currently holds nothing there AND Grant has
+        a real value. So this can add information and cannot remove or contradict any,
+        whatever the caller passes. The allowlist excludes identity and ownership.
+
+        The returned `error` field carries a plain description of what was filled or
+        why nothing was — it is the caller's material for telling a rep the truth.
+        """
+        validate_record_id(record_id, "Lead")
+        self.verify_write_scope()
+        token, instance = self._auth()
+        headers = {"Authorization": f"Bearer {token}"}
+        base = f"{instance}/services/data/{API_VERSION}/sobjects/Lead/{record_id}"
+
+        wanted = {
+            field: value
+            for field, value in proposed.items()
+            if field in _ALLOWED_LEAD_FILL_FIELDS and str(value or "").strip()
+        }
+        if not wanted:
+            return CreateResult(True, record_id, error="nothing to fill")
+        current = requests.get(
+            base,
+            params={"fields": ",".join(sorted(wanted))},
+            headers=headers,
+            timeout=20,
+        )
+        if current.status_code != 200:
+            return CreateResult(
+                False, error=f"HTTP {current.status_code}: {current.text[:200]}"
+            )
+        existing: dict[str, Any] = current.json()
+        blanks = {
+            field: value
+            for field, value in wanted.items()
+            if not str(existing.get(field) or "").strip()
+        }
+        if not blanks:
+            return CreateResult(
+                True, record_id, error="every field already had a value"
+            )
+        response = requests.patch(base, json=blanks, headers=headers, timeout=20)
+        if response.status_code not in (200, 204):
+            return CreateResult(
+                False, error=f"HTTP {response.status_code}: {response.text[:200]}"
+            )
+        return CreateResult(
+            True, record_id, error=f"filled {', '.join(sorted(blanks))}"
+        )
 
     def create_note(self, payload: dict[str, object]) -> CreateResult:
         """Create one legacy Note attached to its ParentId (a Lead)."""
