@@ -25,6 +25,7 @@ from .migrations_nudges import (
     migration_35_capability_ask_correction,
     migration_36_nudge_message_variants,
     migration_38_announcements,
+    migration_39_user_memory,
 )
 from .migrations_zoominfo import (
     migration_29_vendor_contacts_and_credits,
@@ -720,6 +721,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         38,
         "a short plain-language update, posted once",
         migration_38_announcements,
+    ),
+    Migration(
+        39,
+        "what Grant remembers about a colleague, and why it may",
+        migration_39_user_memory,
     ),
 )
 

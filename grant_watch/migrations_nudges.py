@@ -210,3 +210,50 @@ def migration_38_announcements(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_announcements_pending "
         "ON announcements(posted_at, audience)"
     )
+
+
+def migration_39_user_memory(conn: sqlite3.Connection) -> None:
+    """What Grant remembers about a colleague, with the words that justify it.
+
+    Chase: "You are trying to almost befriend the user and build a relationship with
+    them." A colleague who tells you their kid plays lacrosse, or that they only work
+    Texas, or that they hate spreadsheets, expects you to still know that next month.
+    Grant currently forgets everything the moment a thread ends.
+
+    THREE THINGS MAKE THIS SAFE TO KEEP.
+
+    `evidence` holds the person's OWN words, verbatim, and a memory may not be stored
+    without them. A remembered "fact" about a person that nobody can trace to
+    something they said is gossip Grant invented about a colleague — the same failure
+    as a fabricated contact, aimed at someone on the team.
+
+    `expires_at` is written at insert, not enforced by a cleanup someone remembers to
+    run. Chase set the horizon: "Maybe six months of memory per user... After that it
+    can delete or override itself because you do not need that much data." A read
+    filters on it, so an expired memory is invisible even if the purge never runs.
+
+    `superseded_by` lets a later statement replace an earlier one instead of both
+    being true at once. People change territory, job title, and preference; a memory
+    store that only accumulates will eventually tell Grant two contradictory things
+    about the same person and it will pick one at random.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS user_memory (
+              id INTEGER PRIMARY KEY,
+              slack_user TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              fact TEXT NOT NULL,
+              evidence TEXT NOT NULL,
+              audience TEXT NOT NULL DEFAULT '',
+              thread_ts TEXT NOT NULL DEFAULT '',
+              message_ts TEXT NOT NULL DEFAULT '',
+              recorded_at TIMESTAMP NOT NULL,
+              expires_at TIMESTAMP NOT NULL,
+              superseded_by INTEGER REFERENCES user_memory(id),
+              UNIQUE(slack_user, kind, fact)
+            )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_user_memory_live "
+        "ON user_memory(slack_user, expires_at, superseded_by)"
+    )

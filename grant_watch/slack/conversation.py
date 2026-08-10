@@ -197,15 +197,44 @@ def _sentence_end(text: str) -> int:
 # why the per-turn conversation goes in `messages` and never into `system`.
 
 
-def _cached_system() -> list[dict[str, Any]]:
-    """The system prompt as a single cacheable block."""
-    return [
+def _cached_system(memory: str = "") -> list[dict[str, Any]]:
+    """The system prompt, plus what Grant remembers about THIS person.
+
+    The order is load-bearing for cost. `_SYSTEM` is identical for everyone and
+    carries the cache breakpoint; the memory block varies per colleague and therefore
+    goes AFTER it. Putting the per-person text first would change the prefix on every
+    turn and defeat caching for every user at once.
+    """
+    blocks: list[dict[str, Any]] = [
         {
             "type": "text",
             "text": _SYSTEM,
             "cache_control": {"type": "ephemeral"},
         }
     ]
+    if memory:
+        blocks.append({"type": "text", "text": memory})
+    return blocks
+
+
+def _recall_for(slack_user: str) -> str:
+    """What Grant knows about this colleague, rendered for the prompt.
+
+    Best-effort by design: a conversation must never fail because the memory store is
+    unreachable. Forgetting is a poor turn; erroring is a broken product.
+    """
+    if not slack_user:
+        return ""
+    try:
+        from .. import db, user_memory
+
+        conn = db.connect_readonly()
+        try:
+            return user_memory.as_prompt_context(user_memory.recall(conn, slack_user))
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — memory is an enhancement, never a dependency
+        return ""
 
 
 def _cached_tools() -> list[dict[str, Any]]:
@@ -589,6 +618,9 @@ def respond(
     cleans it before re-raising. The dict remains dynamic because Anthropic message
     blocks are third-party runtime objects rather than a stable local model.
     """
+    # Loaded once per turn, before any model call, so both the tool loop and the
+    # budget-exhausted final answer speak to the same remembered person.
+    remembered = _recall_for(requester_slack)
     source_reply = slack_source_status_reply(user_text, thread_context)
     if source_reply is not None:
         return {
@@ -655,7 +687,7 @@ def respond(
             msg = client.messages.create(
                 model=model,
                 max_tokens=3000,
-                system=_cached_system(),
+                system=_cached_system(remembered),
                 tools=_cached_tools(),
                 messages=messages,
             )
@@ -793,7 +825,10 @@ def respond(
             }
         )
         msg = client.messages.create(
-            model=model, max_tokens=3000, system=_cached_system(), messages=messages
+            model=model,
+            max_tokens=3000,
+            system=_cached_system(remembered),
+            messages=messages,
         )
         raw = "".join(b.text for b in msg.content if b.type == "text")
         if raw.strip():

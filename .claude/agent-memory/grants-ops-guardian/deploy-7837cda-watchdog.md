@@ -5,6 +5,10 @@ metadata:
   type: project
 ---
 
+> **SUPERSEDED BY `8cb557a` — the boot pass documented below was REMOVED the same night.**
+> A restart is inert again: no `db.connect()` at boot, no migrations applied, no Slack edit.
+> See [[deploy-8cb557a-watchdog-boot-revert]]. The cron tick and `watchdog.py` are unchanged.
+
 **LIVE 2026-08-10T06:31:08Z (droplet Sun 23:31:08 PT).**
 `cdfdaf917ae752f1de09b2b4b75991e0ed652285` → `7837cdad8bc5d5b8089cc5b72cd4d0d6398faa83`
 (1 commit). **Schema stayed 38.** Listener **34654 → 36059**, **0.153 s outage**.
