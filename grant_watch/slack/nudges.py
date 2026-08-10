@@ -591,6 +591,7 @@ def run(
     dry_run: bool = False,
     force: bool = False,
     now: datetime | None = None,
+    audience: str = "",
 ) -> str:
     """Deliver at most ONE nudge per invocation, reserving before Slack is called.
 
@@ -599,11 +600,21 @@ def run(
     on the next tick. A dry run returns before any write.
     """
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    # SCOPE A FORCED RUN TO ONE CHANNEL. `--force` skips the business-hours guard, so
+    # without this the only way to exercise the path is to send into whichever
+    # channel happens to be at the head of the queue — which is how a test becomes a
+    # Sunday-evening notification to a colleague. Scoping makes the blast radius one
+    # channel and one message, reviewable before it goes.
+    #
+    # Deliberately NOT a suppression: an out-of-scope subject is skipped without a
+    # ledger row, so scoping a run can never retire a subject somewhere else.
     if not dry_run:
         # Close the loop on earlier sends BEFORE choosing this one's wording, so the
         # choice is made on the freshest evidence available.
         nudge_variants.mark_engagement(conn)
     for candidate in candidates(conn, current):
+        if audience and candidate.audience != audience:
+            continue
         already = conn.execute(
             """SELECT state FROM followup_nudges
                 WHERE subject_kind=? AND subject_id=? AND policy_version=?""",

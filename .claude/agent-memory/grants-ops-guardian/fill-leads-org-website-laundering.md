@@ -1,9 +1,15 @@
 ---
 name: fill-leads-org-website-laundering
-description: 2026-08-09 STOPPED fill-leads --execute — organization_fields() writes org_website even when org_profile_status='not_found', so 3 of 5 leads would have got a vendor CDN or cde.ca.gov as their Website in PRODUCTION Salesforce; and a fill-blanks error is self-sealing
+description: 2026-08-09 STOPPED fill-leads --execute — organization_fields() wrote org_website even when org_profile_status='not_found', so 3 of 5 leads would have got a vendor CDN or cde.ca.gov as their Website in PRODUCTION Salesforce. FIXED in 0716a17 and proven at the destination
 metadata:
   type: project
 ---
+
+**RESOLVED 2026-08-09 by `0716a17`** (option 2 below), deployed and proven by reading the
+records back out of Salesforce: leads #233/#234/#235 now hold **no Website at all**, while
+#231/#232 kept their correct ones. See [[deploy-0716a17-org-profile-gate]] — including the
+distinction that cleared their *contacts*: a bare host is a failed search's fallback, a deep
+link carrying the record's own key is a citation. The record below is the original finding.
 
 **The contact provenance is guarded. The ORGANIZATION provenance is not.**
 

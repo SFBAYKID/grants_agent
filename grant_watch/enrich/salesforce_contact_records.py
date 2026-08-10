@@ -255,6 +255,14 @@ def choose_phone(contact: sqlite3.Row, lead: sqlite3.Row) -> tuple[str, str]:
     """
     if contact["phone"]:
         return str(contact["phone"]), "direct"
+    # THE ORG FALLBACK IS ONLY AS GOOD AS THE LOOKUP THAT PRODUCED IT. A `not_found`
+    # org profile still leaves `org_phone` holding whatever the failed search landed
+    # on — the same defect that put `cde.ca.gov` in an `org_website` and nearly wrote
+    # the state education department into five Salesforce Leads. This is a different
+    # surface (the contact-record payloads) with identical shape, found by the
+    # guardian while checking the first fix.
+    if _lead_value(lead, "org_profile_status") != "found":
+        return "", ""
     org_phone = _lead_value(lead, "org_phone")
     if org_phone:
         return org_phone, "org_general"

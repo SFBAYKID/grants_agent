@@ -950,3 +950,33 @@ def test_a_reopened_ask_queues_by_when_the_person_asked(tmp_path: Path) -> None:
         f"a July ask queued behind a one-day-old subject: {order}"
     )
     conn.close()
+
+
+def test_scoping_a_run_to_one_channel_leaves_other_channels_untouched(
+    tmp_path: Path,
+) -> None:
+    """`--force` skips the business-hours guard, so an unscoped forced run sends into
+    whichever channel happens to be at the head of the queue — which is how a test
+    becomes a Sunday-evening notification to a colleague.
+
+    The critical half is that scoping must NOT suppress: an out-of-scope subject is
+    skipped with no ledger row, so exercising the path in a test channel can never
+    permanently retire a subject in the team channel.
+    """
+    conn = _conn(tmp_path)
+    _expired_preview(conn, NOW - timedelta(hours=6))
+    conn.execute("UPDATE crm_actions SET channel='C-OTHER' WHERE id='act-1'")
+    conn.commit()
+    client = _Client()
+
+    outcome = nudges.run(client, conn, now=NOW, audience=CHANNEL)
+    assert client.posts == [], "a scoped run posted into a different channel"
+    assert "nothing to follow up" in outcome
+    assert conn.execute("SELECT COUNT(*) FROM followup_nudges").fetchone()[0] == 0, (
+        "scoping burned a subject belonging to another channel"
+    )
+
+    # Unscoped, the same subject is still deliverable — scoping skipped it, not killed it.
+    assert "nudged" in nudges.run(client, conn, now=NOW)
+    assert len(client.posts) == 1
+    conn.close()

@@ -406,3 +406,40 @@ def test_a_found_org_profile_is_still_offered(tmp_path: Path) -> None:
     assert offered["PostalCode"] == "90640"
     assert offered["City"] == "Montebello"
     conn.close()
+
+
+def test_the_org_phone_fallback_also_respects_a_failed_lookup(tmp_path: Path) -> None:
+    """Same defect, a different surface — found while verifying the first fix.
+
+    `choose_phone` falls back to the organization's main line when a person has no
+    direct number, and read `org_phone` without consulting `org_profile_status`. A
+    failed lookup leaves that column holding whatever the search landed on, exactly
+    as `org_website` held `cde.ca.gov`. This feeds the contact-record payloads rather
+    than `fill-leads`, so the first fix did not cover it.
+    """
+    from grant_watch.enrich.salesforce_contact_records import choose_phone
+
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url,"
+        "lead_grade,org_profile_status,org_phone) VALUES ('s','1','Valle Lindo',"
+        "'CA','u','gold','not_found','(916) 319-0800')"
+    )
+    conn.commit()
+    lead = db.get_lead(conn, int(conn.execute("SELECT id FROM leads").fetchone()["id"]))
+    lead_id = int(lead["id"])
+    db.save_linkedin_contact(conn, lead_id, "Dana", "Director", "https://li.test/in/d")
+    contact = conn.execute(
+        "SELECT * FROM contacts WHERE lead_id=?", (lead_id,)
+    ).fetchone()
+
+    number, kind = choose_phone(contact, lead)
+    assert (number, kind) == ("", ""), (
+        f"a failed org lookup supplied a phone number: {number!r}"
+    )
+
+    conn.execute("UPDATE leads SET org_profile_status='found' WHERE id=?", (lead_id,))
+    conn.commit()
+    lead = db.get_lead(conn, lead_id)
+    assert choose_phone(contact, lead) == ("(916) 319-0800", "org_general")
+    conn.close()
