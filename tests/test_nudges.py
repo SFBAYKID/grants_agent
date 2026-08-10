@@ -912,3 +912,41 @@ def test_a_turn_still_running_is_left_alone(tmp_path: Path) -> None:
         c for c in nudges.candidates(conn, NOW) if c.subject_kind == "thread_abandoned"
     ], "Grant apologised for an answer it was still writing"
     conn.close()
+
+
+def test_a_reopened_ask_queues_by_when_the_person_asked(tmp_path: Path) -> None:
+    """The feature built to reach three named people would have reached none of them.
+
+    A capability ask uses `available_since` as `stalled_at`, which is correct for
+    staleness — the thing worth reporting is that Grant can now do it. But ordering
+    the queue by the same value timestamps every reopened ask to "now", so they sort
+    BEHIND every existing subject. Measured live, declaring the four capabilities put
+    Kerry, Jocelyn and Nelly at positions 14-18 of 19: about seven days of delivery
+    behind the backlog.
+
+    A July question outranks an August card. That is the honest priority.
+    """
+    from grant_watch import capability_asks
+
+    conn = _conn(tmp_path)
+    # An existing subject that stalled recently.
+    _expired_preview(conn, NOW - timedelta(days=1))
+    # An ask made in JULY, reopened now.
+    capability_asks.record(
+        conn,
+        slack_user="U01E908206M",
+        audience=CHANNEL,
+        thread_ts="800.9",
+        message_ts="800.9",
+        ask_text="Email those to kerry@monarchconnected.com",
+        capability="email_results",
+        asked_at="2026-07-23T15:26:29+00:00",
+        recorded_by="test",
+    )
+    capability_asks.mark_available(conn, "email_results", shipped_at=NOW.isoformat())
+
+    order = [c.subject_kind for c in nudges.candidates(conn, NOW)]
+    assert order[0] == "capability_now_available", (
+        f"a July ask queued behind a one-day-old subject: {order}"
+    )
+    conn.close()

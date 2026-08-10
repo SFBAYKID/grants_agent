@@ -133,6 +133,25 @@ class NudgeCandidate:
         """After this it is stale; Grant drops it rather than posting late."""
         return self.stalled_at + DROP_AFTER
 
+    @property
+    def priority_at(self) -> datetime:
+        """Queue position: how long the PERSON has been waiting, oldest first.
+
+        DIFFERENT FROM `stalled_at`, and the difference is the whole point. For a
+        capability ask, `stalled_at` is when the CAPABILITY shipped — which is right
+        for staleness, because the thing worth reporting is that Grant can now do it.
+        But using the same value to order the queue timestamps every reopened ask to
+        "now", so they sort BEHIND every other subject.
+
+        Measured on live data: declaring the four capabilities put Kerry, Jocelyn and
+        Nelly at positions 14-18 of 19, roughly seven days of delivery behind the
+        existing backlog — so the feature built to reach exactly those three people
+        would not have reached any of them. Ordering by the date they actually ASKED
+        puts a July question ahead of an August card, which is the honest priority.
+        """
+        asked = _parse(self.observed.get("asked_at_iso"))
+        return asked or self.stalled_at
+
 
 def _parse(value: object) -> datetime | None:
     """Parse a stored ISO timestamp, returning None rather than guessing."""
@@ -321,6 +340,10 @@ def _capability_asks(conn: sqlite3.Connection) -> list[NudgeCandidate]:
                     "ask_text": str(row["ask_text"] or ""),
                     "capability": str(row["capability"] or ""),
                     "correction": str(row["correction"] or ""),
+                    # Queue priority is how long the PERSON has waited, which is the
+                    # ask date — not `available_since`, which is only the staleness
+                    # clock. See NudgeCandidate.priority_at.
+                    "asked_at_iso": str(row["asked_at"] or ""),
                     "asked_on": asked_at.astimezone(BUSINESS_TZ).strftime("%-d %B")
                     if asked_at
                     else "",
@@ -405,7 +428,7 @@ def candidates(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandidate]:
         and item.audience
         and item.due_at <= now
     ]
-    return sorted(ready, key=lambda item: item.stalled_at)
+    return sorted(ready, key=lambda item: item.priority_at)
 
 
 def suppress_reason(

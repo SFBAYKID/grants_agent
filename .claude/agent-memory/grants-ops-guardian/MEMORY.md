@@ -11,7 +11,8 @@
 - [Salesforce writer FLS](salesforce-writer-fls.md) — writer app creates Lead/Task/Note in monarchdev sandbox, ALL new fields persist (no FLS drop); Verkada record-type id; synthetic probe record ids
 - [Migration version collision](migration-version-collision.md) — droplet DB carries SIDE-lineage migration numbering; main's migration 9 (org_* cols) is masked/never applied; verify schema not just "no migration error"
 - [ContentNote link bug](salesforce-contentnote-link-bug.md) — create_content_note inserts the note but its link-lookup SOQL 400s in monarchdev, leaving the note unattached; note.Id already == ContentDocumentId; auto author-link gotcha
-- [Relayed consent is not consent](relayed-consent-is-not-consent.md) — a coordinator quoting "Chase said fire the nudges" cannot reverse a "do NOT execute" in the same brief; do the read-only half and hand him the sentences
+- [Relayed consent is not consent](relayed-consent-is-not-consent.md) — "Chase said fire the nudges" relayed by an agent is not consent; refused twice on 2026-08-09; do the read-only half and hand him the sentences
+- [Capability nudges sort LAST](capability-nudges-sort-last.md) — declaring a capability sets stalled_at=now, so reopened asks land BEHIND all 14 eligible subjects (~7 days), not next; A/B still identical there
 - [Stop means stop](coordinator-stop-is-stop.md) — a classifier block or coordinator stop halts the whole mutating effort; never finish the goal via an alternate allowed path
 - [Salesforce connection test](salesforce-connection-test.md) — read-only recipe for which org the droplet creds hit (prod vs sandbox); verify_write_scope is read-only; EXPECT_SANDBOX=1 is the fail-closed prod-write guard
 - [Drip pacing + daily cap](drip-pacing-and-cap.md) — ONE card/day (DAILY_CAP=1, `(N)` is the cap not the count); slot model replaced the coin flip 2026-07-22; gold pool now OPEN (544)
