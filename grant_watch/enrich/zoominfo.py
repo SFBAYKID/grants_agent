@@ -384,9 +384,16 @@ def enrich_contacts(person_ids: list[str]) -> list[ZoomInfoContactDetail]:
     A ``NO_MATCH`` costs nothing, so unmatched rows are returned with their status
     intact rather than dropped — the caller needs them to reconcile what it paid for.
 
-    `needs-testing`: unlike ``search_contacts``, this endpoint has never been called
-    against the live account (deliberately — it bills). The request shape follows the
-    vendor's published contract; the first real call is its first real test.
+    `verified` 2026-08-10 against the live account, three times now (3 credits total).
+    Two facts worth keeping, both learned by paying rather than by reading the docs:
+
+    ``direct_phone`` comes back EMPTY even for a person whose search result says
+    ``has_direct_phone`` — that column is not licensed on this plan, and asking for it
+    by name 400s the whole batch. ``mobile_phone`` IS licensed and populates: a real
+    pull returned ``(916) 505-3254`` for a Director of Facilities.
+
+    So a direct line can be seen to EXIST while being unavailable to buy. Never
+    promise a rep one.
     """
     ids = [pid.strip() for pid in person_ids if pid.strip()]
     if not ids:
