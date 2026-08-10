@@ -89,7 +89,13 @@ def proposed_fields(conn: sqlite3.Connection, lead_id: int) -> dict[str, object]
     if lead is None:
         return {}
     fields: dict[str, object] = dict(organization_fields(lead))
-    if str(lead["org_phone"] or ""):
+    # Gated on the profile's own verdict for the same reason `organization_fields`
+    # is: a `not_found` lookup leaves these columns holding whatever the search
+    # landed on, and the fill path can only write into an EMPTY field — so a wrong
+    # value here seals that field against every later correction.
+    if str(lead["org_profile_status"] or "") == "found" and str(
+        lead["org_phone"] or ""
+    ):
         fields["Phone"] = str(lead["org_phone"])
 
     # A LINKEDIN CLAIM MUST NOT BECOME A SALESFORCE FIELD. `linkedin_only` means
@@ -133,8 +139,16 @@ def run(
     if dry_run:
         for row in rows:
             fields = proposed_fields(conn, int(row["lead_id"]))
-            names = ", ".join(sorted(fields)) or "(nothing to offer)"
-            print(f"  lead #{row['lead_id']} -> {row['salesforce_id']}: {names}")
+            print(f"  lead #{row['lead_id']} -> {row['salesforce_id']}")
+            if not fields:
+                print("      (nothing to offer)")
+            # PRINT THE VALUES, NOT JUST THE FIELD NAMES. A preview that lists
+            # "Website" tells an operator nothing about whether that Website is the
+            # district's or the state education department's — and on production it
+            # was cde.ca.gov for two leads. The names looked perfect while the
+            # payload was wrong, so the review step could not do its job.
+            for name, value in sorted(fields.items()):
+                print(f"      {name}: {value}")
         return FillOutcome(len(rows), 0, 0, 0)
 
     client = gateway or SalesforceCampaignGateway()

@@ -349,3 +349,60 @@ def test_one_grant_lead_yields_one_salesforce_target(tmp_path: Path) -> None:
     assert len(rows) == 1, f"one lead produced {len(rows)} write targets"
     assert rows[0]["salesforce_id"] == "00Q000000000001"
     conn.close()
+
+
+def test_a_failed_org_lookup_never_reaches_salesforce(tmp_path: Path) -> None:
+    """MEASURED ON PRODUCTION: two leads carried org_website='https://cde.ca.gov'.
+
+    That is the California Department of Education, not the district — and a third
+    carried a CMS vendor's CDN. A failed lookup still leaves `org_website` holding
+    whatever URL the search landed on, and `organization_fields` read it without
+    consulting `org_profile_status`.
+
+    It matters more here than for most bad writes because the fill path only ever
+    writes into EMPTY fields: once cde.ca.gov lands in Website, that field is closed
+    to the tool forever and a later run after a fix skips it. The tool that makes the
+    error can never correct it.
+    """
+    from grant_watch.enrich.salesforce_contact_records import organization_fields
+
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url,"
+        "lead_grade,org_profile_status,org_website,org_street,org_postal_code,"
+        "org_city) VALUES ('s','1','Valle Lindo School District','CA','u','gold',"
+        "'not_found','https://cde.ca.gov','1 Wrong St','00000','Sacramento')"
+    )
+    conn.commit()
+    lead = db.get_lead(conn, int(conn.execute("SELECT id FROM leads").fetchone()["id"]))
+
+    offered = organization_fields(lead)
+    for field in ("Website", "Street", "PostalCode"):
+        assert field not in offered, (
+            f"a not_found org profile leaked {field}={offered[field]!r} to Salesforce"
+        )
+    # The lead's OWN facts are still safe to offer — they do not come from the lookup.
+    assert offered.get("State") == "CA"
+    conn.close()
+
+
+def test_a_found_org_profile_is_still_offered(tmp_path: Path) -> None:
+    """The other direction: gating must not silence a lookup that actually worked."""
+    from grant_watch.enrich.salesforce_contact_records import organization_fields
+
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url,"
+        "lead_grade,org_profile_status,org_website,org_street,org_postal_code,"
+        "org_city) VALUES ('s','1','Montebello Unified','CA','u','gold','found',"
+        "'https://montebello.k12.ca.us','123 Main St','90640','Montebello')"
+    )
+    conn.commit()
+    lead = db.get_lead(conn, int(conn.execute("SELECT id FROM leads").fetchone()["id"]))
+
+    offered = organization_fields(lead)
+    assert offered["Website"] == "https://montebello.k12.ca.us"
+    assert offered["Street"] == "123 Main St"
+    assert offered["PostalCode"] == "90640"
+    assert offered["City"] == "Montebello"
+    conn.close()

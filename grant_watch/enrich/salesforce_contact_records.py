@@ -290,16 +290,31 @@ def organization_fields(lead: sqlite3.Row) -> dict[str, object]:
     state = str(lead["state"] or "") or _lead_value(lead, "org_state")
     if state:
         payload["State"] = state
-    org_city = _lead_value(lead, "org_city")
+
+    # A FAILED ORG LOOKUP STILL LEAVES THESE COLUMNS POPULATED, with whatever URL the
+    # search happened to land on. Measured on production: two leads whose
+    # `org_profile_status` is `not_found` carried `org_website='https://cde.ca.gov'`
+    # — the California Department of Education, not the district — and a third
+    # carried a CMS vendor's CDN. Authoritative-looking enough that no rep would
+    # doubt it, and wrong.
+    #
+    # Worse in this direction than most bad writes, because the fill path only ever
+    # writes into EMPTY fields: once `cde.ca.gov` lands in Website, that field is
+    # closed to the tool forever and a later run after a fix skips it. The tool that
+    # makes the error can never correct it — only a person can. So the profile's own
+    # verdict gates every value derived from it.
+    profile_found = _lead_value(lead, "org_profile_status") == "found"
+    org_city = _lead_value(lead, "org_city") if profile_found else ""
     city = org_city or str(lead["location_city"] or "")
     if city:
         payload["City"] = city
-    if _lead_value(lead, "org_street"):
-        payload["Street"] = _lead_value(lead, "org_street")
-    if _lead_value(lead, "org_postal_code"):
-        payload["PostalCode"] = _lead_value(lead, "org_postal_code")
-    if _lead_value(lead, "org_website"):
-        payload["Website"] = _lead_value(lead, "org_website")
+    if profile_found:
+        if _lead_value(lead, "org_street"):
+            payload["Street"] = _lead_value(lead, "org_street")
+        if _lead_value(lead, "org_postal_code"):
+            payload["PostalCode"] = _lead_value(lead, "org_postal_code")
+        if _lead_value(lead, "org_website"):
+            payload["Website"] = _lead_value(lead, "org_website")
     enrollment = lead["enrollment"]
     if enrollment not in (None, "", 0):
         payload["Number_of_Students__c"] = int(enrollment)
