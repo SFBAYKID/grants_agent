@@ -7,7 +7,13 @@ metadata:
 
 The droplet checkout is NOT a git working tree — `~/grants_agent` has no `.git` and `git` commands fail there. Do not assume `git pull` works to deploy.
 
-**A BOT RESTART DOES NOT APPLY SQLite MIGRATIONS (verified 2026-07-20).** The bot entrypoint
+**SUPERSEDED FROM `7837cda` (2026-08-10) — a restart NOW DOES apply migrations.** `grant.py:main()`
+gained a boot-time watchdog pass that opens the MIGRATING `db.connect()`, so the paragraph below is
+true only for revisions BEFORE `7837cda`. Still apply migrations with the bot DOWN and still verify
+`schema_migrations` MAX directly — the change removes a safety separation rather than adding one.
+See [[deploy-7837cda-watchdog]].
+
+**A BOT RESTART DOES NOT APPLY SQLite MIGRATIONS (verified 2026-07-20, pre-`7837cda`).** The bot entrypoint
 `grant_watch.slack.grant:main()` does `load_dotenv → create_app → sweep_orphaned_spinners (Slack API
 ONLY, no DB) → SocketModeHandler.start()`; there is NO module-level or startup `db.connect()`. The
 MIGRATING `db.connect()` (which runs `apply_migrations`) is called only INSIDE Slack event handlers and

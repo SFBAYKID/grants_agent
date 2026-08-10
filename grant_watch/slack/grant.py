@@ -834,24 +834,21 @@ def main() -> None:
             "(comma-separated to serve several, e.g. production plus playground)"
         )
     app = create_app()
-    # A restart is the single most common way a turn dies, so repair stranded
-    # spinners on the way up as well as on the cron tick.
-    try:
-        from .. import db as _db
-        from . import watchdog as _watchdog
-
-        _conn = _db.connect()
-        print(
-            _watchdog.run(
-                app.client,
-                _conn,
-                bot_id=str(app.client.auth_test().get("user_id") or ""),
-                dry_run=False,
-            )
-        )
-        _conn.close()
-    except Exception as exc:  # noqa: BLE001 — repair is best-effort, never blocks boot
-        print(f"watchdog skipped at boot ({type(exc).__name__})")
+    # NO WATCHDOG PASS HERE, deliberately. Running it at boot cost two properties
+    # that are worth more than the ~10 minutes it saved, and the guardian caught both
+    # on the deployed bytes:
+    #
+    #   1. It needed a writable `db.connect()`, which IS the migration runner — so a
+    #      plain restart silently applied migrations. The deploy protocol is built on
+    #      restarts being inert; migrations are applied deliberately, with the bot
+    #      down and `schema_migrations` checked afterwards.
+    #   2. It ran with `dry_run=False`, which made restarting the process a
+    #      message-mutating act. Editing someone's thread should be something a job
+    #      does on a schedule, never a side effect of `systemctl restart`.
+    #
+    # The cron tick (every 10 minutes, 24/7) already covers the restart case, which
+    # is the common one — it just resolves the spinner a few minutes later instead of
+    # instantly. That is the right trade.
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     print("Grant is listening (Socket Mode)…")
     handler.start()
