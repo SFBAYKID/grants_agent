@@ -542,6 +542,35 @@ def cmd_capability_seed(path: str, dry_run: bool) -> int:
     return 0
 
 
+def cmd_watchdog(dry_run: bool) -> int:
+    """Repair conversations that died mid-turn and left a spinner on screen.
+
+    Runs between restarts, because a turn killed at 18:42 should not wait for the
+    next deploy to be resolved — Chase watched one sit on "Thinking…" for four hours.
+    """
+    import os
+
+    from slack_sdk import WebClient
+
+    from .slack import watchdog
+
+    token = os.environ.get("SLACK_BOT_TOKEN", "")
+    if not token:
+        print("watchdog: SLACK_BOT_TOKEN is not set")
+        return 1
+    client = WebClient(token=token)
+    conn = db.connect_readonly() if dry_run else db.connect()
+    print(
+        watchdog.run(
+            client,
+            conn,
+            bot_id=str(client.auth_test().get("user_id") or ""),
+            dry_run=dry_run,
+        )
+    )
+    return 0
+
+
 def cmd_scan_threads(channel: str, dry_run: bool) -> int:
     """Read a channel's recent conversations and record what went unanswered.
 
@@ -796,6 +825,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="actually send; without it this is a dry run",
     )
+    p_watchdog = sub.add_parser(
+        "watchdog",
+        help="resolve conversations that died mid-turn and stranded a spinner",
+    )
+    p_watchdog.add_argument(
+        "--execute",
+        action="store_true",
+        help="actually repair them; without it this only reports",
+    )
+
     p_scan = sub.add_parser(
         "scan-threads",
         help="find unanswered asks in a channel's recent conversations",
@@ -930,6 +969,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_announce(str(args.load or ""), dry_run=not args.execute)
     if args.command == "nudge-report":
         return cmd_nudge_report()
+    if args.command == "watchdog":
+        return cmd_watchdog(dry_run=not args.execute)
     if args.command == "scan-threads":
         return cmd_scan_threads(args.channel, dry_run=not args.execute)
     if args.command == "capability-seed":
