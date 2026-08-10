@@ -5,6 +5,32 @@ metadata:
   type: project
 ---
 
+**PRODUCTION DEPLOYS FROM `main`. STANDING RULE, from Chase, 2026-08-10.**
+
+A commit is deployable **only once it is an ancestor of `origin/main`**. Assert it in
+preflight and **REFUSE the deploy if it fails**, with the same finality as a cross-tenant
+path — it is a one-line merge on the coordinator's side, so stopping costs nothing and
+shipping off-main costs the ability to answer "what is running?" from the repo.
+
+```bash
+git merge-base --is-ancestor <sha> origin/main || { echo "REFUSED: not on main"; exit 1; }
+```
+
+**This does NOT mean "deploy whatever `main` is now."** Keep pinning the exact hash.
+Hash-pinning has twice caught what a branch name would have hidden: a dirty working tree
+carrying an unfinished migration ([[deploy-3cf9df0-campaign-status]]) and two commits
+landing mid-sync ([[deploy-2239a18-human-asserted]]). "Deploy `main`" and "deploy commit X,
+which is on `main`" differ exactly when somebody pushes while files are being copied.
+
+**Verify the assertion in BOTH directions before trusting it** — a check that can only
+ever pass proves nothing. Exercise it once against a commit that is NOT an ancestor and
+confirm it returns non-zero. Same discipline as every false zero this codebase has produced.
+
+Why the rule exists: until 2026-08-10 production tracked
+`review/rich-award-card-campaign-20260723`, 156 commits ahead of `main`, so anyone reading
+the repo saw a `main` that was not running anywhere. The map said something the ground
+did not.
+
 The droplet checkout is NOT a git working tree — `~/grants_agent` has no `.git` and `git` commands fail there. Do not assume `git pull` works to deploy.
 
 **A RESTART IS INERT AGAIN — the exception below lasted exactly one revision.** `7837cda` added a

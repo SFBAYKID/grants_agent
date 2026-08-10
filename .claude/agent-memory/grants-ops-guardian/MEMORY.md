@@ -2,6 +2,7 @@
 
 - [Tenant + layout](tenant-and-layout.md) — grantwatch user, home, repo/venv paths, DB name/role, bot manager, cron jobs
 - [Deploy mechanism + gotchas](deploy-mechanism.md) — proven rsync recipe; zsh `:gr` destination trap (brace ${h}!); marker ground-truth check; broken .venv/bin/pip
+- [Deploys come from main](deploy-mechanism.md) — STANDING 2026-08-10: refuse any commit that is not an ancestor of origin/main, but keep pinning the exact hash; verify the gate in BOTH directions
 - [macOS archive safety](macos-archive-safety.md) — avoid Bash `mapfile`; fail closed before `git archive` so an empty delta cannot expand to the full tracked tree
 - [Google Sheets export verify](google-sheets-export-verify.md) — droplet Drive export wiring verified 2026-07-14; reusable create+trash smoke-test recipe
 - [Populate open RFPs for a test](rfp-poll-populate.md) — verified-live `poll --source RFP` recipe; matches only "Security RFP discovery"; small short-fused set, close in days
@@ -25,7 +26,7 @@
 - [Deploy 850cccc + email_results STOP](email-results-cannot-send-a-long-list.md) — LIVE 2026-08-10, schema 39, PID 55908; email_results emails "would you like an Excel file?" for any result set >15 so Kerry's list was NOT sent; 22 tools; 34 capability_asks; 4th false-zero grep (`nces bind:`)
 - [Deploy 801b762 + Kerry's email SENT](kerry-email-sent-and-the-15-row-cap.md) — LIVE 2026-08-10, schema 39, PID 57077, 23 tools; for_chat fixed the 93-char question but a SECOND 15-row cap remains, so the email carries 15 of 81 and says so; check ancestry BOTH ways
 - [Closing pass 78000cf](closing-pass-78000cf.md) — LIVE 2026-08-10, schema 39, PID 58929; 40-credit cap PROVEN by ledger; BudgetExhausted + the app_id guard only HALF landed; TOO_OLD==DROP_AFTER silently retired thread_abandoned; 2 chat-isms still on the email path
-- [Session final 2f1ff77 (CURRENT PROD)](session-final-2f1ff77.md) — LIVE 2026-08-10, schema 39, PID 60352, TOOL_SCHEMAS 25; negation guard + per-turn spend key both verified; user_memory EMPTY so the broken guard never wrote a claim about anyone
+- [Session final 2f1ff77 + 1ffe7ce docs (CURRENT PROD)](session-final-2f1ff77.md) — LIVE 2026-08-10, schema 39, PID 60352, TOOL_SCHEMAS 25; negation guard + per-turn spend key both verified; user_memory EMPTY so the broken guard never wrote a claim about anyone
 - [Drip pacing + daily cap](drip-pacing-and-cap.md) — ONE card/day (DAILY_CAP=1, `(N)` is the cap not the count); slot model replaced the coin flip 2026-07-22; gold pool now OPEN (544)
 - [Drip slot vs cron granularity](drip-slot-band-vs-cron-granularity.md) — a ≤30-min band on a `*/30` cron collapses to one clock time: 10:30–11:00 posts at 11:00 PT on 19 of 20 weekdays
 - [Identical RFP card text](identical-rfp-card-text.md) — a "repeated" Slack card can be 2 different leads; build_rfp_alert prints entity+keyword+due only, never the title

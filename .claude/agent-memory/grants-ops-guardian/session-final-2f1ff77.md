@@ -62,5 +62,31 @@ approved orphans. `.env` `9b68bc18…c634`, crontab `34002d4b…7ab5` (25 lines,
 Disk **71%** (68% at session start). 40 credential copies still HELD; retention plan still
 UNAUTHORISED.
 
+
+## Superseded as CURRENT PROD by `1ffe7ce` — docs-only, and the first main-gated deploy
+
+**LIVE 2026-08-10T23:24Z.** `2f1ff77` → `1ffe7cecdebc4363bf942e5a70009979b8c90bac`.
+**NO RESTART, and that is the correct outcome, not an omission.** The delta is
+`CLAUDE.md` plus two `.claude/**` paths that never ship — **zero `.py` files**. Proven
+rather than asserted: all **121** tracked `grant_watch/**/*.py` files hash IDENTICALLY at
+both revisions. Restarting would have bought a 0.14 s outage and changed nothing, so the
+listener stayed up: **PID 60352 before and after**, 52 minutes uptime, unbroken.
+
+Deployable set was `CLAUDE.md` alone (droplet pre-image `544af43c…` →
+`4425fb6a…`). rsync itemize exactly 1 line, 0 deleting, catch-all empty, second pass 0,
+`find -cnewer` exactly `CLAUDE.md`. Closure **123/123**, `TOOL_SCHEMAS` 25, schema 39,
+integrity ok, FK the two approved orphans, `.env` and crontab byte-identical.
+Backup holds `CLAUDE.md.at-2f1ff77` + crontab + revision — **no DB vacuum**, deliberately:
+nothing touched code or schema, so a 25 MB copy would be noise.
+
+**First live exercise of the main-ancestor gate, run in BOTH directions:**
+```
+PASS  1ffe7ce IS an ancestor of origin/main            -> deployable
+PASS  gate returns non-zero for a non-ancestor (exit 1) -> it can actually refuse
+      2f1ff77 (running before this) IS on main
+```
+The negative control matters as much as the positive: a gate that can only pass is
+decoration. See [[deploy-mechanism]] for the rule itself.
+
 Related: [[closing-pass-78000cf]], [[kerry-email-sent-and-the-15-row-cap]],
 [[email-results-cannot-send-a-long-list]].
