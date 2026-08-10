@@ -37,34 +37,28 @@ def build_message(candidate: "NudgeCandidate", variant: str = "a") -> str:
     mention = f"<@{candidate.target_slack}> " if candidate.target_slack else ""
     if candidate.subject_kind == "crm_preview_expired":
         if variant == "b":
-            return (
-                f"{mention}that Salesforce approval expired before it was clicked — "
-                "nothing was written. Shall I rebuild it?"
-            )
+            return f"{mention}that approval expired before anyone clicked. Rebuild it?"
         return (
-            f"{mention}that Salesforce approval timed out before anyone hit the "
-            "button, so nothing got written. Want me to rebuild it? 🙂"
+            f"{mention}that approval timed out, so nothing got written. "
+            "Want me to rebuild it? 🙂"
         )
     if candidate.subject_kind == "crm_batch_blocked":
         count = candidate.observed.get("organizations", 0)
         if variant == "b":
             return (
-                f"{mention}{count} organizations on this one are waiting on a call "
-                "from you about how to match them. Shall I add the rest without them?"
+                f"{mention}{count} orgs here need your call on how to match them. "
+                "Add the rest without them?"
             )
         return (
-            f"{mention}still stuck on this one — {count} organizations need a call "
-            "on how to match them. Want me to skip those and add the rest?"
+            f"{mention}still stuck on {count} orgs I can't match. "
+            "Want me to add the rest?"
         )
     if candidate.subject_kind == "crm_batch_partial":
         if variant == "b":
-            return (
-                f"{mention}the unmatched ones from this batch never made it into the "
-                "campaign. Want me to try them again?"
-            )
+            return f"{mention}the unmatched ones never made it in. Try them again?"
         return (
-            f"{mention}we only added the ones I could match here — the rest never "
-            "made it. Want me to have another go at them?"
+            f"{mention}only the ones I could match went in. "
+            "Want me to have another go at the rest?"
         )
     if candidate.subject_kind == "capability_now_available":
         return _capability_message(candidate, mention, variant)
@@ -72,13 +66,10 @@ def build_message(candidate: "NudgeCandidate", variant: str = "a") -> str:
         return _escalation_message(candidate, mention, variant)
     if candidate.subject_kind == "thread_abandoned":
         if variant == "b":
-            return (
-                f"{mention}I dropped the ball on this one and never got you an "
-                "answer. Want me to have another go?"
-            )
+            return f"{mention}I dropped the ball here and never answered. Another go?"
         return (
-            f"{mention}I never got you a proper answer on this one, and it looks like "
-            "it stalled there. Want me to pick it back up?"
+            f"{mention}I never got you an answer on this one. "
+            "Want me to pick it back up?"
         )
     entity = display_entity_name(str(candidate.observed.get("entity_name") or ""))
     subject = entity or "that lead"
@@ -91,13 +82,12 @@ def build_message(candidate: "NudgeCandidate", variant: str = "a") -> str:
             # answered more often is exactly what the variant ledger measures.
             amount = int(candidate.observed.get("amount_usd") or 0)
             money = f"${amount:,} " if amount > 0 else ""
-            return (
-                f"{mention}{money}{subject} is still sitting here — want me to find "
-                "you a contact for it?"
-            )
+            return f"{mention}{money}{subject} is still going spare. Want the contact?"
+        # "back here" keeps the claim to what Grant can see: it never asserts the rep
+        # did nothing, because they may have phoned the district from the car.
         return (
-            f"{mention}still nothing back on {subject} — though that's only what I "
-            "can see here. Want me to find a contact, or shall I drop it?"
+            f"{mention}nothing back here on {subject} yet. "
+            "Want me to find a contact, or drop it?"
         )
     if variant == "b":
         # The untagged wording needed its own alternate too. Without one, the ledger
@@ -105,31 +95,20 @@ def build_message(candidate: "NudgeCandidate", variant: str = "a") -> str:
         # live queue is untagged cards, `choose` would have declared a winner from
         # pure noise after eight sends. That is the superstition this module's own
         # docstring says it exists to prevent.
-        return (
-            f"{subject} is still unclaimed. Shall I track down a contact for it, or "
-            "let it go?"
-        )
+        return f"{subject} is still unclaimed — want me to dig up a contact?"
     return (
-        f"Anyone want {subject}? Nothing's come back here and I've got no activity "
-        "logged on it — though that's only what I can see. I can find a contact or "
-        "drop it."
+        f"Anyone want {subject}? Nothing's come back here on it. "
+        "Happy to find a contact, or drop it."
     )
 
 
 # What Grant can now do, phrased as the offer it is. Keyed by capability so the
 # sentence stays tied to the thing that actually shipped.
 _CAPABILITY_OFFER = {
-    "email_results": "I can email you a list now — want me to send it?",
-    "campaign_load": (
-        "I can build the Salesforce campaign now and add them for you — want me to?"
-    ),
-    "reminders": (
-        "I can hold on to that now and come back to you — want me to set it up?"
-    ),
-    "contact_supplied": (
-        "I can record what you tell me now, tagged as coming from you — want to "
-        "give it to me again?"
-    ),
+    "email_results": "I can now — want me to send it?",
+    "campaign_load": "I can now — want me to build it?",
+    "reminders": "I can now — want me to set it up?",
+    "contact_supplied": "I can now — want to send it again?",
 }
 
 
@@ -138,9 +117,9 @@ _CAPABILITY_OFFER = {
 # produced duplicated words and messages that never asked anything.
 _CAPABILITY_HEADLINE = {
     "email_results": "I can email you that list now — want it?",
-    "campaign_load": "I can build the Salesforce campaign now — want me to?",
-    "reminders": "I can hold on to that for you now — want me to set it up?",
-    "contact_supplied": "I can record what you tell me now — want to give it again?",
+    "campaign_load": "I can build that campaign now — want me to?",
+    "reminders": "I can actually track that for you now — set it up?",
+    "contact_supplied": "I can save contacts you give me now — want to re-send it?",
 }
 
 
@@ -160,12 +139,12 @@ def _capability_message(
         str(candidate.observed.get("capability") or ""),
         "I can do that now — want me to?",
     )
-    # Long asks are trimmed at a word boundary; the permalink in the ledger keeps the
-    # full message one click away, so nothing is lost by not pasting all of it.
-    if len(asked) > 160:
-        asked = asked[:160].rsplit(" ", 1)[0] + "…"
-    opener = f"back on {when}," if when else "a while back,"
-    quoted = f'you asked: "{asked}".' if asked else "you asked me for this."
+    # SHORT. Chase: keep these like a colleague poking you, not a letter. The
+    # verbatim quote is the evidence and stays, but trimmed hard — the permalink in
+    # the ledger keeps the full message one click away, so nothing is lost.
+    if len(asked) > 70:
+        asked = asked[:70].rsplit(" ", 1)[0] + "…"
+    opener = f"back on {when}" if when else "a while back"
     # A correction REPLACES "I couldn't do it then". That sentence is true but
     # incomplete where Grant did not merely fail — it said the thing was handled.
     # Reporting only the capability gap would quietly omit the broken promise, which
@@ -188,9 +167,10 @@ def _capability_message(
         )
         # Upper-case only the FIRST character. `.capitalize()` lower-cases everything
         # after it, which turned "back on 23 July" into "Back on 23 july".
-        lead = opener[:1].upper() + opener[1:]
-        return f"{mention}{headline} {lead} {quoted} {admission}"
-    return f"{mention}{opener} {quoted} {admission} {offer}"
+        return (
+            f"{mention}{headline} You asked {opener.rstrip(',')}: \u201c{asked}\u201d"
+        )
+    return f"{mention}{opener} you asked: \u201c{asked}\u201d {admission} {offer}"
 
 
 def _escalation_message(
@@ -212,12 +192,12 @@ def _escalation_message(
     subject = entity or "a lead"
     if variant == "b":
         return (
-            f"{mention}{money}{subject} has been sitting with {owner} and nothing's "
-            "come back here — could well be handled offline. Shall I dig out a "
-            "contact?"
+            f"{mention}{money}{subject} has been sitting with {owner} — nothing back "
+            "here, though it may be offline. Want a contact?"
         )
+    # "nothing back here" and "may be handled offline" are load-bearing: Grant sees
+    # Slack and its own tables, so it must not tell a manager the rep did nothing.
     return (
         f"{mention}heads up — {money}{subject} went to {owner} and nothing's come "
-        "back here since. Could just be handled offline. Want me to find a contact "
-        "and draft something?"
+        "back here. May be handled offline. Want me to find a contact?"
     )

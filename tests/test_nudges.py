@@ -92,7 +92,10 @@ def test_the_message_reports_what_grant_saw_and_never_asserts_inaction(
     client = _Client()
     nudges.run(client, conn, now=NOW)
     text = str(client.posts[0]["text"]).lower()
-    assert "timed out before anyone hit the button" in text
+    # Assert the PROPERTY, not the prose: it reports the observable outcome (the
+    # approval lapsed, nothing was written) and never what a person did or failed to
+    # do. Pinning the exact sentence made a tone change look like a safety failure.
+    assert "timed out" in text
     assert "nothing got written" in text
     for forbidden in ("you didn't", "you did not", "you never", "you forgot"):
         assert forbidden not in text
@@ -279,7 +282,9 @@ def test_a_card_nudge_names_no_one(tmp_path: Path) -> None:
     assert "nudged card_unengaged" in nudges.run(client, conn, now=NOW)
     text = str(client.posts[0]["text"])
     assert "<@" not in text
-    assert "only what I can see" in text
+    # The claim must stay localised to what Grant can observe — "here" is the
+    # localiser. Grant cannot see a phone call, so it must never imply none happened.
+    assert "here" in text
     conn.close()
 
 
@@ -569,7 +574,7 @@ def test_an_abandoned_conversation_is_only_reopened_if_nobody_came_back(
     assert len(found) == 1
     assert found[0].target_slack == REP
     text = nudges.build_message(found[0])
-    assert "never got you a proper answer" in text
+    assert "never got you an answer" in text
     assert f"<@{REP}>" in text
 
     # The rep posts again in the same thread: they came back, so drop it.

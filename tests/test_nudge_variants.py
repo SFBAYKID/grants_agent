@@ -292,3 +292,61 @@ def test_no_slot_is_unreachable_for_an_eastern_rep(tmp_path: Path) -> None:
         f"the latest slot {latest} PT is {local}:00 Eastern — already outside a "
         "New York rep's working hours, so it can never be delivered to them"
     )
+
+
+@pytest.mark.parametrize("variant", ["a", "b"])
+def test_every_follow_up_stays_short_enough_to_read(variant: str) -> None:
+    """Chase: keep these short and human, like a colleague poking you.
+
+    The first version of the reopened-ask message ran to 255 characters — three
+    sentences of self-criticism before it got to the point. A message that long in a
+    busy channel is scrolled past, which makes it worse than no message: it spends
+    the one first impression Grant gets with each rep and gets nothing back.
+
+    The cap is generous on purpose. It is a guard against essays, not a style rule,
+    and the mention plus a verbatim quote already cost most of the budget.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+
+    now = _dt.now(_tz.utc)
+    shapes = [
+        (
+            "capability_now_available",
+            {
+                "ask_text": "Can you contact me on Slack for any grants that are "
+                "awarded to schools in Tx, AR, OK, UT, MI, LA",
+                "capability": "reminders",
+                "asked_on": "24 July",
+                "correction": "I said I'd watch those states and then never did — "
+                "sorry.",
+            },
+        ),
+        ("card_unengaged", {"entity_name": "Wilder School District #133"}),
+        ("crm_batch_blocked", {"organizations": 3}),
+        ("crm_batch_partial", {}),
+        ("crm_preview_expired", {}),
+        ("thread_abandoned", {}),
+        (
+            "card_escalated",
+            {
+                "entity_name": "Hoxie School District",
+                "amount_usd": 500000,
+                "tagged_slack": "U08C1NBH875",
+            },
+        ),
+    ]
+    for kind, observed in shapes:
+        candidate = nudges.NudgeCandidate(
+            subject_kind=kind,
+            subject_id="1",
+            audience=CHANNEL,
+            target_slack=REP,
+            anchor_ts="1.1",
+            stalled_at=now,
+            observed=observed,
+        )
+        text = nudges.build_message(candidate, variant)
+        assert len(text) <= 220, f"{kind} ({variant}) is {len(text)} chars: {text}"
+        # Still has to ASK something — a follow-up that reports and stops is a dead
+        # end, which is the complaint that started all of this.
+        assert "?" in text, f"{kind} ({variant}) asks nothing: {text}"

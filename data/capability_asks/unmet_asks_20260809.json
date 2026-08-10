@@ -12,7 +12,8 @@
     "These are seeded, not invented, and each is checkable: the permalink pattern is",
     "https://monarch-pon5011.slack.com/archives/C01DGT9D11D/p<message_ts without the",
     "dot>?thread_ts=<thread_ts>&cid=C01DGT9D11D",
-    "A `correction` is present where Grant did not merely fail but SAID the thing was handled, or answered badly. It replaces the neutral 'I couldn't do it then' so the follow-up owns what actually happened."
+    "A `correction` is present where Grant did not merely fail but SAID the thing was handled, or answered badly. It replaces the neutral 'I couldn't do it then' so the follow-up owns what actually happened.",
+    "Corrections are kept to ONE short sentence. Chase, 2026-08-10: keep follow-ups short and human, like a colleague rather than a letter. An apology that runs to three sentences reads as performance; one sentence reads as meant."
   ],
   "asks": [
     {
@@ -25,7 +26,7 @@
       "ask_text": "Email those to kerry@monarchconnected.com",
       "capability": "email_results",
       "note": "Grant replied that it could not send email and suggested she forward the thread herself. It also referred to her in the third person to her face. She never posted in that thread again.",
-      "correction": "I couldn't send email then \u2014 and I talked about you in the third person while telling you so, which can't have helped."
+      "correction": "I couldn't then, and I answered you clumsily on top of it."
     },
     {
       "slack_user": "U01E908206M",
@@ -37,7 +38,7 @@
       "ask_text": "Can you contact me on Slack for any grants that are awarded to schools in Tx, AR, OK, UT, MI, LA",
       "capability": "reminders",
       "note": "Grant answered 'I'll keep watching these states and flag new awards here as they land.' It had no per-user watch and never contacted her. This is the ask the reminder feature exists for.",
-      "correction": "I told you I'd keep watching those states and flag new awards here. That wasn't true \u2014 I had no way to watch anything for a specific person, and I never came back to you. Sorry."
+      "correction": "I said I'd watch those states and then never did \u2014 sorry."
     },
     {
       "slack_user": "U06RXJKRXSR",
