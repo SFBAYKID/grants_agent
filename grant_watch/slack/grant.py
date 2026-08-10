@@ -718,6 +718,24 @@ def _converse_general(
     status.start()
     try:
         context = _thread_history(client, channel, thread_ts) if thread_ts else []
+        # WHAT GRANT OFFERED, STATED AS A FACT, BEFORE THE MODEL CLASSIFIES ANYTHING.
+        #
+        # Grant's first proactive follow-up asked Kerry "I can now — want me to send
+        # it?" and she replied "Yes". The model read that as `draft_email` — prospect
+        # outreach — because the sentence Grant had quoted back to her CONTAINS an
+        # email address, and a bare "Yes" carries no words of its own to correct it.
+        #
+        # My first attempt intercepted the misclassification AFTER the fact and sent
+        # the email itself. That was worse: it called `email_results` with no search
+        # spec, which renders empty, which would have mailed her "I couldn't find
+        # anything matching that." A confident false negative in her inbox is worse
+        # than the wrong question in Slack.
+        #
+        # So the fix belongs upstream. The model is missing one fact — what was just
+        # offered — and the honest place to get it is the ledger of what was actually
+        # delivered. Given that fact it routes correctly and builds a real spec from
+        # the thread, which is the thing it is good at and the intercept was not.
+        context = _with_pending_offer(context, channel, thread_ts)
         out = conversation.respond(
             text,
             None,
@@ -738,32 +756,6 @@ def _converse_general(
             outreach_conn = db.connect()
             lead_id = _single_lead_id(text, context)
             row = db.get_lead(outreach_conn, lead_id) if lead_id is not None else None
-            # ANSWERING AN OFFER IS NOT A REQUEST TO EMAIL A PROSPECT. Grant's first
-            # ever proactive follow-up asked Kerry "I can now — want me to send it?";
-            # she said "Yes"; this branch decided she wanted OUTREACH drafted and
-            # asked her for a Lead number. She had asked for her own spreadsheets.
-            #
-            # The tell is that a `draft_email` with NO resolvable lead, arriving in a
-            # thread where Grant is waiting on an answer, is far more likely to be
-            # that answer than a prospect request — a real outreach ask names an
-            # organization. The offer is read from the nudge ledger rather than
-            # inferred from the thread, because the quoted July message contains an
-            # email address and a bare "Yes" has no words to correct that.
-            if row is None and thread_ts:
-                from . import nudges as _nudges
-
-                offered = _nudges.pending_capability_offer(
-                    outreach_conn, channel, str(thread_ts)
-                )
-                if offered:
-                    reply = (
-                        "On it — I'll email you that list at your Monarch address. "
-                        "Give me a moment."
-                    )
-                    _deliver_offered_capability(
-                        client, channel, str(thread_ts), user, offered, status
-                    )
-                    return status.finalize(reply)
             if row is None:
                 reply = (
                     "Tell me the exact Lead number you want to use. I won't guess "
@@ -789,39 +781,38 @@ def _converse_general(
         return status.finalize(_fallback_answer(text))
 
 
-def _deliver_offered_capability(
-    client: WebClient,
-    channel: str,
-    thread_ts: str,
-    user: str,
-    capability: str,
-    status: object,
-) -> None:
-    """Honour the thing Grant offered, now that the person has said yes.
+def _with_pending_offer(
+    context: list[str] | None, channel: str, thread_ts: str
+) -> list[str]:
+    """Prepend what Grant offered in this thread, when it is still awaiting an answer.
 
-    Deliberately narrow: it only handles capabilities Grant actually offered in a
-    follow-up, and it does the SAME work the rep would have got by asking directly.
-    Anything unrecognised falls through silently rather than inventing a behaviour —
-    a follow-up that promises and then improvises is worse than one that never fired.
+    Best-effort and silent: if the ledger cannot be read, the conversation proceeds
+    exactly as it did before. A missing hint costs a worse answer; a raised exception
+    would cost the whole turn.
     """
-    if capability != "email_results":
-        return
+    items = list(context or [])
+    if not thread_ts:
+        return items
     try:
-        from . import reminder_tools
+        from .. import db as _db
+        from . import nudges as _nudges
 
-        reminder_tools.email_results({}, user, channel, thread_ts)
-    except Exception as exc:  # noqa: BLE001 — never crash the turn on a follow-through
+        conn = _db.connect_readonly()
         try:
-            client.chat_postMessage(
-                channel=channel,
-                thread_ts=thread_ts,
-                text=(
-                    "I hit a problem sending that email "
-                    f"({type(exc).__name__}) — say the word and I'll retry."
-                ),
-            )
-        except Exception:  # noqa: BLE001
-            return
+            offered = _nudges.pending_capability_offer(conn, channel, str(thread_ts))
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — a hint is never worth a failed turn
+        return items
+    if not offered:
+        return items
+    return [
+        "SYSTEM FACT: Grant proactively offered this person the "
+        f"'{offered}' capability in this thread and is waiting on their answer. "
+        "If they are agreeing, do that thing for THEM — it is not a request to "
+        "contact a prospect.",
+        *items,
+    ]
 
 
 def _remember_from(
