@@ -5,6 +5,14 @@ metadata:
   type: project
 ---
 
+> **FIXED IN PRODUCTION 2026-08-09 by `d050c8e` — see [[deploy-d050c8e-priority-at]].**
+> `candidates()` now sorts on `NudgeCandidate.priority_at` (the date the PERSON asked),
+> while staleness still measures from `available_since`. Re-measured on the deployed bytes
+> right after arming: the same five asks sit at **eligible positions 0-4**, not 14-18, and
+> `nudge --dry-run --force` names Kerry. The A/B inertness noted at the bottom is fixed too.
+> Everything below is the ORIGINAL measurement, kept because it is why the fix exists and
+> because the "read the merged sort order, never the ask list" lesson still stands.
+
 **The "declare the capabilities, then fire a nudge and Kerry/Jocelyn/Nelly hear from Grant"
 plan does not work, and the reason is in the sort key.**
 

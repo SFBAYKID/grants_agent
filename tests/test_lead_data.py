@@ -244,3 +244,108 @@ def test_the_sweep_pays_for_each_organization_once(tmp_path: Path) -> None:
     names = [row["entity_name"] for row in picked]
     assert len(names) == len(set(names)) == 3, f"paid for a duplicate: {names}"
     conn.close()
+
+
+def _linked(conn: sqlite3.Connection, lead_id: int, sf_id: str, item: int) -> None:
+    """Record that a Grant lead corresponds to a Salesforce Lead.
+
+    The parent `crm_actions` row is required: `crm_action_items.action_id` carries a
+    foreign key, and inserting items without it silently tested nothing.
+    """
+    conn.execute(
+        "INSERT OR IGNORE INTO crm_actions (id,action_type,workspace,channel,"
+        "thread_ts,requested_by,state,payload_json,payload_hash,nonce_hash,"
+        "expires_at,attempts,external_write_started,created_at,updated_at) "
+        "VALUES (?,'add_campaign_members','T1','C1','1.1','U0REP','complete','{}',"
+        "'h','n','2026-08-02',0,0,'2026-08-01','2026-08-01')",
+        (f"act-{item}",),
+    )
+    conn.execute(
+        "INSERT INTO crm_action_items (id,action_id,lead_id,canonical_entity_key,"
+        "operation,proposed_json,state,verification_state,salesforce_id) "
+        "VALUES (?,?,?,'k','add_member','{}','complete','verified',?)",
+        (item, f"act-{item}", lead_id, sf_id),
+    )
+
+
+def test_a_linkedin_title_never_becomes_a_salesforce_field(tmp_path: Path) -> None:
+    """`linkedin_only` means ownership is UNPROVEN, and a Salesforce Title says nothing.
+
+    Writing an unverified title into a structured CRM field launders a guess into a
+    fact that outlives every thread, and nobody downstream can tell it from a checked
+    one. Grant still surfaces LinkedIn findings in Slack, where they are labelled.
+    """
+    from grant_watch import salesforce_lead_fill
+
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url,"
+        "lead_grade) VALUES ('s','1','Test District','CA','u','gold')"
+    )
+    conn.commit()
+    lead_id = int(conn.execute("SELECT id FROM leads").fetchone()["id"])
+    db.save_linkedin_contact(
+        conn, lead_id, "Dana Reyes", "Director of Technology", "https://li.test/in/dr"
+    )
+    conn.commit()
+
+    offered = salesforce_lead_fill.proposed_fields(conn, lead_id)
+    assert "Title" not in offered, (
+        f"an unverified LinkedIn title was offered to Salesforce: {offered}"
+    )
+    conn.close()
+
+
+def test_a_verified_title_is_offered(tmp_path: Path) -> None:
+    """The other direction: a page-verified contact SHOULD complete the record."""
+    from grant_watch import salesforce_lead_fill
+
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url,"
+        "lead_grade) VALUES ('s','1','Test District','CA','u','gold')"
+    )
+    conn.commit()
+    lead_id = int(conn.execute("SELECT id FROM leads").fetchone()["id"])
+    db.save_contact(
+        conn,
+        lead_id,
+        "Dana Reyes",
+        "Director of Technology",
+        "d@x.test",
+        "555-0100",
+        "https://district.test/staff",
+        "high",
+    )
+    conn.commit()
+
+    offered = salesforce_lead_fill.proposed_fields(conn, lead_id)
+    assert offered.get("Title") == "Director of Technology"
+    assert offered.get("Email") == "d@x.test"
+    conn.close()
+
+
+def test_one_grant_lead_yields_one_salesforce_target(tmp_path: Path) -> None:
+    """Lead #231 maps to TWO Salesforce records and appeared twice.
+
+    The same values would have gone to both, and --limit would have bounded rows
+    rather than leads. Merging two CRM records for one organization is a human's
+    call, not something a sweep should do by writing to both.
+    """
+    from grant_watch import salesforce_lead_fill
+
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url,"
+        "lead_grade) VALUES ('s','1','Birmingham Community Charter','CA','u','gold')"
+    )
+    conn.commit()
+    lead_id = int(conn.execute("SELECT id FROM leads").fetchone()["id"])
+    _linked(conn, lead_id, "00Q000000000001", 1)
+    _linked(conn, lead_id, "00Q000000000002", 2)
+    conn.commit()
+
+    rows = salesforce_lead_fill.linked_leads(conn)
+    assert len(rows) == 1, f"one lead produced {len(rows)} write targets"
+    assert rows[0]["salesforce_id"] == "00Q000000000001"
+    conn.close()

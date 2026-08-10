@@ -24,7 +24,6 @@ from dataclasses import dataclass
 
 from .enrich.salesforce_campaign_gateway import SalesforceCampaignGateway
 from .enrich.salesforce_contact_records import organization_fields
-from .slack.contact_enrichment import _best_linkedin_contact
 
 
 @dataclass(frozen=True)
@@ -51,15 +50,23 @@ def linked_leads(conn: sqlite3.Connection, limit: int = 25) -> list[sqlite3.Row]
     it is the only place Grant honestly knows which CRM record a lead became. Only
     `Lead` ids are eligible — a Contact is a different object with different fields
     and is deliberately out of scope.
+
+    ONE ROW PER GRANT LEAD. `DISTINCT` on the PAIR is not the same thing: lead #231
+    maps to two Salesforce records, so it appeared twice and the identical values
+    would have been written to both — and `--limit 25` would have bounded rows rather
+    than leads. Where a lead has several CRM records, the lowest id is taken and the
+    rest are left alone; writing the same organization's details into two records is
+    a merge decision, and a merge is a human's call.
     """
     return list(
         conn.execute(
-            """SELECT DISTINCT i.lead_id, i.salesforce_id
+            """SELECT i.lead_id, MIN(i.salesforce_id) AS salesforce_id
                  FROM crm_action_items i
                 WHERE i.salesforce_id IS NOT NULL
                   AND i.salesforce_id <> ''
                   AND i.salesforce_id LIKE '00Q%'
                   AND i.lead_id IS NOT NULL
+                GROUP BY i.lead_id
                 ORDER BY i.lead_id
                 LIMIT ?""",
             (max(1, limit),),
@@ -85,14 +92,20 @@ def proposed_fields(conn: sqlite3.Connection, lead_id: int) -> dict[str, object]
     if str(lead["org_phone"] or ""):
         fields["Phone"] = str(lead["org_phone"])
 
+    # A LINKEDIN CLAIM MUST NOT BECOME A SALESFORCE FIELD. `linkedin_only` means
+    # exactly "we found a profile and ownership is unproven" — this repo says so
+    # everywhere it renders one. A Salesforce `Title` carries no provenance, so
+    # writing an unverified title there launders a guess into a CRM fact that outlives
+    # every thread and that nobody downstream can tell apart from a checked one.
+    # Grant still surfaces LinkedIn findings in Slack, where they are labelled.
     contacts = db.contacts_for_lead(conn, lead_id)
-    verified = [row for row in contacts if str(row["contact_status"]) == "verified"]
-    best = verified[0] if verified else _best_linkedin_contact(contacts)
-    if best is None:
-        vendor = [
-            row for row in contacts if str(row["contact_status"]) == "vendor_licensed"
-        ]
-        best = vendor[0] if vendor else None
+    usable = [
+        row
+        for row in contacts
+        if str(row["contact_status"]) in {"verified", "vendor_licensed"}
+    ]
+    verified = [row for row in usable if str(row["contact_status"]) == "verified"]
+    best = verified[0] if verified else (usable[0] if usable else None)
     if best is not None:
         for column, field in (
             ("title", "Title"),
