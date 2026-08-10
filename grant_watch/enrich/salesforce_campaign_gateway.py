@@ -724,6 +724,14 @@ class SalesforceCampaignGateway:
             headers=headers,
             timeout=20,
         )
+        if current.status_code == 404:
+            # NOT IN THIS ORG — a distinct, expected outcome rather than a failure.
+            # `crm_action_items.salesforce_id` holds ids from BOTH the production org
+            # and the monarchdev sandbox, with nothing recording which is which, so a
+            # bulk fill legitimately meets ids that do not exist here. The pre-read is
+            # what makes that safe: nothing is ever patched. Reporting it as
+            # "HTTP 404" made a routine skip read like a broken integration.
+            return CreateResult(False, record_id, error="not in this org")
         if current.status_code != 200:
             return CreateResult(
                 False, error=f"HTTP {current.status_code}: {current.text[:200]}"

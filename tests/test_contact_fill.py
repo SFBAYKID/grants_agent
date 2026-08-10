@@ -202,3 +202,67 @@ def test_a_zero_budget_buys_nothing(
     assert out.credits_spent == 0
     assert out.filled == 0
     conn.close()
+
+
+def test_a_lead_id_from_another_org_is_skipped_not_patched() -> None:
+    """`salesforce_id` holds BOTH production and sandbox ids, with nothing marking which.
+
+    A bulk fill therefore meets ids that do not exist in this org. The pre-read is
+    what makes that safe — nothing is patched — but it used to be reported as a raw
+    `HTTP 404`, which reads like a broken integration rather than a routine skip.
+    """
+    import requests
+
+    from grant_watch.enrich import salesforce_campaign_gateway as gw
+
+    calls: list[str] = []
+
+    class _Resp:
+        """A Salesforce response with a chosen status."""
+
+        def __init__(self, code: int) -> None:
+            """Hold the status code."""
+            self.status_code = code
+            self.text = "not found"
+
+        def json(self) -> dict[str, object]:
+            """Never reached for a 404."""
+            return {}
+
+    def fake_get(url: str, **_kw: object) -> _Resp:
+        """The pre-read, answering as the org would for a foreign id."""
+        calls.append("GET")
+        return _Resp(404)
+
+    def fake_patch(url: str, **_kw: object) -> _Resp:
+        """Must never be reached."""
+        calls.append("PATCH")
+        return _Resp(204)
+
+    with pytest.MonkeyPatch.context() as mp:
+        for var in (
+            "SALESFORCE_WRITE_CLIENT_ID",
+            "SALESFORCE_WRITE_CLIENT_SECRET",
+            "SALESFORCE_CLIENT_ID",
+            "SALESFORCE_CLIENT_SECRET",
+        ):
+            mp.setenv(var, "x")
+        mp.setenv("SALESFORCE_MY_DOMAIN_URL", "https://example.my.salesforce.com")
+        mp.setenv("SALESFORCE_WRITE_ORG_ID", "00D000000000000EAM")
+        mp.setenv("SALESFORCE_CAMPAIGN_WRITES_ENABLED", "1")
+        gateway = gw.SalesforceCampaignGateway()
+        mp.setattr(
+            gw.SalesforceCampaignGateway,
+            "_auth",
+            lambda self, force=False: ("tok", "https://example.my.salesforce.com"),
+        )
+        mp.setattr(
+            gw.SalesforceCampaignGateway, "verify_write_scope", lambda self: None
+        )
+        mp.setattr(requests, "get", fake_get)
+        mp.setattr(requests, "patch", fake_patch)
+        result = gateway.fill_lead_blanks("00QVC00000abcde2AA", {"Title": "CTO"})
+
+    assert calls == ["GET"], "a record that does not exist here was patched"
+    assert result.error == "not in this org"
+    assert result.success is False

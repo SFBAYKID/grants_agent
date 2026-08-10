@@ -25,11 +25,35 @@ def cmd_fill_contacts(
 
     conn = db.connect_readonly() if dry_run else db.connect()
     if campaign:
+        # RESOLVED THROUGH SALESFORCE, because `crm_action_items` has no campaign
+        # column at all — the first version of this query named one and raised
+        # `no such column`. Worse than the crash was the shape of the recovery: the
+        # `else` branch below is NOT a fallback, it selects the 25 newest gold leads,
+        # so an operator who reacted by dropping the flag would have quietly bought
+        # contacts for a completely different set of leads.
+        from .enrich.salesforce_campaign_gateway import SalesforceCampaignGateway
+
+        gateway = SalesforceCampaignGateway()
+        found = gateway.search_campaigns(campaign)
+        if not found:
+            print(f"fill-contacts: no Salesforce campaign named {campaign!r}")
+            return 1
+        member_ids = [
+            str(r["LeadId"])
+            for r in gateway._query_all(
+                "SELECT LeadId FROM CampaignMember "
+                f"WHERE CampaignId='{found[0].record_id}' AND LeadId != null"
+            )
+        ]
+        if not member_ids:
+            print(f"fill-contacts: campaign {campaign!r} has no Lead members")
+            return 1
+        quoted = ",".join("?" for _ in member_ids)
         rows = conn.execute(
-            """SELECT DISTINCT lead_id FROM crm_action_items
-                WHERE campaign_name=? AND lead_id IS NOT NULL
-                ORDER BY lead_id LIMIT ?""",
-            (campaign, limit),
+            f"""SELECT DISTINCT lead_id FROM crm_action_items
+                 WHERE salesforce_id IN ({quoted}) AND lead_id IS NOT NULL
+                 ORDER BY lead_id LIMIT ?""",
+            (*member_ids, limit),
         ).fetchall()
     else:
         rows = conn.execute(
