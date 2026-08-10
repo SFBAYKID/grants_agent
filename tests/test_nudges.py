@@ -851,3 +851,91 @@ def test_a_rep_with_no_recorded_timezone_behaves_exactly_as_before(
         conn, candidate, late, force=True
     )
     conn.close()
+
+
+def _seed_capability_subject(conn: sqlite3.Connection) -> None:
+    """One armed capability ask — the simplest subject a nudge can be built from."""
+    from grant_watch import capability_asks
+
+    capability_asks.record(
+        conn,
+        slack_user="U01E908206M",
+        audience=CHANNEL,
+        thread_ts="800.9",
+        message_ts="800.9",
+        # `campaign_load`, not `email_results`: the latter is gated on a live Resend
+        # key, which a test environment does not have, so it would be suppressed as
+        # `capability_not_ready` and never reach the send path under test.
+        ask_text="can you add the lead lists assigned to each state to campaign?",
+        capability="campaign_load",
+        asked_at="2026-07-23T15:26:29+00:00",
+        recorded_by="test",
+    )
+    capability_asks.mark_available(
+        conn, "campaign_load", shipped_at=(NOW - timedelta(days=3)).isoformat()
+    )
+
+
+def test_a_rate_limited_send_keeps_the_subject_its_one_chance(
+    tmp_path: Path,
+) -> None:
+    """A send Slack REJECTED must not consume the subject's single follow-up.
+
+    Found by firing a real nudge at a thread that did not exist. Slack refused the
+    request outright, nothing was posted, and the subject was still recorded as
+    "may have landed, never retry" — which permanently destroyed a follow-up that
+    had definitively not been sent.
+    """
+    conn = _conn(tmp_path)
+    _seed_capability_subject(conn)
+
+    class _RateLimited:
+        """A Slack client that refuses everything with a transient error."""
+
+        def chat_postMessage(self, **_kw: object) -> dict[str, object]:
+            """Refuse the way Slack does under load."""
+            from slack_sdk.errors import SlackApiError
+
+            raise SlackApiError("ratelimited", {"error": "ratelimited"})
+
+    out = nudges.run(_RateLimited(), conn, now=NOW)
+    assert "deferred" in out, out
+    assert conn.execute("SELECT COUNT(*) FROM followup_nudges").fetchone()[0] == 0, (
+        "a rejected send burned the subject's only chance"
+    )
+
+    # And the retry works, proving the chance really was preserved.
+    sent: list[dict[str, object]] = []
+
+    class _Works:
+        """A Slack client that accepts the message."""
+
+        def chat_postMessage(self, **kw: object) -> dict[str, object]:
+            """Accept and record it."""
+            sent.append(kw)
+            return {"ts": "1.1"}
+
+    assert "nudged" in nudges.run(_Works(), conn, now=NOW)
+    assert len(sent) == 1
+    conn.close()
+
+
+def test_a_bad_anchor_is_terminal_and_not_retried(tmp_path: Path) -> None:
+    """The other half: a wrong destination must NOT be retried forever."""
+    conn = _conn(tmp_path)
+    _seed_capability_subject(conn)
+
+    class _BadThread:
+        """Slack rejecting a thread that does not exist."""
+
+        def chat_postMessage(self, **_kw: object) -> dict[str, object]:
+            """Refuse with a permanent target error."""
+            from slack_sdk.errors import SlackApiError
+
+            raise SlackApiError("invalid_thread_ts", {"error": "invalid_thread_ts"})
+
+    assert "failed" in nudges.run(_BadThread(), conn, now=NOW)
+    row = conn.execute("SELECT state,last_error FROM followup_nudges").fetchone()
+    assert row["state"] == "suppressed"
+    assert row["last_error"] == "invalid_thread_ts"
+    conn.close()

@@ -766,9 +766,25 @@ def run(
                 )
         except SlackApiError as exc:
             code = str(exc.response.get("error") or "")
-            # A missing thread is permanent; anything else may or may not have
-            # landed, and a nudge is never blind-retried.
-            state = "suppressed" if code == "thread_not_found" else "unknown"
+            # THREE outcomes, not two. Found by firing a real nudge at a thread that
+            # did not exist: Slack rejected it outright, and the subject was recorded
+            # `unknown` — "this may have landed, never retry" — which permanently
+            # destroyed a follow-up that had definitively NOT been sent. One nudge per
+            # subject ever means a burned subject is gone for good.
+            #
+            # A rejection Slack raises BEFORE accepting the message did not deliver
+            # anything, and we can say so. Whether it is worth retrying depends on
+            # whether the TARGET is broken or the moment was.
+            if code in _BAD_TARGET:
+                state = "suppressed"  # the anchor is wrong and will stay wrong
+            elif code in _RETRYABLE:
+                # Nothing was posted and the target is fine — release the
+                # reservation so the next run can try again, rather than spending
+                # the subject's single chance on a rate-limit.
+                _release(conn, nudge_id, error=code)
+                return f"nudge deferred ({code})"
+            else:
+                state = "unknown"  # may or may not have landed; never blind-retried
             _finish(conn, nudge_id, state=state, error=code)
             return f"nudge failed ({code})"
         except Exception as exc:  # noqa: BLE001 — ambiguity is preserved, not retried
@@ -782,6 +798,39 @@ def run(
             capability_asks.close(conn, int(candidate.subject_id))
         return f"nudged {candidate.subject_kind} in {candidate.audience}"
     return "skip: nothing to follow up on"
+
+
+# Slack refused because the destination is wrong. Retrying cannot help.
+_BAD_TARGET = frozenset(
+    {
+        "thread_not_found",
+        "invalid_thread_ts",
+        "channel_not_found",
+        "not_in_channel",
+        "is_archived",
+        "msg_too_long",
+        "invalid_auth",
+        "account_inactive",
+    }
+)
+
+# Slack refused for a reason that has nothing to do with this message. Nothing was
+# posted, so the subject keeps its one chance.
+_RETRYABLE = frozenset(
+    {"ratelimited", "service_unavailable", "fatal_error", "request_timeout"}
+)
+
+
+def _release(conn: sqlite3.Connection, nudge_id: int, *, error: str) -> None:
+    """Give a reserved subject its chance back after a definitively-failed send.
+
+    Only ever called for errors where Slack rejected the request outright, so this
+    can never produce a duplicate message: there is no message.
+    """
+    conn.execute(
+        "DELETE FROM followup_nudges WHERE id=? AND state='reserved'", (nudge_id,)
+    )
+    conn.commit()
 
 
 def _record(
