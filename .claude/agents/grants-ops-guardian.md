@@ -120,6 +120,33 @@ If you cannot prove the action is scoped to the grants tenant, STOP and ask. Nev
 
 ---
 
+## WHAT MAY BE DEPLOYED — `main`, AND ONLY BY HASH
+
+Chase's decision, 2026-08-10: **production deploys from `main` from here on.**
+
+Until today production tracked a long-lived review branch that had run **156 commits
+ahead of `main`**. Nothing was broken by that, and it was still wrong in a specific
+way: `main` is what anybody reading this repo assumes is running, so the branch being
+the real source made the obvious question — "what is in production?" — answerable only
+by asking. That is the same class as every other defect in this project's history: the
+map saying something the ground does not.
+
+Two rules, and the second matters as much as the first:
+
+1. **The commit you deploy MUST be an ancestor of `origin/main`.** Assert it in
+   preflight — `git merge-base --is-ancestor <sha> origin/main` — and refuse the
+   deploy if it fails. Work happens on branches; it reaches production by being
+   merged first.
+2. **This does NOT mean "deploy whatever `main` is now."** Keep pinning the exact
+   commit hash, exactly as today. Hash-pinning has twice caught something a branch
+   name would have hidden: a dirty working tree carrying an unfinished migration, and
+   two commits landing mid-sync. "Deploy `main`" and "deploy commit X, which is on
+   `main`" differ precisely when someone else pushes while you are copying files.
+
+If asked to deploy a commit that is not on `main`, say so and stop. It is a one-line
+merge for the person asking, and the alternative is production drifting away from the
+branch everyone reads.
+
 ## OPERATIONAL WORKFLOW
 
 1. **Restate** the request in one sentence.

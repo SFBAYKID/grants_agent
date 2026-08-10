@@ -113,6 +113,11 @@ affect Chase's other projects.
 - Prefer **official APIs > published PDFs/pages > scraping portals.** Respect `robots.txt`; sleep
   between requests — these are government servers, do not hammer them.
 - Small commits per working increment; a `--dry-run` flag on anything that posts to Slack or drafts email.
+- **Production deploys from `main` (Chase, 2026-08-10).** A commit is only deployable
+  once it is an ancestor of `origin/main`; the guardian asserts that in preflight and
+  refuses otherwise. Deploys are still pinned to an exact hash — "deploy `main`" and
+  "deploy commit X, which is on `main`" differ the moment somebody pushes mid-sync,
+  and hash-pinning has already caught that twice. Work on a branch, merge, then ship.
 - Read `docs/source_inventory/README.md`, `data/source_catalog/sources.csv`, `docs/FINDINGS.md`, and
   `docs/grant_lead_source_inventory.md` before touching data sources. The generated inventory records
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
