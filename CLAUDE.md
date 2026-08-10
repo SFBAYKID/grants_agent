@@ -220,6 +220,38 @@ affect Chase's other projects.
   design that makes the Resend surface safe, so building it deliberately widens a
   safety boundary and needs care). `db_engagement` + `followup_nudges.state` are
   enough to measure a variant's reply rate — measure before optimising.
+- `verified` 2026-08-10 **ALL THREE SYSTEMS EXERCISED LIVE, NOT JUST UNIT-TESTED.**
+  SLACK (production, playground): "remind me friday morning to circle back on the
+  texas rfps" → Grant resolved the date itself and confirmed in one line; "what
+  reminders do i have" listed it; "stop reminding me" → *"all reminders and
+  follow-ups are off, and I cancelled the Texas RFP one"* — the confirmation naming
+  what it ACTUALLY cancelled is the C2 fix live; "turn them back on" → restored, and
+  it pointedly did NOT silently resurrect the cancelled reminder, it offered to.
+  SALESFORCE: *"whats in salesforce for bellaire"* returned BOTH matches **with
+  working Lightning links in the message**, flagged possible-not-confirmed, and
+  called the health centre out as likely unrelated — the exact gap Chase reported.
+  ZOOMINFO: through Slack, a free preview quoted three IT people, their exact cost
+  (3 credits), the remaining balance, and all three do-not-call flags, then ASKED
+  before spending.
+- `verified` 2026-08-10 **A REAL PAID ZOOMINFO PULL FILLED THE LEAD CHASE OPENED.**
+  Birmingham Community Charter: 25 people found for ZERO credits, 2 pulled for 2
+  credits — Vic Chalabian (Manager, Information Technology Systems) and Kristine
+  Torres (Chief Business Officer), both with real `@bcchs.net` emails. Vic's number
+  was WITHHELD as do-not-call. Stored `vendor_licensed`, never `verified`.
+- `verified` 2026-08-10 **THAT PULL EXPOSED A FALSE CLAIM BEING WRITTEN INTO THE
+  CRM.** The Salesforce Lead Description read *"Contact verified verbatim on unknown
+  source."* — a claim of verification, citing nothing, about vendor data nobody
+  checked. `_contact_evidence` special-cased only `linkedin_only` and fell through to
+  the verified wording for everything else. Every evidence class now says what it
+  actually is, and a contact with no captured source page claims no verification at
+  all. This string outlives every Slack thread, which is what makes it the most
+  durable claim Grant makes about a person.
+- `verified` 2026-08-10 **THE CREDIT LEDGER IS PER-DATABASE, NOT A VENDOR BALANCE.**
+  Production's ledger reads 2 consumed and my laptop's also reads 2, but BOTH drew on
+  the same ZoomInfo account, so true vendor consumption this period is 4. The cap
+  still protects each database from overspending itself; it cannot see spend from
+  anywhere else. Worth knowing before anyone treats "998 remaining" as a fact about
+  the account rather than about that database.
 - `needs-testing` 2026-08-09: **no nudge, escalation, reminder or capability follow-up
   has been delivered live.** `followup_nudges` and `reminders` are empty in production;
   no `nudge` cron line exists; production asks are NOT seeded. LinkedIn connection
