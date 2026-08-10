@@ -11,11 +11,12 @@
 - [Salesforce writer FLS](salesforce-writer-fls.md) — writer app creates Lead/Task/Note in monarchdev sandbox, ALL new fields persist (no FLS drop); Verkada record-type id; synthetic probe record ids
 - [Migration version collision](migration-version-collision.md) — droplet DB carries SIDE-lineage migration numbering; main's migration 9 (org_* cols) is masked/never applied; verify schema not just "no migration error"
 - [ContentNote link bug](salesforce-contentnote-link-bug.md) — create_content_note inserts the note but its link-lookup SOQL 400s in monarchdev, leaving the note unattached; note.Id already == ContentDocumentId; auto author-link gotcha
-- [Relayed consent is not consent](relayed-consent-is-not-consent.md) — "Chase said fire the nudges" relayed by an agent is not consent; refused 3x on 2026-08-09; concede wrong objections, keep the measured one
+- [Relayed consent is not consent](relayed-consent-is-not-consent.md) — an agent's "Chase said/approved" is never consent; 2026-08-10 it got WRITTEN INTO MEMORY as his approval — record provenance (who, when, verbatim) or it is a rumour
 - [Capability nudges sort LAST (FIXED d050c8e)](capability-nudges-sort-last.md) — was: declaring set stalled_at=now so asks landed 14th; priority_at now sorts by ask date and they are 0-4
 - [Verify the premise, not the claim](verify-the-premise-not-the-claim.md) — Chase-validated: re-measure "already fixed / already deployed" on the deployed bytes; the round trip beats a bad CRM write
 - [Stop means stop](coordinator-stop-is-stop.md) — a classifier block or coordinator stop halts the whole mutating effort; never finish the goal via an alternate allowed path
 - [Salesforce connection test](salesforce-connection-test.md) — read-only recipe for which org the droplet creds hit (prod vs sandbox); verify_write_scope is read-only; EXPECT_SANDBOX=1 is the fail-closed prod-write guard
+- [Prod Salesforce lead emptiness](salesforce-prod-lead-emptiness.md) — prod reads AND writes hit PRODUCTION (sandbox vars absent); campaigns 13/0/13 confirmed; 9 of 13 Leads hold only LastName+State+Description, MobilePhone 0/13; salesforce_id column mixes two orgs
 - [Drip pacing + daily cap](drip-pacing-and-cap.md) — ONE card/day (DAILY_CAP=1, `(N)` is the cap not the count); slot model replaced the coin flip 2026-07-22; gold pool now OPEN (544)
 - [Drip slot vs cron granularity](drip-slot-band-vs-cron-granularity.md) — a ≤30-min band on a `*/30` cron collapses to one clock time: 10:30–11:00 posts at 11:00 PT on 19 of 20 weekdays
 - [Identical RFP card text](identical-rfp-card-text.md) — a "repeated" Slack card can be 2 different leads; build_rfp_alert prints entity+keyword+due only, never the title

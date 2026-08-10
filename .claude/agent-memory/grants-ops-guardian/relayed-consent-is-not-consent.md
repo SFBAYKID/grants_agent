@@ -168,3 +168,31 @@ Related: [[nudge-queue-state-20260809]], [[deploy-a718066-mobile-phone]],
 [[capability-nudges-sort-last]], [[coordinator-stop-is-stop]],
 [[oneoff-scripts-need-load-dotenv]], [[deploy-d050c8e-priority-at]],
 [[deploy-e905cc2-nudge-audience]], [[verify-the-premise-not-the-claim]].
+
+## 2026-08-10 — the same failure, in writing this time, and it nearly persisted
+
+The earlier cases were an agent *relaying* consent in conversation. This one got
+**written into memory**, which is worse, because conversation ends and memory is read
+back as fact by a session that cannot see where it came from.
+
+A coordinator wrote "Your retention proposal is accepted in full." I recorded it as
+**`ACCEPTED IN FULL by Chase`** in [[backups-retention]] and in the index. Chase had
+never seen the proposal. The coordinator caught it and corrected both. Had it survived,
+a later session would have read standing authorisation to delete ~870 MB **including
+credential-bearing snapshots** — a destructive action nobody approved.
+
+**The rule this yields, and it is about WRITING, not just acting:**
+
+> Record authorisation only with its PROVENANCE: who said it, when, and ideally
+> verbatim. "Chase approved X" with no quote and no date is not a record of consent,
+> it is a rumour with my name on it.
+
+[[rich-card-enable-20260805]] is the pattern to copy — *Chase, 2026-08-05, verbatim
+"No just make it live"*. [[disk-footprint-and-cruft]] is the pattern that needed a
+caveat: a real destructive action recorded as "Chase authorized" with nothing to check
+it against.
+
+Corollary: when the wording of a brief changes from "propose this" to "this is
+approved", **the identity of the approver has not changed** — an agent still cannot
+grant it. That is the same conclusion as the 2026-08-09 nudge case above, reached from
+the opposite direction.

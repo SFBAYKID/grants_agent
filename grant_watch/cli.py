@@ -38,6 +38,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from . import db, scoring
+from .cli_ops import cmd_fill_contacts, cmd_scan_threads, cmd_watchdog
 from .config import primary_channel_id
 from .migrations_nudges import CAPABILITY_KINDS
 from .models import RawItem, RunStats
@@ -542,86 +543,6 @@ def cmd_capability_seed(path: str, dry_run: bool) -> int:
     return 0
 
 
-def cmd_watchdog(dry_run: bool) -> int:
-    """Repair conversations that died mid-turn and left a spinner on screen.
-
-    Runs between restarts, because a turn killed at 18:42 should not wait for the
-    next deploy to be resolved — Chase watched one sit on "Thinking…" for four hours.
-    """
-    import os
-
-    from slack_sdk import WebClient
-
-    from .slack import watchdog
-
-    token = os.environ.get("SLACK_BOT_TOKEN", "")
-    if not token:
-        print("watchdog: SLACK_BOT_TOKEN is not set")
-        return 1
-    client = WebClient(token=token)
-    conn = db.connect_readonly() if dry_run else db.connect()
-    print(
-        watchdog.run(
-            client,
-            conn,
-            bot_id=str(client.auth_test().get("user_id") or ""),
-            dry_run=dry_run,
-        )
-    )
-    return 0
-
-
-def cmd_scan_threads(channel: str, dry_run: bool) -> int:
-    """Read a channel's recent conversations and record what went unanswered.
-
-    The standing replacement for hand-seeding asks out of a JSON file somebody wrote
-    after reading July's transcripts by eye. This runs weekly and finds tomorrow's.
-    """
-    import os
-
-    from anthropic import Anthropic
-    from slack_sdk import WebClient
-
-    from . import thread_scanner
-
-    token = os.environ.get("SLACK_BOT_TOKEN", "")
-    if not token:
-        print("scan-threads: SLACK_BOT_TOKEN is not set")
-        return 1
-    client = Anthropic()
-
-    def ask_model(prompt: str) -> str:
-        """One cheap classification pass over a single thread."""
-        reply = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=900,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return "".join(
-            block.text
-            for block in reply.content
-            if getattr(block, "type", "") == "text"
-        )
-
-    slack = WebClient(token=token)
-    # Ask Slack who Grant is rather than hard-coding an id: the scan must ignore
-    # threads belonging to the other bots that share this channel.
-    identity = slack.auth_test()
-    conn = db.connect_readonly() if dry_run else db.connect()
-    print(
-        thread_scanner.scan_channel(
-            slack,
-            conn,
-            channel,
-            ask_model,
-            dry_run=dry_run,
-            grant_user=str(identity.get("user_id") or ""),
-            grant_bot=str(identity.get("bot_id") or ""),
-        )
-    )
-    return 0
-
-
 def cmd_enrich_orgs(grade: str, limit: int, dry_run: bool) -> int:
     """Fill in organization details for leads that have none.
 
@@ -825,6 +746,26 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="actually send; without it this is a dry run",
     )
+    p_fill_contacts = sub.add_parser(
+        "fill-contacts",
+        help="buy decision-maker contacts for leads that have none",
+    )
+    p_fill_contacts.add_argument(
+        "--campaign", default="", help="only leads on this campaign name"
+    )
+    p_fill_contacts.add_argument("--limit", type=int, default=25)
+    p_fill_contacts.add_argument(
+        "--max-credits",
+        type=int,
+        required=True,
+        help="hard ceiling on credits this run may spend",
+    )
+    p_fill_contacts.add_argument(
+        "--execute",
+        action="store_true",
+        help="actually buy; without it this prices the run for free",
+    )
+
     p_watchdog = sub.add_parser(
         "watchdog",
         help="resolve conversations that died mid-turn and stranded a spinner",
@@ -969,6 +910,13 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_announce(str(args.load or ""), dry_run=not args.execute)
     if args.command == "nudge-report":
         return cmd_nudge_report()
+    if args.command == "fill-contacts":
+        return cmd_fill_contacts(
+            args.campaign,
+            args.limit,
+            args.max_credits,
+            dry_run=not args.execute,
+        )
     if args.command == "watchdog":
         return cmd_watchdog(dry_run=not args.execute)
     if args.command == "scan-threads":

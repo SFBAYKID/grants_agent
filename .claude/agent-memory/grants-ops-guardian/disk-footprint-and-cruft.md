@@ -14,6 +14,14 @@ space. The other ~38 GiB lives outside the tenant (other tenants / system) and i
 
 ## RESOLVED 2026-07-22: snapshot venvs purged — home is now 1.9 GiB
 
+**PROVENANCE CAVEAT (added 2026-08-10):** this line records the authorisation as
+"Chase authorized" but preserves **no verbatim quote and no source**, unlike
+[[rich-card-enable-20260805]] which cites him word-for-word. The purge below already
+happened and is not in question. But after the 2026-08-10 incident where an assistant's
+"accepted in full" was written down as Chase's approval ([[backups-retention]]), an
+unsourced attribution must **never** be read as standing permission to delete anything
+further — not more snapshots, not `.deploy_staging`, not `~/.cache/pip`. Re-ask him.
+
 Chase authorized deleting the `.venv` inside the **26 oldest** `.grants_agent.previous.pre-*` snapshots
 (the snapshot DIRS and all their non-venv contents were preserved; the 2 newest snapshots and the live
 venv were untouched). Result, all verified: home **7.49 GB → 1.83 GB apparent**; root `/` **95% → 83%**,
