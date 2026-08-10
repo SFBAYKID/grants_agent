@@ -54,6 +54,14 @@ _ALLOWED_LEAD_FILL_FIELDS = frozenset(
     }
 )
 
+# The exact sentence written onto an existing Lead. Code-owned and fixed: the
+# marking primitive takes no caller text at all, which is what keeps "mark this lead
+# do-not-call" from becoming "append anything to this record".
+DO_NOT_CALL_MARKER = (
+    "DO NOT CALL: this person is flagged do-not-call; any number for them must "
+    "not be dialled, including the main line below."
+)
+
 _ID_PREFIXES = {
     "Campaign": "701",
     "Lead": "00Q",
@@ -754,6 +762,69 @@ class SalesforceCampaignGateway:
         return CreateResult(
             True, record_id, error=f"filled {', '.join(sorted(blanks))}"
         )
+
+    def mark_lead_do_not_call(self, record_id: str) -> CreateResult:
+        """Append a do-not-call warning to an existing Lead's Description.
+
+        THE ONLY OPERATION IN THIS GATEWAY THAT WRITES OVER A NON-EMPTY FIELD, and it
+        is built so that it cannot lose anything. `fill_lead_blanks` is safe because
+        it only ever fills a blank; that rule is what makes the whole write surface
+        trustworthy and it is deliberately NOT relaxed here. Instead this is a
+        separate, tiny primitive with a narrower contract:
+
+        - it accepts NO caller content, only a fixed marker owned by this module, so
+          "mark this lead do-not-call" can never become "append anything you like";
+        - it reads first and refuses unless the stored text is a strict PREFIX of
+          what it is about to write, so truncation is structurally impossible rather
+          than merely unintended;
+        - it is idempotent on the marker, because a compliance warning repeated four
+          times reads like a bug and teaches people to ignore it.
+
+        Why Description and not the standard `DoNotCall` checkbox: the checkbox is
+        strictly better and `SELECT DoNotCall FROM Lead` returns HTTP 400 for this
+        integration user, which is a field-level-security question rather than a code
+        one. This is what can actually be written today, and it is worth writing today
+        because the records naming a do-not-call person are live now.
+        """
+        record_id = validate_record_id(record_id, "Lead")
+        token, host = self._auth()
+        headers = {"Authorization": f"Bearer {token}"}
+        base = f"{host}/services/data/{API_VERSION}/sobjects/Lead/{record_id}"
+
+        current = requests.get(
+            base, params={"fields": "Description"}, headers=headers, timeout=20
+        )
+        if current.status_code == 404:
+            return CreateResult(False, record_id, error="not in this org")
+        if current.status_code != 200:
+            return CreateResult(
+                False, error=f"HTTP {current.status_code}: {current.text[:200]}"
+            )
+        existing = str(current.json().get("Description") or "")
+        if DO_NOT_CALL_MARKER in existing:
+            return CreateResult(True, record_id, error="already marked")
+
+        updated = (
+            f"{DO_NOT_CALL_MARKER} {existing}".strip()
+            if existing
+            else DO_NOT_CALL_MARKER
+        )
+        # The marker goes FIRST, so the guard is that the old text is a strict SUFFIX
+        # of the new one — same property, checked in the direction the write actually
+        # takes. A rep should not have to read a paragraph to reach the warning.
+        if existing and not updated.endswith(existing):
+            return CreateResult(
+                False, error="refusing to write: would alter existing text"
+            )
+
+        response = requests.patch(
+            base, json={"Description": updated}, headers=headers, timeout=20
+        )
+        if response.status_code not in (200, 204):
+            return CreateResult(
+                False, error=f"HTTP {response.status_code}: {response.text[:200]}"
+            )
+        return CreateResult(True, record_id, error="marked do-not-call")
 
     def create_note(self, payload: dict[str, object]) -> CreateResult:
         """Create one legacy Note attached to its ParentId (a Lead)."""

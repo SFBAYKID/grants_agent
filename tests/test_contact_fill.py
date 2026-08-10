@@ -319,3 +319,116 @@ def test_do_not_call_also_marks_a_linkedin_sourced_person() -> None:
     )
     assert text.startswith("DO NOT CALL")
     assert "LinkedIn" in text
+
+
+class _Sf:
+    """A Salesforce stand-in recording the exact call sequence and payload."""
+
+    def __init__(self, description: str, get_code: int = 200) -> None:
+        """Seed the stored Description and the read's status."""
+        self.description = description
+        self.get_code = get_code
+        self.calls: list[str] = []
+        self.patched: dict[str, object] | None = None
+
+    def get(self, url: str, **_kw: object) -> object:
+        """The mandatory pre-read."""
+        self.calls.append("GET")
+        outer = self
+
+        class _R:
+            status_code = outer.get_code
+            text = "err"
+
+            def json(self) -> dict[str, object]:
+                """The stored record."""
+                return {"Description": outer.description}
+
+        return _R()
+
+    def patch(self, url: str, **kw: object) -> object:
+        """The append."""
+        self.calls.append("PATCH")
+        self.patched = dict(kw.get("json") or {})
+
+        class _R:
+            status_code = 204
+            text = ""
+
+        return _R()
+
+
+def _gateway(mp: pytest.MonkeyPatch) -> object:
+    """A gateway with auth and the write gate stubbed out."""
+    from grant_watch.enrich import salesforce_campaign_gateway as gw
+
+    for var in (
+        "SALESFORCE_WRITE_CLIENT_ID",
+        "SALESFORCE_WRITE_CLIENT_SECRET",
+        "SALESFORCE_CLIENT_ID",
+        "SALESFORCE_CLIENT_SECRET",
+    ):
+        mp.setenv(var, "x")
+    mp.setenv("SALESFORCE_MY_DOMAIN_URL", "https://example.my.salesforce.com")
+    mp.setenv("SALESFORCE_WRITE_ORG_ID", "00D000000000000EAM")
+    mp.setenv("SALESFORCE_CAMPAIGN_WRITES_ENABLED", "1")
+    mp.setattr(
+        gw.SalesforceCampaignGateway,
+        "_auth",
+        lambda self, force=False: ("t", "https://example.my.salesforce.com"),
+    )
+    mp.setattr(gw.SalesforceCampaignGateway, "verify_write_scope", lambda self: None)
+    return gw.SalesforceCampaignGateway()
+
+
+def test_marking_do_not_call_prepends_and_keeps_every_existing_character() -> None:
+    """The one write that touches a non-empty field must be unable to lose anything."""
+    import requests
+
+    from grant_watch.enrich import salesforce_campaign_gateway as gw
+
+    original = "Created by Grant as an organization-only lead. Grant lead 231."
+    fake = _Sf(original)
+    with pytest.MonkeyPatch.context() as mp:
+        gateway = _gateway(mp)
+        mp.setattr(requests, "get", fake.get)
+        mp.setattr(requests, "patch", fake.patch)
+        result = gateway.mark_lead_do_not_call("00QUZ00000byrvN2AQ")
+
+    assert result.success is True
+    written = str((fake.patched or {}).get("Description"))
+    assert written.startswith(gw.DO_NOT_CALL_MARKER), "the warning must lead"
+    assert written.endswith(original), "existing text was altered or truncated"
+    assert original in written
+
+
+def test_marking_twice_does_not_repeat_the_warning() -> None:
+    """A compliance sentence printed four times teaches people to ignore it."""
+    import requests
+
+    from grant_watch.enrich import salesforce_campaign_gateway as gw
+
+    fake = _Sf(f"{gw.DO_NOT_CALL_MARKER} Created by Grant.")
+    with pytest.MonkeyPatch.context() as mp:
+        gateway = _gateway(mp)
+        mp.setattr(requests, "get", fake.get)
+        mp.setattr(requests, "patch", fake.patch)
+        result = gateway.mark_lead_do_not_call("00QUZ00000byrvN2AQ")
+
+    assert result.error == "already marked"
+    assert fake.calls == ["GET"], "an already-marked record was written again"
+
+
+def test_marking_a_record_from_another_org_is_a_skip() -> None:
+    """Same foreign-id case as the fill: read first, never patch."""
+    import requests
+
+    fake = _Sf("", get_code=404)
+    with pytest.MonkeyPatch.context() as mp:
+        gateway = _gateway(mp)
+        mp.setattr(requests, "get", fake.get)
+        mp.setattr(requests, "patch", fake.patch)
+        result = gateway.mark_lead_do_not_call("00QVC00000abcde2AA")
+
+    assert result.error == "not in this org"
+    assert fake.calls == ["GET"]
