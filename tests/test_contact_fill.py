@@ -266,3 +266,56 @@ def test_a_lead_id_from_another_org_is_skipped_not_patched() -> None:
     assert calls == ["GET"], "a record that does not exist here was patched"
     assert result.error == "not in this org"
     assert result.success is False
+
+
+def _row(**fields: object) -> dict[str, object]:
+    """A contact row with the columns the evidence sentence reads."""
+    base = {
+        "source_url": "",
+        "contact_status": "vendor_licensed",
+        "provenance": "vendor_licensed",
+        "do_not_call": 0,
+        "asserted_by_slack_user": "",
+        "asserted_at": "",
+    }
+    base.update(fields)
+    return base
+
+
+def test_do_not_call_is_stated_in_the_salesforce_record_and_stated_first() -> None:
+    """The flag has to travel with the person, not stop at our own database.
+
+    Blanking the number locally is airtight while it stays inside Grant, and worth
+    nothing once a rep gets it another way: the CRM record names a real human with no
+    marker, and an empty Phone reads as "we don't have it" rather than "do not call".
+    It leads the sentence because a compliance fact a rep has to scroll for is one
+    they will miss.
+    """
+    from grant_watch.enrich import salesforce_contact_records as scr
+
+    flagged = scr._contact_evidence(_row(do_not_call=1))
+    assert flagged.startswith("DO NOT CALL"), flagged
+    assert "must not be dialled" in flagged
+    # The provenance claim is still made — the warning adds to it, never replaces it.
+    assert "ZoomInfo" in flagged
+
+    clean = scr._contact_evidence(_row(do_not_call=0))
+    assert "DO NOT CALL" not in clean, "a callable contact was labelled do-not-call"
+    assert "ZoomInfo" in clean
+
+
+def test_do_not_call_also_marks_a_linkedin_sourced_person() -> None:
+    """Every evidence class needs it, not just the vendor one.
+
+    Fixing only the path in front of you is how the opt-out shipped for the legacy
+    drip while the rich card — the thing that actually posts — ignored it.
+    """
+    from grant_watch.enrich import salesforce_contact_records as scr
+
+    text = scr._contact_evidence(
+        _row(
+            contact_status="linkedin_only", provenance="linkedin_claimed", do_not_call=1
+        )
+    )
+    assert text.startswith("DO NOT CALL")
+    assert "LinkedIn" in text

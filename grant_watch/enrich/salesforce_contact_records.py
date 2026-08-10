@@ -176,14 +176,30 @@ def _contact_evidence(contact: sqlite3.Row) -> str:
     source = str(contact["source_url"] or "").strip()
     status = str(contact["contact_status"] or "")
     provenance = _row_value(contact, "provenance")
+    # DO-NOT-CALL HAS TO TRAVEL WITH THE PERSON. Until now the flag was enforced only
+    # at storage time — the number is blanked before it is written locally — and then
+    # nothing carried it any further. That is airtight while the number stays inside
+    # Grant, and worth nothing the moment a rep obtains it another way: the Salesforce
+    # record names a real person with no marker at all, and there is no Salesforce
+    # field being populated with it either. An empty Phone reads as "we don't have it",
+    # not as "do not call this person".
+    #
+    # Saying it in the Description is not as good as a real DoNotCall checkbox, and it
+    # is what this integration user can actually write today. It appears FIRST because
+    # a compliance fact a rep has to scroll for is a compliance fact they will miss.
+    dnc = (
+        "DO NOT CALL: this person is flagged do-not-call; any number for them must not be dialled. "
+        if _row_value(contact, "do_not_call") in ("1", 1, True, "True")
+        else ""
+    )
 
     if status == "linkedin_only" or provenance == "linkedin_claimed":
         where = source or "a LinkedIn profile"
-        return f"Evidence is a LinkedIn profile (ownership not verified): {where}."
+        return f"{dnc}Evidence is a LinkedIn profile (ownership not verified): {where}."
     if status == "vendor_licensed" or provenance == "vendor_licensed":
         return (
-            "Supplied by ZoomInfo from licensed data. Grant did NOT verify this "
-            "against the organization's own site."
+            f"{dnc}Supplied by ZoomInfo from licensed data. Grant did NOT verify "
+            "this against the organization's own site."
         )
     if status == "human_asserted" or provenance == "human_asserted":
         who = _row_value(contact, "asserted_by_slack_user")
