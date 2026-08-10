@@ -261,6 +261,7 @@ def create_app() -> App:
                         request_token=str(
                             event.get("ts") or event.get("event_ts") or ""
                         ),
+                        from_app=bool(event.get("app_id")),
                     )
         except Exception as exc:
             db.finish_slack_event(
@@ -351,6 +352,7 @@ def create_app() -> App:
                         request_token=str(
                             event.get("ts") or event.get("event_ts") or ""
                         ),
+                        from_app=bool(event.get("app_id")),
                     )
         except Exception as exc:
             db.finish_slack_event(
@@ -705,8 +707,15 @@ def _converse_general(
     user: str = "",
     workspace: str = "",
     request_token: str = "",
+    from_app: bool = False,
 ) -> bool:
-    """Answer a configured-channel @mention with tools and a visible status update."""
+    """Answer a configured-channel @mention with tools and a visible status update.
+
+    `from_app` exists because this function cannot see the Slack event. The guard that
+    keeps app-authored messages out of `user_memory` was first added at the OTHER call
+    site — the drip-thread one — which is the minor path. This is the ordinary @mention
+    route, and it was still unguarded, so the fix had landed where it did not matter.
+    """
     from . import conversation
 
     if not text.strip():
@@ -783,7 +792,10 @@ def _converse_general(
             _with_upload_warning(reply, failures),
             _crm_action_blocks(out.get("pending_crm_actions", [])),
         )
-        _remember_from(db.connect(), user, text, channel, thread_ts or "")
+        # An app-authored message must not become a "memory" about a colleague. The
+        # caller knows; this function cannot, so it is told.
+        if not from_app:
+            _remember_from(db.connect(), user, text, channel, thread_ts or "")
         return outcome
     except Exception:
         return status.finalize(_fallback_answer(text))

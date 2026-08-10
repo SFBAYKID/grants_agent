@@ -89,6 +89,17 @@ GRACE = {
     "card_escalated": timedelta(days=4),
     # A day is long enough that someone who simply got pulled away has had a chance
     # to come back on their own, and short enough that the thread is still live.
+    # ONE DAY, AND IT NOW MEANS SOMETHING DIFFERENT THAN IT DID. The watchdog runs
+    # every ten minutes and marks a receipt reviewed as soon as it repairs the
+    # spinner, so on the happy path this subject is gone within half an hour and this
+    # follow-up never fires. That reads like dead code and is not: the watchdog leaves
+    # `reviewed_at` NULL whenever the Slack edit FAILS, which is precisely the case
+    # where a person is still looking at "Thinking…" a day later.
+    #
+    # So this became the fallback for a repair that did not work, rather than the
+    # primary path — a strictly better division of labour, arrived at by accident when
+    # TOO_OLD was widened. Recorded because "it can never fire" is the kind of
+    # observation that gets something deleted.
     "thread_abandoned": timedelta(days=1),
 }
 

@@ -703,8 +703,13 @@ def search_leads(
                     f"Found {total} matches, but the requested export contains "
                     f"{requested_export_rows} rows, which exceeds the "
                     f"{MAX_EXPORT_ROWS}-row "
-                    "export safety limit. Refine the search; no incomplete file was "
-                    "created.",
+                    "export safety limit. "
+                    + (
+                        "Refine the search; "
+                        if for_chat
+                        else "Ask me in Slack for a narrower list; "
+                    )
+                    + "no incomplete file was created.",
                     None,
                 )
 

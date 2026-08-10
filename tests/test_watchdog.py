@@ -211,3 +211,41 @@ def test_a_dm_is_repaired_too(conn: sqlite3.Connection) -> None:
     watchdog.run(client, conn, bot_id=BOT, dry_run=False, now=NOW)
     assert client.updated, "a dead turn outside the primary channel was never repaired"
     conn.close()
+
+
+def test_a_failed_repair_stays_visible_to_the_apology(conn: sqlite3.Connection) -> None:
+    """The watchdog and `thread_abandoned` divide the work by whether repair WORKED.
+
+    The watchdog runs every ten minutes and marks a receipt reviewed the moment it
+    fixes the spinner, so on the happy path the apology never fires — which looks
+    like dead code and is not. When the Slack edit fails, `reviewed_at` stays NULL,
+    and that is exactly the case where somebody is still staring at "Thinking…" a day
+    later and deserves to be told.
+
+    If this ever passes with the row marked reviewed, the fallback is gone and nobody
+    will notice until a rep is ignored.
+    """
+    from slack_sdk.errors import SlackApiError
+
+    _receipt(conn)
+
+    class _Broken(_Slack):
+        """Slack refusing every edit."""
+
+        def chat_update(self, channel: str, ts: str, text: str) -> dict[str, object]:
+            """Refuse."""
+            raise SlackApiError("ratelimited", {"error": "ratelimited"})
+
+    watchdog.run(
+        _Broken([{"user": BOT, "ts": "100.2", "text": "| Thinking…"}]),
+        conn,
+        bot_id=BOT,
+        dry_run=False,
+        now=NOW,
+    )
+    row = conn.execute("SELECT reviewed_at,state FROM slack_event_receipts").fetchone()
+    assert row["reviewed_at"] is None, (
+        "a failed repair was closed, so the apology fallback can never see it"
+    )
+    assert row["state"] == "processing"
+    conn.close()

@@ -30,7 +30,11 @@ import sqlite3
 from dataclasses import dataclass
 
 from .enrich import zoominfo_credits, zoominfo_enrichment
-from .enrich.zoominfo_credits import AlreadySpent
+from .enrich.zoominfo_credits import (
+    AlreadySpent,
+    BudgetExhausted,
+    SpendIndeterminate,
+)
 
 # At most this many people per organisation. Two is a decision-maker and a fallback;
 # more is a directory, and each one costs a credit.
@@ -184,6 +188,20 @@ def fill_contacts(
             # sees a failure, and the money is gone.
             skipped_none += 1
             continue
+        except (BudgetExhausted, SpendIndeterminate) as exc:
+            # THE SIBLINGS MATTER AS MUCH AS THE ONE I CAUGHT, and I missed them the
+            # first time. Both are raised by the same `spend` call. Either escaping
+            # discards the whole FillOutcome after earlier leads were already bought
+            # and billed — the exact defect the AlreadySpent handler was added to
+            # prevent, still live through two other doors.
+            #
+            # Exhausted means the PERIOD is spent and every later lead would fail the
+            # same way, so stop. Indeterminate means one pull's outcome is unknown and
+            # must never be silently retried, so stop there too and report what is
+            # certain.
+            skipped_budget += 1
+            _ = exc
+            break
         spent += int(applied.billed)
         if applied.stored:
             filled += 1

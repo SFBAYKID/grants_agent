@@ -55,4 +55,13 @@ def render(spec: dict[str, Any]) -> str:
     if wider.startswith(NO_MATCH_PREFIX):
         return body
     where = str(kwargs.get("state", "")).upper()
-    return f"Nothing new in {where} today, but here's the closest I've got:\n\n{wider}"
+    # "Nothing new … today" is DRIP phrasing and this renderer feeds an inbox. An
+    # email is read hours or days after it is sent, so "today" is either meaningless
+    # or wrong, and "nothing new" implies a daily cadence the reader never subscribed
+    # to. Same class as the spreadsheet offer and the refine-your-search trailer: a
+    # string carrying an assumption about where it would be read.
+    scope = f" in {where}" if where else ""
+    return (
+        f"No exact matches{scope} for those filters. Here are the closest I have:"
+        f"\n\n{wider}"
+    )
