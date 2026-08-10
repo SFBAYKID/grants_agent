@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ..record_semantics import semantics_for
 from .. import db
+from ..presentation import model_note
 from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact, make_spreadsheet
 from .search_enrichment import MAX_ENRICH_ROWS, _CONTACT_COLUMNS, _enrich_contacts
@@ -645,9 +646,13 @@ def search_leads(
                             f"dropping every filter: {pool:,} leads on file overall"
                         )
                 hint_note = (
-                    "\nNearby alternatives — " + "; ".join(hints) + ". Offer these "
-                    "to the user (with counts) and ask which to run; do not stop "
-                    "at a bare no-results answer."
+                    "\nNearby alternatives — "
+                    + "; ".join(hints)
+                    + "."
+                    + model_note(
+                        " Offer these to the user (with counts) and ask which to "
+                        "run; do not stop at a bare no-results answer."
+                    )
                     if hints
                     else ""
                 )

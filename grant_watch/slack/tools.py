@@ -26,6 +26,7 @@ from ..spreadsheets import GeneratedArtifact
 from .contact_enrichment import (  # re-export: search.py and tests call these
     enrich_lead_contact,
 )
+from ..presentation import for_model
 from .search import search_leads
 from .salesforce_campaign_tools import (
     salesforce_campaign_batch_preview,
@@ -773,4 +774,7 @@ def run_tool(
     )
     if name not in _ACTION_PRODUCING_TOOLS:
         text = strip_action_markers(text)
-    return text, artifact
+    # The model SHOULD read the guidance a tool attaches; it just should not see the
+    # delimiters. Human-facing surfaces that post a tool result unmediated call
+    # presentation.for_human instead, which removes the guidance itself.
+    return for_model(text), artifact

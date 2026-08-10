@@ -148,3 +148,37 @@ def display_entity_name(value: object, max_length: int = 120) -> str:
             formatted = word.title()
         words.append(formatted)
     return " ".join(words)
+
+
+# Guidance written FOR THE MODEL, wrapped so a human-facing surface can drop it.
+# Tool results are read by two very different audiences: the model, which needs to
+# be told how to use a result, and — through the reminder worker — a rep, who must
+# never see that coaching. A live playground test posted "Offer these to the user
+# (with counts) and ask which to run" straight into a Slack thread. Marking the
+# guidance is the fix, rather than pattern-matching prose after the fact, because a
+# marker cannot drift out of sync with the sentence it wraps.
+MODEL_NOTE_OPEN = "<model-note>"
+MODEL_NOTE_CLOSE = "</model-note>"
+_MODEL_NOTE_RE = re.compile(
+    re.escape(MODEL_NOTE_OPEN) + r".*?" + re.escape(MODEL_NOTE_CLOSE), re.DOTALL
+)
+
+
+def model_note(text: str) -> str:
+    """Wrap guidance intended only for the model."""
+    return f"{MODEL_NOTE_OPEN}{text}{MODEL_NOTE_CLOSE}"
+
+
+def for_model(text: str) -> str:
+    """Tool text as the model should see it: guidance kept, markers removed."""
+    return text.replace(MODEL_NOTE_OPEN, "").replace(MODEL_NOTE_CLOSE, "")
+
+
+def for_human(text: str) -> str:
+    """Tool text safe to show a person verbatim: guidance removed entirely.
+
+    Used by surfaces that post a tool result WITHOUT a model rewording it — today
+    the reminder worker. Anything that reaches a rep unmediated must come through
+    here.
+    """
+    return _MODEL_NOTE_RE.sub("", text).replace("  ", " ").strip()

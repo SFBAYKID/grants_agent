@@ -482,3 +482,97 @@ def test_an_untitled_contact_never_beats_a_titled_one(tmp_path: Path) -> None:
     best = _best_linkedin_contact(db.contacts_for_lead(conn, lead_id))
     assert best is not None and best["name"] == "Dana Reyes"
     conn.close()
+
+
+# --- Model guidance must never reach a person -------------------------------------
+
+
+def test_a_reminder_never_posts_model_coaching_to_a_human() -> None:
+    """Caught by a LIVE playground test, not by any unit test I had written.
+
+    A real reminder landed in Slack reading: "Nearby alternatives — without the state
+    filter: 75 matches. Offer these to the user (with counts) and ask which to run;
+    do not stop at a bare no-results answer." The second sentence is written FOR THE
+    MODEL. The reminder worker posts tool text with no model in between, so it went
+    to a person verbatim — the same defect class as leaking an internal identifier.
+    """
+    from grant_watch.presentation import for_human, for_model, model_note
+
+    raw = (
+        "No grants matched those filters.\nNearby alternatives — without the state "
+        "filter: 75 matches."
+        + model_note(
+            " Offer these to the user (with counts) and ask which to run; do not "
+            "stop at a bare no-results answer."
+        )
+    )
+    human = for_human(raw)
+    assert "Offer these to the user" not in human
+    assert "do not stop at a bare" not in human
+    assert "<model-note>" not in human
+    # The FACT survives — the rep still learns there are 75 without the filter.
+    assert "75 matches" in human
+    assert "No grants matched those filters." in human
+
+    # The model keeps the guidance, minus the delimiters.
+    seen_by_model = for_model(raw)
+    assert "Offer these to the user" in seen_by_model
+    assert "<model-note>" not in seen_by_model
+
+
+def test_the_live_search_output_carries_no_bare_coaching(tmp_path: Path) -> None:
+    """End to end against the real search: a zero-result reminder is clean."""
+    from grant_watch.presentation import for_human
+    from grant_watch.slack.search import search_leads
+
+    text, _ = search_leads(state="ZZ", grade="gold", db_path=tmp_path / "s.db")
+    human = for_human(text)
+    for coaching in (
+        "Offer these to the user",
+        "do not stop at a bare",
+        "<model-note>",
+    ):
+        assert coaching not in human, f"model coaching reached a human surface: {human}"
+
+
+def test_the_reminder_worker_itself_strips_the_coaching(tmp_path: Path) -> None:
+    """Drive the WORKER, not the helper.
+
+    The first version of this test exercised `for_human` directly and passed against
+    a worker that had gone back to posting raw tool text — it proved the sanitiser
+    worked while proving nothing about whether anyone called it. Mutation testing
+    caught that. This drives `run()` end to end with a recording Slack stub and
+    asserts on the text that would actually have been posted.
+    """
+    from grant_watch import reminder_worker
+
+    posted: list[str] = []
+
+    class _Client:
+        """Records what would have been sent to Slack."""
+
+        def chat_postMessage(self, **kwargs: object) -> dict[str, object]:
+            """Capture the outgoing text."""
+            posted.append(str(kwargs.get("text", "")))
+            return {"ok": True, "ts": "1.1"}
+
+    conn = _conn(tmp_path)
+    # A search that returns nothing is what produced the leak in the playground.
+    _make(
+        conn,
+        subject="gold leads in Texas",
+        due_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        search_spec={"state": "ZZ", "grade": "gold"},
+    )
+    reminder_worker.run(_Client(), conn)
+
+    assert posted, "the reminder never went out"
+    body = posted[0]
+    for coaching in (
+        "Offer these to the user",
+        "do not stop at a bare",
+        "<model-note>",
+    ):
+        assert coaching not in body, f"model coaching reached the rep: {body}"
+    assert "you asked me to remind you about gold leads in Texas" in body
+    conn.close()

@@ -26,6 +26,7 @@ from slack_sdk.errors import SlackApiError
 
 from . import reminders
 from .notify import resend_client
+from .presentation import for_human
 from .slack.search import search_leads
 
 # One reminder per invocation, matching the nudge worker. The cron tick is every 30
@@ -44,7 +45,10 @@ def _render(reminder: reminders.Reminder) -> tuple[str, str]:
     if not kwargs or set(kwargs) == {"limit"}:
         return (f"Reminder: {reminder.subject}", "")
     text, _artifact = search_leads(**kwargs)
-    return (f"Reminder: {reminder.subject}", text)
+    # A reminder posts this straight to a human with no model in between, so the
+    # model-facing coaching has to come out. A live test in the playground posted
+    # "Offer these to the user (with counts) and ask which to run" into a thread.
+    return (f"Reminder: {reminder.subject}", for_human(text))
 
 
 def _slack_text(reminder: reminders.Reminder, headline: str, body: str) -> str:
