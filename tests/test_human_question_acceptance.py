@@ -63,6 +63,45 @@ def _lead_row() -> sqlite3.Row:
     return row
 
 
+# Two-letter codes the questions actually use, so a canned row can name the state a
+# rep asked about rather than contradicting them.
+_STATE_CODES = {
+    "washington": "WA",
+    "california": "CA",
+    "texas": "TX",
+    "michigan": "MI",
+    "nebraska": "NE",
+    "oregon": "OR",
+    "arkansas": "AR",
+    "florida": "FL",
+    "new york": "NY",
+    "ohio": "OH",
+    "georgia": "GA",
+    "arizona": "AZ",
+}
+
+
+def _canned_search(args: dict[str, object] | None) -> str:
+    """A search result COHERENT with what was asked.
+
+    The fixture used to return the same California row for every query. Ask about
+    Washington and Grant was handed a CA record — it noticed the contradiction and
+    said so, which is exactly the honesty this project is built around, and the case
+    scored it as a failure. That measured the harness, not the model.
+
+    A canned result must be a plausible answer to the question asked. Where it cannot
+    be, the case should assert the honest mismatch on purpose.
+    """
+    spec = args or {}
+    state = str(spec.get("state") or "").strip()
+    code = _STATE_CODES.get(state.lower(), state.upper()[:2] or "CA")
+    grade = str(spec.get("grade") or "gold").strip().lower() or "gold"
+    return (
+        f"Found 1 matching grant:\n- Lead #42 — Test School ({code}, school) — "
+        f"SVPP · $500,000 · {grade} · spend window 2025-10-01 to 2028-09-30."
+    )
+
+
 def _canned_tool(
     calls: list[str],
     overrides: dict[str, str],
@@ -71,8 +110,11 @@ def _canned_tool(
     *_pos: object,
     **_kw: object,
 ) -> tuple[str, None]:
-    """Return safe typed evidence while recording the model's actual tool choice."""
-    del args
+    """Return safe typed evidence while recording the model's actual tool choice.
+
+    `args` is READ, not discarded. It used to be thrown away with `del`, which is why
+    a question about Washington came back holding a California record.
+    """
     calls.append(name)
     if name in overrides:
         return overrides[name], None
@@ -91,10 +133,7 @@ def _canned_tool(
             "LinkedIn: Vic Example, IT Systems Manager — "
             "https://www.linkedin.com/in/vic-example (candidate profile; no email verified)"
         ),
-        "search_leads": (
-            "Found 1 matching grant:\n- Lead #42 — Test School (CA, school) — "
-            "SVPP · $500,000 · spend window 2025-10-01 to 2028-09-30."
-        ),
+        "search_leads": _canned_search(args),
         "salesforce_campaign_search": (
             "Found 1 Campaign result: 2026 School Security — "
             "https://example.my.salesforce.com/lightning/r/Campaign/701TEST/view. "
