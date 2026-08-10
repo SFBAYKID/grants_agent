@@ -542,6 +542,57 @@ def cmd_capability_seed(path: str, dry_run: bool) -> int:
     return 0
 
 
+def cmd_scan_threads(channel: str, dry_run: bool) -> int:
+    """Read a channel's recent conversations and record what went unanswered.
+
+    The standing replacement for hand-seeding asks out of a JSON file somebody wrote
+    after reading July's transcripts by eye. This runs weekly and finds tomorrow's.
+    """
+    import os
+
+    from anthropic import Anthropic
+    from slack_sdk import WebClient
+
+    from . import thread_scanner
+
+    token = os.environ.get("SLACK_BOT_TOKEN", "")
+    if not token:
+        print("scan-threads: SLACK_BOT_TOKEN is not set")
+        return 1
+    client = Anthropic()
+
+    def ask_model(prompt: str) -> str:
+        """One cheap classification pass over a single thread."""
+        reply = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=900,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return "".join(
+            block.text
+            for block in reply.content
+            if getattr(block, "type", "") == "text"
+        )
+
+    slack = WebClient(token=token)
+    # Ask Slack who Grant is rather than hard-coding an id: the scan must ignore
+    # threads belonging to the other bots that share this channel.
+    identity = slack.auth_test()
+    conn = db.connect_readonly() if dry_run else db.connect()
+    print(
+        thread_scanner.scan_channel(
+            slack,
+            conn,
+            channel,
+            ask_model,
+            dry_run=dry_run,
+            grant_user=str(identity.get("user_id") or ""),
+            grant_bot=str(identity.get("bot_id") or ""),
+        )
+    )
+    return 0
+
+
 def cmd_enrich_orgs(grade: str, limit: int, dry_run: bool) -> int:
     """Fill in organization details for leads that have none.
 
@@ -745,14 +796,31 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="actually send; without it this is a dry run",
     )
+    p_scan = sub.add_parser(
+        "scan-threads",
+        help="find unanswered asks in a channel's recent conversations",
+    )
+    p_scan.add_argument("--channel", required=True, help="Slack channel id to read")
+    p_scan.add_argument(
+        "--execute",
+        action="store_true",
+        help="record what it finds; without it this only reports",
+    )
+
     p_capability = sub.add_parser(
         "capability",
         help="declare a capability live, reopening every ask that was waiting on it",
     )
     p_capability.add_argument(
         "name",
-        choices=list(CAPABILITY_KINDS),
-        help="which capability now exists",
+        # NOT `choices`. A thread scan can discover a capability nobody anticipated,
+        # and an argparse enum here would mean the discovery is unusable until
+        # someone edits this file — the bottleneck moved rather than removed.
+        help=(
+            "which capability now exists (a slug; hand-written wording exists for "
+            + ", ".join(CAPABILITY_KINDS)
+            + ")"
+        ),
     )
     p_capability.add_argument(
         "--execute",
@@ -862,6 +930,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_announce(str(args.load or ""), dry_run=not args.execute)
     if args.command == "nudge-report":
         return cmd_nudge_report()
+    if args.command == "scan-threads":
+        return cmd_scan_threads(args.channel, dry_run=not args.execute)
     if args.command == "capability-seed":
         return cmd_capability_seed(args.path, dry_run=not args.execute)
     if args.command == "capability":

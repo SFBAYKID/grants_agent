@@ -25,11 +25,14 @@ key.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from .migrations_nudges import CAPABILITY_KINDS
+# Keeps a discovered capability name storable and safe to interpolate, without
+# constraining WHICH capabilities may exist.
+_SLUG = re.compile(r"[a-z][a-z0-9_]{2,39}")
 
 ASK_STATES = ("open", "answered", "dismissed")
 
@@ -72,8 +75,13 @@ def record(
     The duplicate case is a normal outcome, not an error: the same person asking the
     same thing twice in one thread should still produce exactly one follow-up.
     """
-    if capability not in CAPABILITY_KINDS:
-        raise ValueError(f"capability must be one of {CAPABILITY_KINDS}")
+    # A SLUG, NOT A CLOSED ENUM. This used to reject anything outside a hard-coded
+    # list, which meant the next kind of ask a rep invents could not be recorded
+    # until someone edited this file — the exact "then we go hard-code that too"
+    # trap Chase named. `CAPABILITY_KINDS` still lists the ones with hand-written
+    # wording; anything else records fine and falls back to the generic offer.
+    if not _SLUG.fullmatch(capability):
+        raise ValueError("capability must be a short slug like 'email_results'")
     if not ask_text.strip():
         raise ValueError("an unmet ask needs the human's own words")
     if not slack_user or not audience or not thread_ts or not message_ts:
@@ -125,8 +133,10 @@ def mark_available(
     after a later deploy cannot resurrect an ask somebody already answered or reopen
     one whose clock has already started.
     """
-    if capability not in CAPABILITY_KINDS:
-        raise ValueError(f"capability must be one of {CAPABILITY_KINDS}")
+    # Same slug rule as `record`: a capability discovered by a thread scan must be
+    # armable without a code change, or discovery just relocates the bottleneck.
+    if not _SLUG.fullmatch(capability):
+        raise ValueError("capability must be a short slug like 'email_results'")
     cur = conn.execute(
         "UPDATE capability_asks SET available_since=? "
         "WHERE capability=? AND state='open' AND available_since IS NULL",
