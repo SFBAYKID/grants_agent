@@ -108,7 +108,7 @@ def test_a_silver_award_is_an_award_on_every_surface(tmp_path: Path) -> None:
     assert "solicitation" not in draft.lower()
     assert "response deadline" not in draft.lower()
 
-    note = sf._grant_summary(row)
+    note = sf.grant_summary(row)
     assert "grant" in note and "solicitation" not in note
     assert "spend window" in sf._grant_headline(row)
 
@@ -126,7 +126,7 @@ def test_a_gold_solicitation_is_a_solicitation_on_every_surface(
     assert "solicitation" in persequor_client._angle(row)
     draft = persequor.compose_draft(row)
     assert "solicitation" in draft.lower() and "spend window" not in draft.lower()
-    assert "solicitation" in sf._grant_summary(row)
+    assert "solicitation" in sf.grant_summary(row)
     assert "spend window" not in sf._grant_headline(row)
 
 
@@ -145,7 +145,7 @@ def test_unknown_event_claims_nothing_anywhere(tmp_path: Path) -> None:
     ):
         assert claim not in draft, claim
     assert "purpose unverified" in search_presentation.window_label(row)
-    assert "dates unverified" in sf._grant_summary(row)
+    assert "dates unverified" in sf.grant_summary(row)
 
 
 # ------------------------------------------- payload must assert nothing prose denies

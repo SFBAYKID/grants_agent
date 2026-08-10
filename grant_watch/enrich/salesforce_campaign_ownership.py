@@ -21,6 +21,8 @@ def organization_lead_payload(
     """Build an honest organization-only Lead owned by the requesting Salesforce rep."""
     validate_record_id(owner.record_id, "User")
     entity = str(row["entity_name"] or "").strip()
+    from .salesforce_contact_records import grant_summary, organization_fields
+
     payload: dict[str, object] = {
         "Company": entity,
         "LastName": entity,
@@ -28,14 +30,21 @@ def organization_lead_payload(
         "Status": "New",
         "LeadSource": "Other",
         "Description": (
-            "Created by Grant as an organization-only lead. No individual contact "
-            f"has been verified. Grant lead {row['id']}; action {action_id}; "
+            f"{grant_summary(row)} "
+            "Created by Grant as an organization-only lead — no individual contact "
+            "has been verified yet, so the next step is to identify who runs "
+            "technology or facilities there. "
+            f"Grant lead {row['id']}; action {action_id}; "
             f"requested by Slack user {requester}; "
             f"source {row['detail_url'] or 'not provided'}."
         ),
     }
-    if row["state"]:
-        payload["State"] = str(row["state"])
+    # THE ORGANIZATION'S OWN FACTS DO NOT DEPEND ON HAVING FOUND A PERSON. This
+    # payload used to carry only the name and the state, so a rep opening one of
+    # these Leads saw an empty address, no website, no student count and no
+    # industry — and had to go and research an organization Grant had already
+    # researched. Everything here is evidenced and omitted when absent.
+    payload.update(organization_fields(row))
     return payload
 
 

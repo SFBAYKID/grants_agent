@@ -69,7 +69,7 @@ def _amount_text(row: sqlite3.Row) -> str:
     return f"${float(amount):,.0f}"
 
 
-def _grant_summary(row: sqlite3.Row) -> str:
+def grant_summary(row: sqlite3.Row) -> str:
     """One honest sentence describing the record behind this Salesforce note.
 
     Wording follows the record kind, never the grade. This note is CREATE-ONLY and
@@ -230,6 +230,44 @@ def _infer_industry(lead: sqlite3.Row) -> str:
     return ""
 
 
+def organization_fields(lead: sqlite3.Row) -> dict[str, object]:
+    """Every ORGANIZATION fact Grant holds, ready for a Salesforce Lead payload.
+
+    WHY THIS IS SHARED. Grant builds two kinds of Lead: a person Lead when a contact
+    is verified, and an ORGANIZATION-ONLY Lead when none is. The person payload
+    carried the address, website, student count and industry; the organization-only
+    payload carried none of them, so the twelve org-only Leads written for the
+    California campaign landed with an empty address and no firmographics — a record
+    a rep cannot act on without going and researching it themselves, which is the
+    work Grant exists to remove.
+
+    None of these fields describe a PERSON, so nothing here depends on having found
+    one. Every key is omitted unless the value is actually present: an absent address
+    stays absent rather than becoming an empty string that looks filled in.
+    """
+    payload: dict[str, object] = {}
+    state = str(lead["state"] or "") or _lead_value(lead, "org_state")
+    if state:
+        payload["State"] = state
+    org_city = _lead_value(lead, "org_city")
+    city = org_city or str(lead["location_city"] or "")
+    if city:
+        payload["City"] = city
+    if _lead_value(lead, "org_street"):
+        payload["Street"] = _lead_value(lead, "org_street")
+    if _lead_value(lead, "org_postal_code"):
+        payload["PostalCode"] = _lead_value(lead, "org_postal_code")
+    if _lead_value(lead, "org_website"):
+        payload["Website"] = _lead_value(lead, "org_website")
+    enrollment = lead["enrollment"]
+    if enrollment not in (None, "", 0):
+        payload["Number_of_Students__c"] = int(enrollment)
+    industry = _infer_industry(lead)
+    if industry:
+        payload["Industry"] = industry
+    return payload
+
+
 def contact_lead_payload(
     lead: sqlite3.Row,
     contact: sqlite3.Row,
@@ -255,7 +293,7 @@ def contact_lead_payload(
         "Status": "New",
         "LeadSource": "Other",
         "Description": (
-            f"{_grant_summary(lead)} {_contact_evidence(contact)} "
+            f"{grant_summary(lead)} {_contact_evidence(contact)} "
             "Created by Grant from a public contact. "
             f"Grant lead {lead['id']}; action {action_id}; "
             f"requested by Slack user {requester}."
