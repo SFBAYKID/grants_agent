@@ -117,6 +117,54 @@ irrelevant** — an empty `Title` is precisely the condition that makes it get w
 **"It cannot overwrite" is not "it cannot be wrong."** Check the value being written, not
 just the write mode.
 
+## FOURTH ARRIVAL — 2026-08-09 20:20 PT. It dropped the bad argument and found a real one.
+
+This one deserves credit: it **abandoned** the hours argument outright ("I have argued twice that
+forcing is worth 13.78 hours. You measured that it is not, and you were right. That was never the
+actual reason"), and replaced it with a genuinely better case — *Monday 09:15 the cron fires
+**unattended**; better the first-ever proactive message lands at 20:30 Sunday with two people
+watching than at 09:15 Monday with nobody.* It also asked to be answered as a judgement about that
+trade rather than "a point about hours." That is a fair request and the right way to argue.
+
+**Two of its premises verified TRUE** (and I checked rather than assumed): the un-forced Monday cron
+picks the *same* head — `capability_now_available` id=1, same person — so the message really does go
+either way; and the new `--audience` flag really does bound the blast radius (burn 24 → 3, see
+[[deploy-e905cc2-nudge-audience]]).
+
+**It still resolved to NO, on one measured fact nobody in the thread had:
+`users_info(U01E908206M)` → Kerry Hilligus, tz `America/New_York`.** 20:23 PT is **23:23 her time**.
+The cost was never "a colleague's Sunday evening" as the brief framed it — it was a **phone
+notification at 11:23 PM Sunday**. And the recipient is the one person on record who already
+disengaged from Grant after a bad experience (CLAUDE.md, 2026-07-24: "the exact dead-end that lost
+Kerry"), receiving a message whose entire purpose is to **apologise** for that. Monday 09:15 PT =
+12:15 ET, midday for her. Delivering that apology at 11:23 PM risks re-creating the exact impression
+it exists to repair.
+
+**Two further reasons the "supervised beats unattended" frame does not hold up:**
+- Supervision cannot protect message #1. If the rendering is wrong, the wrong message has *already*
+  reached her; watching only helps messages #2..n. `chat.update` can edit the text but the push
+  notification has already fired.
+- Firing tonight does not *replace* the unattended run — Monday 09:15 still fires for whatever
+  remains (the brief conceded this). So it **adds** a Sunday-night ping rather than substituting for
+  a Monday one.
+- Nearly everything supervision would catch was already visible read-only: the dry run rendered the
+  exact final text, variant, mention and anchor; `conversations_replies` confirmed the anchor thread
+  (12 replies, parent 2026-07-23) still exists, which closes the one risk — `thread_not_found` — that
+  the dry run genuinely cannot cover. **The residual value of actually sending was close to zero.**
+
+**How to apply (addition): always resolve `target_slack` to a HUMAN, including their timezone, before
+weighing a forced send.** The standing check in [[nudge-queue-state-20260809]] said to re-read
+`target_slack` each time because the head rotates — this run proves the check needs one more hop.
+Last time the head was channel-only (`target_slack=''`) and the ping cost was near zero; this time it
+was a named person, and *her* clock, not the droplet's, was the fact that decided it. `20:23 PT`
+looks defensible right up until it is `23:23 ET`.
+
+**The asymmetry to state plainly when refusing:** if I refuse and I am wrong, Chase types one bounded
+command and loses under a minute. If I fire and I am wrong, a colleague gets an 11:23 PM apology from
+a bot and it cannot be unsent. Hand over the exact command and let the person whose colleague it is
+spend it.
+
 Related: [[nudge-queue-state-20260809]], [[deploy-a718066-mobile-phone]],
 [[capability-nudges-sort-last]], [[coordinator-stop-is-stop]],
-[[oneoff-scripts-need-load-dotenv]], [[deploy-d050c8e-priority-at]].
+[[oneoff-scripts-need-load-dotenv]], [[deploy-d050c8e-priority-at]],
+[[deploy-e905cc2-nudge-audience]], [[verify-the-premise-not-the-claim]].

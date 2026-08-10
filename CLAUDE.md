@@ -118,6 +118,46 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-10, the send that did not happen)
+
+- `verified` 2026-08-10 **KERRY IS IN `America/New_York`, AND THAT SETTLED IT.** I
+  argued four times for firing the first proactive follow-up tonight; the last
+  argument was the honest one (an unattended Monday cron sends Grant's first-ever
+  proactive message to a colleague with nobody watching, so a supervised send beats
+  an unsupervised one). The guardian resolved the mention and measured what nobody
+  had: 20:23 PT is **23:23 HER time**. The cost was never "a colleague's Sunday
+  evening" — it is an **11:23 PM phone notification to the one person on record who
+  already disengaged from Grant after a bad experience, carrying a message whose
+  whole purpose is to apologise for that**. Monday 09:15 PT is 12:15 ET — midday.
+  It also dismantled my premise: supervision cannot protect message #1, because if
+  the rendering is wrong it has already arrived, and `chat.update` cannot unsend a
+  push notification. Accepted, and I stopped asking.
+- `verified` 2026-08-10 **THE `--audience` FLAG CUT THE PERMANENT BURN FROM 24 TO 3.**
+  A scoped run skips out-of-scope subjects with NO ledger row (the filter is the first
+  statement in the loop, above the one-shot check and above `_record`), so bounding a
+  forced run can never retire a subject elsewhere. My "25 stale" figure was wrong
+  twice: unscoped it is 24, scoped it is 3.
+- `verified` 2026-08-10 **THE SALESFORCE LEADS ARE FILLED.** `fill-leads --execute`
+  wrote **27 fields across 5 Leads, every one into an empty field**, verified by
+  reading back FROM Salesforce: `CHANGED_FROM_NON_EMPTY` 0, `CLEARED` 0. Montebello
+  Unified now carries its address, `superintendent@montebello.k12.ca.us`, Title
+  "Superintendent of Schools", phone, website and 19,149 students. `cde.ca.gov` never
+  reached the CRM.
+- `verified` 2026-08-10 EVIDENCE QUALITY IS IN A URL'S SPECIFICITY, NOT ITS DOMAIN.
+  Contacts sourced from `cde.ca.gov/schooldirectory/details?cdscode=…` are sound —
+  that is the state directory's record FOR THAT DISTRICT — while the bare host
+  `https://cde.ca.gov` as an `org_website` is junk. Nobody should later "fix" this by
+  blocking the domain.
+- `needs-testing` 2026-08-10 **NO PROACTIVE FOLLOW-UP HAS EVER BEEN DELIVERED.**
+  `followup_nudges` is 0 rows. The cron fires Monday 09:15 PT with Kerry at eligible
+  #0. To send it sooner, by hand:
+  `python -m grant_watch.cli nudge --execute --force --audience C01DGT9D11D`
+- `needs-testing` 2026-08-10 **`in_window` IS COMPUTED IN ONE TIMEZONE FOR EVERYONE.**
+  It closes at 17:00 Pacific, which is 20:00 Eastern, so a nudge aimed at an Eastern
+  rep can legitimately land at 7:45 PM their time. The two cron slots (09:15 and 14:15
+  PT = 12:15 and 17:15 ET) are civil, but the WINDOW is not, and `config/reps.json`
+  records no timezone. Worth fixing before the cadence is widened.
+
 ## Current status (2026-08-10, armed)
 
 - `verified` 2026-08-10 **PRODUCTION IS `65f05c7`, SCHEMA 37, AND THE FOLLOW-UP SYSTEM
