@@ -26,7 +26,7 @@ from ..spreadsheets import GeneratedArtifact
 from .contact_enrichment import (  # re-export: search.py and tests call these
     enrich_lead_contact,
 )
-from ..presentation import for_model
+from ..presentation import for_model, model_note
 from .search import search_leads
 from .salesforce_campaign_tools import (
     salesforce_campaign_batch_preview,
@@ -356,7 +356,9 @@ def salesforce_campaign_search(name_or_link: str) -> str:
     instruction = (
         "Confirm this exact Campaign with the user before preparing members."
         if len(records) == 1
-        else "Multiple Campaigns matched; ask the user to choose one by link."
+        else model_note(
+            "Multiple Campaigns matched; ask the user to choose one by link."
+        )
     )
     return (
         f"Found {len(records)} Campaign result(s):\n"

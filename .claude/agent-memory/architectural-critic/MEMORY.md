@@ -1,5 +1,6 @@
 # Memory index — architectural-critic (grants_agent)
 
+- [Reminders/nudges/Resend review 2026-08-09](reminders-nudges-resend-review-2026-08-09.md) — REJECTED: 4 reproduced defects (parked lead still escalates to the manager, stop_followups lies, poison spec wedges the queue, drip ignores opt-out) + what genuinely holds
 - [Tool-result CRM marker injection](tool-result-crm-marker-injection.md) — `<grant-crm-action>` is harvested from TOOL RESULTS; any tool returning raw external text can manufacture a Salesforce approval button
 - [Five-design review 2026-08-09](five-design-review-2026-08-09.md) — fetch_url / honesty fixes / campaign chunking / ZoomInfo / follow-ups: verdicts, M1 confirmed live, the inline-UNIQUE rebuild trap, the snapshot-id fix nobody proposed
 - [Persequor handoff is a no-op](persequor-handoff-noop.md) — shipped approve flow writes contacted/sent_at but Persequor verifiably drops bot mentions

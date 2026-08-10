@@ -19,6 +19,7 @@ from collections.abc import Callable
 import requests
 
 from .. import db
+from ..presentation import model_note
 
 Progress = Callable[[str], None]
 
@@ -226,7 +227,7 @@ def salesforce_campaign_status(name_or_link: str) -> str:
                 listing = "\n".join(f"- {c.name} — {c.link}" for c in found)
                 return (
                     f"{len(found)} Campaigns match '{query}':\n{listing}\n"
-                    "Ask the user which one before reporting on it."
+                    + model_note("Ask the user which one before reporting on it.")
                 )
             campaign = found[0]
             campaign_id = campaign.record_id
@@ -280,8 +281,12 @@ def salesforce_campaign_status(name_or_link: str) -> str:
             "missing from the Campaign unless someone added them by hand."
         )
     lines.append(
+        # The first sentence is a FACT a rep should see; only the instruction after
+        # it is for the model. Wrapping the boundary in the wrong place left a human
+        # surface rendering "someone may have" and stopping there.
         "The live count and Grant's count can differ legitimately — someone may have "
-        "added or removed members outside Grant. Report both, never one as the other."
+        "added or removed members outside Grant."
+        + model_note(" Report both, never one as the other.")
     )
     return "\n".join(lines)
 
