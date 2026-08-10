@@ -24,7 +24,8 @@ import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+import random
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any
 
@@ -47,6 +48,22 @@ POLICY_VERSION = "nudge-v1"
 MAX_NUDGES_PER_DAY = 2
 MAX_NUDGES_PER_TARGET_PER_DAY = 1
 MIN_GAP = timedelta(hours=4)
+
+# WHEN a follow-up may land, Pacific. Grant is a cron job and a fixed schedule makes
+# it read like one: a message that arrives at 09:15 every single weekday is
+# furniture, and people stop seeing furniture. The daily card already solved this by
+# drawing ONE target time per day inside a band; follow-ups now do the same.
+#
+# THE BAND IS COUPLED TO THE CRON AND MUST NOT OUTRUN IT. A slot drawn after the
+# last tick of the day means "never": every tick logs `holding for today's slot`,
+# nothing posts, and both lines read as routine. Caught immediately when this shipped
+# against a cron that ran only at 09:15 and 14:15 — any slot after 14:15 was
+# unreachable, so more than half the band silently meant silence.
+#
+# The cron is therefore `*/30 8-15 * * 1-5` (last tick 15:30) and the band ends at
+# 15:00, leaving one spare tick. CHANGE THEM TOGETHER.
+NUDGE_BAND_START_PT = time(8, 30)
+NUDGE_BAND_END_PT = time(15, 0)
 
 # How long after the work stalls Grant waits, and how long before it gives up. A
 # nudge about something from three weeks ago is noise, not help.
@@ -548,6 +565,35 @@ def _target_local_hour(candidate: NudgeCandidate, now: datetime) -> int | None:
         return None
 
 
+def daily_slots(local_date: date, audience: str) -> tuple[time, ...]:
+    """The Pacific target times a follow-up may land at today, earliest first.
+
+    Seeded by (date, audience) so EVERY tick of a given day draws the SAME times — a
+    per-tick roll would move the goalpost every 30 minutes, which is how the drip
+    used to front-load its whole day into the first hour. Varies day to day, so two
+    consecutive Tuesdays do not look identical.
+
+    One slot per allowed daily nudge, and they are forced at least MIN_GAP apart so
+    the randomness cannot accidentally stack both messages into the same half hour.
+    """
+    seed = random.Random(f"nudge:{local_date.isoformat()}:{audience}")
+    start = NUDGE_BAND_START_PT.hour * 60 + NUDGE_BAND_START_PT.minute
+    end = NUDGE_BAND_END_PT.hour * 60 + NUDGE_BAND_END_PT.minute
+    gap = int(MIN_GAP.total_seconds() // 60)
+    slots: list[time] = []
+    earliest = start
+    for index in range(MAX_NUDGES_PER_DAY):
+        # Leave room for the remaining slots so the last one still fits in the band.
+        remaining = MAX_NUDGES_PER_DAY - index - 1
+        latest = end - remaining * gap
+        if latest < earliest:
+            break
+        minutes = seed.randint(earliest, latest)
+        slots.append(time(minutes // 60, minutes % 60))
+        earliest = minutes + gap
+    return tuple(slots)
+
+
 def _sent_today(
     conn: sqlite3.Connection, audience: str, now: datetime
 ) -> list[sqlite3.Row]:
@@ -595,6 +641,20 @@ def pacing_reason(
     if local is not None and not 8 <= local < 18:
         return f"outside {candidate.target_slack}'s working hours"
     today = _sent_today(conn, candidate.audience, now)
+    # HOLD FOR TODAY'S DRAWN MOMENT. Without this the worker fires on the first tick
+    # it is allowed to, so a 30-minute cron delivers at the same minute every single
+    # weekday and Grant reads as the cron job it is. The slots are drawn per day and
+    # per channel, so the cadence looks human without becoming unpredictable to us.
+    #
+    # `force` skips it, like the business-hours window: both are about WHEN, and an
+    # operator exercising the path should not have to wait out a random draw. The
+    # recipient's own working hours above are NOT skippable, because that one is
+    # about a person rather than a schedule.
+    slots = daily_slots(now.astimezone(BUSINESS_TZ).date(), candidate.audience)
+    if not force and len(today) < len(slots):
+        due_at = slots[len(today)]
+        if now.astimezone(BUSINESS_TZ).time() < due_at:
+            return f"holding for today's {due_at:%H:%M} PT slot"
     if len(today) >= MAX_NUDGES_PER_DAY:
         return f"daily nudge cap reached ({MAX_NUDGES_PER_DAY})"
     if (

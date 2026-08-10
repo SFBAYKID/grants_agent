@@ -822,9 +822,11 @@ def test_a_nudge_respects_the_mentioned_reps_own_clock(tmp_path: Path) -> None:
         "an 11pm phone notification was allowed by --force"
     )
 
-    # Monday 09:15 Pacific = 12:15 for her: civil, and allowed.
+    # Monday 09:15 Pacific = 12:15 for her: civil, so the TIMEZONE gate must not be
+    # the thing holding it. It may still be waiting on the day's drawn slot, which is
+    # a separate concern with its own test.
     civil = datetime(2026, 8, 10, 16, 15, tzinfo=timezone.utc)
-    assert nudges.pacing_reason(conn, candidate, civil) == ""
+    assert "working hours" not in nudges.pacing_reason(conn, candidate, civil)
     conn.close()
 
 

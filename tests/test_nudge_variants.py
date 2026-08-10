@@ -210,3 +210,58 @@ def test_the_member_add_confirmation_carries_the_campaign_link() -> None:
 
     assert execution._campaign_link(_Broken(), "701UZ00000uW9jBYAS") == ""
     assert execution._campaign_link(None, "701UZ00000uW9jBYAS") == ""
+
+
+def test_the_daily_slots_vary_by_day_but_not_within_one(tmp_path: Path) -> None:
+    """A fixed schedule makes Grant read as the cron job it is.
+
+    Seeded by (date, audience) so every tick of a day agrees — a per-tick roll would
+    move the goalpost every 30 minutes, which is how the daily card once front-loaded
+    its entire day into the first hour.
+    """
+    from datetime import date as _date
+
+    monday = nudges.daily_slots(_date(2026, 8, 10), CHANNEL)
+    again = nudges.daily_slots(_date(2026, 8, 10), CHANNEL)
+    tuesday = nudges.daily_slots(_date(2026, 8, 11), CHANNEL)
+
+    assert monday == again, "two ticks on the same day drew different times"
+    assert monday != tuesday, "every day would land at the identical minute"
+    assert len(monday) == nudges.MAX_NUDGES_PER_DAY
+    assert monday[0] < monday[1], "slots are not ordered"
+
+
+def test_no_slot_is_ever_drawn_past_the_last_cron_tick(tmp_path: Path) -> None:
+    """A slot after the final tick means NEVER, and it fails silently.
+
+    Every tick would log "holding for today's slot" and nothing would post — two
+    lines that both read as routine. It shipped exactly that way against a cron that
+    ran only at 09:15 and 14:15: any slot after 14:15 was unreachable, so more than
+    half the band quietly meant silence. The cron is now every 30 minutes to 15:30,
+    and the band ends at 15:00 with a spare tick.
+    """
+    from datetime import date as _date, time as _time
+
+    latest = _time(0, 0)
+    for day in range(1, 29):
+        for channel in (CHANNEL, "C0B02721MNK", "C01DGT9D11D"):
+            for slot in nudges.daily_slots(_date(2026, 9, day), channel):
+                latest = max(latest, slot)
+    assert latest <= _time(15, 30), (
+        f"a slot at {latest} PT is past the last cron tick and can never fire"
+    )
+    assert nudges.NUDGE_BAND_END_PT <= _time(15, 30)
+
+
+def test_two_slots_are_never_stacked_into_the_same_gap(tmp_path: Path) -> None:
+    """Randomness must not defeat MIN_GAP by drawing both slots minutes apart."""
+    from datetime import date as _date, datetime as _dt
+
+    gap = nudges.MIN_GAP
+    for day in range(1, 29):
+        slots = nudges.daily_slots(_date(2026, 9, day), CHANNEL)
+        if len(slots) < 2:
+            continue
+        first = _dt.combine(_date(2026, 9, day), slots[0])
+        second = _dt.combine(_date(2026, 9, day), slots[1])
+        assert second - first >= gap, f"day {day}: {slots} are closer than {gap}"
