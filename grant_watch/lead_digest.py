@@ -37,7 +37,10 @@ def render(spec: dict[str, Any]) -> str:
     kwargs = search_kwargs(spec)
     if not kwargs or set(kwargs) == {"limit"}:
         return ""
-    text, _artifact = search_leads(**kwargs)
+    # `for_chat=False`: this text is going into an EMAIL. The chat renderer answers a
+    # large result set by offering a spreadsheet, which is a question, and nobody can
+    # answer a question that arrives in their inbox from a no-reply sender.
+    text, _artifact = search_leads(**kwargs, for_chat=False)
     body = for_human(text)
     if not body.startswith(NO_MATCH_PREFIX):
         return body
@@ -47,7 +50,7 @@ def render(spec: dict[str, Any]) -> str:
     broadened = {key: value for key, value in kwargs.items() if key != "state"}
     if broadened == kwargs:
         return body
-    wider, _ = search_leads(**broadened)
+    wider, _ = search_leads(**broadened, for_chat=False)
     wider = for_human(wider)
     if wider.startswith(NO_MATCH_PREFIX):
         return body

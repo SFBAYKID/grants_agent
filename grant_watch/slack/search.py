@@ -370,6 +370,7 @@ def search_leads(
     channel: str = "",
     thread_ts: str = "",
     db_path: Path | str | None = None,
+    for_chat: bool = True,
 ) -> tuple[str, GeneratedArtifact | None]:
     """Search one read-only SQLite snapshot and optionally export every matching row.
 
@@ -666,8 +667,18 @@ def search_leads(
                     NO_MATCH_PREFIX + hint_note + reference_note,
                     None,
                 )
+            # ONLY IN CHAT. Offering a spreadsheet instead of 81 leads is right in
+            # Slack, where the list would bury the channel — and completely wrong in
+            # an email, where a long list is the entire point and the reader cannot
+            # answer the question anyway.
+            #
+            # This branch is why `email_results` was about to send Kerry ninety-three
+            # characters reading "would you like an Excel file or a Google Sheet?".
+            # She had asked, twice, to be sent the list. A question in a medium she
+            # cannot reply to would have been the fourth non-answer in that thread.
             if (
-                total > 15
+                for_chat
+                and total > 15
                 and int(limit or 50) > 15
                 and not export_value
                 and not with_contacts
