@@ -775,6 +775,26 @@ def test_a_reply_in_the_thread_marks_the_wording_answered(tmp_path: Path) -> Non
         ("crm_batch_partial", REP, {}),
         ("crm_preview_expired", REP, {}),
         ("thread_abandoned", REP, {}),
+        # The two the guardian caught still discarding the label on the DEPLOYED
+        # bytes: both delegate to their own builder, and neither took a variant.
+        (
+            "capability_now_available",
+            REP,
+            {
+                "ask_text": "Email those to kerry@monarchconnected.com",
+                "capability": "email_results",
+                "asked_on": "23 July",
+            },
+        ),
+        (
+            "card_escalated",
+            REP,
+            {
+                "entity_name": "Hoxie School District",
+                "amount_usd": 500000,
+                "tagged_slack": "U08C1NBH875",
+            },
+        ),
     ],
 )
 def test_every_wording_pair_is_actually_two_different_sentences(

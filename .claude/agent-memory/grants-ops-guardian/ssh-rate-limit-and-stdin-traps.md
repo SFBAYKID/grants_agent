@@ -17,6 +17,15 @@ This is the mirror image of the already-recorded "ssh eats the heredoc" gotcha i
 > `-n` on every ssh that does **not** need stdin; **never** on the ssh that *is* the
 > consumer of a pipe, heredoc, or `< file`.
 
+**Re-bit 2026-08-09 during the a718066 deploy, in its third guise:** `ssh -n host
+'bash -s' <<REMOTE` — a *heredoc* rather than a `< file`. `-n` won again, `bash -s`
+read EOF, and the whole verification block (remote size + sha of the just-uploaded
+archive) printed NOTHING and exited 0. Silence from a verification step is not a pass.
+The tell is generic: **if a step produces no output at all, re-run it standalone
+before trusting anything downstream** — which is what confirmed the upload was in fact
+byte-exact. A heredoc is a stdin consumer exactly like `< file`; the rule has no
+carve-out for it.
+
 Cost here: three uploaded manifests were silently 0 bytes. It was caught only because the
 next step hashed them. **Always `wc -c` the remote file after an stdin upload** — the
 pre-image/target hash manifests are exactly the files whose emptiness would turn a

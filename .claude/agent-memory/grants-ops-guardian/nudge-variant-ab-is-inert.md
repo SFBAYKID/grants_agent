@@ -1,6 +1,6 @@
 ---
 name: nudge-variant-ab-is-inert
-description: Measured 2026-08-09 on prod — the nudge A/B variant ledger labels messages "a"/"b" for kinds whose two wordings are byte-identical, so the reply-rate table it produces compares nothing
+description: MOSTLY FIXED in prod by a718066 — six subject kinds now have two real wordings; only card_escalated and capability_now_available still emit identical text for both labels
 metadata:
   type: project
 ---
@@ -45,3 +45,21 @@ imply a comparison that was never run.
 
 Verified read-only against production at revision d664548, schema 36
 ([[deploy-d664548-followups-live]]). Related: [[nudge-queue-state-20260809]].
+
+---
+
+## STATUS 2026-08-09: mostly fixed in production by a718066
+
+Re-measured **on the deployed bytes** (`nudges.py` sha `5f6ccda2…f399` == the a718066
+blob), schema 37 — see [[deploy-a718066-mobile-phone]]. `build_message(c,"a") !=
+build_message(c,"b")` is now **True** for: untagged `card_unengaged` (the common case,
+and the one the whole live queue is made of), tagged `card_unengaged`,
+`crm_batch_blocked`, `crm_batch_partial`, `crm_preview_expired`, `thread_abandoned`.
+
+**Still identical for both labels: `card_escalated` and `capability_now_available`.**
+They delegate to `_escalation_message` / `_capability_message`, neither of which accepts
+a variant argument, so the variant is discarded before the text is built. Both are
+currently unreachable in practice — `followup_nudges` is still 0 and all 5
+`capability_asks` have `available_since` NULL — but the moment `capability --execute`
+declares a capability, the caveat above applies again to that kind. The rest of this
+note stands as the reason the fix mattered; the table is history, not current state.

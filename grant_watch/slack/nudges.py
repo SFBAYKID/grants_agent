@@ -595,9 +595,9 @@ def build_message(candidate: NudgeCandidate, variant: str = "a") -> str:
             "made it. Want me to have another go at them?"
         )
     if candidate.subject_kind == "capability_now_available":
-        return _capability_message(candidate, mention)
+        return _capability_message(candidate, mention, variant)
     if candidate.subject_kind == "card_escalated":
-        return _escalation_message(candidate, mention)
+        return _escalation_message(candidate, mention, variant)
     if candidate.subject_kind == "thread_abandoned":
         if variant == "b":
             return (
@@ -661,7 +661,20 @@ _CAPABILITY_OFFER = {
 }
 
 
-def _capability_message(candidate: NudgeCandidate, mention: str) -> str:
+# The variant-b opener: leads with the capability instead of the apology. Hand
+# written per capability, because assembling it from the variant-a fragments
+# produced duplicated words and messages that never asked anything.
+_CAPABILITY_HEADLINE = {
+    "email_results": "I can email you that list now — want it?",
+    "campaign_load": "I can build the Salesforce campaign now — want me to?",
+    "reminders": "I can hold on to that for you now — want me to set it up?",
+    "contact_supplied": "I can record what you tell me now — want to give it again?",
+}
+
+
+def _capability_message(
+    candidate: NudgeCandidate, mention: str, variant: str = "a"
+) -> str:
     """Reopen an ask Grant had to refuse, quoting the person back to themselves.
 
     The quote is the evidence. This message makes a claim about something a named
@@ -686,7 +699,25 @@ def _capability_message(candidate: NudgeCandidate, mention: str) -> str:
     # Reporting only the capability gap would quietly omit the broken promise, which
     # is rule 1 applied to Grant's own conduct rather than to a lead.
     correction = str(candidate.observed.get("correction") or "").strip()
-    admission = correction if correction else "I couldn't do it then."
+    admission = correction or "I couldn't do it then."
+    if variant == "b":
+        # LEADS WITH WHAT CHANGED rather than with the apology. Both wordings carry
+        # the same quote and the same admission — which one a person actually answers
+        # is the question the ledger exists to settle, and it cannot settle anything
+        # while both labels carry one sentence.
+        #
+        # Written out rather than assembled from the variant-a pieces: reordering
+        # those fragments produced "I can email you a list now now" and a message
+        # that ended without asking anything. A wording a person will read is worth
+        # writing by hand.
+        headline = _CAPABILITY_HEADLINE.get(
+            str(candidate.observed.get("capability") or ""),
+            "Good news — I can do that one now.",
+        )
+        # Upper-case only the FIRST character. `.capitalize()` lower-cases everything
+        # after it, which turned "back on 23 July" into "Back on 23 july".
+        lead = opener[:1].upper() + opener[1:]
+        return f"{mention}{headline} {lead} {quoted} {admission}"
     return f"{mention}{opener} {quoted} {admission} {offer}"
 
 
@@ -846,7 +877,9 @@ def _finish(
         )
 
 
-def _escalation_message(candidate: NudgeCandidate, mention: str) -> str:
+def _escalation_message(
+    candidate: NudgeCandidate, mention: str, variant: str = "a"
+) -> str:
     """Tell a manager one lead went unanswered — briefly, and without accusing anyone.
 
     Chase asked for this and asked for it SHORT. The care needed is in what it does
@@ -861,6 +894,12 @@ def _escalation_message(candidate: NudgeCandidate, mention: str) -> str:
     money = f"${amount:,} " if amount > 0 else ""
     owner = f"<@{who}>" if who else "the territory rep"
     subject = entity or "a lead"
+    if variant == "b":
+        return (
+            f"{mention}{money}{subject} has been sitting with {owner} and nothing's "
+            "come back here — could well be handled offline. Shall I dig out a "
+            "contact?"
+        )
     return (
         f"{mention}heads up — {money}{subject} went to {owner} and nothing's come "
         "back here since. Could just be handled offline. Want me to find a contact "
