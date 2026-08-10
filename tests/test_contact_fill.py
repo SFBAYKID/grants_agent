@@ -497,3 +497,64 @@ def test_the_trailer_does_not_tell_an_email_reader_to_refine_their_search() -> N
     trailer_block = src[src.index("if total > shown:") : src.index("more = trailer")]
     assert "if for_chat" in trailer_block, "the trailer ignores its destination"
     assert "Ask me in Slack for the rest" in trailer_block
+
+
+def test_a_repeat_pull_skips_that_lead_instead_of_aborting_a_paid_batch(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One poisoned lead must not discard the outcome of leads already bought.
+
+    Reachable and compounding: a lead whose chosen people all return NO_MATCH bills
+    nothing and stores nothing, so it is re-selected next run, the ranking is
+    deterministic so the same two people are chosen, the request key is identical,
+    and the ledger refuses. Before this, that refusal escaped the loop — every
+    earlier lead in the batch was billed and stored, and the rep saw only a failure.
+    """
+    from grant_watch.enrich import zoominfo_enrichment
+    from grant_watch.enrich.zoominfo_credits import AlreadySpent
+
+    _patch_search(monkeypatch, per_org=2)
+    ids = [_lead(conn, f"D{i}") for i in range(3)]
+    calls: list[int] = []
+
+    def flaky(_conn: object, lead_id: int, _people: list, **_kw: object) -> object:
+        """The middle lead was already paid for."""
+        calls.append(lead_id)
+        if lead_id == ids[1]:
+            raise AlreadySpent("this ZoomInfo pull already completed")
+        return zoominfo_enrichment.ZoomInfoApplied(
+            stored=2, billed=2, suppressed_numbers=0
+        )
+
+    monkeypatch.setattr(zoominfo_enrichment, "apply_for_lead", flaky)
+    out = contact_fill.fill_contacts(conn, ids, max_credits=40, dry_run=False)
+
+    assert calls == ids, "the run stopped instead of continuing past the repeat"
+    assert out.filled == 2
+    assert out.credits_spent == 4
+    conn.close()
+
+
+def test_the_bulk_tool_refuses_a_ceiling_the_model_invented(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The model supplies max_credits, so it cannot be the only ceiling.
+
+    The two-step "price it, then confirm" protocol lives in the tool DESCRIPTION,
+    which is a prompt instruction — and a model may call confirm=true on its first
+    turn. Several tool_use blocks across six turns compound it. The cap has to be in
+    the code.
+    """
+    from grant_watch.slack import tools
+
+    spent: list[int] = []
+    monkeypatch.setattr(
+        tools.contact_fill if hasattr(tools, "contact_fill") else tools,
+        "__name__",
+        "tools",
+        raising=False,
+    )
+    out = tools._zoominfo_fill_many([1, 2], 997, True, "U0REP")
+    assert out.startswith("ERROR:")
+    assert str(tools.MAX_CREDITS_PER_CALL) in out
+    assert spent == []

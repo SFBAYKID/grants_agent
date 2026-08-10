@@ -30,6 +30,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from .enrich import zoominfo_credits, zoominfo_enrichment
+from .enrich.zoominfo_credits import AlreadySpent
 
 # At most this many people per organisation. Two is a decision-maker and a fallback;
 # more is a directory, and each one costs a credit.
@@ -162,12 +163,27 @@ def fill_contacts(
             spent += cost
             filled += 1
             continue
-        applied = zoominfo_enrichment.apply_for_lead(
-            conn,
-            lead_id,
-            [str(getattr(m, "person_id", "")) for m in chosen],
-            requested_by=requested_by,
-        )
+        try:
+            applied = zoominfo_enrichment.apply_for_lead(
+                conn,
+                lead_id,
+                [str(getattr(m, "person_id", "")) for m in chosen],
+                requested_by=requested_by,
+            )
+        except AlreadySpent:
+            # A ROUTINE RE-ENTRY, NOT AN ERROR — the same shape as a Salesforce id
+            # from another org. This exact set was already paid for, so the ledger is
+            # right to refuse; what was wrong is that the refusal escaped the loop.
+            #
+            # It is reachable and it compounds: a lead whose chosen people all return
+            # NO_MATCH bills nothing and stores nothing, so `_has_contact` stays
+            # False, so the next run re-selects the SAME top two (the ranking is
+            # deterministic), rebuilds the identical request key, and raises. One
+            # such lead would abort every future batch containing it — after the
+            # earlier leads in that batch had already been bought and billed. The rep
+            # sees a failure, and the money is gone.
+            skipped_none += 1
+            continue
         spent += int(applied.billed)
         if applied.stored:
             filled += 1

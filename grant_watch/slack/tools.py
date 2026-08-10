@@ -534,6 +534,10 @@ def salesforce_contact_record_preview(
     )
 
 
+# The most a single bulk pull may ever spend, regardless of what the model asks for.
+MAX_CREDITS_PER_CALL = 40
+
+
 def _zoominfo_fill_many(
     lead_ids: list[int], max_credits: int, confirm: bool, requester_slack: str
 ) -> str:
@@ -555,6 +559,19 @@ def _zoominfo_fill_many(
         return "ERROR: tell me which leads to fill."
     if max_credits <= 0:
         return "ERROR: I need a credit ceiling above zero before I can price this."
+    # THE MODEL SUPPLIES `max_credits`, SO IT CANNOT BE THE ONLY CEILING. The
+    # two-step "price it, then confirm" protocol lives in the tool DESCRIPTION,
+    # which is a prompt instruction — and the rule here is that the safety is the
+    # shape, not the prompt. A model may call confirm=true on the first turn, and
+    # several tool_use blocks across six turns compound it.
+    #
+    # 40 is the ceiling a human chose for the manual run, and it covers any
+    # realistic single campaign — the 13-lead California campaign cost 12.
+    if max_credits > MAX_CREDITS_PER_CALL:
+        return (
+            f"ERROR: I cap a single bulk pull at {MAX_CREDITS_PER_CALL} credits. "
+            f"Ask for {MAX_CREDITS_PER_CALL} or fewer, or split the leads."
+        )
 
     conn = db.connect()
     remaining = contact_fill.remaining_credits(conn)

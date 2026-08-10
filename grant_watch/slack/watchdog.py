@@ -39,9 +39,14 @@ from slack_sdk.errors import SlackApiError
 # above that ceiling means this can never interrupt work that is still happening.
 STUCK_AFTER = timedelta(minutes=20)
 
-# Nothing older than this is worth editing. A spinner from last week has already
-# been read as a failure, and rewriting it now just resurfaces an old wound.
-TOO_OLD = timedelta(days=3)
+# Nothing older than this is worth editing — but the number is not free to choose.
+# It MUST be at least the nudge worker's DROP_AFTER, because `thread_abandoned`
+# apologises for exactly these receipts. At 3 days against DROP_AFTER's 14 there was
+# a band where a thread was too old for the watchdog to repair and not yet stale for
+# the nudge worker, so Grant would apologise for a dead conversation while its
+# "Thinking…" spinner stayed on screen forever. An apology beside an unresolved
+# spinner is worse than either alone.
+TOO_OLD = timedelta(days=14)
 
 # The live spinner is a frame char, a space, then a short phrase ending in an
 # ellipsis — "/ Thinking…", "| Thinking…". Kept identical to the pattern the retired

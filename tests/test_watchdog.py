@@ -138,11 +138,30 @@ def test_a_turn_that_may_still_be_running_is_left_alone(
 
 
 def test_an_ancient_spinner_is_not_resurfaced(conn: sqlite3.Connection) -> None:
-    """A spinner from last week was read as a failure long ago. Leave it."""
-    _receipt(conn, age=timedelta(days=9))
+    """A spinner from a month ago was read as a failure long ago. Leave it."""
+    _receipt(conn, age=timedelta(days=30))
     client = _Slack([{"user": BOT, "ts": "100.2", "text": "| Thinking…"}])
     assert "nothing stuck" in watchdog.run(
         client, conn, bot_id=BOT, dry_run=False, now=NOW
+    )
+    conn.close()
+
+
+def test_the_repair_horizon_covers_everything_the_nudge_worker_apologises_for(
+    conn: sqlite3.Connection,
+) -> None:
+    """Two horizons that disagree leave a band where Grant apologises and never repairs.
+
+    `thread_abandoned` reopens exactly the receipts this module repairs. While the
+    watchdog gave up at 3 days and the nudge worker stayed interested until 14, a
+    thread that died on day four got an apology while its "Thinking…" spinner stayed
+    on screen forever. An apology beside an unresolved spinner is worse than either
+    alone.
+    """
+    from grant_watch.slack import nudges
+
+    assert watchdog.TOO_OLD >= nudges.DROP_AFTER, (
+        "a receipt can be too old to repair and still young enough to apologise for"
     )
     conn.close()
 

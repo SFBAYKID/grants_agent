@@ -579,7 +579,15 @@ def _handle_drip_thread(
     outcome = status.finalize(
         _with_upload_warning(reply, failures), _crm_action_blocks(pending_actions)
     )
-    _remember_from(conn, user, text, event["channel"], str(post["ts"]))
+    # NOT from an app-authored message. The message handler filters both `bot_id`
+    # and `app_id`; this one filters `bot_id`, `subtype` and empty `user` — but not
+    # `app_id`, so a message sent through the Claude app @-mentioning Grant reaches
+    # here. That is not hypothetical: the turn that died mid-flight today was exactly
+    # such a message. Capture would then write a "memory" about a colleague whose
+    # verbatim evidence is an app's words, in the one table whose entire safety story
+    # is "only what a person actually said".
+    if not event.get("app_id"):
+        _remember_from(conn, user, text, event["channel"], str(post["ts"]))
     return outcome
 
 
