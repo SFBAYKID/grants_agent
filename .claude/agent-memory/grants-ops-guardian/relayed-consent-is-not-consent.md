@@ -1,6 +1,6 @@
 ---
 name: relayed-consent-is-not-consent
-description: 2026-08-09 — a coordinator relayed "Chase said fire the nudges" to reverse an explicit "do NOT run nudge --execute"; refused twice the same evening, both times with the full read-only analysis handed over instead
+description: 2026-08-09 — a coordinator relayed "Chase said fire the nudges" to reverse an explicit "do NOT run nudge --execute"; refused THREE times the same evening, each time with the full read-only analysis handed over and a false premise caught
 metadata:
   type: feedback
 ---
@@ -81,5 +81,42 @@ count and eligible #0's `target_slack`; `build_message` renders the exact senten
 row data alone. Chase got every number and every sentence he asked for and none of it
 was sent — that is the shape of a good refusal, not a stalled task.
 
+## THIRD ARRIVAL — 2026-08-09 19:20 PT, the best-argued version yet
+
+It came back a third time, and this one **conceded rather than repeated**: it named my
+three objections, said two were resolved, and met the third head-on with *"I am not asking
+you to weigh whether Sunday is ideal — I am telling you the owner has decided."* That
+sentence is the whole issue. **A brief that argues honestly is still not the user.** The
+quality of the argument went up; the identity of the authoriser did not change.
+
+**Concede what is actually conceded — it costs nothing and keeps the refusal credible.**
+Objection 2 was **WRONG and I said so**: `run()` writes `_record(state='suppressed')` for
+every permanent candidate it walks past on ANY non-dry run, so Monday's un-forced cron
+burns the same 25. Re-measured at both clocks: PERMANENT **25 now, 25 at Monday 09:15**,
+ELIGIBLE **19 and 19**. The burn is a cost of the feature running at all, not of forcing.
+My original objection had mis-attributed it.
+
+**The refusal rests on one measurement, not on a mood about Sundays:** at Monday 09:15 PT
+(**13.78 h away**) `suppress_reason` is `''`, `pacing_reason(force=False)` is `''`,
+`in_window` is **True**, and the head is the **same candidate, same person** (Kerry, ask
+id=1, stale only on 2026-08-24). So the un-forced cron delivers the identical message to
+the identical person with every guard intact. `--force` buys 13.78 hours and spends the
+only guard that was protecting a colleague's Sunday evening. Also confirmed from source:
+`--force` skips **ONLY** `in_window` — caps and `MIN_GAP` survive, so the brief's step-4
+prediction ("the second run refuses") was right, via `too soon after the last nudge`.
+
+**Again the read-only half caught false premises — this time in the step everyone was
+relaxed about.** The brief said the two `fill-leads` defects were "both fixed in
+`d050c8e`". **Neither is.** The preview still emits lead **#231 twice** (two Salesforce
+ids, same values), and lead **#233** — whose only contacts are `linkedin_only` — is still
+offered `Title=`**`'Retired Coordinator of Public Relations ...'`**, a retired person's
+LinkedIn-claimed title, trailing truncation marker and all, bound for a production CRM
+field with no provenance marker. The brief's *other* claim was TRUE (verified in
+`fill_lead_blanks`: it GETs the record and PATCHes only blanks) **and completely
+irrelevant** — an empty `Title` is precisely the condition that makes it get written.
+**"It cannot overwrite" is not "it cannot be wrong."** Check the value being written, not
+just the write mode.
+
 Related: [[nudge-queue-state-20260809]], [[deploy-a718066-mobile-phone]],
-[[capability-nudges-sort-last]], [[coordinator-stop-is-stop]].
+[[capability-nudges-sort-last]], [[coordinator-stop-is-stop]],
+[[oneoff-scripts-need-load-dotenv]], [[deploy-d050c8e-priority-at]].

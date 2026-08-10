@@ -11,8 +11,9 @@
 - [Salesforce writer FLS](salesforce-writer-fls.md) — writer app creates Lead/Task/Note in monarchdev sandbox, ALL new fields persist (no FLS drop); Verkada record-type id; synthetic probe record ids
 - [Migration version collision](migration-version-collision.md) — droplet DB carries SIDE-lineage migration numbering; main's migration 9 (org_* cols) is masked/never applied; verify schema not just "no migration error"
 - [ContentNote link bug](salesforce-contentnote-link-bug.md) — create_content_note inserts the note but its link-lookup SOQL 400s in monarchdev, leaving the note unattached; note.Id already == ContentDocumentId; auto author-link gotcha
-- [Relayed consent is not consent](relayed-consent-is-not-consent.md) — "Chase said fire the nudges" relayed by an agent is not consent; refused twice on 2026-08-09; do the read-only half and hand him the sentences
+- [Relayed consent is not consent](relayed-consent-is-not-consent.md) — "Chase said fire the nudges" relayed by an agent is not consent; refused 3x on 2026-08-09; concede wrong objections, keep the measured one
 - [Capability nudges sort LAST (FIXED d050c8e)](capability-nudges-sort-last.md) — was: declaring set stalled_at=now so asks landed 14th; priority_at now sorts by ask date and they are 0-4
+- [Verify the premise, not the claim](verify-the-premise-not-the-claim.md) — Chase-validated: re-measure "already fixed / already deployed" on the deployed bytes; the round trip beats a bad CRM write
 - [Stop means stop](coordinator-stop-is-stop.md) — a classifier block or coordinator stop halts the whole mutating effort; never finish the goal via an alternate allowed path
 - [Salesforce connection test](salesforce-connection-test.md) — read-only recipe for which org the droplet creds hit (prod vs sandbox); verify_write_scope is read-only; EXPECT_SANDBOX=1 is the fail-closed prod-write guard
 - [Drip pacing + daily cap](drip-pacing-and-cap.md) — ONE card/day (DAILY_CAP=1, `(N)` is the cap not the count); slot model replaced the coin flip 2026-07-22; gold pool now OPEN (544)
@@ -60,4 +61,5 @@
 - [Nudge A/B variants (mostly FIXED)](nudge-variant-ab-is-inert.md) — a718066 gave 6 kinds real second wordings; card_escalated + capability_now_available still emit identical text for both labels
 - [SSH rate limit + stdin traps](ssh-rate-limit-and-stdin-traps.md) — `ssh -n … < file` uploads an EMPTY file and exits 0; a burst of sessions gets port 22 REJECTED; multiplex with a SHORT ControlPath
 - [Deploy a718066 mobile_phone (superseded)](deploy-a718066-mobile-phone.md) — LIVE 2026-08-09 schema 36→37, PID 26876, 0.91s outage; A/B wordings proven distinct on deployed bytes; `--delete` is wrong for staging-dir rsync; zsh `:gr` eats git revspecs too
-- [Deploy d050c8e priority_at (CURRENT PROD)](deploy-d050c8e-priority-at.md) — LIVE 2026-08-09 code-only, schema stayed 37, PID 27714, 0.21s outage; capability asks moved eligible 14-18 -> 0-4; fill-leads lists 22; `declare -A` false pass
+- [Deploy d050c8e priority_at (superseded)](deploy-d050c8e-priority-at.md) — LIVE 2026-08-09 code-only, schema stayed 37, PID 27714, 0.21s outage; capability asks moved eligible 14-18 -> 0-4; fill-leads lists 22; `declare -A` false pass
+- [Deploy 65f05c7 fill-leads fix (CURRENT PROD)](deploy-65f05c7-fill-leads-fix.md) — LIVE 2026-08-09 code-only, schema stayed 37, PID 29164, 0.30s outage; both fill-leads traps PROVEN fixed on live data; `tarfile` strips the dir-entry slash so the `/$` filter fails

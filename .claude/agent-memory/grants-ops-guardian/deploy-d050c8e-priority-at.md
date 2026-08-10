@@ -1,6 +1,6 @@
 ---
 name: deploy-d050c8e-priority-at
-description: Deploy a718066→d050c8e on 2026-08-09 (CURRENT PROD) — code-only, schema stayed 37, PID 27714, 0.21s outage; the priority_at fix MOVED capability asks from eligible 14-18 to 0-4, measured on real data
+description: Deploy a718066→d050c8e on 2026-08-09 (SUPERSEDED by 65f05c7) — code-only, schema stayed 37, PID 27714, 0.21s outage; the priority_at fix MOVED capability asks from eligible 14-18 to 0-4; its two fill-leads traps are now FIXED
 metadata:
   type: project
 ---
@@ -82,6 +82,22 @@ correctly excluded by the `LIKE '00Q%'` filter; 0 have a NULL `lead_id`).
 
 The dry run makes **zero Salesforce calls** — `SalesforceCampaignGateway()` is only
 constructed on the `--execute` branch — and uses `connect_readonly()`. DB stat identical.
+
+**BOTH TRAPS ARE NOW FIXED — shipped in `8976530`, deployed in `65f05c7`; see
+[[deploy-65f05c7-fill-leads-fix]] for the live proof.** The record below is the pre-fix
+measurement and the reason the fix exists; do not re-report it as current.
+
+**BOTH TRAPS RE-CONFIRMED STILL LIVE on 2026-08-09 evening** (a later brief asserted they
+were "both fixed in `d050c8e`" — they are not; they landed in `8976530`, which is AFTER
+`d050c8e`). `fill-leads --limit 5` preview: lead
+**#231 appears twice** (`00QVC00000Y3mFp2AJ` + `00QUZ00000byrvN2AQ`), and lead **#233**
+resolves `Title=`**`'Retired Coordinator of Public Relations ...'`** via
+`_best_linkedin_contact` → Francisco Mata, `linkedin_claimed` — a RETIRED person's
+LinkedIn title, truncation marker included, headed for a live CRM `Title`. #233's other
+candidate is titled `'LinkedIn Top Voice'`, which is a badge, not a job.
+`--limit 5` bounded 5 ROWS over **4 distinct leads**.
+`fill_lead_blanks` genuinely GETs the record and PATCHes only blank fields (source-verified)
+— which protects nothing here, because an **empty** `Title` is exactly what it fills.
 
 ## Postflight fingerprints
 

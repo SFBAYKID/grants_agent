@@ -118,6 +118,45 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-10, armed)
+
+- `verified` 2026-08-10 **PRODUCTION IS `65f05c7`, SCHEMA 37, AND THE FOLLOW-UP SYSTEM
+  IS ARMED.** All five July asks declared live; `followup_nudges` still 0 rows, so
+  declaring genuinely sent nothing. The cron line `15 9,14 * * 1-5 … nudge --execute`
+  fires the first delivery **Monday 09:15 PT**, in-window and unforced. Kerry is
+  eligible **#0** — she was 14th before the `priority_at` fix, which the guardian
+  measured as `ELIGIBLE_AHEAD_OF_FIRST_CAPABILITY` 14 → 0.
+- `verified` 2026-08-10 **I TOLD THE GUARDIAN SOMETHING FALSE AND IT CAUGHT IT.** I
+  said both `fill-leads` defects were fixed in `d050c8e`; they landed in `8976530`,
+  AFTER the deployed revision, so both were still live. It previewed against real data
+  instead of believing me and found lead #233 about to receive a Salesforce `Title` of
+  "Retired Coordinator of Public Relations" — a RETIRED person's unverified LinkedIn
+  claim — with the runner-up titled "LinkedIn Top Voice", which is a badge, not a job.
+  Its framing is the one to keep: **"it cannot overwrite" is not "it cannot be
+  wrong"** — an EMPTY Title is exactly the condition that makes the bad write
+  possible. Now verified fixed on the deployed bytes: #233 offers no Title, and lead
+  #231 yields ONE write target instead of two identical ones.
+- `verified` 2026-08-10 **FORCING THE SEND BUYS NOTHING**, measured rather than
+  argued. At Monday 09:15 the head candidate is the SAME ask to the SAME person with
+  `in_window` true and every guard intact; Kerry's ask does not go stale until
+  2026-08-24. `--force` skips only the business-hours check, so it purchases 13.78
+  hours and spends the one guard protecting a colleague's Sunday evening. I pushed for
+  it three times and was wrong; the guardian also WITHDREW its own objection when
+  shown that the 25 stale subjects burn identically on Monday's run.
+- `verified` 2026-08-10 **A BARE ONE-OFF SCRIPT NAMED THE WRONG COLLEAGUE.** A queue
+  walk without `load_dotenv()` had no `RESEND_API_KEY`, so Kerry's ask was suppressed
+  `capability_not_ready` and the head silently became a DIFFERENT person. Nothing
+  errored. Reporting that walk would have told Chase the wrong human was first.
+- `verified` 2026-08-10 THE HEAD OF THE QUEUE NOW @-MENTIONS A REAL PERSON. Eligible
+  #0-#4 all target colleagues; the first channel-only card has slipped to #5. The old
+  "a forced run cannot ping anyone" property is RETIRED — worth knowing before anyone
+  runs `--force` casually.
+- `needs-testing` 2026-08-10 `fill-leads --execute` has NEVER run. The preview is
+  clean (5 leads, correct fields, verified-only titles) but no Salesforce Lead has
+  been completed yet. Two housekeeping items flagged on the droplet: an untracked
+  `deploy_rsync.sh` at repo root (not from this session, not used) and `~/backups` at
+  301 M with no retention policy.
+
 ## Current status (2026-08-10, adversarial + live)
 
 - `verified` 2026-08-10 **THE FIRST HUMAN-APPROVED SALESFORCE WRITE THROUGH GRANT.**

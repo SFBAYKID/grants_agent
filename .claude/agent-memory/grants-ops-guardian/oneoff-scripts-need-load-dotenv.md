@@ -25,8 +25,30 @@ into honest-looking negatives instead of crashing early: the Salesforce lookup r
 lead from `_candidates` re-lookup for `STALE_HOURS = 24`. A missing-config run can therefore
 leave real state behind before it ever reaches its first hard failure.
 
+## IT ALSO SILENTLY REORDERS THE NUDGE QUEUE — 2026-08-09
+
+The worst instance yet, because nothing failed and the wrong answer looked authoritative.
+A bare-python walk of `nudges.candidates()` put **`U06RXJKRXSR` at eligible #0**, while
+`cli nudge --dry-run --force` (stable across three consecutive runs) named **Kerry
+`U01E908206M`**. Neither errored. The cause: `suppress_reason` calls
+`_capability_is_live('email_results')` → `resend_client.is_configured()`, which reads
+`RESEND_API_KEY`. Without `.env` that is **False**, so Kerry's ask is suppressed
+`capability_not_ready` and the head of the queue silently becomes a different colleague.
+With `load_dotenv()` the two agree exactly (ELIGIBLE 19, PERMANENT 25).
+
+So a bare one-off does not merely degrade — it can produce a **confident, plausible,
+wrong answer about which human a proactive message would reach**. Reporting that walk
+would have been fabrication of exactly the kind the Constitution forbids.
+
+Two mechanical traps hit while fixing it: `load_dotenv()` with no argument **raises
+`AssertionError`** under `python - <<'PY'` (its `find_dotenv` walks `frame.f_back`, which
+is None from stdin), and writing the script to `/tmp` puts it outside the repo so
+`import grant_watch` fails — write it inside `~/grants_agent/` and delete it after.
+
 **How to apply:** before running any one-off on the tenant, confirm it calls `load_dotenv()`
 itself, or supply the env without editing it (`set -a && . ./.env && set +a && .venv/bin/python …`).
+**Whenever a one-off's answer disagrees with the CLI's, believe the CLI and suspect the env
+first** — and never report a queue/eligibility result from a walk that did not load `.env`.
 Order the script's steps so the cheapest credential check fails FIRST — a script that
 validates `os.environ` up front cannot write a misleading `unavailable` snapshot. Related:
 [[firecrawl-paid-call-surface]], [[tenant-db-write-safety]].
