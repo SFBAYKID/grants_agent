@@ -525,3 +525,113 @@ def test_the_same_update_cannot_be_loaded_twice(tmp_path: Path) -> None:
     count = conn.execute("SELECT COUNT(*) FROM announcements").fetchone()[0]
     assert count == 1
     conn.close()
+
+
+def test_rep_email_is_not_redirected_by_the_prospect_test_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One switch for two different risks is how a true feature became a false claim.
+
+    `OUTREACH_TEST_EMAIL` exists to stop PROSPECT outreach reaching a school
+    administrator. It was also redirecting reps' own results, so on production mail
+    for Kerry, Nelly and Jocelyn went to the test mailbox while `email_results` told
+    them "Sent it to …". Clearing it to fix that would have un-protected Persequor at
+    the same time.
+    """
+    from grant_watch.notify import resend_client
+
+    monkeypatch.setenv("OUTREACH_TEST_EMAIL", "someone-else@example.test")
+    monkeypatch.delenv("RESEND_TEST_EMAIL", raising=False)
+    assert resend_client.recipient_for("U01DPJVURHU") == "chase@monarchconnected.com"
+
+    # Its own switch still works, for when a rep email genuinely needs redirecting.
+    monkeypatch.setenv("RESEND_TEST_EMAIL", "inbox@example.test")
+    assert resend_client.recipient_for("U01DPJVURHU") == "inbox@example.test"
+
+
+def test_reseeding_updates_the_apology_but_never_the_quote(tmp_path: Path) -> None:
+    """`record()` skips duplicates, so an edited correction never reached the DB.
+
+    Right for the ASK — what a colleague said is verbatim forever — and wrong for the
+    CORRECTION, which is Grant's own apology and gets reviewed and shortened. The
+    consequence was measured: Kerry's Monday message was still 236 characters, over
+    the limit, because the shortened wording lived only in the file.
+    """
+    from grant_watch import capability_asks
+
+    conn = _conn(tmp_path)
+    common = {
+        "slack_user": REP,
+        "audience": CHANNEL,
+        "thread_ts": THREAD,
+        "message_ts": "1784820389.857359",
+        "capability": "email_results",
+        "asked_at": "2026-07-23T15:26:29+00:00",
+        "recorded_by": "test",
+    }
+    capability_asks.record(
+        conn,
+        ask_text="Email those to kerry@…",
+        correction="A long-winded apology.",
+        **common,
+    )
+    capability_asks.record(
+        conn, ask_text="SOMETHING ELSE ENTIRELY", correction="Short one.", **common
+    )
+
+    row = conn.execute("SELECT ask_text, correction FROM capability_asks").fetchone()
+    assert row["correction"] == "Short one.", "the edited apology never landed"
+    assert row["ask_text"] == "Email those to kerry@…", (
+        "a colleague's own words were rewritten"
+    )
+    conn.close()
+
+
+def test_the_real_seeded_follow_ups_all_fit(tmp_path: Path) -> None:
+    """Against the ACTUAL shipped data, not a convenient fixture.
+
+    The length invariant was already tested — with a short correction written inside
+    the test. Production carried a longer one, so Kerry's real Monday message was 236
+    characters, over the limit, and every test was green. A test that supplies its own
+    happy input measures the test, not the product.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+
+    from grant_watch import capability_asks
+    from grant_watch.slack import nudges
+
+    conn = _conn(tmp_path)
+    shipped = json.loads(
+        Path("data/capability_asks/unmet_asks_20260809.json").read_text()
+    )
+    for ask in shipped["asks"]:
+        capability_asks.record(
+            conn,
+            slack_user=ask["slack_user"],
+            audience=ask["audience"],
+            thread_ts=ask["thread_ts"],
+            message_ts=ask["message_ts"],
+            ask_text=ask["ask_text"],
+            capability=ask["capability"],
+            asked_at=ask["asked_at"],
+            recorded_by="test",
+            correction=ask.get("correction", ""),
+        )
+    for capability in {ask["capability"] for ask in shipped["asks"]}:
+        capability_asks.mark_available(conn, capability)
+
+    found = [
+        c
+        for c in nudges.candidates(conn, _dt.now(_tz.utc))
+        if c.subject_kind == "capability_now_available"
+    ]
+    assert len(found) == len(shipped["asks"]), "not every seeded ask became reachable"
+    for candidate in found:
+        for variant in ("a", "b"):
+            text = nudges.build_message(candidate, variant)
+            assert len(text) <= 220, (
+                f"{candidate.target_slack} ({variant}) is {len(text)} chars: {text}"
+            )
+            assert "?" in text
+            assert candidate.target_slack in text, "the wrong person is mentioned"
+    conn.close()

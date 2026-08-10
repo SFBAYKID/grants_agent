@@ -76,7 +76,14 @@ def recipient_for(slack_user: object) -> str:
             "that Slack user is not on the reviewed Monarch roster, so there is no "
             "mailbox I am allowed to send to"
         )
-    override = _env("OUTREACH_TEST_EMAIL")
+    # ITS OWN VARIABLE, DELIBERATELY. `OUTREACH_TEST_EMAIL` exists to stop PROSPECT
+    # outreach reaching a school administrator during testing — a different risk with
+    # a different owner. Sharing it meant every rep's own results were silently
+    # redirected to the test mailbox: measured on production, mail for Kerry, Nelly
+    # and Jocelyn all landed elsewhere while `email_results` told them "Sent it to
+    # …". Clearing the shared variable to fix that would have un-protected Persequor
+    # at the same time, which is why one switch for two risks was the bug.
+    override = _env("RESEND_TEST_EMAIL")
     return override or resolved
 
 

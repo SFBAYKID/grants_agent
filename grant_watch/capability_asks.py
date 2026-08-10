@@ -102,6 +102,16 @@ def record(
         )
         conn.commit()
     except sqlite3.IntegrityError:
+        # The ask is already on file. Refresh only the CORRECTION — Grant's own
+        # apology, which is authored and gets edited — and never `ask_text`, which is
+        # what a colleague actually said and must stay verbatim forever.
+        if correction.strip():
+            conn.execute(
+                """UPDATE capability_asks SET correction=?
+                    WHERE audience=? AND message_ts=? AND capability=?""",
+                (correction.strip(), audience, message_ts, capability),
+            )
+            conn.commit()
         return None
     return int(cur.lastrowid)
 

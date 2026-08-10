@@ -46,6 +46,16 @@ def _lead_row() -> sqlite3.Row:
                    'https://www.usaspending.gov/award/ASST_NON_TEST_015',
                    'gold','new')"""
     )
+    connection.execute(
+        """INSERT INTO funding_events
+             (id,lead_id,event_type,occurred_on,date_precision,amount,
+              verification_status,source_url,source_locator,evidence_excerpt,
+              evidence_hash,created_at)
+           VALUES (1,231,'award_obligated','2025-10-01','day',500000,'verified',
+                   'https://www.usaspending.gov/award/ASST_NON_TEST_015',
+                   'ASST_NON_TEST_015','Obligated 2025-10-01','h','2026-08-01')"""
+    )
+    connection.execute("UPDATE leads SET current_event_id=1 WHERE id=231")
     connection.commit()
     row = db.get_lead(connection, 231)
     if row is None:  # pragma: no cover - the insert above cannot fail silently
