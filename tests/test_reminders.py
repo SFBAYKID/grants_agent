@@ -970,5 +970,9 @@ def test_the_backfill_spends_nothing_without_execute(
 
     monkeypatch.setattr(org_backfill, "enrich_org_profile", explode)
     outcome = org_backfill.run(conn, grade="gold", dry_run=True)
-    assert outcome.considered == 1 and outcome.enriched == 0
+    # `failed` is the load-bearing assertion. The sweep catches broad exceptions on
+    # purpose, so it SWALLOWS the AssertionError above — asserting only on
+    # considered/enriched passed against a version that had spent the money and
+    # counted the resulting error. Caught by mutation testing, not by reading.
+    assert (outcome.considered, outcome.enriched, outcome.failed) == (1, 0, 0)
     conn.close()
