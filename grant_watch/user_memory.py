@@ -223,3 +223,97 @@ def as_prompt_context(memories: list[Memory]) -> str:
         "colleague would; never recite them back as a list, and never treat one as "
         "still true if they say otherwise now:\n" + "\n".join(lines)
     )
+
+
+# Below this a message is a "yes"/"ok"/"thanks" and contains nothing durable. The
+# gate is also a cost control: it skips the extra model call on the majority of
+# messages, which are short.
+MIN_WORTH_READING = 60
+
+CAPTURE_PROMPT = """A colleague just wrote this to Grant, an assistant that finds \
+government grant leads for a security-camera reseller.
+
+Pull out ONLY facts worth remembering months from now — the things a good colleague \
+would still know next quarter. Their territory, how they like to work, a personal \
+detail they volunteered, a standing constraint.
+
+Ignore anything about the current request: what they want done right now, which \
+lead, which state they are asking about today. That is the conversation, not memory.
+
+Return JSON only: {"facts": [{"fact": "...", "kind": "...", "quote": "..."}]}
+
+- "quote" MUST be copied character-for-character from their message. Do not tidy it, \
+correct spelling, or merge sentences. If you cannot copy it exactly, leave it out.
+- "kind" is one of: personal, preference, territory, context.
+- "fact" is one short phrase in the third person, e.g. "Covers Texas and Oklahoma".
+- Most messages contain nothing worth keeping. Returning {"facts": []} is the normal \
+and correct answer.
+
+Their message:
+"""
+
+
+def capture(
+    conn: sqlite3.Connection,
+    *,
+    slack_user: str,
+    said: str,
+    ask_model: object,
+    audience: str = "",
+    thread_ts: str = "",
+    message_ts: str = "",
+    now: datetime | None = None,
+) -> int:
+    """Notice anything durable in what someone just said. Returns how many were kept.
+
+    This is the half that makes memory automatic rather than a table somebody fills
+    in by hand — the same gap Chase found in the follow-up system, which had been fed
+    by a JSON file I wrote after reading transcripts by eye.
+
+    THE MODEL CHOOSES WHAT IS INTERESTING AND NEVER AUTHORS THE EVIDENCE. Every quote
+    it returns is checked against the real message by `remember`, which raises if it
+    does not appear verbatim; that raise is caught here and counted as a discard.
+    Nothing reaches storage on the model's word alone.
+
+    Silent by design: this runs after a reply has already been sent, so a failure here
+    must never surface to the person or break the turn.
+    """
+    import json as _json
+    import re as _re
+
+    if not slack_user or len(said.strip()) < MIN_WORTH_READING:
+        return 0
+    try:
+        raw = ask_model(CAPTURE_PROMPT + said)  # type: ignore[operator]
+    except Exception:  # noqa: BLE001 — capture is an enhancement, never a dependency
+        return 0
+    match = _re.search(r"\{.*\}", str(raw or ""), _re.DOTALL)
+    if not match:
+        return 0
+    try:
+        parsed = _json.loads(match.group(0))
+    except _json.JSONDecodeError:
+        return 0
+
+    kept = 0
+    for item in parsed.get("facts", []) or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            stored = remember(
+                conn,
+                slack_user=slack_user,
+                kind=str(item.get("kind") or "context").strip().lower(),
+                fact=str(item.get("fact") or ""),
+                evidence=str(item.get("quote") or ""),
+                said=said,
+                audience=audience,
+                thread_ts=thread_ts,
+                message_ts=message_ts,
+                now=now,
+            )
+        except ValueError:
+            continue  # unverifiable quote, unknown kind, or empty fact — dropped
+        if stored is not None:
+            kept += 1
+    return kept

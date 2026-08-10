@@ -576,9 +576,11 @@ def _handle_drip_thread(
         db.record_engagement(conn, int(post["id"]), user, "question")
 
     failures = _deliver_artifacts(client, event["channel"], post["ts"], files)
-    return status.finalize(
+    outcome = status.finalize(
         _with_upload_warning(reply, failures), _crm_action_blocks(pending_actions)
     )
+    _remember_from(conn, user, text, event["channel"], str(post["ts"]))
+    return outcome
 
 
 def _request_outreach(
@@ -747,12 +749,58 @@ def _converse_general(
                     thread_ts or "",
                     request_token,
                 )
-        return status.finalize(
+        outcome = status.finalize(
             _with_upload_warning(reply, failures),
             _crm_action_blocks(out.get("pending_crm_actions", [])),
         )
+        _remember_from(db.connect(), user, text, channel, thread_ts or "")
+        return outcome
     except Exception:
         return status.finalize(_fallback_answer(text))
+
+
+def _remember_from(
+    conn: sqlite3.Connection, user: str, said: str, channel: str, thread_ts: str
+) -> None:
+    """Notice anything durable in what a colleague just said.
+
+    Called AFTER the reply is on screen, deliberately. Capture is worth roughly a
+    second on a long message and nothing on a short one, and none of that should sit
+    between a person and their answer. Silent and best-effort: if it fails, Grant is
+    forgetful, which is exactly what it was before.
+    """
+    try:
+        from anthropic import Anthropic
+
+        from .. import user_memory
+
+        client = Anthropic()
+
+        def ask_model(prompt: str) -> str:
+            """One cheap pass over a single message."""
+            reply = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=400,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return "".join(
+                b.text for b in reply.content if getattr(b, "type", "") == "text"
+            )
+
+        # The CALLER's connection, never a new one, and never closed here. Opening
+        # its own and closing it severed the handler's connection wherever
+        # `db.connect` hands back a shared handle — caught by two event-path tests
+        # that drive the real handler rather than the helper.
+        user_memory.capture(
+            conn,
+            slack_user=user,
+            said=said,
+            ask_model=ask_model,
+            audience=channel,
+            thread_ts=thread_ts,
+        )
+    except Exception:  # noqa: BLE001 — memory is an enhancement, never a dependency
+        return
 
 
 def _deliver_artifacts(

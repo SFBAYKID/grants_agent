@@ -253,3 +253,104 @@ def test_an_unknown_person_adds_no_block_at_all() -> None:
 
     assert conversation._recall_for("") == ""
     assert len(conversation._cached_system("")) == 1
+
+
+def test_capture_keeps_the_durable_fact_and_drops_the_invented_one(
+    conn: sqlite3.Connection,
+) -> None:
+    """The model picks what matters; it never gets to author the evidence.
+
+    One real quote, one plausible fabrication. Only the provable one survives, and
+    the check is the same `remember` guard rather than a second, weaker copy.
+    """
+    import json
+
+    payload = json.dumps(
+        {
+            "facts": [
+                {
+                    "fact": "Covers Texas and Oklahoma",
+                    "kind": "territory",
+                    "quote": "I only cover Texas and Oklahoma",
+                },
+                {
+                    "fact": "Prefers spreadsheets over Slack",
+                    "kind": "preference",
+                    "quote": "just send me a spreadsheet",
+                },
+            ]
+        }
+    )
+    kept = user_memory.capture(
+        conn, slack_user=KERRY, said=SAID, ask_model=lambda _p: payload, now=NOW
+    )
+    assert kept == 1
+    assert [m.fact for m in user_memory.recall(conn, KERRY, now=NOW)] == [
+        "Covers Texas and Oklahoma"
+    ]
+    conn.close()
+
+
+def test_a_short_message_costs_no_model_call(conn: sqlite3.Connection) -> None:
+    """Most messages are "ok, thanks". Paying for a capture pass on those is waste.
+
+    Chase raised the API spend directly, so the gate has to be BEFORE the call, not a
+    filter on its result.
+    """
+    calls: list[str] = []
+
+    def spy(prompt: str) -> str:
+        """Record that the model was consulted at all."""
+        calls.append(prompt)
+        return '{"facts": []}'
+
+    assert (
+        user_memory.capture(conn, slack_user=KERRY, said="ok thanks", ask_model=spy)
+        == 0
+    )
+    assert calls == [], "a trivial message triggered a paid model call"
+    conn.close()
+
+
+def test_capture_never_raises_on_junk(conn: sqlite3.Connection) -> None:
+    """It runs after the reply is already sent; a failure must stay invisible."""
+
+    def explode(_prompt: str) -> str:
+        """A model call that fails outright."""
+        raise RuntimeError("model down")
+
+    for bad in ('{"facts": [', "not json", "", None):
+        assert (
+            user_memory.capture(
+                conn, slack_user=KERRY, said=SAID, ask_model=lambda _p, b=bad: b
+            )
+            == 0
+        )
+    assert (
+        user_memory.capture(conn, slack_user=KERRY, said=SAID, ask_model=explode) == 0
+    )
+    conn.close()
+
+
+def test_capture_rejects_a_kind_it_does_not_recognise(conn: sqlite3.Connection) -> None:
+    """An invented category must not become a stored one."""
+    import json
+
+    payload = json.dumps(
+        {
+            "facts": [
+                {
+                    "fact": "Covers Texas",
+                    "kind": "salary_expectations",
+                    "quote": "I only cover Texas and Oklahoma",
+                }
+            ]
+        }
+    )
+    assert (
+        user_memory.capture(
+            conn, slack_user=KERRY, said=SAID, ask_model=lambda _p: payload, now=NOW
+        )
+        == 0
+    )
+    conn.close()
