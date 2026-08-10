@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "Authored, reviewed, and posted VERBATIM. Grant does not compose these.",
+    "",
+    "Every line must describe something a rep can actually do TODAY. Grant once told",
+    "a rep it would 'keep watching those states and flag new awards here' when no such",
+    "capability existed, and she never used it again — an announcement that oversells",
+    "is worse than none, because the first thing anyone tries is the thing promised.",
+    "",
+    "Plain words, no code, no internal names. `capabilities` lists which unmet asks",
+    "this update closes; declaring those is what makes Grant follow up personally with",
+    "the people who originally asked."
+  ],
+  "announcements": [
+    {
+      "slug": "2026-08-10-what-changed",
+      "audience": "C01DGT9D11D",
+      "capabilities": ["email_results", "campaign_load", "reminders", "contact_supplied"],
+      "body": "Morning all — a few things I can do now that I couldn't last week.\n\n*Campaigns.* I can build a Salesforce campaign and load leads onto it, and I'll always send you the link. Just say what you want on it.\n\n*Email.* I can email you a list of leads directly — no more copying them out of Slack.\n\n*Reminders.* Ask me to remind you about something and I'll actually come back to you. Say \"stop reminding me\" any time and I'll stop, no questions.\n\n*Contacts.* If you tell me someone's name or number, I'll save it and note that it came from you. And I can pull contacts from ZoomInfo, including who not to call.\n\n*Following up.* If something we started goes quiet, I'll check back in rather than letting it drop.\n\nIf you asked me for any of these before and I couldn't help — I'll come find you. Sorry for the wait."
+    }
+  ]
+}

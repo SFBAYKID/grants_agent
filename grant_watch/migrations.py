@@ -24,6 +24,7 @@ from .migrations_nudges import (
     migration_34_capability_asks,
     migration_35_capability_ask_correction,
     migration_36_nudge_message_variants,
+    migration_38_announcements,
 )
 from .migrations_zoominfo import (
     migration_29_vendor_contacts_and_credits,
@@ -714,6 +715,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         37,
         "a mobile number is its own fact, not 'the phone'",
         migration_37_mobile_phone,
+    ),
+    Migration(
+        38,
+        "a short plain-language update, posted once",
+        migration_38_announcements,
     ),
 )
 

@@ -178,3 +178,35 @@ def migration_36_nudge_message_variants(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_nudges_variant "
         "ON followup_nudges(subject_kind, variant, state)"
     )
+
+
+def migration_38_announcements(conn: sqlite3.Connection) -> None:
+    """A short, plain-language "here's what changed" post, and proof it went out once.
+
+    WHY A TABLE AND NOT A GENERATED SUMMARY. The obvious implementation is to
+    summarise recent commits, and it would be wrong twice: commit messages are
+    written for engineers, and a model summarising its own changelog will confidently
+    describe capabilities that do not work yet. This has happened here already —
+    Grant once told a rep it would "keep watching those states" when nothing of the
+    kind existed, and she never came back.
+
+    So an announcement is AUTHORED, reviewed, and stored as the exact words that will
+    be posted. Grant delivers it; it does not compose it. `posted_at` makes the
+    one-shot rule a fact about the row rather than a hope about the scheduler.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS announcements (
+              id INTEGER PRIMARY KEY,
+              slug TEXT NOT NULL UNIQUE,
+              audience TEXT NOT NULL,
+              body TEXT NOT NULL,
+              capabilities TEXT NOT NULL DEFAULT '',
+              created_at TIMESTAMP NOT NULL,
+              posted_at TIMESTAMP,
+              slack_ts TEXT
+            )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_announcements_pending "
+        "ON announcements(posted_at, audience)"
+    )

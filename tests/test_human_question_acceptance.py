@@ -136,10 +136,27 @@ def test_real_model_understands_human_question_families(
     reply = str(output["reply"])
     assert output["intent"] in case.allowed_intents
     if case.family == "lead-search" and not case.context:
-        assert "search_leads" not in calls
-        assert reply.lower().startswith("search plan:")
-        assert "running that now" not in reply.lower()
-        assert "reply yes" in reply.lower()
+        # AN ANCHORED ASK RUNS. THE PLAN-AND-CONFIRM FLOW WAS DELIBERATELY REMOVED.
+        #
+        # This block used to demand a "Search plan: … reply yes and I'll run it"
+        # preamble for every context-free search. That behaviour was replaced on
+        # 2026-07-18 (ce1295a, "run anchored asks, scope open ones, never dead-end")
+        # after Chase's feedback that being made to restate a request in Grant's
+        # format is the fastest way to lose a rep — and every one of these cases
+        # names a state, a programme, an amount or an org type, so every one is
+        # anchored.
+        #
+        # The tests were never updated, so they demanded the removed flow for three
+        # weeks and the suite sat at ~22 red. A test asserting a behaviour the
+        # product deliberately dropped is worse than no test: it reads as a
+        # regression every run, so people stop reading it.
+        assert "search_leads" in calls, (
+            "an anchored ask must run, not interrogate the rep"
+        )
+        assert not reply.lower().startswith("search plan:"), (
+            "the plan-and-confirm preamble was removed on 2026-07-18"
+        )
+        assert "reply yes" not in reply.lower()
     for tool_name in case.expected_tools:
         assert tool_name in calls
         assert calls.count(tool_name) == 1

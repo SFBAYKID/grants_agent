@@ -13,6 +13,7 @@ Usage (from the repo root, venv active):
     python -m grant_watch.cli remind [--dry-run | --execute]
     python -m grant_watch.cli capability <name> [--execute]
     python -m grant_watch.cli nudge-report
+    python -m grant_watch.cli announce [--load FILE] [--execute]
     python -m grant_watch.cli fill-leads [--limit N] [--execute]
     python -m grant_watch.cli enrich-orgs [--grade gold] [--limit N] [--execute]
     python -m grant_watch.cli salesforce-followups [--dry-run] [--smoke]
@@ -568,6 +569,28 @@ def cmd_fill_leads(limit: int, dry_run: bool) -> int:
     return 1 if outcome.failed else 0
 
 
+def cmd_announce(load_path: str, dry_run: bool) -> int:
+    """Post the next authored update to the channel, exactly once.
+
+    `--load` records authored announcements from a reviewed file; posting is a
+    separate act, so seeding can never message a channel by accident.
+    """
+    from slack_sdk import WebClient
+
+    from . import announce
+
+    if load_path:
+        conn = db.connect()
+        added = announce.load(conn, Path(load_path))
+        print(f"announce: {added} new announcement(s) recorded")
+        return 0
+    client = None if dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    conn = db.connect_readonly() if dry_run else db.connect()
+    outcome = announce.run(client, conn, dry_run=dry_run)
+    print(f"announce: {outcome}")
+    return 1 if "failed" in outcome else 0
+
+
 def cmd_nudge_report() -> int:
     """Show which follow-up wording gets answered more often."""
     from .slack import nudge_variants
@@ -737,6 +760,15 @@ def main(argv: list[str] | None = None) -> int:
         help="actually mark it available; without it this only previews",
     )
     sub.add_parser("nudge-report", help="reply rate per follow-up wording")
+    p_ann = sub.add_parser(
+        "announce", help="post the next authored 'what changed' update, once"
+    )
+    p_ann.add_argument(
+        "--load", default="", help="record authored announcements from a JSON file"
+    )
+    p_ann.add_argument(
+        "--execute", action="store_true", help="actually post; default previews"
+    )
     p_fill = sub.add_parser(
         "fill-leads",
         help="fill EMPTY fields on the Salesforce Leads Grant put on a campaign",
@@ -826,6 +858,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_enrich_orgs(args.grade, args.limit, dry_run=not args.execute)
     if args.command == "fill-leads":
         return cmd_fill_leads(args.limit, dry_run=not args.execute)
+    if args.command == "announce":
+        return cmd_announce(str(args.load or ""), dry_run=not args.execute)
     if args.command == "nudge-report":
         return cmd_nudge_report()
     if args.command == "capability-seed":

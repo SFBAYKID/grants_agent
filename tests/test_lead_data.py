@@ -11,7 +11,9 @@ most durable claim Grant makes about a person.
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -442,4 +444,84 @@ def test_the_org_phone_fallback_also_respects_a_failed_lookup(tmp_path: Path) ->
     conn.commit()
     lead = db.get_lead(conn, lead_id)
     assert choose_phone(contact, lead) == ("(916) 319-0800", "org_general")
+    conn.close()
+
+
+# --- The morning update -----------------------------------------------------------
+
+
+def _announcement(conn: sqlite3.Connection, slug: str = "u1") -> None:
+    """Record one authored update."""
+    from grant_watch import announce
+
+    path = Path(tempfile.mkdtemp()) / "a.json"
+    path.write_text(
+        json.dumps(
+            {
+                "announcements": [
+                    {
+                        "slug": slug,
+                        "audience": CHANNEL,
+                        "body": "Morning all — here's what changed.",
+                        "capabilities": ["email_results"],
+                    }
+                ]
+            }
+        )
+    )
+    announce.load(conn, path)
+
+
+def test_an_update_is_posted_once_and_only_once(tmp_path: Path) -> None:
+    """A repeated "here's what's new" teaches a channel to ignore Grant.
+
+    `posted_at` is written BEFORE the Slack call, so a crash between the two loses
+    an update rather than duplicating one — the same reserve-before-send ordering as
+    every other proactive sender here.
+    """
+    from grant_watch import announce
+
+    posts: list[str] = []
+
+    class _Client:
+        """Records what would reach Slack."""
+
+        def chat_postMessage(self, **kwargs: object) -> dict[str, object]:
+            """Capture one post."""
+            posts.append(str(kwargs.get("text", "")))
+            return {"ok": True, "ts": "9.1"}
+
+    conn = _conn(tmp_path)
+    _announcement(conn)
+
+    assert "announced" in announce.run(_Client(), conn, dry_run=False)
+    assert len(posts) == 1
+    assert "here's what changed" in posts[0]
+
+    assert announce.run(_Client(), conn, dry_run=False) == "skip: nothing to announce"
+    assert len(posts) == 1, "the same update was posted twice"
+    conn.close()
+
+
+def test_seeding_an_update_never_posts_it(tmp_path: Path) -> None:
+    """Recording and announcing are separate acts, so a seed cannot message anyone."""
+    from grant_watch import announce
+
+    conn = _conn(tmp_path)
+    _announcement(conn)
+    item = announce.pending(conn)
+    assert item is not None and item.slug == "u1"
+    assert announce.run(None, conn, dry_run=True).startswith("[dry-run]")
+    assert announce.pending(conn) is not None, "a dry run consumed the update"
+    conn.close()
+
+
+def test_the_same_update_cannot_be_loaded_twice(tmp_path: Path) -> None:
+    """Re-running a seed must not queue a second copy of the same post."""
+
+    conn = _conn(tmp_path)
+    _announcement(conn)
+    _announcement(conn)
+    count = conn.execute("SELECT COUNT(*) FROM announcements").fetchone()[0]
+    assert count == 1
     conn.close()
