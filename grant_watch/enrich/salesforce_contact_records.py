@@ -160,11 +160,52 @@ def _grant_headline(row: sqlite3.Row) -> str:
 
 
 def _contact_evidence(contact: sqlite3.Row) -> str:
-    """Describe where the contact came from, honestly per evidence kind."""
-    source = str(contact["source_url"] or "unknown source")
-    if str(contact["contact_status"]) == "linkedin_only":
-        return f"Evidence is a LinkedIn profile (ownership not verified): {source}."
+    """Describe where the contact came from, honestly per evidence kind.
+
+    THIS SENTENCE IS WRITTEN INTO A SALESFORCE RECORD and outlives every thread, so
+    it is the most durable claim Grant makes about a person. It used to special-case
+    only `linkedin_only` and fall through to "Contact verified verbatim on {source}"
+    for everything else — which meant a ZoomInfo contact, with no source URL at all,
+    was filed as "Contact verified verbatim on unknown source". A claim of
+    verification, citing nothing, about data nobody checked.
+
+    Every evidence class now says what it actually is. `contact_status` is preferred
+    over `provenance` only where the two can disagree on legacy rows; both are read
+    so a row written before the provenance split is still described correctly.
+    """
+    source = str(contact["source_url"] or "").strip()
+    status = str(contact["contact_status"] or "")
+    provenance = _row_value(contact, "provenance")
+
+    if status == "linkedin_only" or provenance == "linkedin_claimed":
+        where = source or "a LinkedIn profile"
+        return f"Evidence is a LinkedIn profile (ownership not verified): {where}."
+    if status == "vendor_licensed" or provenance == "vendor_licensed":
+        return (
+            "Supplied by ZoomInfo from licensed data. Grant did NOT verify this "
+            "against the organization's own site."
+        )
+    if status == "human_asserted" or provenance == "human_asserted":
+        who = _row_value(contact, "asserted_by_slack_user")
+        when = _row_value(contact, "asserted_at")[:10]
+        attribution = f" by {who}" if who else ""
+        dated = f" on {when}" if when else ""
+        return (
+            f"Supplied{attribution}{dated} by a Monarch rep in Slack, and recorded "
+            "as their statement. Not independently verified by Grant."
+        )
+    if not source:
+        # Never claim verification without being able to say against what.
+        return "Contact recorded by Grant; no source page was captured."
     return f"Contact verified verbatim on {source}."
+
+
+def _row_value(row: sqlite3.Row, column: str) -> str:
+    """Read an optional column that may be absent on a legacy row."""
+    try:
+        return str(row[column] or "")
+    except (IndexError, KeyError):
+        return ""
 
 
 # The Lead record type Grant's leads belong to (resolved by DeveloperName at
