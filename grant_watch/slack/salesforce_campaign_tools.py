@@ -21,9 +21,13 @@ CAMPAIGN_CREATE_TOOL_SCHEMA: dict[str, Any] = {
     "name": "salesforce_campaign_create_preview",
     "description": (
         "Prepare, but do not execute, one immutable Salesforce Campaign preview. "
-        "Call exactly once only after the user explicitly supplied or confirmed the "
-        "name, Type, Status, Active value, and either both dates or no dates. A name "
-        "alone is never sufficient; never infer defaults."
+        "Call exactly once. You need a name, Type, Status, Active, and either both "
+        "dates or no dates. If the rep gave only a name, PROPOSE the usual settings "
+        "in ONE short line and build the preview with them — Type Other, Status "
+        "Planned, Active yes, no dates — rather than interrogating them field by "
+        "field. Every value you propose is printed in the preview and nothing is "
+        "written until a human clicks Confirm, so the proposal is visible and the "
+        "click is the approval. Never invent a NAME."
     ),
     "input_schema": {
         "type": "object",
