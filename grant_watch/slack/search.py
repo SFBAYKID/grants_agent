@@ -344,6 +344,11 @@ def _export_kind(raw: str | bool) -> str:
 NO_MATCH_PREFIX = "No grants matched those filters."
 
 
+# How many leads an EMAIL may list. Generous enough that a real result set arrives
+# intact, bounded because an unbounded body is its own kind of failure.
+EMAIL_ROW_CAP = 100
+
+
 def search_leads(
     state: str = "",
     org_type: str = "",
@@ -876,8 +881,16 @@ def search_leads(
             artifact,
         )
 
+    # A SECOND CAP, behind the one `for_chat` already fixed. Fifteen rows is right in
+    # Slack — a longer list buries the channel and nobody scrolls it. In an email the
+    # whole reason someone asked is to have the list, and Kerry received "15 of 81"
+    # after asking twice to be sent all of them.
+    #
+    # It is still bounded, because an unbounded body is its own failure: a thousand
+    # leads is not a useful email either, and Resend has size limits.
+    display_cap = 15 if for_chat else EMAIL_ROW_CAP
     lines: list[str] = []
-    for index, row in enumerate(rows[:15]):
+    for index, row in enumerate(rows[:display_cap]):
         amount = f"${row['amount']:,.0f}" if row["amount"] is not None else "$ n/a"
         role = _entity_role_for_row(row)
         contact = (
@@ -904,12 +917,21 @@ def search_leads(
             f"{row['program'] or row['lead_grade']} · {amount} · "
             f"{_window_label(row)}{enrollment}{contact}{source_link}"
         )
-    shown = min(len(rows), 15)
-    more = (
-        f"\nShowing {shown} of {total} matches — refine the search or export all results."
-        if total > shown
-        else ""
-    ) + enrich_note
+    shown = min(len(rows), display_cap)
+    # The TRAILER needed the destination too. "refine the search or export all
+    # results" is an instruction nobody can act on from an inbox — the same class of
+    # leak `for_chat` was built to stop, one string further down.
+    if total > shown:
+        trailer = (
+            f"\nShowing {shown} of {total} matches — refine the search or export "
+            "all results."
+            if for_chat
+            else f"\nShowing the first {shown} of {total} matches. "
+            "Ask me in Slack for the rest or for a spreadsheet."
+        )
+    else:
+        trailer = ""
+    more = trailer + enrich_note
     inference_note = (
         "\nOrganization type is conservatively inferred from the entity name "
         "when the source does not provide a structured type."

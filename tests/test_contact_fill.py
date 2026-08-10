@@ -466,3 +466,34 @@ def test_a_foreign_org_skip_does_not_make_fill_leads_exit_nonzero(
     outcome = salesforce_lead_fill.run(conn, _Client(), limit=10, dry_run=False)
     assert outcome.failed == 0, "a routine skip was counted as an error"
     conn.close()
+
+
+def test_an_email_carries_the_whole_list_and_a_chat_message_does_not() -> None:
+    """Two caps, one destination question.
+
+    Kerry asked twice to be SENT the list and received "15 of 81". Fifteen rows is
+    right in Slack, where a longer list buries the channel and nobody scrolls it, and
+    wrong in an inbox, where having the list is the entire reason she asked.
+    """
+    from grant_watch.slack import search
+
+    assert search.EMAIL_ROW_CAP > 15
+    src = Path(search.__file__).read_text()
+    assert "display_cap = 15 if for_chat else EMAIL_ROW_CAP" in src, (
+        "the row cap stopped depending on the destination"
+    )
+
+
+def test_the_trailer_does_not_tell_an_email_reader_to_refine_their_search() -> None:
+    """The same leak as the spreadsheet offer, one string further down.
+
+    "refine the search or export all results" is an instruction nobody can act on
+    from an inbox — and it arrived in the one thread where being handed an action
+    instead of an answer is the whole complaint.
+    """
+    from grant_watch.slack import search
+
+    src = Path(search.__file__).read_text()
+    trailer_block = src[src.index("if total > shown:") : src.index("more = trailer")]
+    assert "if for_chat" in trailer_block, "the trailer ignores its destination"
+    assert "Ask me in Slack for the rest" in trailer_block
