@@ -635,3 +635,44 @@ def test_the_real_seeded_follow_ups_all_fit(tmp_path: Path) -> None:
             assert "?" in text
             assert candidate.target_slack in text, "the wrong person is mentioned"
     conn.close()
+
+
+# --- Prompt caching ---------------------------------------------------------------
+
+
+def test_the_fixed_prefix_is_marked_for_caching() -> None:
+    """~11,000 identical tokens were re-sent and re-billed on every single call.
+
+    The system prompt (~6,200 tokens) and tool schemas (~5,000) are byte-identical
+    every time, on every message from every rep, and on every turn of the tool loop.
+    A cache breakpoint on each means the rest of the window reads them instead of
+    reprocessing them.
+
+    The marker caches everything UP TO it, so ONE marker on the final tool covers the
+    whole array — marking each tool individually would waste breakpoints.
+    """
+    from grant_watch.slack import conversation
+
+    system = conversation._cached_system()
+    assert len(system) == 1
+    assert system[0]["cache_control"] == {"type": "ephemeral"}
+    assert system[0]["text"] == conversation._SYSTEM
+
+    schemas = conversation._cached_tools()
+    marked = [s for s in schemas if "cache_control" in s]
+    assert len(marked) == 1, "a breakpoint per tool wastes the budget"
+    assert marked[0] is schemas[-1], "the marker must sit on the LAST tool"
+
+
+def test_caching_never_mutates_the_shared_schema_list() -> None:
+    """`tools.TOOL_SCHEMAS` is a module-level list shared with every other caller.
+
+    Marking it in place would let an unrelated import order decide whether a
+    cache_control key exists on the object other code and other tests read.
+    """
+    from grant_watch.slack import conversation, tools
+
+    conversation._cached_tools()
+    conversation._cached_tools()
+    assert not any("cache_control" in schema for schema in tools.TOOL_SCHEMAS)
+    assert len(conversation._cached_tools()) == len(tools.TOOL_SCHEMAS)

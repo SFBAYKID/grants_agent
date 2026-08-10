@@ -183,6 +183,44 @@ def _sentence_end(text: str) -> int:
     return best
 
 
+# THE SAME 11,000 TOKENS ON EVERY SINGLE CALL. The system prompt is ~6,200 tokens and
+# the tool schemas ~5,000, and both are byte-identical every time — re-sent and
+# re-billed on every message from every rep, and on every turn of the tool loop.
+#
+# Anthropic caches a prefix marked with `cache_control`, so the second and subsequent
+# calls within the cache window read it instead of reprocessing it. The marker goes on
+# the LAST element of each cacheable block, because it caches everything UP TO that
+# point: one marker on the final tool covers the whole tool array.
+#
+# Ordering matters and is fixed by the API: tools are prefixed before system, which is
+# prefixed before messages. Anything appended AFTER the marker is uncached, which is
+# why the per-turn conversation goes in `messages` and never into `system`.
+
+
+def _cached_system() -> list[dict[str, Any]]:
+    """The system prompt as a single cacheable block."""
+    return [
+        {
+            "type": "text",
+            "text": _SYSTEM,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
+def _cached_tools() -> list[dict[str, Any]]:
+    """The tool schemas with the cache breakpoint on the last one.
+
+    A COPY is built rather than mutating `tools.TOOL_SCHEMAS`, which is a module-level
+    list shared with every other caller and with the tests. Marking it in place would
+    make an unrelated import order decide whether a cache_control key exists.
+    """
+    schemas = [dict(schema) for schema in tools.TOOL_SCHEMAS]
+    if schemas:
+        schemas[-1] = {**schemas[-1], "cache_control": {"type": "ephemeral"}}
+    return schemas
+
+
 def _parse_final(raw: str) -> dict[str, Any]:
     """Extract the {intent, reply} JSON; degrade to an honest fallback, never to a
     wrong action."""
@@ -617,8 +655,8 @@ def respond(
             msg = client.messages.create(
                 model=model,
                 max_tokens=3000,
-                system=_SYSTEM,
-                tools=tools.TOOL_SCHEMAS,
+                system=_cached_system(),
+                tools=_cached_tools(),
                 messages=messages,
             )
             if msg.stop_reason != "tool_use":
@@ -755,7 +793,7 @@ def respond(
             }
         )
         msg = client.messages.create(
-            model=model, max_tokens=3000, system=_SYSTEM, messages=messages
+            model=model, max_tokens=3000, system=_cached_system(), messages=messages
         )
         raw = "".join(b.text for b in msg.content if b.type == "text")
         if raw.strip():
