@@ -34,7 +34,8 @@
 
 ## Current production state
 
-- [9ef2ad7 — CURRENT PROD, deployed + verified](prod-state-9ef2ad7-verified.md) — 2026-08-11, schema 39, PID 71366, 0.18s outage; 7 capability slugs still have NO wording (all unarmed); the branch name is not `main` and that is fine
+- [02377ae — CURRENT PROD, deployed + verified](prod-state-02377ae-verified.md) — 2026-08-11, schema 39, PID 71882, 0.19s outage; wording guard now bites on the DELIVERY path, proven True→False with a control; the 3 armed asks named
+- [9ef2ad7 (superseded by 02377ae)](prod-state-9ef2ad7-verified.md) — schema 39, PID 71366, 0.18s outage; the branch name is not `main` and that is fine — check `merge-base`, not the name
 - [f7cff1d (superseded by 9ef2ad7)](prod-state-f7cff1d-verified.md) — still the reference for the manifest-diff noise floor (6 always-benign paths); 2 nudges REALLY delivered; nudge cron's 3 log vocabularies
 - [Deploy 43e6f1d (superseded by f7cff1d)](deploy-c7d0d54-accusation-guards.md) — schema 39, PID 67672; four false-accusation paths closed + opt-out routing stall; manager IS in the channel so the membership guard suppresses nothing
 - [Deploy 885ad88 lead-ranked cards](fair-order-does-not-rescue-fresh-cards.md) — LIVE 2026-08-10, schema 39, PID 66465; North Palos 26→29→**0**; rotation was not the error, the within-kind sort key was; `award-brief` sorts unranked

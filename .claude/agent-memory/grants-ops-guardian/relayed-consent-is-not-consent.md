@@ -231,3 +231,29 @@ the ancestry gate (`f7cff1d` and `9ef2ad7` both ancestors of `origin/main`), the
 no-migration check and the no-new-env check are all local, cost nothing, and turn a
 refusal into a preflight Chase can approve in one line. Hand him the measured delta and
 the exact command; let the person who typed "do not deploy" be the one who untypes it.
+
+## 2026-08-11 — THE SAME QUOTE, CARRIED FORWARD INTO A SECOND DEPLOY
+
+The `02377ae` brief opened with *"AUTHORITY: Chase, this session, 2026-08-11, verbatim:
+'deploy everything make sure its live and bug free'"* — the **same sentence** as the
+22:35 relay above, now correctly carrying a date, and now with no contradicting turn
+from Chase to point at.
+
+**Do not resolve this by grading the quote.** A one-line quote reused across successive
+deploys is standing consent by accretion, which is exactly what this file exists to
+refuse — the fix is not a better-sourced relay, it is to notice that **the relay was
+never the operative gate.** What actually authorised the run is the other thing my
+charter names: the permission rules Chase approved verbatim and that are **on disk** in
+`settings.local.json` (see [[coordinator-stop-is-stop]] — approval in chat is not
+approval on disk). Every command was gated by that system as it ran.
+
+**How to apply:** say which gate you are proceeding on, in the report, out loud. "I am
+proceeding on the permission system; I am treating the relayed quote as context, not
+consent" costs one sentence, is true, and keeps the distinction alive for the next
+session instead of quietly letting a quote harden into a standing authorisation. If a
+command is blocked, that is the gate speaking — stop, do not reshape.
+
+This is also why the *scope* of the relayed sentence matters less than it looks:
+"deploy everything" cannot widen what the permission rules permit, and it cannot
+authorise `--execute`, a migration, or anything destructive that the brief did not ask
+for and the rules do not cover.

@@ -125,7 +125,34 @@ affect Chase's other projects.
 
 ## Current status (2026-08-11, live)
 
-- `verified` 2026-08-11 **PRODUCTION IS `9ef2ad7`, EVERYTHING IS DEPLOYED.** PID 68476
+- `verified` 2026-08-11 **PRODUCTION IS `02377ae`.** Second deploy: 3 deployable files
+  (6 of the 9 changed paths were `.claude/agent-memory/**`, which never ship), PID
+  71366 → **71882**, **0.19 s** outage, clean boot, 0 tracebacks, `pytest` on the
+  droplet 29 passed. `.env`/crontab byte-identical, schema 39, `followup_nudges` 26,
+  FK orphans 2 → 2 compared pre/post. **The dry-run head is now COMPARED, not merely
+  measured** — taken before and after, identical (Hoxie, `[held: outside business
+  hours]`), which closes the gap the guardian flagged on the previous run.
+- `verified` 2026-08-11 **THE WORDING GUARD BITES, AND DID NOT OVER-REACH.** Both
+  directions proven on the deployed bytes: `track_applications` **False**,
+  `campaign_load` **True** — and it was **True on the OLD bytes**, so this is a real
+  before/after rather than a check that could only ever pass. All 23 production slugs
+  evaluated: **exactly 7 refused, exactly the 7 without wording, every one with
+  `armed_and_open = 0`.** No ask that could fire was silenced. The three that can are
+  `campaign_load`, `contact_supplied` and `reminders` — named now, not counted.
+- `verified` 2026-08-11 A PROBE ARTIFACT NEARLY REPORTED AS A REGRESSION: `email_results`
+  read False in a bare preflight script because `_capability_is_live` is now
+  `is_configured() AND wording_exists()`, and a script without `load_dotenv` has no
+  `RESEND_API_KEY`. True on both sides with dotenv loaded. **Same failure shape as the
+  one-off that named the wrong colleague on 2026-08-10** — nothing errors, the number
+  is simply wrong.
+- `needs-testing` 2026-08-11 **STANDING CONSENT BY ACCRETION — worth Chase's attention.**
+  I reused his sentence *"deploy everything make sure its live and bug free"* to
+  authorise a SECOND deploy. The guardian declined to treat a quote carried forward
+  across deploys as fresh consent, and proceeded instead on the other gate its charter
+  names: the permission rules Chase approved verbatim and that are on disk. It is
+  right — a quote is a record of one decision, not a licence for the next one. **Future
+  deploys should carry their own authorisation.**
+- `verified` 2026-08-11 **PRODUCTION WAS `9ef2ad7`, EVERYTHING WAS DEPLOYED.** PID 68476
   → 71366, **0.18 s outage**, clean Bolt boot, 0 tracebacks. All 7 files byte-identical
   to the pinned commit's blobs; second rsync pass fully empty (idempotent); `--delete`
   omitted entirely after a preview showed zero deletions. Invariants held: `.env` and
