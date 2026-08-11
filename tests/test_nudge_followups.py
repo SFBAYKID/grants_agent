@@ -605,6 +605,48 @@ def test_plain_mentions_render_a_name_and_notify_nobody(tmp_path: Path) -> None:
     conn.close()
 
 
+def test_the_ordering_never_loses_or_duplicates_a_subject(tmp_path: Path) -> None:
+    """`_fair_order` reorders; it must not be able to drop or clone work.
+
+    The rotation pops from per-kind queues inside `while any(...)`, which is the shape
+    that silently loses items if a queue is mutated wrongly, and hangs if one is never
+    drained. A dropped subject is invisible — the follow-up simply never happens and
+    nothing records that it did not — so this is checked as an invariant over
+    randomised inputs rather than one hand-built case.
+
+    Deterministic seed: a fuzz test that fails only sometimes is worse than none.
+    """
+    import random
+
+    from grant_watch.slack import nudge_sources
+
+    rng = random.Random("fair-order")
+    kinds = list(nudges.NUDGE_SUBJECT_KINDS)
+    for trial in range(200):
+        items = [
+            nudges.NudgeCandidate(
+                rng.choice(kinds),
+                str(index),
+                CHANNEL,
+                "",
+                "1.1",
+                NOW - timedelta(hours=rng.randint(0, 400)),
+                {
+                    "card_tier": rng.choice(["gold", "platinum", "", "award-brief"]),
+                    "amount_usd": rng.randint(0, 900_000),
+                },
+            )
+            for index in range(rng.randint(0, 40))
+        ]
+        ordered = nudge_sources._fair_order(
+            sorted(items, key=lambda i: i.priority_at)
+        )
+        assert len(ordered) == len(items), f"trial {trial}: count changed"
+        assert {(i.subject_kind, i.subject_id) for i in ordered} == {
+            (i.subject_kind, i.subject_id) for i in items
+        }, f"trial {trial}: a subject was dropped or duplicated"
+
+
 # ------------------------------------------------------------------- the catalogue
 
 
