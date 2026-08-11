@@ -22,109 +22,21 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
 
-from grant_watch import db, reminders
-from grant_watch.slack import nudge_promises, nudge_silence, nudges
+from grant_watch import reminders
+from grant_watch.slack import nudge_promises, nudges
 
-CHANNEL = "C0TEST"
-MANAGER = "U01DFJWQQJ3"  # Anthony, the one roster row carrying `manager: true`
-JOCELYN = "U06RXJKRXSR"
-BRETT = "U08C1NBH875"
-# A Wednesday inside the business window (11:00 Pacific).
-NOW = datetime(2026, 8, 12, 18, 0, tzinfo=timezone.utc)
-
-
-class _Slack:
-    """Slack stand-in whose thread contents the test controls.
-
-    `human_reply_at` is the ts of a human message in the thread; None means the thread
-    holds only Grant's own post, which is verified silence. `explode` makes every read
-    fail, which is how an outage or a missing scope actually presents.
-    """
-
-    def __init__(
-        self, *, human_reply_at: str | None = None, explode: bool = False
-    ) -> None:
-        """Record posts and serve a thread the test has described."""
-        self.posts: list[dict[str, Any]] = []
-        self.human_reply_at = human_reply_at
-        self.explode = explode
-
-    def chat_postMessage(self, **kwargs: Any) -> dict[str, Any]:
-        """Record one post."""
-        self.posts.append(kwargs)
-        return {"ok": True, "ts": "999.1"}
-
-    def conversations_replies(self, **kwargs: Any) -> dict[str, Any]:
-        """The thread, or a failure if this test is exercising an unreadable one."""
-        if self.explode:
-            raise RuntimeError("slack is down")
-        messages: list[dict[str, Any]] = [{"bot_id": "B1", "ts": "700.1"}]
-        if self.human_reply_at:
-            messages.append({"user": JOCELYN, "ts": self.human_reply_at})
-        return {"ok": True, "messages": messages}
-
-    def chat_getPermalink(self, **kwargs: Any) -> dict[str, Any]:
-        """A working link, so the escalation can point at what it is about."""
-        return {"ok": True, "permalink": "https://slack.example/archives/C0TEST/p1"}
-
-
-def _conn(tmp_path: Path) -> sqlite3.Connection:
-    """A migrated database of its own."""
-    return db.connect(tmp_path / "followups.db")
-
-
-def _delivered_offer(conn: sqlite3.Connection, when: datetime) -> str:
-    """A `capability_now_available` follow-up that was delivered to Jocelyn.
-
-    This is the exact shape of the real row behind Chase's case: Grant posted "I can
-    build that campaign now — want me to?" into the channel thread where she had asked
-    on 23 July, and the ledger recorded the delivery.
-    """
-    conn.execute(
-        """INSERT INTO followup_nudges
-             (id,subject_kind,subject_id,audience,target_slack,anchor_ts,
-              policy_version,due_at,drop_after,state,observed_json,delivery_key,
-              reserved_at,delivered_at,slack_ts,variant)
-           VALUES ('offer-1','capability_now_available','5',?,?,'700.1',
-                   'nudge-v1',?,?,'delivered',
-                   '{"capability":"campaign_load","ask_text":"I want them both, the gold and the silver leads please","asked_on":"23 July"}',
-                   'k1',?,?,'800.5','b')""",
-        (
-            CHANNEL,
-            JOCELYN,
-            when.isoformat(),
-            (when + timedelta(days=14)).isoformat(),
-            when.isoformat(),
-            when.isoformat(),
-        ),
-    )
-    conn.commit()
-    return "offer-1"
-
-
-def _card(
-    conn: sqlite3.Connection,
-    when: datetime,
-    *,
-    kind: str = "rich_award",
-    style: str = "gold",
-    lead_id: int = 900,
-) -> None:
-    """A posted lead card of one tier, which nobody engaged with."""
-    conn.execute(
-        "INSERT INTO leads (id,source,source_item_id,entity_name,state,detail_url,"
-        "amount,status) VALUES (?,'usaspending:svpp',?,"
-        "'NORTH PALOS SCHOOL DISTRICT 117','IL','u',500000,'new')",
-        (lead_id, f"x{lead_id}"),
-    )
-    conn.execute(
-        "INSERT INTO posts (id,channel,ts,posted_at,lead_id,kind,style) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (lead_id, CHANNEL, f"8{lead_id}.1", when.isoformat(), lead_id, kind, style),
-    )
-    conn.commit()
+from nudge_helpers import (
+    BRETT,
+    CHANNEL,
+    JOCELYN,
+    MANAGER,
+    NOW,
+    _card,
+    _conn,
+    _delivered_offer,
+    _Slack,
+)
 
 
 # --------------------------------------------------------------- the unanswered offer
@@ -693,39 +605,159 @@ def test_the_message_catalog_does_not_drift_from_the_code() -> None:
         )
 
 
-# --------------------------------------------------------------- the silence reader
+# ------------------------------------------------------------------ caps and queueing
 
 
-def test_a_bot_message_is_not_a_reply() -> None:
-    """Three signals, because each has burned something already.
+def _tagged_card(
+    conn: sqlite3.Connection, channel: str, lead_id: int, when: datetime
+) -> None:
+    """A card in one channel whose snapshot tags Brett."""
+    conn.execute(
+        "INSERT INTO leads (id,source,source_item_id,entity_name,state,detail_url,"
+        "amount,status,lead_grade) VALUES (?,'usaspending:svpp',?,'DISTRICT','PA',"
+        "'u',500000,'new','gold')",
+        (lead_id, f"x{lead_id}"),
+    )
+    conn.execute(
+        "INSERT INTO posts (id,channel,ts,posted_at,lead_id,kind,style) "
+        "VALUES (?,?,?,?,?,'rich_award','gold')",
+        (lead_id, channel, f"9{lead_id}.1", when.isoformat(), lead_id),
+    )
+    conn.commit()
 
-    An EMPTY `bot_id` must not count as a bot — the watchdog shipped exactly that,
-    where a falsy id matched every message in the channel and read Grant's own silence
-    as an answer.
+
+def test_one_person_gets_one_nudge_a_day_across_every_channel(
+    tmp_path: Path,
+) -> None:
+    """The per-person cap is about a PHONE, and a phone has no idea which channel.
+
+    Counting it per audience — as the daily cap correctly does — let production, the
+    playground and a DM audience each spend their own allowance on the same human.
+    Review reproduced four messages in one day with one rep nudged twice, which means
+    a rehearsal in the playground could double a colleague's real notifications.
     """
+    conn = _conn(tmp_path)
+    _tagged_card(conn, CHANNEL, 900, NOW - timedelta(days=2))
+    _tagged_card(conn, "C0OTHER", 901, NOW - timedelta(days=2))
+    client = _Slack()
 
-    class _Thread:
-        def conversations_replies(self, **kwargs: Any) -> dict[str, Any]:
-            """A thread of messages that were all posted by software, not people."""
-            return {
-                "messages": [
-                    {"bot_id": "B1", "user": "U1", "ts": "900.1"},
-                    {"app_id": "A1", "user": "U2", "ts": "900.2"},
-                    {"subtype": "channel_join", "user": "U3", "ts": "900.3"},
-                    {"bot_id": "", "user": "", "ts": "900.4"},
-                ]
-            }
+    assert "nudged card_unengaged" in nudges.run(
+        client, conn, force=True, now=NOW, audience=CHANNEL
+    )
+    second = nudges.run(client, conn, force=True, now=NOW, audience="C0OTHER")
 
-    assert nudge_silence.replied_since(_Thread(), "C1", "800.1", "800.5") is False
+    delivered_to_brett = conn.execute(
+        "SELECT COUNT(*) FROM followup_nudges "
+        "WHERE target_slack=? AND state='delivered'",
+        (BRETT,),
+    ).fetchone()[0]
+    assert delivered_to_brett == 1, f"{BRETT} was nudged twice in one day: {second}"
+    conn.close()
 
 
-def test_an_unreadable_thread_says_so_rather_than_guessing() -> None:
-    """None is a real answer here, and it is the one that prevents a false claim."""
+def test_a_blocked_candidate_does_not_starve_the_one_behind_it(
+    tmp_path: Path,
+) -> None:
+    """A pacing reason about ONE person must not stop every other subject.
 
-    class _Broken:
-        def conversations_replies(self, **kwargs: Any) -> dict[str, Any]:
-            """Fail the way a rate-limited or out-of-scope read actually fails."""
-            raise RuntimeError("ratelimited")
+    `run` returned on any pacing reason, so a head-of-queue card for a rep who was
+    asleep blocked everything behind it on every tick — and told the operator that
+    rep's clock was why nothing happened, while other subjects were fully sendable.
+    """
+    conn = _conn(tmp_path)
+    # Kerry is America/New_York; at 16:00 Pacific it is 19:00 for her, outside her
+    # hours, while the shared window is still open.
+    late = datetime(2026, 8, 12, 23, 0, tzinfo=timezone.utc)
+    # WA is Kerry's territory and `usaspending:svpp` is a verified-state source, so
+    # the card tags her exactly as production would, with no snapshot needed.
+    conn.execute(
+        "INSERT INTO leads (id,source,source_item_id,entity_name,state,detail_url,"
+        "amount,status,lead_grade) VALUES (900,'usaspending:svpp','k','DISTRICT',"
+        "'WA','u',500000,'new','gold')"
+    )
+    conn.execute(
+        "INSERT INTO posts (id,channel,ts,posted_at,lead_id,kind,style) "
+        "VALUES (900,?,'900.1',?,900,'rich_award','gold')",
+        (CHANNEL, (late - timedelta(days=5)).isoformat()),
+    )
+    # And a completely unrelated, fully sendable subject behind it.
+    conn.execute(
+        """INSERT INTO crm_actions
+             (id,action_type,workspace,channel,thread_ts,requested_by,state,
+              payload_json,payload_hash,nonce_hash,expires_at,created_at,updated_at)
+           VALUES ('act-9','add_campaign_members','T1',?,'100.1',?,'ready',
+                   '{}','h','n',?,?,?)""",
+        (
+            CHANNEL,
+            BRETT,
+            (late - timedelta(hours=6)).isoformat(),
+            (late - timedelta(hours=6)).isoformat(),
+            (late - timedelta(hours=6)).isoformat(),
+        ),
+    )
+    conn.commit()
 
-    assert nudge_silence.replied_since(_Broken(), "C1", "800.1", "800.5") is None
-    assert nudge_silence.replied_since(None, "C1", "800.1", "800.5") is None
+    outcome = nudges.run(_Slack(), conn, force=True, now=late)
+    assert "crm_preview_expired" in outcome, (
+        f"one sleeping rep starved the whole queue: {outcome}"
+    )
+    conn.close()
+
+
+def test_the_batch_nudge_counts_only_the_orgs_that_are_stuck(
+    tmp_path: Path,
+) -> None:
+    """"Still stuck on 14 orgs" when 13 of 14 matched is a figure with no source.
+
+    `blocked_resolution` is set when ANY item is unresolved, so reporting the batch
+    size asserted something its own data contradicts — to a named rep, which is rule 1.
+    """
+    conn = _conn(tmp_path)
+    stalled = (NOW - timedelta(days=3)).isoformat()
+    # Before the items, which carry a foreign key to it.
+    conn.execute(
+        "INSERT INTO leads (id,source,source_item_id,entity_name,state,detail_url,"
+        "amount,status) VALUES (900,'s','x','ORG','CA','u',1,'new')"
+    )
+    conn.execute(
+        """INSERT INTO crm_campaign_batches
+             (id,workspace,channel,thread_ts,requested_by,query_version,state,
+              completion_mode,expected_source_row_count,stored_source_row_count,
+              source_row_count,unique_org_count,selection_hash,writer_org_id,
+              writer_is_sandbox,writer_host,created_at,updated_at)
+           VALUES ('b1','T1',?,'500.1',?,'v1','blocked_resolution','all',
+                   14,14,14,14,'h','org',0,'host',?,?)""",
+        (CHANNEL, BRETT, stalled, stalled),
+    )
+    conn.execute(
+        """INSERT INTO crm_campaign_batch_targets
+             (id,batch_id,campaign_id,campaign_name,campaign_link,state_code,
+              grades_json,expected_source_row_count,stored_source_row_count,
+              source_row_count,unique_org_count,selection_hash,approved_org_count,
+              approved_selection_hash,completion_mode,state,created_at,updated_at)
+           VALUES ('t1','b1','c1','CA','link','CA','["gold"]',14,14,14,14,'h',0,'',
+                   'all','blocked_resolution',?,?)""",
+        (stalled, stalled),
+    )
+    for index in range(14):
+        conn.execute(
+            """INSERT INTO crm_campaign_batch_items
+                 (id,target_id,canonical_entity_key,representative_lead_id,
+                  source_lead_ids_json,grades_json,entity_name,state_code,item_hash,
+                  resolution_state)
+               VALUES (?,'t1',?,900,'[900]','["gold"]','ORG','CA','h',?)""",
+            (
+                f"i{index}",
+                f"key{index}",
+                "existing_record" if index < 13 else "ambiguous",
+            ),
+        )
+    conn.commit()
+
+    candidate = next(
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "crm_batch_blocked"
+    )
+    text = nudges.build_message(candidate, "a", conn=conn)
+    assert "1 org I can't match" in text, text
+    assert "14" not in text
+    conn.close()

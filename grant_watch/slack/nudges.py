@@ -36,6 +36,7 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 from .. import capability_asks, db, reminders, roster
+from ..presentation import defuse_mentions
 from ..migrations_nudges import NUDGE_SUBJECT_KINDS
 from . import nudge_silence, nudge_variants
 from .drip import PT as BUSINESS_TZ
@@ -118,6 +119,22 @@ SILENCE_CLAIM_KINDS = frozenset({"card_escalated", "offer_unanswered"})
 # Kinds that tell one person about another person's silence. An escalation may never
 # be the FIRST thing that happens: the rep whose lead it is gets asked first.
 ESCALATION_KINDS = frozenset({"card_escalated"})
+
+# Pacing reasons that are facts about ONE CANDIDATE rather than about the day.
+#
+# THE DIFFERENCE DECIDES WHETHER THE QUEUE MOVES. `run` used to return on any pacing
+# reason, so a single head-of-queue candidate whose recipient was asleep — or who had
+# already had their one message — stopped every other subject behind it, on every tick,
+# for as long as it stayed at the head. Reproduced by review: a card for a rep at 22:00
+# their time blocked a fully sendable preview follow-up two places back, and reported
+# the rep's clock as the reason nothing happened.
+PERSON_ALREADY_NUDGED = "already nudged this person today"
+_PERSON_HOURS_SUFFIX = "'s working hours"
+
+
+def blocks_only_this_candidate(reason: str) -> bool:
+    """Whether this pacing reason lets the NEXT subject be tried on the same tick."""
+    return reason == PERSON_ALREADY_NUDGED or reason.endswith(_PERSON_HOURS_SUFFIX)
 
 # The wordings a follow-up may use. Two, deliberately: enough to learn which reads
 # better, few enough that every one is written and reviewed by a person rather than
@@ -225,6 +242,21 @@ def suppress_reason(
         waiting = _escalation_is_premature(conn, candidate)
         if waiting:
             return waiting
+    if candidate.subject_kind in CHANNEL_POST_KINDS:
+        # THE ADDRESSEE HAS TO BE ABLE TO SEE IT. A mention notifies nobody who is not
+        # in the conversation, so posting an escalation into a channel the manager has
+        # not joined pays the whole social cost of naming a colleague publicly, buys
+        # nothing, and reports success. Transient: an unknown answer suppresses without
+        # recording, so an API hiccup cannot retire the subject.
+        visible = nudge_silence.is_member(
+            client, candidate.audience, candidate.target_slack
+        )
+        if visible is not True:
+            return (
+                "manager cannot see that channel"
+                if visible is False
+                else "could not verify channel membership"
+            )
     if candidate.subject_kind in SILENCE_CLAIM_KINDS:
         return _silence_reason(client, candidate)
     return ""
@@ -272,13 +304,20 @@ def _silence_reason(client: WebClient | None, candidate: NudgeCandidate) -> str:
     # For an unanswered offer the clock starts at the OFFER, not the thread's start:
     # everything before it is the conversation the offer was made in.
     since = str(candidate.observed.get("offer_ts") or "") or anchor
+    # THE TWO KINDS ASK DIFFERENT QUESTIONS, and using one for both was a real defect.
+    # An unanswered offer claims "JOCELYN has not come back to me", so only Jocelyn can
+    # answer it — reading any human reply as hers meant an uninvolved colleague asking
+    # something unrelated in the thread permanently retired her follow-up, silently.
+    # A card claims nobody picked it up, so anyone speaking settles it; there the
+    # manager's own passing comment is the one that must not count.
+    silent = str(candidate.observed.get("silent_slack") or "")
     replied = nudge_silence.replied_since(
         client,
         channel,
         anchor,
         since,
-        # The manager's own passing comment must not be read as the REP answering.
-        exclude_user=candidate.target_slack,
+        only_user=silent,
+        exclude_user="" if silent else candidate.target_slack,
     )
     if replied is True:
         return "answered_since_offer"
@@ -368,20 +407,47 @@ def daily_slots(local_date: date, audience: str) -> tuple[time, ...]:
     return tuple(slots)
 
 
+def _day_start(now: datetime) -> str:
+    """Midnight Pacific for the day `now` falls in, as a UTC ISO string."""
+    local = now.astimezone(BUSINESS_TZ)
+    start = datetime.combine(local.date(), time.min, BUSINESS_TZ)
+    return start.astimezone(timezone.utc).isoformat()
+
+
 def _sent_today(
     conn: sqlite3.Connection, audience: str, now: datetime
 ) -> list[sqlite3.Row]:
     """Nudges already reserved or delivered in this Pacific day for one channel."""
-    local = now.astimezone(BUSINESS_TZ)
-    start = datetime.combine(local.date(), time.min, BUSINESS_TZ)
     return list(
         conn.execute(
             """SELECT target_slack,reserved_at FROM followup_nudges
                 WHERE audience=? AND state IN ('reserved','delivered','unknown')
                   AND reserved_at>=?""",
-            (audience, start.astimezone(timezone.utc).isoformat()),
+            (audience, _day_start(now)),
         )
     )
+
+
+def _sent_to_person_today(
+    conn: sqlite3.Connection, target_slack: str, now: datetime
+) -> int:
+    """How many nudges this PERSON has had today, across every channel.
+
+    THE PER-PERSON CAP IS ABOUT A PHONE, AND A PHONE DOES NOT KNOW WHICH CHANNEL A
+    NOTIFICATION CAME FROM. Counting it per audience — as the daily cap correctly does
+    — meant a rehearsal in the playground could double a colleague's real
+    notifications for the day, and production plus playground plus a DM audience could
+    put four messages out where the constants promise two. Reproduced by review.
+    """
+    if not target_slack:
+        return 0
+    row = conn.execute(
+        """SELECT COUNT(*) FROM followup_nudges
+            WHERE target_slack=? AND state IN ('reserved','delivered','unknown')
+              AND reserved_at>=?""",
+        (target_slack, _day_start(now)),
+    ).fetchone()
+    return int(row[0] or 0)
 
 
 def pacing_reason(
@@ -431,14 +497,13 @@ def pacing_reason(
             return f"holding for today's {due_at:%H:%M} PT slot"
     if len(today) >= MAX_NUDGES_PER_DAY:
         return f"daily nudge cap reached ({MAX_NUDGES_PER_DAY})"
+    # Counted across EVERY channel, not just this one — see `_sent_to_person_today`.
     if (
         candidate.target_slack
-        and sum(
-            1 for row in today if str(row["target_slack"]) == candidate.target_slack
-        )
+        and _sent_to_person_today(conn, candidate.target_slack, now)
         >= MAX_NUDGES_PER_TARGET_PER_DAY
     ):
-        return "already nudged this person today"
+        return PERSON_ALREADY_NUDGED
     latest = max(
         (_parse(row["reserved_at"]) for row in today if _parse(row["reserved_at"])),
         default=None,
@@ -509,17 +574,40 @@ def run(
                 _record(conn, candidate, current, state="suppressed", reason=reason)
             continue
         waiting = pacing_reason(conn, candidate, current, force=force)
-        if waiting:
+        # A DRY RUN REPORTS THE HOLD INSTEAD OF OBEYING IT. Pacing was evaluated before
+        # the preview returned, so `nudge --dry-run` outside business hours — or once
+        # the day's cap was spent — printed only "skip: outside business hours" and
+        # showed nothing at all. That is the same false all-clear this command was
+        # already fixed once for: an operator asking what Grant is about to say about a
+        # colleague was shown an empty answer that looked like "nothing pending".
+        if waiting and not dry_run:
+            # A reason about ONE candidate must not stop the ones behind it.
+            if blocks_only_this_candidate(waiting):
+                continue
             return f"skip: {waiting}"
         variant = nudge_variants.choose(conn, candidate.subject_kind, VARIANTS)
         text = build_message(candidate, variant, conn=conn)
         if plain_mentions:
             text = _plainify_mentions(text)
         if dry_run:
-            return f"[dry-run] would nudge {candidate.subject_kind} ({variant}): {text}"
-        nudge_id = _record(
-            conn, candidate, current, state="reserved", reason=None, variant=variant
-        )
+            held = f" [held: {waiting}]" if waiting else ""
+            return (
+                f"[dry-run] would nudge {candidate.subject_kind} "
+                f"({variant}){held}: {text}"
+            )
+        try:
+            nudge_id = _record(
+                conn, candidate, current, state="reserved", reason=None, variant=variant
+            )
+        except sqlite3.IntegrityError:
+            # ANOTHER RUN GOT THERE FIRST. The cron carries no `flock`, and
+            # `suppress_reason` now makes network calls, so two ticks can overlap for
+            # seconds — long enough for both to pass the one-shot check above and race
+            # to reserve the same subject. The UNIQUE key is what actually prevents the
+            # duplicate message, and it does; before this the loser died with an
+            # uncaught IntegrityError, so the job crashed rather than moving on. The
+            # subject is taken, so skip to the next one.
+            continue
         if client is None:
             return "skip: no Slack client configured"
         try:
@@ -587,7 +675,7 @@ def run(
 
 
 def _plainify_mentions(text: str) -> str:
-    """Render `<@U…>` as "at Name" so a rehearsal notifies nobody.
+    """Strip every notifying form from a message so a rehearsal wakes nobody.
 
     "at Anthony", NOT "@Anthony" — Chase's exact instruction, and he is right to
     insist on the stricter form. A bare `@Anthony` in message text does not create a
@@ -596,23 +684,17 @@ def _plainify_mentions(text: str) -> str:
     great many people have their own first name in that list. The whole point of a
     rehearsal is that no colleague's phone lights up, and "at" costs nothing.
 
-    Resolved through the roster, so an id with no approved row renders as a neutral
-    "a teammate" rather than leaking a raw Slack id into a message a human reads.
+    IT USED TO NEUTRALISE ONE FORM OUT OF SIX. `<@U…>` was handled; the legacy piped
+    `<@U…|name>`, `<!here>`, `<!channel>`, `<!everyone>` and `<!subteam^S…>` all
+    survived verbatim — so a rehearsal could notify an entire channel, which is a
+    louder failure than the ping it was written to prevent. `defuse_mentions` now does
+    the removing (one implementation, shared with the live path), and this only takes
+    the remaining "@" off so nothing can reach a highlight word either.
     """
     names = {item.slack_id: item.name for item in roster.identities()}
-
-    def replace(match: re.Match[str]) -> str:
-        """One mention, as words that cannot notify anybody."""
-        name = names.get(match.group(1))
-        return f"at {name}" if name else "a teammate"
-
-    return _MENTION_RE.sub(replace, text)
-
-
-# A Slack mention as it appears on the wire. Slack ids are `U…` for people and `W…`
-# for Enterprise Grid users; channel mentions (`<#C…>`) are deliberately not matched,
-# because they notify nobody and rewriting them would only break a link.
-_MENTION_RE = re.compile(r"<@([UW][A-Z0-9]+)>")
+    inert = defuse_mentions(text, names.get)
+    # `defuse_mentions` leaves readable "@Name" / "@here"; a rehearsal drops the "@".
+    return re.sub(r"@([A-Za-z][\w.\-]*)", lambda m: f"at {m.group(1)}", inert)
 
 # What the link at the bottom of an escalation points AT, in the reader's terms. A
 # raw permalink is 130 characters of query string under a one-line message, which

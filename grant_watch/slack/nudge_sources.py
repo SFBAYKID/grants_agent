@@ -159,10 +159,20 @@ def _abandoned_previews(conn: sqlite3.Connection) -> list[NudgeCandidate]:
 
 def _stalled_batches(conn: sqlite3.Connection) -> list[NudgeCandidate]:
     """Campaign batches that stopped for a human and never restarted."""
+    # COUNT WHAT IS ACTUALLY STUCK, not the size of the batch. `blocked_resolution` is
+    # set when ANY item is unresolved (`salesforce_campaign_batch.py:647`), so reporting
+    # `unique_org_count` told a rep "still stuck on 14 orgs I can't match" about the
+    # real California batch where 13 of 14 matched and exactly one was ambiguous. An
+    # item is resolved iff `resolution_state='existing_record'`.
     rows = conn.execute(
-        """SELECT id,channel,thread_ts,requested_by,state,updated_at,unique_org_count
-             FROM crm_campaign_batches
-            WHERE state IN ('blocked_resolution','partial_by_user')"""
+        """SELECT b.id,b.channel,b.thread_ts,b.requested_by,b.state,b.updated_at,
+                  b.unique_org_count,
+                  (SELECT COUNT(*) FROM crm_campaign_batch_items i
+                     JOIN crm_campaign_batch_targets t ON t.id=i.target_id
+                    WHERE t.batch_id=b.id
+                      AND i.resolution_state<>'existing_record') AS unresolved
+             FROM crm_campaign_batches b
+            WHERE b.state IN ('blocked_resolution','partial_by_user')"""
     ).fetchall()
     out: list[NudgeCandidate] = []
     for row in rows:
@@ -182,10 +192,24 @@ def _stalled_batches(conn: sqlite3.Connection) -> list[NudgeCandidate]:
                 target_slack=str(row["requested_by"] or ""),
                 anchor_ts=str(row["thread_ts"] or ""),
                 stalled_at=stalled,
-                observed={"organizations": int(row["unique_org_count"] or 0)},
+                observed=_batch_observed(row),
             )
         )
     return out
+
+
+def _batch_observed(row: sqlite3.Row) -> dict[str, Any]:
+    """Batch facts for the wording, with the stuck count only when it is known.
+
+    A legacy batch with no item rows yields 0, which is not evidence that nothing is
+    stuck — so `unresolved` is omitted entirely and the wording falls back to the
+    total, exactly as it did before. Absent means unknown; it must not mean zero.
+    """
+    observed: dict[str, Any] = {"organizations": int(row["unique_org_count"] or 0)}
+    unresolved = int(row["unresolved"] or 0)
+    if unresolved:
+        observed["unresolved"] = unresolved
+    return observed
 
 
 def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandidate]:
@@ -264,8 +288,12 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
         # actionable because the message now carries a concrete next step Grant has
         # verified it can actually perform — see `nudge_promises.best_offer`.
         #
-        # The manager is never escalated to about their OWN card.
-        if manager and manager != tagged:
+        # The manager is never escalated to about their OWN card, and an escalation is
+        # only ever posted to a real channel — `C…`. The offer path grew that guard in
+        # d4c934d and this one did not; a card whose `posts.channel` was ever a DM
+        # would otherwise put a message about a colleague into a private conversation
+        # the manager is not in.
+        if manager and manager != tagged and str(row["channel"] or "").startswith("C"):
             out.append(
                 NudgeCandidate(
                     subject_kind="card_escalated",

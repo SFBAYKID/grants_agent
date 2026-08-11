@@ -123,6 +123,66 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-11, the accusation guard was not one)
+
+- `verified` 2026-08-11 **"GRANT CAN NEVER POST A FALSE ACCUSATION ABOUT A COLLEAGUE"
+  WAS FALSE, FOUR WAYS.** The architectural-critic did not describe them, it
+  REPRODUCED them as real posted messages. Three fire on completely ordinary replies:
+  (1) `_is_human` rejected any message carrying a `subtype`, and Slack attaches one to
+  `file_share` — which is what "here's the list you asked for" is, the exact reply
+  being chased — plus `thread_broadcast` (the "also send to channel" tick) and
+  `me_message`; (2) a thread over ONE PAGE reported VERIFIED SILENCE, because
+  `has_more` was ignored and Slack returns replies OLDEST FIRST, so the truncated tail
+  is precisely where an answer would be (threshold: 201 messages); (3) a REACTION was
+  invisible, though `grant.py` calls one "the cheapest +1 there is" — and the payload
+  already carried it; (4) the wording claimed Grant's whole inbox ("hasn't come back
+  to me") while the check reads ONE thread. All fixed, each mutation-proven.
+  **The root cause is one sentence: the check inherited the listener's blind spot
+  instead of correcting for it**, which defeated the entire point of asking Slack
+  rather than the receipts table.
+- `verified` 2026-08-11 **A STRANGER'S COMMENT WAS RETIRING SOMEBODY ELSE'S
+  FOLLOW-UP.** `replied_since` answered "did any human speak" and that was used for a
+  claim about ONE person, so Nelly asking something unrelated in Jocelyn's thread
+  permanently suppressed it as `answered_since_offer`. Erring safe on the accusation
+  while silently destroying the feature's purpose. The two kinds now ask different
+  questions — `only_user` for an offer, `exclude_user` for a card.
+- `verified` 2026-08-11 **A QUOTED ASK COULD PING THE WHOLE CHANNEL.** Grant repeats a
+  colleague's words verbatim weeks later and Slack stores mentions as MARKUP, so a
+  quoted `<!here>` broadcasts and a quoted `<@U…>` pings a third party — **the one
+  named person with no opt-out protection**, because nothing knows they are inside a
+  quotation. `presentation.defuse_mentions` renders all six notifying forms as the
+  words the reader originally saw, which is the faithful rendering as well as the
+  inert one. `_plainify_mentions` had neutralised ONE form of six, so a rehearsal
+  could have notified an entire channel — louder than the ping it exists to prevent.
+- `verified` 2026-08-11 **THE CAPS DID NOT HOLD THE NUMBERS THEY CLAIMED.** Both were
+  computed per AUDIENCE, so production + playground + a DM audience each spent their
+  own allowance on the same human: four messages in a day, one rep nudged twice. The
+  per-person cap is about a PHONE, and a phone does not know which channel a
+  notification came from — it is now counted across every audience. A rehearsal in the
+  playground can no longer double a colleague's real notifications.
+- `verified` 2026-08-11 **ONE SLEEPING REP STARVED THE WHOLE QUEUE.** `run` returned
+  on any pacing reason, but two are facts about ONE candidate rather than about the
+  day. A card for a rep at 22:00 their time blocked a fully sendable subject two places
+  back, on every tick, and reported that rep's clock as the reason nothing happened.
+- `verified` 2026-08-11 ALSO FIXED: an escalation is no longer sent into a channel the
+  MANAGER IS NOT IN (full social cost of naming a colleague, audience of nobody,
+  reported as success); `crm_batch_blocked` said "still stuck on 14 orgs" for the real
+  California batch where 13 of 14 matched and ONE was ambiguous — a figure its own data
+  contradicts; the unlocked cron could race itself into an uncaught `IntegrityError`
+  and kill the job; and `card_escalated` gained the `C…`-only guard the offer path got
+  in d4c934d.
+- `verified` 2026-08-11 **THE TEST DOUBLES WERE THE ROOT CAUSE, and that is the durable
+  lesson.** Both Slack stubs hand-built payloads, so they could only ever emit what the
+  code already looked for — no `subtype`, no `has_more`, no `reactions`. Same failure
+  class as the `COUNT()` bug already in this file, where "the unit test MASKED it by
+  stubbing thirteen empty dicts". The doubles now model paging, subtypes, reactions and
+  channel membership, and every fix above fails a test when reverted.
+- `verified` 2026-08-11 The critic also confirmed what holds: `_fair_order` is correct
+  (3,000 random inputs, no losses or duplicates, terminates), `_escalation_is_premature`
+  is genuinely structural, `PERMANENT_SUPPRESSIONS` has no transient leak, `--audience`
+  really is above `_record`, and copying the outreach predicate into `nudge_promises`
+  rather than inventing one is the right shape.
+
 ## Current status (2026-08-10, following up on silence)
 
 - `verified` 2026-08-10 **AN OFFER NOBODY ANSWERED WAS INDISTINGUISHABLE FROM A

@@ -18,8 +18,16 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING
 
-from ..presentation import display_entity_name
+from .. import roster
+from ..presentation import defuse_mentions, display_entity_name
 from . import nudge_promises
+
+
+def _roster_name(slack_id: str) -> str:
+    """A colleague's display name for an id, or "" when they are not on the roster."""
+    return next(
+        (item.name for item in roster.identities() if item.slack_id == slack_id), ""
+    )
 
 if TYPE_CHECKING:  # import-only: the runtime path needs attribute access, not the class
     from .nudge_sources import NudgeCandidate
@@ -50,14 +58,22 @@ def build_message(
             "Want me to rebuild it? 🙂"
         )
     if candidate.subject_kind == "crm_batch_blocked":
-        count = candidate.observed.get("organizations", 0)
+        # THE UNMATCHED COUNT, NOT THE BATCH SIZE. This said "still stuck on 14 orgs
+        # I can't match" for the real California batch where 13 of 14 matched and one
+        # was ambiguous — a figure asserted to a named rep that its own source
+        # contradicts, which is rule 1. `unresolved` falls back to the total only for
+        # rows written before it was recorded, where nothing better is known.
+        count = candidate.observed.get(
+            "unresolved", candidate.observed.get("organizations", 0)
+        )
+        plural = "org" if count == 1 else "orgs"
         if variant == "b":
             return (
-                f"{mention}{count} orgs here need your call on how to match them. "
+                f"{mention}{count} {plural} here need your call on how to match them. "
                 "Add the rest without them?"
             )
         return (
-            f"{mention}still stuck on {count} orgs I can't match. "
+            f"{mention}still stuck on {count} {plural} I can't match. "
             "Want me to add the rest?"
         )
     if candidate.subject_kind == "crm_batch_partial":
@@ -151,7 +167,15 @@ def _capability_message(
     words rather than summarise them — a paraphrase that drifts is Grant putting
     words in someone's mouth, which is rule 1 pointed at a person instead of a lead.
     """
-    asked = str(candidate.observed.get("ask_text") or "").strip()
+    # THE QUOTE IS STORED VERBATIM FROM SLACK, so it holds mentions in wire format and
+    # re-sending it re-fires them: a quoted `<!here>` pings the whole channel, and a
+    # quoted `<@U…>` pings a third party who is not the subject of this follow-up and
+    # whose opt-out nothing consults, because no code path knows they are named inside
+    # a quotation. Defusing renders them as the words the reader originally saw, which
+    # is the faithful rendering as well as the inert one.
+    asked = defuse_mentions(
+        str(candidate.observed.get("ask_text") or "").strip(), _roster_name
+    )
     when = str(candidate.observed.get("asked_on") or "").strip()
     offer = _CAPABILITY_OFFER.get(
         str(candidate.observed.get("capability") or ""),
@@ -305,7 +329,11 @@ def _unanswered_offer_message(
     since = f" — they first asked back on {when}" if when else ""
     if variant == "b":
         about = _OFFER_ABOUT.get(capability, "something I offered to do")
-        return f"{mention}{who} hasn't come back to me about {about}. Any ideas?"
+        # "IN THAT THREAD", NOT "TO ME". The silence check reads ONE thread in ONE
+        # channel; "hasn't come back to me" asserts Grant's entire inbox, which a reply
+        # in a DM or at channel level makes false. The claim has to stop where the
+        # evidence stops — and half of all sends use this wording.
+        return f"{mention}{who} hasn't come back in that thread about {about}. Any ideas?"
     todo = _OFFER_TO_DO.get(capability, "do something they'd asked for")
     return (
         f"{mention}I offered to {todo} for {who} and nothing's come back here{since}. "

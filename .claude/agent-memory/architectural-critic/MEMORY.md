@@ -1,5 +1,9 @@
 # Memory index — architectural-critic (grants_agent)
 
+- [Nudge subtype blindness](nudge-subtype-blindness.md) — REPRODUCED: a reply with a file or "also send to channel" is dropped by the listener AND by the silence guard, so the person is then publicly accused of not replying
+- [Silence guard: verified vs unknown](nudge-silence-verified-vs-unknown.md) — REPRODUCED: `False` claimed on a truncated 200-message page, on a reaction, and on "anyone but the manager spoke"; permanent burn on a stranger's comment
+- [Nudge pacing is per-audience](nudge-pacing-per-audience.md) — REPRODUCED: cap 2 delivered 4, per-person cap 1 delivered 2; `run` returns on a per-candidate pacing reason and starves the queue behind it
+- [Untrusted text and mentions in nudges](nudge-untrusted-text-and-mentions.md) — REPRODUCED: `<!here>`/`<!subteam>`/legacy piped mentions survive `_plainify_mentions`; `ask_text` is quoted verbatim into the body; `_fair_order` itself is sound
 - [Sibling-caller blind spot](sibling-caller-blind-spot.md) — invariants fixed in ONE caller while the sibling production actually runs stays broken: for_human/email_results, opt-out/rich card, tagged-rep recomputation
 - [Reminders/nudges/Resend review 2026-08-09](reminders-nudges-resend-review-2026-08-09.md) — REJECTED: 4 reproduced defects (parked lead still escalates to the manager, stop_followups lies, poison spec wedges the queue, drip ignores opt-out) + what genuinely holds
 - [Tool-result CRM marker injection](tool-result-crm-marker-injection.md) — `<grant-crm-action>` is harvested from TOOL RESULTS; any tool returning raw external text can manufacture a Salesforce approval button

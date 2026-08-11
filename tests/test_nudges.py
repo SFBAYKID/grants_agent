@@ -57,6 +57,10 @@ class _Client:
         """The thread as Slack would return it, for the silence check."""
         return {"ok": True, "messages": self.replies}
 
+    def conversations_members(self, **kwargs: Any) -> dict[str, Any]:
+        """Channel membership, for the "can the addressee see this?" guard."""
+        return {"ok": True, "members": ["U01DFJVURHU", "U01DFJWQQJ3", "U08C1NBH875"]}
+
     def chat_getPermalink(self, **kwargs: Any) -> dict[str, Any]:
         """A permalink for the message an escalation points at."""
         return {"ok": True, "permalink": "https://slack.example/archives/C0TEST/p1"}

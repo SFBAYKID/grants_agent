@@ -132,6 +132,56 @@ def plain_fragment(value: object, max_length: int = 120) -> str:
     return inert[:max_length].rstrip(" ,;:-")
 
 
+# Every Slack markup form that causes a NOTIFICATION, in wire format. Slack stores
+# what a person typed, so any text captured from a real message can contain these.
+_MENTION_FORMS = (
+    # <@U123>, <@U123|name>, <@W123>
+    (re.compile(r"<@([UW][A-Z0-9]+)(?:\|([^>]*))?>"), "user"),
+    # <!subteam^S123>, <!subteam^S123|@team>
+    (re.compile(r"<!subteam\^([A-Z0-9]+)(?:\|([^>]*))?>"), "subteam"),
+    # <!here>, <!channel>, <!everyone>, and the |label variants
+    (re.compile(r"<!(here|channel|everyone)(?:\|([^>]*))?>"), "broadcast"),
+)
+
+
+def defuse_mentions(value: object, name_for: object = None) -> str:
+    """Render Slack mention markup as the words a reader saw, notifying nobody.
+
+    WHY THIS EXISTS. Grant quotes a colleague's own message back to them weeks later —
+    "back on 23 July you asked: '…'" — and that quote is stored verbatim from Slack,
+    so it holds mentions in WIRE FORMAT. Re-sending it re-fires every one of them: a
+    quoted `<!here>` pings the whole channel, and a quoted `<@U…>` pings a third party
+    who is not the subject of the follow-up and whose opt-out is never consulted,
+    because no code path knows they are named inside a quotation.
+
+    Only the LINK form notifies. Plain "@here" or "@Chase" is inert text, and it is
+    also what the original message LOOKED like on screen — so this is the faithful
+    rendering as well as the safe one, which matters when the whole justification for
+    quoting is showing the words rather than summarising them.
+
+    `name_for` optionally maps a Slack id to a display name; without it an id renders
+    as "@someone" rather than leaking a raw identifier into prose a human reads.
+    """
+    text = str(value or "")
+    for pattern, kind in _MENTION_FORMS:
+
+        def replace(match: re.Match[str], kind: str = kind) -> str:
+            """One mention, as inert text."""
+            label = (match.group(2) or "").strip().lstrip("@")
+            if kind == "broadcast":
+                return f"@{match.group(1)}"
+            if label:
+                return f"@{label}"
+            if kind == "user" and callable(name_for):
+                resolved = name_for(match.group(1))
+                if resolved:
+                    return f"@{resolved}"
+            return "@team" if kind == "subteam" else "@someone"
+
+        text = pattern.sub(replace, text)
+    return text
+
+
 def display_entity_name(value: object, max_length: int = 120) -> str:
     """Humanize all-caps source names while preserving useful education acronyms."""
     entity = plain_fragment(value, max_length=max_length)
