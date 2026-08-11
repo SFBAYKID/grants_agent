@@ -25,6 +25,11 @@ class HumanQuestion:
     lead_thread: bool = False
     expected_tools: tuple[str, ...] = ()
     forbidden_tools: tuple[str, ...] = ()
+    # Arguments a tool call MUST carry, as (tool, key, value) triples. Checking the
+    # call is far stronger than checking prose: "did Grant apply the correction" is a
+    # fact about `state='TX'`, not about whether the sentence happened to contain the
+    # word Texas. Values compare as lowercase strings so 10 and "10" both match.
+    expected_tool_args: tuple[tuple[str, str, str], ...] = ()
     expected_reply: tuple[str, ...] = ()
     expected_any: tuple[tuple[str, ...], ...] = ()
     allowed_intents: tuple[str, ...] = ("question",)
@@ -409,7 +414,13 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "search-all-excel",
         "lead-search",
         "Export all California SVPP awards to Excel.",
-        expected_reply=("SVPP", "Excel"),
+        # The format is asserted on the CALL, not the prose. Grant saying "that's what
+        # the export contains" is a perfectly good sentence that does not happen to
+        # contain the word Excel; `export='excel'` is what actually makes it an Excel
+        # file, and it is checkable.
+        expected_tools=("search_leads",),
+        expected_tool_args=(("search_leads", "export", "excel"),),
+        expected_reply=("SVPP",),
     ),
     HumanQuestion(
         "search-contact-followup",
@@ -610,8 +621,23 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
             "date=no date filter; grade=gold; results=top 5; "
             "format=listed here in the thread. Reply yes and I’ll run it.",
         ),
-        forbidden_tools=("search_leads",),
-        expected_reply=("location=TX", "top 10", "Excel"),
+        # THE CORRECTION IS APPLIED, NOT RESTATED. This case used to forbid
+        # `search_leads` and demand the reply echo "location=TX; top 10; Excel" — the
+        # plan-and-confirm preamble that was REMOVED on 2026-07-18 (ce1295a) after
+        # Chase's feedback that making a rep restate their request in Grant's format is
+        # the fastest way to lose them. The runner asserts elsewhere that the preamble
+        # must NOT appear, so this case was demanding the exact behaviour its
+        # neighbours forbid, and had sat red ever since.
+        #
+        # "Actually make that Texas, top 10 in Excel" is an anchored correction, so the
+        # product runs it. Asserting the ARGUMENTS is stronger than asserting prose:
+        # it proves every part of the correction landed, which a sentence cannot.
+        expected_tools=("search_leads",),
+        expected_tool_args=(
+            ("search_leads", "state", "TX"),
+            ("search_leads", "limit", "10"),
+            ("search_leads", "export", "excel"),
+        ),
     ),
     HumanQuestion(
         "search-discovered-date",

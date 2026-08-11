@@ -128,6 +128,7 @@ def _canned_search(args: dict[str, object] | None) -> str:
 
 def _canned_tool(
     calls: list[str],
+    recorded: list[tuple[str, dict[str, object]]],
     overrides: dict[str, str],
     name: str,
     args: dict[str, object],
@@ -140,6 +141,10 @@ def _canned_tool(
     a question about Washington came back holding a California record.
     """
     calls.append(name)
+    # The ARGUMENTS are kept, not just the tool name. "Did Grant apply the correction"
+    # is a fact about `state='TX'`; a reply that happens to contain the word Texas
+    # proves nothing, and a reply that omits it disproves nothing.
+    recorded.append((name, dict(args)))
     if name in overrides:
         return overrides[name], None
     outcomes = {
@@ -190,11 +195,12 @@ def test_real_model_understands_human_question_families(
     """Exercise the current model and enforce each scenario's minimum safe outcome."""
     load_dotenv()
     calls: list[str] = []
+    recorded: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(
         tools,
         "run_tool",
         lambda name, args, *pos, **kw: _canned_tool(
-            calls, dict(case.tool_results), name, args, *pos, **kw
+            calls, recorded, dict(case.tool_results), name, args, *pos, **kw
         ),
     )
     output = conversation.respond(
@@ -249,6 +255,15 @@ def test_real_model_understands_human_question_families(
             assert calls.count(tool_name) == 1, (
                 f"{tool_name} mutates or costs money; it must not be called twice"
             )
+    for tool_name, key, value in case.expected_tool_args:
+        supplied = [
+            str(args.get(key, "")).lower()
+            for name, args in recorded
+            if name == tool_name
+        ]
+        assert value.lower() in supplied, (
+            f"{tool_name} was not called with {key}={value}; saw {supplied}"
+        )
     for tool_name in case.forbidden_tools:
         assert tool_name not in calls
     for fragment in case.expected_reply:
