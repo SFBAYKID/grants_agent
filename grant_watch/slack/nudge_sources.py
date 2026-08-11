@@ -475,7 +475,13 @@ def _abandoned_threads(conn: sqlite3.Connection) -> list[NudgeCandidate]:
 
 
 def candidates(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandidate]:
-    """Every piece of unfinished work Grant can honestly ask about, oldest first."""
+    """Every piece of unfinished work Grant can honestly ask about, fairly ordered.
+
+    ONLY WORK THAT IS ALREADY DUE. The `due_at <= now` filter at the end means this
+    returns nothing for a subject still inside its grace period — so an empty result
+    means "nothing due", never "nothing exists". Reading it as absence is a mistake
+    worth naming here, because it was made once already while measuring the queue.
+    """
     found = (
         _abandoned_previews(conn)
         + _stalled_batches(conn)
@@ -492,4 +498,41 @@ def candidates(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandidate]:
         and item.audience
         and item.due_at <= now
     ]
-    return sorted(ready, key=lambda item: item.priority_at)
+    return _fair_order(sorted(ready, key=lambda item: item.priority_at))
+
+
+def _fair_order(by_age: list[NudgeCandidate]) -> list[NudgeCandidate]:
+    """Round-robin across subject kinds, oldest-first WITHIN each kind.
+
+    WHY STRICT AGE ORDER STARVES THE THING IT WAS BUILT FOR. `priority_at` sorts by
+    how long the PERSON has waited, which is the honest priority for one capability
+    ask against another — a July question should outrank an August one. But applied
+    across ALL kinds it means every historical ask outranks every card, forever, and
+    cards are the one kind that keeps arriving.
+
+    Measured on production the day this shipped: 30 live subjects, and the North Palos
+    card — $500,000 of verified SVPP money, the specific lead Chase raised because
+    nobody engaged with it — sat at position 26. At two deliveries a day that is
+    roughly thirteen days out, against a fourteen-day staleness horizon. It would very
+    likely have aged out unmentioned, which is precisely the failure the card
+    follow-up exists to prevent. A queue that never reaches a kind is not a queue with
+    a long tail; it is a feature that does not run.
+
+    So kinds take turns. The kind whose oldest member has waited longest goes first,
+    then the next kind, and round again — so the July asks still lead, and a fresh
+    gold card still gets a slot the same day instead of queueing behind all of them.
+    Ordering within a kind is untouched, so `priority_at` still decides who among
+    Kerry, Nelly and Jocelyn is asked first.
+    """
+    queues: dict[str, list[NudgeCandidate]] = {}
+    for item in by_age:
+        queues.setdefault(item.subject_kind, []).append(item)
+    # Kind order is set by each kind's OLDEST member, so this cannot be gamed by a
+    # kind that simply has more rows, and the overall head of the queue is unchanged.
+    rotation = list(queues)
+    out: list[NudgeCandidate] = []
+    while any(queues[kind] for kind in rotation):
+        for kind in rotation:
+            if queues[kind]:
+                out.append(queues[kind].pop(0))
+    return out

@@ -439,6 +439,56 @@ def test_a_preview_can_actually_see_an_escalation(tmp_path: Path) -> None:
     conn.close()
 
 
+def test_a_fresh_card_is_not_starved_behind_a_pile_of_old_asks(
+    tmp_path: Path,
+) -> None:
+    """Kinds take turns, so the queue cannot stop reaching one of them.
+
+    MEASURED, NOT IMAGINED. On the production queue the day this shipped there were 30
+    live subjects and the North Palos card — the $500,000 lead Chase raised precisely
+    because nobody engaged with it — sat at position 26. Two deliveries a day puts that
+    ~13 days out against a 14-day staleness horizon, so it would very likely have gone
+    stale unmentioned. Strict `priority_at` order across all kinds means every
+    historical ask outranks every card forever, and cards are the kind that keeps
+    arriving.
+
+    The head of the queue must still be the person who has waited longest, so this
+    pins both halves: oldest-first survives, and the card is reachable the same day.
+    """
+    conn = _conn(tmp_path)
+    _card(conn, NOW - timedelta(days=2))
+    for index in range(20):
+        asked = NOW - timedelta(days=30 + index)
+        conn.execute(
+            """INSERT INTO capability_asks
+                 (id,slack_user,audience,thread_ts,message_ts,asked_at,ask_text,
+                  capability,available_since,state,recorded_by,created_at)
+               VALUES (?,?,?,?,?,?,'please do the thing','email_results',?,'open',
+                       'test',?)""",
+            (
+                index + 1,
+                JOCELYN,
+                CHANNEL,
+                f"70{index}.1",
+                f"70{index}.1",
+                asked.isoformat(),
+                (NOW - timedelta(days=1)).isoformat(),
+                asked.isoformat(),
+            ),
+        )
+    conn.commit()
+
+    order = [c.subject_kind for c in nudges.candidates(conn, NOW)]
+    # The oldest ask still leads — the priority_at fix that moved Kerry 14th -> 0th
+    # is not undone by taking turns.
+    assert order[0] == "capability_now_available"
+    # And the card is reachable inside the daily cap of 2 rather than 20 deep.
+    assert "card_unengaged" in order[: nudges.MAX_NUDGES_PER_DAY], (
+        f"a fresh card queued behind every old ask: {order[:6]}"
+    )
+    conn.close()
+
+
 # ------------------------------------------------------------------ the rehearsal
 
 

@@ -221,6 +221,35 @@ affect Chase's other projects.
   is gone and the module imports clean, but `offer_unanswered` is 0 rows and the
   escalation path has never been observed producing a candidate in production. That
   distinction is the guardian's, and it is the right one.
+- `verified` 2026-08-11 **THE CARD CHASE COMPLAINED ABOUT WOULD HAVE AGED OUT
+  UNMENTIONED.** Measuring the real queue (read-only, future clock) found **65
+  subjects due by Tuesday: 35 stale, 30 live** — and North Palos at position **26 of
+  30**, its two escalations at 27 and 28. At `MAX_NUDGES_PER_DAY=2` that is ~13 days
+  against a 14-day `DROP_AFTER`. `priority_at` sorts by how long the PERSON has
+  waited, which is right for one capability ask against another, but across ALL kinds
+  it means every historical ask outranks every card forever — and cards are the kind
+  that keeps arriving. A queue that never reaches a kind is not a long tail, it is a
+  feature that does not run. `_fair_order` now round-robins across kinds, oldest-first
+  WITHIN each kind, so the July asks still lead and a fresh gold card still gets a
+  slot the same day. Mutation-proven.
+- `verified` 2026-08-11 TIMING, MEASURED RATHER THAN DERIVED: North Palos
+  `card_unengaged` is due Tue 10:30:04 PT and first reachable at the **Tue 10:45**
+  tick; `offer_unanswered` (Jocelyn's) and `card_escalated` are due Tue 16:15/16:30,
+  which is past the 14:45 last tick, so both slip to **Wed 10:15**. Tuesday's drawn
+  slots are 08:48 and 13:19. **The `offer_unanswered` target is the MANAGER**
+  (`U01DFJWQQJ3`), not Jocelyn — the subject is derived from her offer but the
+  message is a channel escalation about her silence.
+- `verified` 2026-08-11 **KERRY IS CORRECTLY EXCLUDED, CHECKED PER ROW.**
+  `_unanswered_offers` requires `engaged_at IS NULL`; her 10:00 offer carries
+  `engaged_at='2026-08-10T17:03:45Z'` — her "Yes", 3m41s after delivery. Escalating
+  about the one person who DID answer is the most embarrassing thing this feature
+  could do, and the filter holds at the database level before `replied_since` is even
+  consulted.
+- `needs-testing` 2026-08-11 **EXPECT `followup_nudges` TO JUMP 26 → ~63 ON THE FIRST
+  UNATTENDED RUN.** `stale` is in `PERMANENT_SUPPRESSIONS`, the 35 stale subjects are
+  the oldest so they sort first, and an `--execute` walk burns them as it passes.
+  That is the backlog retiring by design — but predicted here so it does not read as
+  a runaway.
 - `needs-testing` 2026-08-11 **32 `capability_asks` ARE STILL OPEN, NINE OF THEM ONE
   PERSON** asking repeatedly to get leads INTO campaigns ("Why theres no leads inside
   these campaigns?"). That is the loudest unmet request in the data.

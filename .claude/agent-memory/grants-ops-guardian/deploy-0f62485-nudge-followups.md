@@ -111,3 +111,39 @@ already exist; sha256 comparison only. See [[env-credential-sprawl]].
 
 Pre-existing and NOT caused by this deploy: 12 `CompletedPaidCall` tracebacks in `find_contact`
 re-enrichment, all below `bot.log` line 1028.
+
+## READING THE QUEUE WITHOUT THE WORKER (read-only recipe + four traps)
+
+`nudge_sources.candidates(conn, now)` is the discovery half: **pure SELECT, no Slack import,
+zero SQL write statements** (verified by grep at `0f62485`; the one `nudge_silence` hit is
+prose in a docstring). Safe against `db.connect_readonly()`. Measured 2026-08-10 18:45 PT.
+
+1. **`candidates()` ENDS WITH `and item.due_at <= now`, so it returns only ALREADY-DUE work.**
+   A subject you expect and cannot find is very often just *not due yet* — not a defect.
+   **Simulate a future day by passing a future `now`**; still pure SELECT. That is how
+   "what fires tomorrow" becomes measured instead of derived.
+2. **`priority_at` order is NOT `due_at` order, and the queue is sorted by `priority_at`** —
+   for a capability ask that is the date the person ASKED. So a brand-new subject lands near
+   the BOTTOM. On 2026-08-10 the newest card sat at position **[26] of 30 live**, behind
+   capability asks whose `priority_at` was 07-23. Never answer "what goes out next" from
+   `due_at`.
+3. **Most of the due queue is STALE and will be PERMANENTLY BURNED by the next `--execute`.**
+   65 due by Tue EOD = **35 stale + 30 live**, and `stale` ∈ `PERMANENT_SUPPRESSIONS`
+   (`{answered_since_offer, engaged_since_queued, lead_parked, resolved_since_queued, stale}`).
+   The stale ones are the OLDEST so they sort FIRST and get walked first. **Expect
+   `followup_nudges` 26 → ~63 rows on the first unattended run.** A jump like that reads as a
+   runaway if you have not predicted it; it is the backlog retiring by design.
+4. **An escalation targets the MANAGER, not the silent person.** `offer_unanswered` derived
+   from Jocelyn's offer carries `target_slack=U01DFJWQQJ3`, not her id — it is posted to the
+   channel (`CHANNEL_POST_KINDS`) to tell the manager. Do not expect the subject's own id.
+
+**`engaged_at` is what stops Grant escalating someone who ANSWERED.** `_unanswered_offers`
+requires `engaged_at IS NULL`. Kerry's 10:00 offer has `engaged_at='2026-08-10T17:03:45Z'`
+(her "Yes", 3m41s later) so she is correctly excluded; Jocelyn's 14:15 offer has NULL and
+qualifies. Verified per-row rather than assumed — this is the single most embarrassing
+failure the feature could produce, and the DB-level filter holds. `nudge_silence.replied_since`
+is the second, runtime backstop.
+
+Cap arithmetic that decides a day: `MAX_NUDGES_PER_DAY=2`,
+`MAX_NUDGES_PER_TARGET_PER_DAY=1`. Tue 2026-08-11 drew slots `08:48` and `13:19` for
+`C01DGT9D11D` (deterministic from date+audience, so it can be read ahead of time).
