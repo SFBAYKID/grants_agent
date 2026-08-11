@@ -78,7 +78,11 @@ class _Slack:
         self.pages_served += 1
         last_page = self.pages_served >= self.pages
         messages: list[dict[str, Any]] = [
-            {"bot_id": "B1", "ts": "700.1", **({"reactions": self.reactions} if self.reactions else {})}
+            {
+                "bot_id": "B1",
+                "ts": "700.1",
+                **({"reactions": self.reactions} if self.reactions else {}),
+            }
         ]
         if self.human_reply_at and last_page:
             reply: dict[str, Any] = {"user": JOCELYN, "ts": self.human_reply_at}

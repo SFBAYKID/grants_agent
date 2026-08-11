@@ -123,6 +123,38 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-11, the documents were stale in four ways)
+
+- `verified` 2026-08-11 **A DOC AUDIT FOUND FOUR CLAIMS THAT WERE SIMPLY FALSE**, each
+  the kind a new agent would act on. `AGENTS.md` said "Campaign writes remain disabled
+  until explicitly approved" — they are LIVE and a human has clicked Confirm.
+  `architectural.md` said the rich card was "implemented locally, feature OFF" — it is
+  the path that actually posts in production and has been since 2026-08-05; said
+  "seven ordered migrations" — there are **39**; said an 11:00 hard cutoff — it is
+  **11:30**; and said card threads "cannot invoke mutable contact/CRM tools" — that
+  restriction was REMOVED, and its removal is what makes a card follow-up's offer
+  actionable where it lands. All corrected, with the retraction stated rather than
+  quietly edited away.
+- `verified` 2026-08-11 **AND ONE WHOLE LIVE SUBSYSTEM WAS ABSENT.** The follow-up
+  system — six modules, eight subject kinds, a cron, and the only messages Grant sends
+  ABOUT one colleague TO another — appeared nowhere in the system design. Now
+  `architectural.md` §5.3, with the constraints that each cost a defect to learn. §5.4
+  adds the three surfaces that spend money or leave the building (ZoomInfo, Resend,
+  Persequor), because "safe by SHAPE, not by a careful caller" is the property a
+  refactor can silently destroy. §6.1 records how a deploy actually happens.
+- `verified` 2026-08-11 **`ruff format --check` HAD BEEN SKIPPED ALL SESSION.** It is in
+  the documented health gate; `ruff check` passes independently, which is exactly why
+  the other one gets missed. Five files had drifted across five production deploys.
+  Now formatted, and AGENTS.md says out loud why that line is easy to skip.
+- `verified` 2026-08-11 **`deploy_rsync.sh` IS DELETED.** It was TRACKED (both CLAUDE.md
+  and the guardian's memory called it untracked — the guardian caught its own error by
+  re-checking rather than agreeing), and it rsynced the laptop WORKING TREE to the
+  droplet with `--delete`, no ancestry check, no hash pin, no clean-tree check, and a
+  hardcoded droplet IP. A hardened version was considered and rejected: **the flags were
+  never the safety.** The safety is the protocol and the willingness to stop when a
+  premise turns out to be false — three of the five deploys this evening were materially
+  changed by exactly that, and a hardened script would have sailed past all three.
+
 ## Current status (2026-08-11, the accusation guard was not one)
 
 - `verified` 2026-08-11 **"GRANT CAN NEVER POST A FALSE ACCUSATION ABOUT A COLLEAGUE"
@@ -451,7 +483,9 @@ affect Chase's other projects.
   only as the fallback when a repair FAILS); `send_to_rep` still cannot attach a file,
   so "email me those spreadsheets" is half-served; the mobile-selection fix is designed
   and unbuilt; 11 acceptance cases fail; and the branch is **136 commits ahead of
-  `main`**, which production tracks instead.
+  `main`**, which production tracks instead. *(Superseded 2026-08-11: the branch was
+  merged to `main` and production now deploys FROM `main`, hash-pinned. `send_to_rep`
+  still cannot attach a file — that half remains true.)*
 
 ## Current status (2026-08-10, the send that did not happen)
 
@@ -487,6 +521,8 @@ affect Chase's other projects.
   `followup_nudges` is 0 rows. The cron fires Monday 09:15 PT with Kerry at eligible
   #0. To send it sooner, by hand:
   `python -m grant_watch.cli nudge --execute --force --audience C01DGT9D11D`
+  *(Superseded 2026-08-10/11: two were delivered, Kerry replied in 3m41s, and the
+  ledger now holds 26 rows. The cron is `*/15 8-14 * * 1-5`, not 09:15.)*
 - `needs-testing` 2026-08-10 **`in_window` IS COMPUTED IN ONE TIMEZONE FOR EVERYONE.**
   It closes at 17:00 Pacific, which is 20:00 Eastern, so a nudge aimed at an Eastern
   rep can legitimately land at 7:45 PM their time. The two cron slots (09:15 and 14:15
@@ -533,7 +569,11 @@ affect Chase's other projects.
   clean (5 leads, correct fields, verified-only titles) but no Salesforce Lead has
   been completed yet. Two housekeeping items flagged on the droplet: an untracked
   `deploy_rsync.sh` at repo root (not from this session, not used) and `~/backups` at
-  301 M with no retention policy.
+  301 M with no retention policy. *(Corrected 2026-08-11: `deploy_rsync.sh` was
+  **tracked**, not untracked — the guardian's own memory carried the same error, which
+  is why it re-checked instead of agreeing. DELETED 2026-08-11: it rsynced the laptop
+  working tree with `--delete`, no ancestry or hash check, and a hardcoded droplet IP.
+  See architectural.md §6.1 — there is deliberately no deploy script now.)*
 
 ## Current status (2026-08-10, adversarial + live)
 

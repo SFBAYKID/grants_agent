@@ -138,9 +138,7 @@ def replied_since(
         # silence is how a 201-message thread produced a false accusation.
         if not response.get("has_more"):
             return False
-        cursor = str(
-            (response.get("response_metadata") or {}).get("next_cursor") or ""
-        )
+        cursor = str((response.get("response_metadata") or {}).get("next_cursor") or "")
         if not cursor:
             return None
     return None
@@ -174,9 +172,7 @@ def is_member(client: WebClient | None, channel: str, user: str) -> bool | None:
             return None
         if user in {str(item) for item in members}:
             return True
-        cursor = str(
-            (response.get("response_metadata") or {}).get("next_cursor") or ""
-        )
+        cursor = str((response.get("response_metadata") or {}).get("next_cursor") or "")
         if not cursor:
             return False
     return None

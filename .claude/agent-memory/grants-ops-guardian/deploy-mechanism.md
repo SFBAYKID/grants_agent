@@ -29,6 +29,30 @@ because the rsync helper fails closed on `[ "$HEADSHA" = "$TARGET" ]`. Every dep
 gets all three guards: HEAD == target, clean tree, and `merge-base --is-ancestor <target>
 origin/main`.
 
+**DO NOT USE THE REPO-ROOT `deploy_rsync.sh`. It is a bypass, and it is TRACKED IN GIT**
+(corrected 2026-08-10 — an older note here called it untracked; verified `git ls-files`
+TRACKED=YES, 1375 bytes, entered history in `6a8f95f`). Read in full, 33 lines, it:
+- rsyncs the laptop **working tree** with **no hash pin, no ancestry assertion, no dirty-tree
+  check** — exactly the path Chase's 2026-08-10 "deploy from `main`, by hash" rule forbids;
+- carries **`--delete` in `real` mode**, against the standing recipe (preview deletions, then
+  OMIT `--delete` when the delta has none);
+- **omits `--no-perms` and `--no-times`**, the two flags added after real incidents — without
+  them it rewrites ~827 content-identical mtimes and destroys the `find -cnewer` ground truth;
+- **hardcodes the droplet IP in a tracked, pushed file.**
+
+Nothing depends on it: guardian helpers are written FRESH per target into the session
+scratchpad (`deploy_rsync_<hash>.sh`), each carrying destination-colon + tenant guards,
+HEAD==TARGET, clean-tree, `merge-base --is-ancestor`, an explicit measured `--files-from`
+list, and `--no-times --no-perms`. Removal was recommended to the coordinator 2026-08-10
+(guardian does NOT edit it unilaterally — it is a repo change, not a production op).
+
+**The deeper reason a "safe version" is still wrong:** the safety is not the flags, it is the
+surrounding protocol — backup-first with `integrity_check` on the COPY, marker +
+`find -cnewer`, per-file sha256 against the target blobs, import smoke BEFORE the kill,
+restart verification, post-deploy state re-read — plus the judgement to STOP when a premise
+turns out false. Three of the five deploys on 2026-08-10 were changed by something no script
+can do.
+
 **Verify the assertion in BOTH directions before trusting it** — a check that can only
 ever pass proves nothing. Exercise it once against a commit that is NOT an ancestor and
 confirm it returns non-zero. Same discipline as every false zero this codebase has produced.

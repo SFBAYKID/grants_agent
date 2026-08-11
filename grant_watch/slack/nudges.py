@@ -136,6 +136,7 @@ def blocks_only_this_candidate(reason: str) -> bool:
     """Whether this pacing reason lets the NEXT subject be tried on the same tick."""
     return reason == PERSON_ALREADY_NUDGED or reason.endswith(_PERSON_HOURS_SUFFIX)
 
+
 # The wordings a follow-up may use. Two, deliberately: enough to learn which reads
 # better, few enough that every one is written and reviewed by a person rather than
 # generated. See slack/nudge_variants.py for how one is chosen and measured.
@@ -695,6 +696,7 @@ def _plainify_mentions(text: str) -> str:
     inert = defuse_mentions(text, names.get)
     # `defuse_mentions` leaves readable "@Name" / "@here"; a rehearsal drops the "@".
     return re.sub(r"@([A-Za-z][\w.\-]*)", lambda m: f"at {m.group(1)}", inert)
+
 
 # What the link at the bottom of an escalation points AT, in the reader's terms. A
 # raw permalink is 130 characters of query string under a one-line message, which

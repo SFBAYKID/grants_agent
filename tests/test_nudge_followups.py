@@ -183,7 +183,7 @@ def test_an_offer_made_in_a_dm_is_never_escalated(tmp_path: Path) -> None:
 
 
 def test_quiet_means_quiet_about_you_as_well_as_to_you(tmp_path: Path) -> None:
-    """"Stop following up" has to cover being TALKED ABOUT, not just being addressed.
+    """ "Stop following up" has to cover being TALKED ABOUT, not just being addressed.
 
     The escalation's `target_slack` is the MANAGER, so the ordinary opt-out check asks
     whether the manager wants quiet — and would happily announce "Jocelyn never
@@ -580,9 +580,7 @@ def test_the_ordering_never_loses_or_duplicates_a_subject(tmp_path: Path) -> Non
             )
             for index in range(rng.randint(0, 40))
         ]
-        ordered = nudge_sources._fair_order(
-            sorted(items, key=lambda i: i.priority_at)
-        )
+        ordered = nudge_sources._fair_order(sorted(items, key=lambda i: i.priority_at))
         assert len(ordered) == len(items), f"trial {trial}: count changed"
         assert {(i.subject_kind, i.subject_id) for i in ordered} == {
             (i.subject_kind, i.subject_id) for i in items
@@ -606,9 +604,7 @@ def test_the_message_catalog_does_not_drift_from_the_code() -> None:
     each of three quoted templates must really appear in that kind's rendered message.
     """
     catalog = (
-        Path(__file__).resolve().parent.parent
-        / "docs"
-        / "grant_message_catalog.md"
+        Path(__file__).resolve().parent.parent / "docs" / "grant_message_catalog.md"
     ).read_text()
 
     for kind in nudges.NUDGE_SUBJECT_KINDS:
@@ -737,7 +733,7 @@ def test_a_blocked_candidate_does_not_starve_the_one_behind_it(
 def test_the_batch_nudge_counts_only_the_orgs_that_are_stuck(
     tmp_path: Path,
 ) -> None:
-    """"Still stuck on 14 orgs" when 13 of 14 matched is a figure with no source.
+    """ "Still stuck on 14 orgs" when 13 of 14 matched is a figure with no source.
 
     `blocked_resolution` is set when ANY item is unresolved, so reporting the batch
     size asserted something its own data contradicts — to a named rep, which is rule 1.

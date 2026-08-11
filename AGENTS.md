@@ -38,6 +38,9 @@ documents agree.
 
 Run from the repository root:
 
+Run every line. `ruff format --check` is easy to skip because `ruff check` passes independently —
+it was skipped through five production deploys on 2026-08-11 and five files had drifted.
+
 ```bash
 python -m pip install -r requirements-dev.txt
 ruff format --check grant_watch tests
@@ -110,9 +113,13 @@ claims. Never store a credential value in the catalog; record only its environme
 - Scheduled workers that post to Slack, submit outreach, or write an external system must support and
   honor dry-run. The Socket Mode listener has no dry-run mode; verify it with offline tests unless an
   explicit real-channel interaction is intended.
-- Salesforce reads and create-only Campaign actions use separate credentials. Campaign writes remain
-  disabled until explicitly approved and sandbox-verified. Organization-only Lead creation must
-  resolve exactly one active Salesforce owner from the requesting Slack rep's roster email; never
-  default ownership to the integration user or another rep.
+- Salesforce reads and create-only Campaign actions use separate credentials. Campaign writes are
+  **live in production** (`SALESFORCE_CAMPAIGN_WRITES_ENABLED=1`, approved by Chase 2026-08-10; a
+  human clicked Confirm and 13 California gold Leads were added to campaign `701UZ00000uW9jBYAS`
+  and read back). The flag still defaults OFF in code, and every execution still requires an
+  immutable preview, a one-time nonce, the same requester and channel, a short expiry, and a final
+  button click. Organization-only Lead creation must resolve exactly one active Salesforce owner from
+  the requesting Slack rep's roster email; never default ownership to the integration user or
+  another rep.
 - A contact remains `not_found` when public evidence is absent. Never construct or guess an email.
 - The production droplet is multi-tenant. Never use admin access, another tenant, `sudo`, or root.

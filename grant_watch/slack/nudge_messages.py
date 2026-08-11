@@ -29,6 +29,7 @@ def _roster_name(slack_id: str) -> str:
         (item.name for item in roster.identities() if item.slack_id == slack_id), ""
     )
 
+
 if TYPE_CHECKING:  # import-only: the runtime path needs attribute access, not the class
     from .nudge_sources import NudgeCandidate
 
@@ -71,9 +72,7 @@ def build_message(
         # talking to software, and the singular case is the COMMON one — a batch is
         # blocked when ANY item is unresolved, and usually that is one awkward name.
         one = count == 1
-        noun, verb, them = (
-            ("org", "needs", "it") if one else ("orgs", "need", "them")
-        )
+        noun, verb, them = ("org", "needs", "it") if one else ("orgs", "need", "them")
         if variant == "b":
             return (
                 f"{mention}{count} {noun} here {verb} your call on how to match "
@@ -264,8 +263,7 @@ def _escalation_message(
         # went to a channel, and Grant can only speak for what came back to it.
         if variant == "b":
             return (
-                f"{mention}nobody's picked up {money}{subject} here. "
-                f"{offer.question}"
+                f"{mention}nobody's picked up {money}{subject} here. {offer.question}"
             )
         return (
             f"{mention}heads up — {money}{subject} has been sitting here with no "
@@ -340,7 +338,9 @@ def _unanswered_offer_message(
         # channel; "hasn't come back to me" asserts Grant's entire inbox, which a reply
         # in a DM or at channel level makes false. The claim has to stop where the
         # evidence stops — and half of all sends use this wording.
-        return f"{mention}{who} hasn't come back in that thread about {about}. Any ideas?"
+        return (
+            f"{mention}{who} hasn't come back in that thread about {about}. Any ideas?"
+        )
     todo = _OFFER_TO_DO.get(capability, "do something they'd asked for")
     return (
         f"{mention}I offered to {todo} for {who} and nothing's come back here{since}. "

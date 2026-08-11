@@ -29,7 +29,10 @@ Data flow:
 ```
 
 Local source, enrichment, Slack, search/export, read-only CRM, and create-only Campaign workflows are
-implemented. Production scheduling and live integration smoke tests remain separate deployment work.
+implemented **and running in production**. The droplet runs a crontab of scheduled workers (polling,
+the daily card, follow-ups at `*/15 8-14 * * 1-5`, reminders, thread scanning, the watchdog); the
+Socket Mode listener is long-lived. Deploys are hash-pinned from `origin/main` by the
+grants-ops-guardian — see §6.
 
 ---
 
@@ -50,8 +53,10 @@ grants_agent/
 │   ├── source_discovery.py    # immutable Firecrawl selected-result evidence
 │   ├── coverage_universe.py   # Census county universe + sharded research tasks
 │   ├── sources/              # one official source per module
-│   ├── enrich/               # contacts, NCES, Salesforce reader + Campaign gateway
-│   └── slack/                # individual proactive alerts and conversation tools
+│   ├── enrich/               # contacts, NCES, ZoomInfo, Salesforce reader + Campaign gateway
+│   ├── campaign/             # the rich award card: policy, snapshot, routing, delivery
+│   ├── notify/               # Resend email transport (to reviewed reps only)
+│   └── slack/                # proactive alerts, conversation tools, follow-ups
 ├── data/source_catalog/       # canonical nationwide source candidates + gap evidence
 ├── docs/source_inventory/     # generated public/keyed/access/coverage catalog views
 ├── data/svpp_active_awards_CA_MI_PA_WA.csv   # 75 verified GOLD seed leads
@@ -69,15 +74,23 @@ grant_watch/
 ├── __init__.py
 ├── models.py           # typed source, funding-event, lead, and run dataclasses
 ├── db.py               # SQLite repository operations; schema lives in migrations.py
-├── migrations.py       # seven ordered migrations; never mutate old migrations in place
+├── migrations*.py      # 39 ordered migrations across several modules; NEVER mutate one in place
 ├── source_catalog.py   # typed candidate catalog, evidence validation, generated reports
 ├── source_discovery.py # immutable Firecrawl search and scrape fingerprints
 ├── coverage_universe.py # pinned Census county universe and per-entity research status
 ├── health.py           # docs/annotations/line-cap/nested-test-tree enforcement
 ├── sources/            # ONE integrated source per module; registry in sources/__init__.py
 ├── scoring.py          # GOLD/SILVER/watch + freshness and physical-security program fit
-├── enrich/             # Firecrawl/Claude contacts, NCES, Salesforce reader and Campaign actions
-├── slack/              # channel-only bot, drip, search/export, tools, Persequor handoff
+├── enrich/             # Firecrawl/Claude contacts, NCES, ZoomInfo, Salesforce reader + Campaign
+├── campaign/           # rich award card: eligibility, snapshot, routing, card, delivery, actions
+├── notify/             # Resend transport; the signature takes a Slack id, never an address
+├── slack/              # channel-only bot, drip, search/export, tools, Persequor handoff,
+│                       #   follow-ups (nudge_*.py), reminders, watchdog, thread scanning
+├── roster.py           # the reviewed Slack-id/email/manager map; every external action resolves here
+├── territory.py        # state -> rep ownership, and which sources may tag a human at all
+├── reminders.py        # rep-requested reminders and the follow-up opt-out register
+├── capability_asks.py  # asks Grant had to refuse, so a shipped feature can reopen them
+├── user_memory.py      # durable facts a colleague told Grant, with their verbatim words
 ├── google_sheets.py    # Google Drive/Sheets export integration
 ├── spreadsheets.py     # local XLSX export generation
 ├── presentation.py     # factual Slack/export presentation helpers
@@ -212,7 +225,9 @@ and execution require v2.
 Full spec and the live app's configuration record in `docs/grant_agent.md`. In short:
 Grant never posts multi-lead digests. A paced worker surfaces at most one ranked lead or lower-priority
 funding bulletin per notification, with strict daily caps. Its initial post is one factual sentence
-without links, buttons, menus, CRM detail, or a call to action. Humans engage only by replying in that
+without links, buttons, menus, CRM detail, or a call to action — **this describes the LEGACY drip
+only; the rich card that actually posts in production carries award facts, a contact, typed
+Salesforce context and separately labelled links (see §5.2)**. Humans engage only by replying in that
 thread or mentioning @Grant in the configured channel; there are no slash commands or DMs. Grant runs
 in **Socket Mode** (no public URL). Scheduled CLI workers for polling, drip delivery, outreach retry,
 and Salesforce sync expose tested dry-run boundaries. The long-lived Socket Mode listener intentionally
@@ -243,7 +258,9 @@ or *"No record found — this is net-new."* This turns a raw lead into an action
 - **One narrow write exception: Campaign intake.** A separate credential may create Campaign,
   CampaignMemberStatus, organization-only Lead, and CampaignMember records. It cannot update/delete
   existing CRM records. Every execution requires an immutable Slack preview, one-time nonce, same
-  requester/channel, short expiry, and a final button confirmation. The feature flag defaults off.
+  requester/channel, short expiry, and a final button confirmation. The feature flag defaults off
+  **in code and is set to 1 in production** (approved 2026-08-10; a human clicked Confirm and 13
+  California gold Leads were added to one campaign and read back).
   Complete state/tier requests use a durable parent batch with one isolated child per Campaign.
   The server—not the model or an export—selects and hashes every source row, aggregates all
   contributing lead IDs/grades under an NCES identity when available, freezes exact source and
@@ -281,16 +298,31 @@ or *"No record found — this is net-new."* This turns a raw lead into an action
   determine confidence. Ambiguous matches remain possible matches and are not used as priority proof.
 - Env keys: `SALESFORCE_LOGIN_URL`, `SALESFORCE_SANDBOX_NAME`, `SALESFORCE_MY_DOMAIN_URL`,
   `SALESFORCE_CLIENT_ID`, `SALESFORCE_CLIENT_SECRET` plus separate `SALESFORCE_WRITE_*` values for
-  the disabled Campaign gateway, including `SALESFORCE_WRITE_ORG_ID` and
+  the create-only Campaign gateway (live), including `SALESFORCE_WRITE_ORG_ID` and
   `SALESFORCE_WRITE_EXPECT_SANDBOX` write-scope attestations (see `.env.example`).
 
 ---
 
-## 5.2 Rich award-card campaign (implemented locally, feature OFF)
+## 5.2 Rich award-card campaign (LIVE in production since 2026-08-05)
 
 `grant_watch/campaign/` is a separate product layer selected only when
-`GRANT_RICH_CARD_ENABLED` is explicitly truthy. OFF remains the default and dispatches
-to the pre-existing drip unchanged.
+`GRANT_RICH_CARD_ENABLED` is explicitly truthy. It defaults OFF **in code** and dispatches
+to the pre-existing drip unchanged — but it is **set to 1 on the droplet** (Chase's explicit
+instruction, 2026-08-05, waiving the five-business-day shadow gate), so in production this is the
+path that actually posts. Three `rich_award` cards have been delivered.
+
+Two things measured on production 2026-08-11 that the design above does not imply, and that anyone
+reading this section will otherwise assume work:
+
+- **The card's control surface is dead three ways.** `card.py` appends its buttons only when the
+  card is not `research_needed`; that mode is unreachable because `leads.nces_website` is 0 of 10,721
+  rows with no writer anywhere. Even if a button rendered, `SLACK_WORKSPACE_ID` is absent from the
+  droplet environment, so `actions._authorized_snapshot` raises `PermissionError` at its first gate.
+  `rich_card_actions` is 0 rows. A human DID once press "Ask Persequor to draft" before the handler
+  existed and received nothing at all — one `Unhandled request` line in `bot.log` and no database
+  row — so **`rich_card_actions = 0` must never be read as "nobody tried".**
+- Cards therefore land with no buttons, and often with **no `@`-mention** (`routing_reason`
+  `unassigned`), which is why the follow-up system in §5.3 exists.
 
 - `policy.py` is the pure fail-closed eligibility predicate. Only verified Gold award
   events for NCES-linked districts qualify; precision-safe dates, open spend window,
@@ -299,7 +331,9 @@ to the pre-existing drip unchanged.
 - Migrations 14–24 add completed-run confirmation, rich post/snapshot/action/contact
   state, exact Salesforce owner/activity evidence, forward organization-kind evidence, and
   durable paid-enrichment attempts, and one atomic cross-worker daily-slot claim.
-  Historical migrations are unchanged.
+  Historical migrations are unchanged. (Schema has since reached **39**; later migrations add
+  campaign batches, nudges, reminders, capability asks, announcements, user memory and the
+  ZoomInfo credit ledger.)
 - `prepare_worker.py` bounds pre-window contact/activity work. Contact discovery commits
   `in_flight` before possibly paid HTTP and refuses silent restart retry; dry-run makes
   no HTTP call or write. `preparation.py`/`report.py` join persisted evidence and produce
@@ -314,20 +348,92 @@ to the pre-existing drip unchanged.
   unassigned; no owner is guessed.
 - `card.py` controls Block Kit and fallback rendering. Untrusted text/URLs are bounded
   and hardened; buttons contain only opaque snapshot IDs; unfurls stay disabled.
-- `delivery.py` applies one weekday 10:00–10:45 Pacific slot and an 11:00 hard cutoff,
+- `delivery.py` applies one weekday 10:00–10:45 Pacific slot and an 11:30 hard cutoff
+  (`pacing.HARD_CUTOFF_PT`; this said 11:00 and was wrong),
   freezes and reserves before Slack, never blind-retries ambiguity, and writes one
   snapshot-linked `posts` row. Follow-up reminders use the same one-message cap while
   the feature is enabled.
 - `actions.py` rechecks workspace/channel/thread/roster and the earliest contact/spend
   expiry, persists
   before Persequor, keeps the exact existing `outreach-request.v1` wire keys, and
-  deduplicates retries/double-clicks. Thread replies load complete snapshot context and
-  cannot invoke mutable contact/CRM tools. `Not relevant` writes typed feedback and the
-  legacy-visible `not_relevant` status.
+  deduplicates retries/double-clicks. Thread replies load complete snapshot context.
+  `Not relevant` writes typed feedback and the legacy-visible `not_relevant` status.
+
+  **RETRACTED 2026-08-11:** this used to say card threads "cannot invoke mutable contact/CRM
+  tools". That restriction was removed, deliberately. It made a card thread TOOL-DEAD — a rep
+  could not search, check Salesforce, enrich, or add to a campaign in the one place leads
+  actually arrive — and the frozen-snapshot rationale, while sound, over-reached. There is now a
+  single `conversation.respond` with no tool narrowing, which is what makes a card follow-up's
+  offer actionable where it lands.
 
 Local commands: `rich-prepare` is preview-only unless `--execute` is explicit;
 `rich-shadow` is a read-only deterministic report; ordinary `drip --dry-run` remains
 write-free. No command here changes cron or enables the flag.
+
+---
+
+## 5.3 Proactive follow-ups (LIVE; cron `*/15 8-14 * * 1-5`)
+
+Cards and offers were dying in silence: three rich cards, zero engagements; an offer to build a
+campaign that nobody answered and nothing noticed, because delivery was treated as completion.
+`grant_watch/slack/nudge_*.py` chases unfinished work. Six modules, one responsibility each —
+`nudge_sources` (what is outstanding), `nudges` (whether/when/to whom), `nudge_messages` (what it
+says), `nudge_promises` (what may be offered), `nudge_silence` (may "nobody answered" be said),
+`nudge_variants` (which wording, and did it get a reply).
+
+Eight subject kinds, listed with their exact wording in `docs/grant_message_catalog.md` §4.
+Most are threaded replies; **`card_escalated` and `offer_unanswered` are top-level CHANNEL posts**
+naming a manager, because their purpose is that somebody sees them (Chase, 2026-08-10, reversing an
+earlier DM design).
+
+The load-bearing constraints, each of which cost a real defect to learn:
+
+- **One nudge per subject, ever** — a UNIQUE constraint, not worker logic.
+- **Only PERMANENT suppressions may be recorded.** A transient reason writes no row, so an outage
+  cannot silently retire a queue. Corollary discovered the hard way: **when adding a suppression
+  reason, ask what downstream is waiting on the row it declines to write.** An opted-out owner
+  produced a transient suppression whose successor waited forever for that row.
+- **Silence is asked of Slack, and may answer "I don't know."** `replied_since` returns
+  True/False/**None**, and None is treated exactly like "they replied". It must NOT use
+  `slack_event_receipts`, which undercounts. It pages (`has_more`), counts reactions, and treats
+  only an explicit DENY list of subtypes as non-human — `file_share`, `thread_broadcast` and
+  `me_message` are people talking.
+- **Promises are computed from the data**, using the same predicate the consumer requires
+  (`contact_status='verified'`), and never promise a SEND: a human approves and Persequor sends,
+  and `outreach.sent_at` has no writer, so the database cannot know an email was delivered.
+- **An opt-out protects the person being talked ABOUT**, not just the addressee.
+- Ordering round-robins across kinds; a card is ranked by the LEAD (tier, money, freshness) because
+  a card has no person waiting on it, while every other kind is oldest-person-first.
+- The delivery band (08:30–14:30 PT) is COUPLED TO THE CRON and must clear its last tick. Both
+  written records of that cron were once wrong; read the crontab.
+
+---
+
+## 5.4 Surfaces that spend money or leave the building
+
+Three surfaces have consequences no test can undo. Each is safe because of its SHAPE, not because a
+caller is careful — that distinction is the design, and a refactor that preserves behaviour while
+losing the shape has broken it.
+
+- **ZoomInfo** (`enrich/zoominfo*`, migrations for the credit ledger). Contact SEARCH is free and
+  returns `hasEmail`/`hasDirectPhone`/`hasMobilePhone` plus do-not-call flags, so a rep can be quoted
+  an exact cost before a credit is spent; ENRICH bills 1 credit per returned record. Vendor data
+  stores as `vendor_licensed` and **never** `verified`, do-not-call numbers are withheld, and mobile
+  is its own column because collapsing it into `Phone` put a mobile where every rep reads a desk
+  line. Two live-only facts: Okta refuses a `client_credentials` grant naming no scope, and
+  `directPhone` is NOT licensed on this plan — asking for it 400s the whole batch. **The credit
+  ledger is per-DATABASE, not a vendor balance**; two databases drawing on one account each believe
+  they have the full allowance.
+- **Resend email** (`notify/resend_client.py`), a sending-only key scoped to monarchconnected.com.
+  **The guardrail is the signature:** `send_to_rep` takes a SLACK USER ID and resolves it through the
+  reviewed roster itself. No parameter anywhere accepts an address, so no prompt and no scraped page
+  can aim Grant's mail at an outside inbox. A test asserts on the SIGNATURE so a refactor cannot
+  loosen it. This is INTERNAL mail to a rep; prospect outreach is Persequor's and is human-approved.
+- **Persequor outreach.** Grant builds an `outreach-request.v1` brief and POSTs it; seven were
+  accepted 2026-07-15/18. `sent_at` and `response` have **no writer anywhere in the codebase**, so
+  the database can confirm handoff accepted and can NEVER confirm an email was sent. Nothing may
+  claim delivery. An unreachable endpoint queues locally and says so, falling back to a copyable
+  draft — but there is no `outreach-retry` cron line, so a queued row would sit indefinitely.
 
 ---
 
@@ -354,6 +460,27 @@ provisions):
 The exact provisioning command recipe lives in `.claude/agents/grants-ops-guardian.md` (placeholders for
 droplet IP + tenant username). Chase fills those and runs them; then the guardian operates within the
 box they define.
+
+### 6.1 How a deploy happens
+
+**Production deploys from `main`, and only by exact hash** (Chase, 2026-08-10). A commit is
+deployable only once it is an ancestor of `origin/main`; the guardian asserts that in preflight and
+refuses otherwise. Work on a branch, merge, then ship.
+
+Hash-pinning is not ceremony — it has caught a mid-flight commit **three times**, including once
+when the repo moved during preflight to a commit that fixed the very command the guardian had been
+told to run as its own verification. "Deploy `main`" and "deploy commit X, which is on `main`" differ
+the moment somebody pushes mid-sync.
+
+**There is deliberately no deploy script in this repository.** A tracked `deploy_rsync.sh` existed
+and was removed on 2026-08-11: it rsynced the laptop WORKING TREE to the droplet with `--delete`, no
+ancestry check, no hash pin, no clean-tree check, and a hardcoded droplet IP. A hardened version was
+considered and rejected, because the flags were never the safety. The safety is the protocol around
+them — backup first with `integrity_check` run against the COPY, a marker plus `find -cnewer` ground
+truth, per-file sha256 against the target blobs, an import smoke test BEFORE the listener is killed,
+restart verification, and a post-deploy state re-read — plus the part no script can encode: stopping
+when a premise turns out to be false. The answer to "how do I deploy?" is **ask the guardian**. An
+executable in the repo will eventually get run by someone in a hurry.
 
 ---
 
