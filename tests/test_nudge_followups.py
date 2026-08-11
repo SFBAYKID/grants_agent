@@ -201,6 +201,36 @@ def test_quiet_means_quiet_about_you_as_well_as_to_you(tmp_path: Path) -> None:
     conn.close()
 
 
+def test_an_opted_out_owner_does_not_freeze_the_card_forever(tmp_path: Path) -> None:
+    """The card named nobody, so the follow-up must not try to name them either.
+
+    A SILENT PERMANENT STALL, found by review. `drip.py` drops the routing mention when
+    the territory owner has opted out — the card still posts, because the lead belongs
+    to the channel rather than to one person — but the follow-up recomputed `tagged`
+    from territory WITHOUT that filter. So `card_unengaged` suppressed as `opted_out`,
+    which is transient and writes no ledger row, and the escalation then waited forever
+    for a `card_unengaged` row that could never exist. Both subjects sat due and
+    undeliverable until they aged out, and nothing said so.
+
+    Nothing about it was observable: no error, no suppression row, no message.
+    """
+    conn = _conn(tmp_path)
+    # PA is Brett's territory and `usaspending:svpp` is a verified-state source.
+    _card(conn, NOW - timedelta(days=2), lead_id=900)
+    conn.execute("UPDATE leads SET state='PA' WHERE id=900")
+    conn.commit()
+    reminders.set_optout(conn, BRETT, scope="nudges")
+
+    found = [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_unengaged"
+    ]
+    assert found, "the card vanished from the queue entirely"
+    assert found[0].target_slack == "", "it tried to name a rep the card never named"
+    # And it is genuinely sendable rather than frozen behind a transient suppression.
+    assert nudges.suppress_reason(conn, found[0], NOW, client=_Slack()) == ""
+    conn.close()
+
+
 def test_an_opt_out_does_not_permanently_burn_the_subject(tmp_path: Path) -> None:
     """An opt-out is reversible, so it must not retire the subject forever.
 

@@ -177,6 +177,31 @@ affect Chase's other projects.
   class as the `COUNT()` bug already in this file, where "the unit test MASKED it by
   stubbing thirteen empty dicts". The doubles now model paging, subtypes, reactions and
   channel membership, and every fix above fails a test when reverted.
+- `verified` 2026-08-11 **AN OPTED-OUT TERRITORY OWNER FROZE A CARD FOREVER, SILENTLY.**
+  `drip.py` drops the routing mention when the owner has opted out — the card still
+  posts, because the lead belongs to the channel rather than one person — but the
+  follow-up recomputed `tagged` from territory WITHOUT that filter. `card_unengaged`
+  then suppressed as `opted_out`, which is transient and writes NO ledger row, and
+  `_escalation_is_premature` waited forever for a `card_unengaged` row that could never
+  exist. Both subjects sat due and undeliverable until they aged out, with no error, no
+  suppression row and no message. An opt-out now means the follow-up treats the card as
+  untagged, which is the honest reading: nobody was asked, so it asks the room.
+- `verified` 2026-08-11 **PRODUCTION IS `c7d0d54`, PID 67420**, 0 new tracebacks,
+  `.env` and crontab byte-identical, `followup_nudges` still 26. The guardian OVERRODE
+  ITS OWN "stop churning production" advice, correctly: that advice was conditional on
+  no open question needing production, and a defect that can post a false accusation
+  about a named colleague is not that. `nudge --dry-run` now shows a real candidate
+  instead of a false all-clear. Manager `U01DFJWQQJ3` **is** a member of `C01DGT9D11D`
+  (12 members), so the new membership guard suppresses nothing today — it is a latent
+  safety net. Worth remembering as a diagnostic: if escalations ever go unexpectedly
+  quiet, check channel membership before suspecting the code.
+- `needs-testing` 2026-08-11 KNOWN AND NOT FIXED, deliberately: `MIN_GAP` (4h) against
+  a 6h band means a FIRST send delayed past its slot can push the second past the 14:45
+  last tick, quietly costing a delivery. The drawn slots themselves are always
+  reachable; only a delayed send loses capacity. Left alone because `MIN_GAP` is a
+  deliberate anti-spam constant and the fix is a tuning call. Also structural: one card
+  yields TWO subjects, so a card every weekday is 10 subjects a week against a 10-send
+  budget per channel — `_fair_order` shares the shortfall out rather than removing it.
 - `verified` 2026-08-11 The critic also confirmed what holds: `_fair_order` is correct
   (3,000 random inputs, no losses or duplicates, terminates), `_escalation_is_premature`
   is genuinely structural, `PERMANENT_SUPPRESSIONS` has no transient leak, `--audience`

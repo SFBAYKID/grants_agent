@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .. import roster, territory
+from .. import reminders, roster, territory
 from ..migrations_nudges import NUDGE_SUBJECT_KINDS
 from .drip import PT as BUSINESS_TZ
 
@@ -254,6 +254,21 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
         tagged = str(row["snapshot_tagged"] or "")
         if not tagged and territory.state_is_verified(row["source"]):
             tagged = territory.owner_for_state(row["state"]) or ""
+        # AN OPT-OUT MEANS THE CARD NAMED NOBODY, so the follow-up must not name them
+        # either. `drip.py` drops the routing mention when the owner has opted out —
+        # the card still posts, because the lead belongs to the channel rather than to
+        # one person — but this recomputed `tagged` from territory WITHOUT that filter.
+        #
+        # The result was a silent permanent stall, not a noisy one. `card_unengaged`
+        # suppressed as `opted_out`, which is transient and writes no ledger row; and
+        # `_escalation_is_premature` then waited forever for a `card_unengaged` row
+        # that could never be written. Both subjects sat due and undeliverable until
+        # they aged out, and nothing anywhere said so.
+        #
+        # Treating the card as untagged is the honest reading: nobody was asked, so the
+        # follow-up asks the room and the escalation names no colleague.
+        if tagged and reminders.is_opted_out(conn, tagged, scope="nudges"):
+            tagged = ""
         observed = {
             "entity_name": str(row["entity_name"] or ""),
             "lead_status": str(row["status"] or ""),
