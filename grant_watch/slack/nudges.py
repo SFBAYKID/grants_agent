@@ -77,7 +77,17 @@ MIN_GAP = timedelta(hours=4)
 # against a cron that ran only at 09:15 and 14:15 — any slot after 14:15 was
 # unreachable, so more than half the band silently meant silence.
 #
-# The cron is therefore `*/30 8-15 * * 1-5` (last tick 15:30). CHANGE THEM TOGETHER.
+# THE INSTALLED CRON IS `*/15 8-14 * * 1-5`, last tick 14:45 PT. Read off the droplet
+# 2026-08-11 and checked empirically: over 1,432 drawn slots the latest is 14:30 and
+# ZERO are unreachable, so the band clears the last tick by 15 minutes.
+# CHANGE THEM TOGETHER.
+#
+# THIS COMMENT PREVIOUSLY CLAIMED `*/30 8-15 * * 1-5` AND WAS SIMPLY WRONG about
+# production — safe, but not a description of the ground. Worse, CLAUDE.md recorded
+# `15 9,14 * * 1-5`, whose last tick is 14:15: under that cron 252 of 1,432 slots
+# (17.6%) are unreachable, and a day that draws a late first slot loses its second
+# outright. Both were written from memory rather than from the crontab. If you are
+# changing this band, go and read the crontab.
 #
 # The band ends at 14:30 rather than 15:00 for a SECOND reason, measured after the
 # first version shipped: the recipient's own working-hours gate is `8 <= local < 18`,

@@ -189,10 +189,24 @@ affect Chase's other projects.
   because Slack also notifies on HIGHLIGHT WORDS and plenty of people keep their own
   first name in that list. All 12 messages deleted; the local database was never
   touched (each scenario ran in its own temp file). Five guards mutation-proven.
+- `verified` 2026-08-11 **THE CRON IS `*/15 8-14 * * 1-5`, AND BOTH WRITTEN RECORDS OF
+  IT WERE WRONG.** Read off the droplet by the guardian rather than from memory. Last
+  tick 14:45 PT against a band ending 14:30, so there is **no silent-never window** —
+  checked empirically over 1,432 drawn slots, latest 14:30, **0 unreachable**. The
+  code comment claimed `*/30 8-15` (safe, but not the ground) and CLAUDE.md claimed
+  `15 9,14`, whose 14:15 last tick would strand **252 of 1,432 slots (17.6%)** and
+  cost the second slot entirely on any day drawing a late first one. **The dangerous
+  value was the one in the project's own docs.** Both corrected; if you change the
+  band, go and read the crontab.
+- `verified` 2026-08-11 **THE GUARDIAN REFUSED A DEPLOY I HAD ALREADY AUTHORISED, AND
+  WAS RIGHT.** It was told to ship `c2a4e47`; mid-preflight the repo moved to
+  `1b1af6b`, which fixes the exact command it had been told to run as its own
+  verification step. Shipping the older hash would have made its report to me the
+  false all-clear the fix exists to prevent, and cost a second listener restart within
+  the hour — and a restart kills in-flight conversations. It traced the defect on the
+  `c2a4e47` bytes instead of trusting the commit message.
 - `needs-testing` 2026-08-10 **NONE OF THIS IS DEPLOYED.** Production is `1ffe7ce`,
-  schema 39; this work is local on `review/rich-award-card-campaign-20260723`. The
-  cron band comment still says `*/30 8-15 * * 1-5` — CHECK IT MATCHES before shipping,
-  since a slot drawn after the last tick means silence. Also open: 32 `capability_asks`
+  schema 39. Also open: 32 `capability_asks`
   are still `open`, **nine of them one person asking repeatedly to get leads INTO
   campaigns**, and `load_leads_to_campaigns` has no hand-written wording in
   `_OFFER_ABOUT`/`_CAPABILITY_HEADLINE`, so it would fall back to generic text if
@@ -321,7 +335,10 @@ affect Chase's other projects.
 - `verified` 2026-08-10 **PRODUCTION IS `65f05c7`, SCHEMA 37, AND THE FOLLOW-UP SYSTEM
   IS ARMED.** All five July asks declared live; `followup_nudges` still 0 rows, so
   declaring genuinely sent nothing. The cron line `15 9,14 * * 1-5 … nudge --execute`
-  fires the first delivery **Monday 09:15 PT**, in-window and unforced. Kerry is
+  fires the first delivery **Monday 09:15 PT**, in-window and unforced. *(Superseded
+  2026-08-11: the installed cron is `*/15 8-14 * * 1-5`, read off the droplet. Do not
+  reuse the value in this line — see the 2026-08-11 entry; `15 9,14` would strand
+  17.6% of drawn slots.)* Kerry is
   eligible **#0** — she was 14th before the `priority_at` fix, which the guardian
   measured as `ELIGIBLE_AHEAD_OF_FIRST_CAPABILITY` 14 → 0.
 - `verified` 2026-08-10 **I TOLD THE GUARDIAN SOMETHING FALSE AND IT CAUGHT IT.** I
