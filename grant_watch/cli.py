@@ -453,12 +453,32 @@ def cmd_nudge(
     A dry run opens a READ-ONLY connection, so any accidental write raises rather
     than quietly happening — the discipline that `salesforce-sync --dry-run` lacked
     until it was found spending live API calls.
+
+    A DRY RUN STILL GETS A SLACK CLIENT, and that is a correction rather than a
+    loosening. Withholding it used to be the belt-and-braces guarantee that a preview
+    could not possibly post — but escalations now establish silence by READING the
+    thread, and with no client that check fails closed as "could not verify silence".
+    The preview therefore hid every escalation and printed "nothing to follow up on",
+    which is the worst possible answer from the one command an operator runs to see
+    what is about to go out: reassuring, and wrong.
+
+    Posting is prevented STRUCTURALLY instead, and always was: `nudges.run` returns at
+    its `if dry_run` branch before it reserves anything or calls `chat_postMessage`.
+    `test_a_dry_run_writes_absolutely_nothing` drives exactly that with a live client
+    double and asserts zero posts and zero rows, so this is a covered property, not a
+    hope. The read-only connection remains the second belt.
     """
     from slack_sdk import WebClient
 
     from .slack import nudges
 
-    client = None if dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    # A preview on a machine with no token degrades to the conservative reading
+    # rather than crashing; a real send still requires the token and fails loudly
+    # without it, because a send that silently did nothing would be worse.
+    token = os.environ.get("SLACK_BOT_TOKEN", "")
+    if not token and not dry_run:
+        raise KeyError("SLACK_BOT_TOKEN")
+    client = WebClient(token=token) if token else None
     conn = db.connect_readonly() if dry_run else db.connect()
     outcome = nudges.run(
         client,

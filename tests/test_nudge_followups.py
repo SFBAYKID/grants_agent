@@ -409,6 +409,36 @@ def test_every_tier_of_card_gets_chased(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_a_preview_can_actually_see_an_escalation(tmp_path: Path) -> None:
+    """The operator preview must show what is about to go out, not a false all-clear.
+
+    `nudge --dry-run` used to withhold the Slack client entirely, as a structural
+    guarantee that a preview could not post. Once escalations began establishing
+    silence by READING the thread, that guarantee turned into a lie: the silence check
+    failed closed as "could not verify silence" and the preview printed "nothing to
+    follow up on" — reassuring, and wrong, from the one command run to find out what
+    Grant is about to say about a colleague.
+
+    Posting is prevented structurally instead: `run` returns at its dry-run branch
+    before reserving or sending. This test pins BOTH halves — the escalation is
+    visible, and nothing is written or posted.
+    """
+    conn = _conn(tmp_path)
+    _delivered_offer(conn, NOW - timedelta(hours=27))
+    client = _Slack()
+
+    outcome = nudges.run(client, conn, dry_run=True, now=NOW)
+    assert "would nudge offer_unanswered" in outcome
+    assert not client.posts
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) FROM followup_nudges WHERE subject_kind='offer_unanswered'"
+        ).fetchone()[0]
+        == 0
+    )
+    conn.close()
+
+
 # ------------------------------------------------------------------ the rehearsal
 
 
