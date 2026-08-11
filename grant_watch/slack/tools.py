@@ -388,6 +388,20 @@ def salesforce_campaign_members_preview(
     """Resolve and persist an exact Campaign membership preview without creating data."""
     from ..enrich import salesforce_campaigns as crm
 
+    # REFUSED BEFORE ANY SALESFORCE CALL, and the refusal names the tool that works.
+    # On 2026-08-11, asked to "load the California gold leads", the model chose this
+    # tool (which needs explicit ids), got a refusal naming no alternative, called
+    # the SAME tool again, ran out of tool turns, and asked the rep a question
+    # instead of building the card. A refusal that does not name the way forward is
+    # a dead end dressed as an error.
+    if not (args.get("lead_ids") or args.get("search_request_id")):
+        return (
+            "ERROR: no Grant lead ids were given. For a whole state and tier, call "
+            "salesforce_campaign_batch_preview with targets=[{campaign_link, "
+            "state, grades}] — it selects the set server-side. Use this tool only "
+            "for a short, explicit list of lead ids the rep named."
+        )
+
     gateway = crm.SalesforceCampaignGateway()
     try:
         _sobject, campaign_id = crm.parse_record_link(
@@ -417,7 +431,12 @@ def salesforce_campaign_members_preview(
                 or len(stored_ids) != int(snapshot["total_count"])
             ):
                 raise ValueError(
-                    "search snapshot is incomplete; run the complete state/tier batch tool"
+                    "this search snapshot is a top-N slice, not the complete "
+                    "state/tier set, so it cannot be frozen into a campaign. "
+                    "CALL salesforce_campaign_batch_preview INSTEAD, with "
+                    "targets=[{campaign_link, state, grades}] — it selects the "
+                    "whole set server-side. Do not call this tool again for a "
+                    "state-and-tier request; it will refuse identically."
                 )
             lead_ids = [int(item) for item in stored_ids]
         action = crm.prepare_membership(

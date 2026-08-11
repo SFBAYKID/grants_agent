@@ -61,9 +61,15 @@ CAMPAIGN_BATCH_TOOL_SCHEMA: dict[str, Any] = {
     "name": "salesforce_campaign_batch_preview",
     "description": (
         "Freeze complete Grant state/tier selections and prepare one isolated, audited "
-        "Salesforce Campaign approval per target. Use this instead of exporting IDs or "
-        "calling the single-list tool repeatedly when the user asks for one or more "
-        "whole state/tier lists. The first call must leave both approval flags false."
+        "Salesforce Campaign approval per target. THIS IS THE DEFAULT TOOL for "
+        "'put <state> <tier> leads on <campaign>' — it selects the whole set "
+        "server-side, so you need no lead ids, no search first, and no contact "
+        "enrichment beforehand (contacts Grant already holds are used "
+        "automatically). Use salesforce_campaign_members_preview ONLY for a short "
+        "list of lead ids the rep named explicitly; it refuses a state/tier ask and "
+        "will keep refusing. The first call must leave both approval flags false: "
+        "it comes back naming every organization that needs a decision, and you "
+        "relay that and ask. Then call again with the flags the rep approved."
     ),
     "input_schema": {
         "type": "object",

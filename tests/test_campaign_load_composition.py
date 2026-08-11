@@ -440,3 +440,27 @@ def test_an_approval_frozen_before_migration_40_still_confirms(
     )
     assert result.state is CampaignActionState.COMPLETE, result.message
     assert result.added == 9, result.message
+
+
+def test_the_single_list_tool_names_the_tool_that_works(tmp_path: Path) -> None:
+    """A refusal that names no alternative is a dead end dressed as an error.
+
+    Asked to "load the California gold leads into it" on 2026-08-11, the model chose
+    the single-list tool (which needs explicit ids), got "search snapshot is
+    incomplete; run the complete state/tier batch tool", called the SAME tool again,
+    ran out of tool turns, and asked the rep a question instead of building a card.
+    """
+    from grant_watch.slack import tools
+
+    out = tools.salesforce_campaign_members_preview(
+        {
+            "campaign_link": campaign_link("Campaign", CAMPAIGNS["IL"][0]),
+            "lead_ids": [],
+        },
+        "UREP",
+        "TWORK",
+        "CGRANTS",
+        "1.0",
+    )
+    assert out.startswith("ERROR:")
+    assert "salesforce_campaign_batch_preview" in out

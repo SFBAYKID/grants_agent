@@ -919,7 +919,9 @@ def test_legacy_incomplete_search_snapshot_cannot_prepare_members(
         "CGRANTS",
         "123.4",
     )
-    assert "snapshot is incomplete" in result
+    assert "not the complete state/tier set" in result
+    # The refusal must also name the tool that works, or the model retries this one.
+    assert "salesforce_campaign_batch_preview" in result
     assert conn.execute("SELECT COUNT(*) FROM crm_actions").fetchone()[0] == 0
 
 
