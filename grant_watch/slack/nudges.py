@@ -65,7 +65,23 @@ POLICY_VERSION = "nudge-v1"
 # though it does not consume the daily card slot.
 MAX_NUDGES_PER_DAY = 2
 MAX_NUDGES_PER_TARGET_PER_DAY = 1
-MIN_GAP = timedelta(hours=4)
+
+# TWO HOURS, LOWERED FROM FOUR, AND THE PER-PERSON CAP IS WHY IT IS SAFE.
+#
+# `MIN_GAP` was doing two different jobs and failing the second. It spaces the two
+# DRAWN slots — `daily_slots` forces them apart — and it also gates the actual send
+# against the previous one. At four hours inside a six-hour band those two collide: the
+# first slot can be drawn as late as 10:30, so a send delayed even slightly past its
+# slot pushes the second requirement past 14:30 and out of the band entirely. The
+# second delivery is then lost silently, reported as ordinary pacing, and the queue
+# drains at half the intended rate — which matters against a backlog of ~30 subjects.
+#
+# It is safe to lower because `MAX_NUDGES_PER_TARGET_PER_DAY = 1` already guarantees
+# the day's two nudges go to DIFFERENT people (or to nobody, for an untagged card). So
+# this constant never protects one human from two notifications — that is the
+# per-person cap's job. All it guards is channel noise, and two hours is ample for
+# that: it still makes back-to-back posts impossible.
+MIN_GAP = timedelta(hours=2)
 
 # WHEN a follow-up may land, Pacific. Grant is a cron job and a fixed schedule makes
 # it read like one: a message that arrives at 09:15 every single weekday is
@@ -277,6 +293,14 @@ def _escalation_is_premature(
 
     An untagged card has no rep to wait for, so it escalates on its own timetable.
     Transient by design — this becomes false the moment the rep's nudge lands.
+
+    ON THE ASYMMETRY, raised in review and deliberately kept: the rep's turn is a
+    THREADED reply while the escalation naming them is a top-level channel post, which
+    looks like the rep gets the quieter treatment. It is not a delivery-probability
+    gap. `<@U…>` pushes a notification identically from a thread and from the channel,
+    so the rep is notified either way; what differs is CHANNEL VISIBILITY, and that
+    difference is the point of an escalation rather than a flaw in it. What would be
+    unfair is the manager hearing FIRST, and that is what this function prevents.
     """
     if not str(candidate.observed.get("tagged_slack") or ""):
         return ""

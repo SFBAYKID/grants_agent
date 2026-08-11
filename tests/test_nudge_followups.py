@@ -730,6 +730,69 @@ def test_a_blocked_candidate_does_not_starve_the_one_behind_it(
     conn.close()
 
 
+def test_the_report_shows_what_the_queue_could_not_reach(tmp_path: Path) -> None:
+    """Silent capacity loss reads exactly like "there was nothing to send".
+
+    The shortfall is structural — one card yields two subjects, so a card every
+    weekday consumes a channel's whole weekly budget — and `_fair_order` shares it out
+    rather than removing it. The tail is retired with a permanent `stale` row, which is
+    honest and durable but invisible unless somebody writes the query. Counting it in
+    the report means the next person to ask "is this working?" sees the backlog it
+    never reached, instead of a clean table implying there was nothing to do.
+    """
+    from grant_watch.slack import nudge_variants
+
+    conn = _conn(tmp_path)
+    for index in range(3):
+        conn.execute(
+            """INSERT INTO followup_nudges
+                 (id,subject_kind,subject_id,audience,target_slack,anchor_ts,
+                  policy_version,due_at,drop_after,state,suppress_reason,
+                  delivery_key,reserved_at)
+               VALUES (?,'card_unengaged',?,?,'','1.1','nudge-v1',?,?,
+                       'suppressed','stale',?,?)""",
+            (
+                f"s{index}",
+                str(index),
+                CHANNEL,
+                NOW.isoformat(),
+                NOW.isoformat(),
+                f"k{index}",
+                NOW.isoformat(),
+            ),
+        )
+    conn.commit()
+
+    report = nudge_variants.report(conn)
+    assert "aged out unsent (3)" in report, report
+    assert "card_unengaged: 3" in report
+    conn.close()
+
+
+def test_the_second_daily_slot_survives_a_delayed_first_send(tmp_path: Path) -> None:
+    """A late first delivery must not silently cost the day its second one.
+
+    `MIN_GAP` gates the send against the previous one, and at four hours inside a
+    six-hour band that collided with the drawn slots: the first slot can fall as late
+    as 10:30, so any delay pushed the second requirement past 14:30 and out of the band.
+    The delivery was then lost, reported as ordinary pacing, and the queue drained at
+    half its intended rate against a backlog of ~30 subjects.
+
+    Safe to shorten because `MAX_NUDGES_PER_TARGET_PER_DAY` already guarantees the two
+    daily nudges go to different people; this constant only guards channel noise.
+    """
+    assert nudges.MIN_GAP <= timedelta(hours=3), (
+        "MIN_GAP must leave room for both drawn slots inside the delivery band"
+    )
+    band = datetime.combine(NOW.date(), nudges.NUDGE_BAND_END_PT) - datetime.combine(
+        NOW.date(), nudges.NUDGE_BAND_START_PT
+    )
+    latest_first_slot = band - nudges.MIN_GAP * (nudges.MAX_NUDGES_PER_DAY - 1)
+    assert nudges.MIN_GAP < latest_first_slot, (
+        "a first send delayed to its latest drawn slot still cannot reach the second"
+    )
+
+
 def test_the_batch_nudge_counts_only_the_orgs_that_are_stuck(
     tmp_path: Path,
 ) -> None:

@@ -133,7 +133,9 @@ def report(conn: sqlite3.Connection) -> str:
         )
     ]
     if not kinds:
-        return "No follow-ups have been delivered yet, so there is nothing to compare."
+        lines.append(
+            "No follow-ups have been delivered yet, so there is nothing to compare."
+        )
     for kind in kinds:
         lines.append(kind)
         for item in stats(conn, kind):
@@ -142,6 +144,7 @@ def report(conn: sqlite3.Connection) -> str:
                 f"  {item.variant}: {item.engaged}/{item.sent} replied "
                 f"({item.reply_rate:.0%}){enough}"
             )
+    lines.extend(_capacity_lines(conn))
     lines.append("")
     lines.append(
         "A reply in the thread is the only signal Grant can see. A rep who phoned "
@@ -149,3 +152,40 @@ def report(conn: sqlite3.Connection) -> str:
         "outcome rates."
     )
     return "\n".join(lines)
+
+
+def _capacity_lines(conn: sqlite3.Connection) -> list[str]:
+    """What the queue dropped for want of a delivery slot, per kind.
+
+    WHY THIS IS IN THE REPORT AND NOT JUST THE TABLE. The system has a structural
+    shortfall: one card produces TWO subjects (`card_unengaged` plus `card_escalated`),
+    so a card every weekday is ten subjects a week against a budget of two sends a day
+    in one channel — before a single capability ask, abandoned thread or expired
+    preview. `_fair_order` shares that shortfall out fairly; it cannot remove it, and
+    the tail ages out at `DROP_AFTER` and is retired with a permanent `stale` row.
+
+    That retirement is honest and durable, but it is INVISIBLE unless somebody writes
+    the query. Silent capacity loss reads exactly like "there was nothing to send",
+    which is the one conclusion it must never support. Counting it here means the next
+    person to ask "is this thing working?" sees the backlog it could not reach.
+    """
+    rows = list(
+        conn.execute(
+            """SELECT subject_kind, COUNT(*) AS n FROM followup_nudges
+                WHERE state='suppressed' AND suppress_reason='stale'
+                GROUP BY subject_kind ORDER BY n DESC"""
+        )
+    )
+    if not rows:
+        return []
+    total = sum(int(row["n"]) for row in rows)
+    lines = [
+        "",
+        f"aged out unsent ({total}) — the queue could not reach these in time:",
+    ]
+    lines.extend(f"  {row['subject_kind']}: {row['n']}" for row in rows)
+    lines.append(
+        "  A large or growing number here means the daily cap is the binding "
+        "constraint, not the supply of work."
+    )
+    return lines
