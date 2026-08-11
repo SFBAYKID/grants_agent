@@ -281,7 +281,9 @@ file's own history as much as to lead data.
   deploy. Also NOT exercised: the Confirm button, `nudge --execute`, and any rich-card
   button.
 - `needs-testing` 2026-08-09 the real-model acceptance matrix
-  (`GRANT_LLM_ACCEPTANCE=1`, default-SKIPPED) is **22 failed / 58 passed**. This is NOT
+  (`GRANT_LLM_ACCEPTANCE=1`, default-SKIPPED) is **22 failed / 58 passed**. *(Superseded
+  2026-08-11: measured at **16 failed / 73 passed**, and 6 of those 16 flipped to
+  passing on an immediate re-run — see the current status in CLAUDE.md.)* This is NOT
   a regression from this session's work: five sampled failures reproduce IDENTICALLY at
   the pre-session commit `90f0420`, and three others flipped between runs, so the suite
   is partly non-deterministic and was already failing. It is worth fixing — a

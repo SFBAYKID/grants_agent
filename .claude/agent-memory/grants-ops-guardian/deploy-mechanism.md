@@ -43,8 +43,23 @@ TRACKED=YES, 1375 bytes, entered history in `6a8f95f`). Read in full, 33 lines, 
 Nothing depends on it: guardian helpers are written FRESH per target into the session
 scratchpad (`deploy_rsync_<hash>.sh`), each carrying destination-colon + tenant guards,
 HEAD==TARGET, clean-tree, `merge-base --is-ancestor`, an explicit measured `--files-from`
-list, and `--no-times --no-perms`. Removal was recommended to the coordinator 2026-08-10
-(guardian does NOT edit it unilaterally — it is a repo change, not a production op).
+list, and `--no-times --no-perms`.
+
+**BOTH COPIES ARE NOW GONE (2026-08-10).** Deleted from the repo by Chase's side in `5238fe4`
+(`D deploy_rsync.sh`), and the DROPLET copy deleted by the guardian under explicit instruction.
+**A repo deletion does NOT propagate to the droplet** — guardian deploys use an explicit
+`--files-from` list, so removing a tracked file never removes it from production. Deleting it
+in git and stopping there leaves the copy a person is most likely to stumble across. Check both.
+
+Removal record: `/home/grantwatch/grants_agent/deploy_rsync.sh` (755, sha `b3e9fde3…`,
+byte-identical to the repo blob) → backup `~/removed-deploy_rsync.20260811T035624Z.sh.bak`,
+**mode 600 and non-executable on purpose** — backing up a 755 `deploy_rsync.sh` as another
+runnable `deploy_rsync.sh` just relocates the trap. Proven inert: manifest diff of the repo
+root showed exactly 1 removal / 0 additions, PID 67672 unchanged across a keepalive tick,
+revision/`.env`/crontab shas unchanged, 0 tracebacks. The only executable left in the repo
+root is `run_bot.sh`, which is correct. Before deleting, it was proven UNREFERENCED: no
+crontab line, no `run_bot.sh` reference, no import — the only hits were prose in `CLAUDE.md`
+and `docs/status_log.md`.
 
 **The deeper reason a "safe version" is still wrong:** the safety is not the flags, it is the
 surrounding protocol — backup-first with `integrity_check` on the COPY, marker +

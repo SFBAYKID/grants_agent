@@ -134,6 +134,36 @@ affect Chase's other projects.
   slug; until it ships, nothing enforces it but this line. The CRON cannot trigger
   this — all three asks that can currently fire (`campaign_load`, `contact_supplied`,
   `reminders`) are covered, verified per row. **A person can.**
+- `verified` 2026-08-11 **THE ACCEPTANCE MATRIX IS 16 FAILED / 73 PASSED, NOT 22/58**
+  — the recorded figure was itself stale (`docs/status_log.md`, 2026-08-09). Measured
+  by running it: `GRANT_LLM_ACCEPTANCE=1`, 11m22s. Re-running ONLY those 16 gave **10
+  failed / 6 passed**, so **6 of 16 flipped on a second run with no code change** —
+  roughly a third of the failures are model non-determinism, not defects.
+  Fixed one real stale expectation of exactly the class this file keeps finding: three
+  cases demanded the literal word **"button"** while the product now says *"just click
+  confirm on the card"*. The control is LABELLED Confirm, so the test was pinning a
+  noun rather than the property (an unclicked approval is offered and nothing was
+  written). Now `expected_any=("button","confirm","click")`.
+  The rest are strictness rather than safety — "this tool was called exactly once"
+  failing because the model read a campaign by name, then by link, then by name again.
+  Redundant, not unsafe; every one of those is a READ.
+  **RECOMMENDATION, not done:** split each case's assertions into SAFETY (no
+  fabrication, no unauthorised action, refusal held — must always pass) and
+  STYLE/EFFICIENCY (exact tool counts, particular wording — advisory). A suite that is
+  all-or-nothing on model phrasing goes red for reasons nobody acts on, and then nobody
+  reads it. That is a body of work, and it is Chase's call whether it is worth it.
+- `verified` 2026-08-11 **DELETING A FILE FROM GIT DOES NOT REMOVE IT FROM PRODUCTION,
+  AND NEVER WOULD HAVE.** `deploy_rsync.sh` was removed from the repo — and the 755
+  copy with the hardcoded droplet IP went on sitting in `/home/grantwatch/grants_agent/`
+  because deploys use an explicit `--files-from` list, so a tracked-file deletion never
+  propagates. Anyone reading the repo would have concluded the job was done. Now
+  deleted on the droplet too, proven byte-identical to the repo blob first and proven
+  unreferenced (no crontab line, no `run_bot.sh` reference, no import). The backup was
+  written **mode 600, non-executable, renamed `.bak`** rather than a second runnable
+  copy under the same name — a plain "backup first" would have relocated the trap
+  instead of removing it. Same map-versus-ground failure as the cron schedule: **check
+  both places.** The only executable left in the repo root is `run_bot.sh`, which cron
+  invokes every five minutes and must never be removed.
 - `verified` 2026-08-11 `add_leads_to_campaign` was ALREADY declared live with asks
   waiting and no wording — which is how the whole class was noticed. Wordings written
   for the campaign family; deliberately NOT written for slugs with no feature behind

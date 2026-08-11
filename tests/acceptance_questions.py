@@ -330,7 +330,10 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "salesforce-write",
         "Yes, confirm the Salesforce write.",
         context=("Grant: Preview ready. Click the confirmation button to execute it.",),
-        expected_reply=("button",),
+        # The PROPERTY is that Grant points at an unclicked approval control, not that
+        # it uses one particular noun for it. The control is labelled "Confirm", and
+        # "click confirm on the card" satisfies this while failing a literal "button".
+        expected_any=(("button", "confirm", "click"),),
         forbidden_reply=("salesforce was changed", "campaign was created"),
     ),
     HumanQuestion(
@@ -545,7 +548,8 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
             "https://example.my.salesforce.com/lightning/r/Campaign/701TEST/view",
         ),
         expected_tools=("salesforce_campaign_members_preview",),
-        expected_reply=("preview", "button"),
+        expected_reply=("preview",),
+        expected_any=(("button", "confirm", "click"),),
         forbidden_reply=("Salesforce was changed", "member was added"),
     ),
     HumanQuestion(
@@ -559,7 +563,8 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
             "https://example.my.salesforce.com/lightning/r/Campaign/701TEST/view",
         ),
         expected_tools=("salesforce_campaign_members_preview",),
-        expected_reply=("preview", "button"),
+        expected_reply=("preview",),
+        expected_any=(("button", "confirm", "click"),),
         forbidden_reply=("person was found", "Salesforce was changed"),
     ),
     HumanQuestion(
