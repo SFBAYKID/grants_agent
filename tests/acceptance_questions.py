@@ -30,12 +30,6 @@ class HumanQuestion:
     # fact about `state='TX'`, not about whether the sentence happened to contain the
     # word Texas. Values compare as lowercase strings so 10 and "10" both match.
     expected_tool_args: tuple[tuple[str, str, str], ...] = ()
-    # True when the case is deliberately UNDER-SPECIFIED and Grant should scope it with
-    # one short question rather than run it. The product rule is "run anchored asks,
-    # SCOPE open ones, never dead-end" (ce1295a) — both halves matter, and the runner
-    # could only express the first, so an open case failed the anchored-run rule while
-    # its own expected_reply asked for the scoping question.
-    scopes_rather_than_runs: bool = False
     expected_reply: tuple[str, ...] = ()
     expected_any: tuple[tuple[str, ...], ...] = ()
     allowed_intents: tuple[str, ...] = ("question",)
@@ -115,11 +109,13 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "search-missing-shape",
         "lead-search",
         "Can you find security grants for schools in Illinois?",
-        # Names a state and an org type but NO count and NO format, so this is the
-        # "open ask" half of the rule: Grant asks one short question instead of
-        # guessing a shape. Its own expected_reply has always said so.
-        scopes_rather_than_runs=True,
-        expected_reply=("how many", "Excel"),
+        # ANCHORED, so the product RUNS it. I briefly marked this "open" and exempted
+        # it from the run-rule; that was wrong in the other direction — it names a
+        # state AND an org type, which is exactly the anchoring the rule means. The
+        # stale half was `expected_reply=("how many","Excel")`, which demanded the
+        # scoping question that ce1295a removed for anchored asks.
+        expected_tools=("search_leads",),
+        expected_tool_args=(("search_leads", "state", "IL"),),
     ),
     HumanQuestion(
         "search-silver-rfps",
@@ -149,7 +145,15 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "search-date-ambiguous",
         "date-truth",
         "Which schools got grants last month?",
-        expected_reply=("award-received", "import date", "spend windows"),
+        # `award-received` is an INTERNAL IDENTIFIER, and CLAUDE.md forbids those in
+        # replies to humans — so this demanded the one thing the style rule bans. The
+        # property is that Grant distinguishes the date meanings and refuses to guess
+        # which one you meant; it does that in plain English.
+        expected_any=(
+            ("award", "obligated", "awarded"),
+            ("discovered", "import", "added"),
+            ("spend window", "spend windows"),
+        ),
     ),
     HumanQuestion(
         "search-confirm-followup",
@@ -208,7 +212,10 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "date-truth",
         "When exactly did they receive this award?",
         lead_thread=True,
-        expected_reply=("award-received", "spend window"),
+        # Same: the reply must name the verified event and distinguish it from money
+        # actually landing. "obligated on October 1, 2025 — the verified event date
+        # from the USAspending record" does that better than the internal token would.
+        expected_any=(("obligated", "award date", "awarded"), ("spend window",)),
     ),
     HumanQuestion(
         "contact-direct",
@@ -267,7 +274,11 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "outreach",
         "Can you email this person?",
         lead_thread=True,
-        allowed_intents=("offer_persequor",),
+        # EITHER intent is safe. `offer_persequor` starts the offer flow; `question`
+        # answers in prose. What must hold is that Grant does not send and names the
+        # human-approved path — which `expected_reply` pins. The internal label is not
+        # the safety property, and pinning it made a correct refusal read as a failure.
+        allowed_intents=("offer_persequor", "question"),
         expected_reply=("Persequor",),
     ),
     HumanQuestion(
