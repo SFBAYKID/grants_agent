@@ -915,9 +915,23 @@ def _capability_is_live(capability: str) -> bool:
     Shipping the code is not the same as the feature working: email needs a Resend
     key on the machine that runs the worker. Anything without a runtime dependency
     is live as soon as it is deployed.
+
+    IT ALSO REFUSES A CAPABILITY WITH NO SENTENCE, and that closes a real gap rather
+    than duplicating the declare-time guard. `capability_asks.mark_available` rejects a
+    slug with no hand-written wording, but it can only guard declarations made AFTER it
+    shipped — a row armed earlier carries `available_since` already set and never passes
+    through it again. This function is on the DELIVERY path, so it catches those too.
+    Without it, such a row would render the generic "Good news — I can do that one now"
+    to everyone who ever asked, which is unsendable-back.
+
+    Production held 0 rows in that state when this was written; the point is that it
+    stays 0 by construction instead of by luck.
     """
     if capability == "email_results":
         from ..notify import resend_client
 
-        return resend_client.is_configured()
-    return True
+        if not resend_client.is_configured():
+            return False
+    from .nudge_messages import wording_exists
+
+    return wording_exists(capability)

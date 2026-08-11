@@ -926,3 +926,51 @@ def test_the_batch_nudge_counts_only_the_orgs_that_are_stuck(
     other = nudges.build_message(candidate, "b", conn=conn)
     assert "1 org here needs your call on how to match it" in other, other
     conn.close()
+
+
+def test_an_armed_slug_without_wording_never_sends_the_generic_line(
+    tmp_path: Path,
+) -> None:
+    """The declare-time guard cannot reach a row that was armed before it existed.
+
+    `mark_available` refuses a slug with no hand-written sentence, but only for
+    declarations made AFTER that guard shipped. A row armed earlier already carries
+    `available_since` and never passes through it again — so the delivery path has to
+    refuse it too, or it renders "Good news — I can do that one now" to everyone who
+    ever asked, which cannot be unsent.
+
+    Production held 0 rows in that state when this was written. The point is that it
+    stays 0 by construction rather than by luck.
+    """
+    conn = _conn(tmp_path)
+    asked = NOW - timedelta(days=20)
+    # Written straight to the table, bypassing mark_available exactly as a row armed
+    # before the guard existed would have been.
+    conn.execute(
+        """INSERT INTO capability_asks
+             (id,slack_user,audience,thread_ts,message_ts,asked_at,ask_text,
+              capability,available_since,state,recorded_by,created_at)
+           VALUES (1,?,?,'700.1','700.1',?,'please track applications',
+                   'track_applications',?,'open','test',?)""",
+        (
+            JOCELYN,
+            CHANNEL,
+            asked.isoformat(),
+            (NOW - timedelta(days=1)).isoformat(),
+            asked.isoformat(),
+        ),
+    )
+    conn.commit()
+
+    candidate = next(
+        c
+        for c in nudges.candidates(conn, NOW)
+        if c.subject_kind == "capability_now_available"
+    )
+    assert (
+        nudges.suppress_reason(conn, candidate, NOW, client=_Slack())
+        == "capability_not_ready"
+    )
+    # Transient, so writing the sentence later revives the ask rather than burning it.
+    assert "capability_not_ready" not in nudges.PERMANENT_SUPPRESSIONS
+    conn.close()

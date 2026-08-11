@@ -34,7 +34,9 @@
 
 ## Current production state
 
-- [Deploy 43e6f1d — final state (CURRENT PROD)](deploy-c7d0d54-accusation-guards.md) — LIVE 2026-08-10, schema 39, PID 67672; four false-accusation paths closed + opt-out routing stall; manager IS in the channel so the membership guard suppresses nothing
+- [9ef2ad7 — CURRENT PROD, deployed + verified](prod-state-9ef2ad7-verified.md) — 2026-08-11, schema 39, PID 71366, 0.18s outage; 7 capability slugs still have NO wording (all unarmed); the branch name is not `main` and that is fine
+- [f7cff1d (superseded by 9ef2ad7)](prod-state-f7cff1d-verified.md) — still the reference for the manifest-diff noise floor (6 always-benign paths); 2 nudges REALLY delivered; nudge cron's 3 log vocabularies
+- [Deploy 43e6f1d (superseded by f7cff1d)](deploy-c7d0d54-accusation-guards.md) — schema 39, PID 67672; four false-accusation paths closed + opt-out routing stall; manager IS in the channel so the membership guard suppresses nothing
 - [Deploy 885ad88 lead-ranked cards](fair-order-does-not-rescue-fresh-cards.md) — LIVE 2026-08-10, schema 39, PID 66465; North Palos 26→29→**0**; rotation was not the error, the within-kind sort key was; `award-brief` sorts unranked
 - [Deploy 0f62485 nudge follow-ups](deploy-0f62485-nudge-followups.md) — schema 39; nudge cron ground truth `*/15 8-14`; dry-run blind without a Slack client; read-only future-clock queue recipe
 - [Session final 2f1ff77 + 1ffe7ce docs (superseded by 0f62485)](session-final-2f1ff77.md) — schema 39, PID 60352, TOOL_SCHEMAS 25; negation guard + per-turn spend key verified; user_memory EMPTY

@@ -45,6 +45,29 @@ when a check reports a zero, print the pattern it used alongside it (`pgrep -af`
 `pgrep -cf`) so the zero can be judged rather than believed — the same "never trust a zero from a
 pattern you have not seen match" rule as the rsync itemize direction in [[deploy-mechanism]].
 
+## 1c. A missing SPACE between a grep pattern and its filename hangs the whole gate
+
+2026-08-11 (9ef2ad7 deploy). The invariant block contained:
+
+```bash
+CRON_POST=$(grep '^CRONTAB_SHA='"$W/post.out" | cut -d= -f2)   # WRONG - no space
+```
+
+The two shell words concatenate into ONE argument, so grep receives a pattern and **no
+file**, falls back to **stdin**, and blocks forever. The Bash tool killed it at the 2-minute
+timeout, *after* the remote phase had already completed successfully — so the transcript
+showed a healthy deploy followed by an alarming `Exit code 143`.
+
+Same family as the ssh traps above: **a step that silently reads the wrong stdin**. Two
+durable habits, both of which contained it here:
+
+- **`tee` every remote phase to a file.** `pre.out`/`post.out` survived the timeout intact,
+  so the gates were re-run locally in seconds with zero extra droplet round-trips and zero
+  ambiguity about whether the deploy had half-landed.
+- **A timeout is not a failure verdict.** Establish *which* phase died before reacting.
+  Rolling back on this one would have reverted a deploy that was already correct and
+  verified.
+
 ## 2. A burst of separate SSH sessions gets port 22 REJECTED (not timed out)
 
 After ~6 short-lived connections in ~5 minutes the droplet began answering with
