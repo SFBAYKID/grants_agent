@@ -151,7 +151,10 @@ def test_an_offer_nobody_answered_reaches_the_manager_in_the_channel(
     text = posted["text"]
     assert f"<@{MANAGER}>" in text  # the manager is being told
     assert f"<@{JOCELYN}>" in text  # about this person
-    assert "building that campaign" in text  # about this specific offer
+    # It names the SPECIFIC offer, not "something I offered". Both wordings say
+    # "that campaign"; only the grammar around it differs ("offered to build" vs
+    # "come back about building"), so the assertion pins the fact, not the phrasing.
+    assert "that campaign" in text
     assert "https://slack.example" in text  # with a link to the actual words
     conn.close()
 

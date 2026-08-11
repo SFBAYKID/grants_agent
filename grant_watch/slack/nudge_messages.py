@@ -82,6 +82,19 @@ def build_message(
         )
     entity = display_entity_name(str(candidate.observed.get("entity_name") or ""))
     subject = entity or "that lead"
+    amount = int(candidate.observed.get("amount_usd") or 0)
+    money = f"${amount:,} " if amount > 0 else ""
+    # THE CLOSING OFFER IS COMPUTED PER LEAD. It used to be the fixed sentence "want me
+    # to find a contact?", which was weaker than the truth on any lead Grant had
+    # already researched — North Palos carried a page-verified Director of Technology
+    # and his email at the moment the card posted, and the follow-up still offered to
+    # go looking. A specific next step is the whole difference between a message that
+    # gets answered and one that gets scrolled past.
+    offer = (
+        nudge_promises.best_offer(conn, int(candidate.observed.get("lead_id") or 0))
+        if conn is not None
+        else nudge_promises.Offer("find_contact", "Want me to find a contact?")
+    )
     if mention:
         # The card named this person, so the follow-up asks THEM rather than the room.
         # Addressing the channel about a card that pinged one rep produced a
@@ -89,25 +102,21 @@ def build_message(
         if variant == "b":
             # Leads with the MONEY rather than the silence. Which of these gets
             # answered more often is exactly what the variant ledger measures.
-            amount = int(candidate.observed.get("amount_usd") or 0)
-            money = f"${amount:,} " if amount > 0 else ""
-            return f"{mention}{money}{subject} is still going spare. Want the contact?"
+            return f"{mention}{money}{subject} is still going spare. {offer.question}"
         # "back here" keeps the claim to what Grant can see: it never asserts the rep
         # did nothing, because they may have phoned the district from the car.
-        return (
-            f"{mention}nothing back here on {subject} yet. "
-            "Want me to find a contact, or drop it?"
-        )
+        return f"{mention}nothing back here on {subject} yet. {offer.question}"
     if variant == "b":
         # The untagged wording needed its own alternate too. Without one, the ledger
         # recorded two labels carrying the SAME sentence — and because the whole
         # live queue is untagged cards, `choose` would have declared a winner from
         # pure noise after eight sends. That is the superstition this module's own
         # docstring says it exists to prevent.
-        return f"{subject} is still unclaimed — want me to dig up a contact?"
+        return f"{money}{subject} is still unclaimed. {offer.question}"
+    amount_clause = f"{money.strip()}, and " if money else ""
     return (
-        f"Anyone want {subject}? Nothing's come back here on it. "
-        "Happy to find a contact, or drop it."
+        f"Anyone want {subject}? {amount_clause}nothing's come back here on it. "
+        f"{offer.question}"
     )
 
 
@@ -249,6 +258,18 @@ def _escalation_message(
 # capability so the sentence stays tied to the thing that actually shipped, and
 # hand-written for the same reason as `_CAPABILITY_HEADLINE`: assembling these from
 # fragments produced text no person would say.
+#
+# TWO GRAMMATICAL FORMS, because one wording needs "I offered to BUILD that campaign"
+# and the other needs "hasn't come back about BUILDING that campaign". Deriving the
+# second from the first is exactly the fragment-reordering that produced "I can email
+# you a list now now" the last time it was tried here.
+_OFFER_TO_DO = {
+    "email_results": "email that list over",
+    "campaign_load": "build that campaign",
+    "reminders": "set that reminder up",
+    "contact_supplied": "save the contact they gave me",
+}
+
 _OFFER_ABOUT = {
     "email_results": "emailing that list over",
     "campaign_load": "building that campaign",
@@ -276,16 +297,17 @@ def _unanswered_offer_message(
     """
     silent = str(candidate.observed.get("silent_slack") or "")
     who = f"<@{silent}>" if silent else "whoever I asked"
-    about = _OFFER_ABOUT.get(
-        str(candidate.observed.get("capability") or ""), "something I offered to do"
-    )
+    capability = str(candidate.observed.get("capability") or "")
     when = str(candidate.observed.get("asked_on") or "").strip()
     # The original ask date is what makes this worth raising rather than nagging: the
-    # request is old, the answer is new, and it is still sitting there.
+    # request is old, the answer is new, and it is still sitting there. It goes at the
+    # END, where it reads as the reason this matters rather than as an aside.
     since = f" — they first asked back on {when}" if when else ""
     if variant == "b":
+        about = _OFFER_ABOUT.get(capability, "something I offered to do")
         return f"{mention}{who} hasn't come back to me about {about}. Any ideas?"
+    todo = _OFFER_TO_DO.get(capability, "do something they'd asked for")
     return (
-        f"{mention}I offered {who} {about}{since}, and nothing's come back here. "
+        f"{mention}I offered to {todo} for {who} and nothing's come back here{since}. "
         "Worth a poke from you, or shall I leave it?"
     )
