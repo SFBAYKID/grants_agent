@@ -125,15 +125,34 @@ affect Chase's other projects.
 
 ## Current status (2026-08-11, closing the deferred items)
 
-- `needs-testing` 2026-08-11 **DO NOT RUN `mark_available` ON ANY CAPABILITY UNTIL
-  `5238fe4` IS DEPLOYED.** Production is `43e6f1d`. Declaring a capability is a
-  BROADCAST — it reopens every ask waiting on that slug at once, and a slug with no
-  hand-written wording sends "Good news — I can do that one now" to all of them, which
-  cannot be unsent. **13 of the 19 distinct open slugs have no wording**, against 29
-  asks a single command can reopen. `5238fe4` makes `mark_available` refuse such a
-  slug; until it ships, nothing enforces it but this line. The CRON cannot trigger
-  this — all three asks that can currently fire (`campaign_load`, `contact_supplied`,
-  `reminders`) are covered, verified per row. **A person can.**
+- `verified` 2026-08-11 **THE DECLARE GUARD IS LIVE, PROVEN BY CALLING IT.** Declaring
+  a capability is a BROADCAST — `mark_available` reopens every ask waiting on that slug
+  at once, and a slug with no hand-written wording sends "Good news — I can do that one
+  now" to all of them, which cannot be unsent. It now raises BEFORE any database write:
+  `mark_available(conn, "track_applications")` → `ValueError: has no hand-written
+  follow-up wording`. So the remaining unwritten slugs fail loudly at declare time
+  instead of broadcasting. **The danger is gone; the capability is not there** — anyone
+  declaring one of them gets a refusal telling them to write the sentence first, which
+  is the correct outcome rather than a lifted constraint.
+- `verified` 2026-08-11 **I STATED A COUNT I HAD NOT MEASURED, AND IT PROPAGATED IN ONE
+  MESSAGE.** The guardian said "13 of 19 slugs have no wording"; the true figure was
+  **16 of 19**. I adopted the 13 verbatim, wrote it into this file and into a deploy
+  instruction, and described a deploy as having written "the 13" — when what I had
+  actually written were the slugs in my LOCAL database, not production's. Only 3 of the
+  ask-set slugs gained wordings in that pass. Map versus ground again, and the number
+  even collided with the true remainder, which is exactly what makes a wrong figure
+  look confirmed. Both of us corrected it by measuring. **A casually stated number
+  becomes somebody else's premise within one message.**
+- `verified` 2026-08-11 SIX MORE WORDINGS WRITTEN AFTER CHECKING EACH FEATURE EXISTS —
+  `salesforce_campaign_add`, `add_campaign_members_via_ids`, `pull_lead_ids_for_campaign`,
+  `contact_lookup`, `search_scoping`, `filter_by_award_date` (the last two verified
+  against the real `search_leads` schema: `result_scope`, `date_field/date_from/date_to`).
+  **Eight remain deliberately unwritten**, each for a reason: `direct_lead_field_edit`
+  (the patch path fills only EMPTY fields and can never overwrite — the promise would
+  be false), `filter_by_application_status` and `track_applications` (no
+  application-tracking feature exists; Grant once promised exactly this and lost a rep),
+  and the upload/Data Loader family plus `campaign_member_enrichment`, which need a
+  product decision rather than a sentence. Leaving them guarded IS the fix.
 - `verified` 2026-08-11 **THE ACCEPTANCE MATRIX IS 16 FAILED / 73 PASSED, NOT 22/58**
   — the recorded figure was itself stale (`docs/status_log.md`, 2026-08-09). Measured
   by running it: `GRANT_LLM_ACCEPTANCE=1`, 11m22s. Re-running ONLY those 16 gave **10

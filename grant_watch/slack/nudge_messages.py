@@ -159,6 +159,12 @@ _CAPABILITY_OFFER = {
     "include_phone_mobile_in_notes": "I can now — want me to add them?",
     "merge_contacts_to_export": "I can now — want me to rebuild it?",
     "salesforce_lookup": "I can now — want me to check?",
+    "salesforce_campaign_add": "I can now — want me to add them?",
+    "add_campaign_members_via_ids": "I can now — want me to add those ids?",
+    "pull_lead_ids_for_campaign": "I can now — want the ids?",
+    "contact_lookup": "I can now — want me to look?",
+    "search_scoping": "I can now — want me to narrow it?",
+    "filter_by_award_date": "I can now — want me to filter it?",
 }
 
 
@@ -194,6 +200,16 @@ _CAPABILITY_HEADLINE = {
         "I can put the contacts into the spreadsheet now — want it rebuilt?"
     ),
     "salesforce_lookup": "I can check Salesforce for you now — want me to?",
+    "salesforce_campaign_add": ("I can add them to the campaign now — want me to?"),
+    "add_campaign_members_via_ids": (
+        "I can add campaign members straight from lead ids now — want me to?"
+    ),
+    "pull_lead_ids_for_campaign": (
+        "I can pull the lead ids for that campaign now — want them?"
+    ),
+    "contact_lookup": "I can look that contact up now — want me to?",
+    "search_scoping": "I can narrow a search down properly now — want me to?",
+    "filter_by_award_date": "I can filter by award date now — want me to?",
 }
 
 
@@ -365,6 +381,12 @@ _OFFER_TO_DO = {
     "include_phone_mobile_in_notes": "include the phone and mobile",
     "merge_contacts_to_export": "put the contacts into the spreadsheet",
     "salesforce_lookup": "check Salesforce",
+    "salesforce_campaign_add": "add them to the campaign",
+    "add_campaign_members_via_ids": "add those campaign members by id",
+    "pull_lead_ids_for_campaign": "pull the lead ids",
+    "contact_lookup": "look that contact up",
+    "search_scoping": "narrow that search down",
+    "filter_by_award_date": "filter by award date",
 }
 
 _OFFER_ABOUT = {
@@ -382,6 +404,12 @@ _OFFER_ABOUT = {
     "include_phone_mobile_in_notes": "including the phone and mobile",
     "merge_contacts_to_export": "putting the contacts into the spreadsheet",
     "salesforce_lookup": "checking Salesforce",
+    "salesforce_campaign_add": "adding them to the campaign",
+    "add_campaign_members_via_ids": "adding those campaign members by id",
+    "pull_lead_ids_for_campaign": "pulling the lead ids",
+    "contact_lookup": "looking that contact up",
+    "search_scoping": "narrowing that search down",
+    "filter_by_award_date": "filtering by award date",
 }
 
 

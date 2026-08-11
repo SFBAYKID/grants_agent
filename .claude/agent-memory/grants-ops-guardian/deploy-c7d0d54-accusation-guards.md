@@ -5,7 +5,54 @@ metadata:
   type: project
 ---
 
-## FINAL STATE FOR THE NIGHT: `43e6f1d6ec609d22e78ca1ef92f63e42c3097b85`, PID 67672
+## FINAL STATE: `f7cff1d3d75d89dd9c65d5e02c82d77e1873f38a`, PID 68476 (2026-08-10 ~21:12 PT)
+
+Sixth and last deploy. 14 files (13 mods + 1 add `docs/status_log_archive.md`), 8 commits,
+schema 39, `.env`/crontab byte-identical, 0 new tracebacks, `followup_nudges` still 26.
+
+**A COUNT I GOT WRONG, AND IT PROPAGATED.** I reported "13 of 19 distinct undeclared slugs
+have no wording". The real figure at `43e6f1d` was **16 of 19**. The coordinator adopted my
+13 verbatim, put it in his next instruction AND in CLAUDE.md, and described the follow-up
+deploy as "the 13 unwritten capability slugs are written". **A number I state casually becomes
+someone else's premise within one message.** State counts as measured-or-not, and re-measure
+before anyone builds on them.
+
+**Measured on the deployed `f7cff1d` bytes** (`wording_exists()` per slug, against the live
+`capability_asks` table):
+
+```
+UNDECLARED open-ask slugs : 19
+NOW WRITTEN               : 6
+STILL MISSING A WORDING   : 13   <-- coincidentally 13 again, a DIFFERENT set
+```
+
+Only **3** slugs in the ask set gained wordings: `contact_phone_mobile_enrichment`,
+`bulk_contact_enrichment`, `salesforce_lookup`. Still unwritten: `add_campaign_members_via_ids`,
+`campaign_member_enrichment`, `contact_lookup`, `direct_lead_field_edit`,
+`filter_by_application_status`, `filter_by_award_date`, `format_spreadsheet_for_dataloader`,
+`format_spreadsheet_for_upload`, `pull_lead_ids_for_campaign`, `salesforce_batch_upload`,
+`salesforce_campaign_add`, `salesforce_upload`, `search_scoping`. **The export family was
+described as done and is not.**
+
+**So the "don't run `mark_available`" constraint does not lift — it CHANGES CHARACTER**, which
+is better. The guard is deployed and proven behaviorally (calling
+`mark_available(conn, "track_applications")` raises `ValueError: … has no hand-written
+follow-up wording`, and it raises BEFORE any write, so a read-only connection is a safe way to
+test it). Those 13 slugs now fail LOUDLY at declare time instead of broadcasting
+"Good news — I can do that one now" to every waiting ask. The danger is gone; the capability
+is not there. `track_applications` stays deliberately unwritten — `wording_exists` False by
+design, because Grant once falsely promised a rep it would "keep watching these states".
+
+**`MIN_GAP` 4h → 2h changed the DRAWN SLOTS**, as predicted: Tue 2026-08-11 for `C01DGT9D11D`
+went `08:48 / 13:19` → **`09:06 / 12:08`**. Ordering held: North Palos `card_unengaged` id=34
+still position **0**, `target_slack` `''` (mentions nobody), due Tue 10:30, reachable Tuesday.
+Never carry slot times across a `MIN_GAP` change — re-draw them.
+
+Checked and clean: no wording promises a direct phone line (the only `direct` hits in
+`nudge_messages.py` are a CODE COMMENT explaining that `directPhone` is unlicensed on this
+ZoomInfo plan while search still reports `has_direct_phone`).
+
+## PREVIOUS STATE: `43e6f1d6ec609d22e78ca1ef92f63e42c3097b85`, PID 67672
 
 Fifth and last deploy of 2026-08-10 (~20:35 PT), 3 files, schema 39, `.env`/crontab
 byte-identical, 0 new tracebacks, `followup_nudges` still 26. Everything below about
