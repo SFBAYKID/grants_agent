@@ -23,6 +23,8 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from grant_watch import reminders
 from grant_watch.slack import nudge_promises, nudges
 
@@ -727,6 +729,32 @@ def test_a_blocked_candidate_does_not_starve_the_one_behind_it(
     assert "crm_preview_expired" in outcome, (
         f"one sleeping rep starved the whole queue: {outcome}"
     )
+    conn.close()
+
+
+def test_a_capability_cannot_go_live_without_a_written_sentence(
+    tmp_path: Path,
+) -> None:
+    """Declaring is a BROADCAST — it reopens every ask waiting on that slug at once.
+
+    A slug missing from the wording tables does not degrade quietly: it sends "Good
+    news — I can do that one now" to everybody who ever asked. Production held nine
+    open asks for one such slug, and `add_leads_to_campaign` had already been declared
+    live with three asks and no sentence, which is how this was noticed. Writing the
+    sentence first is one line; unsending the generic one is impossible.
+    """
+    from grant_watch import capability_asks
+    from grant_watch.slack import nudge_messages
+
+    conn = _conn(tmp_path)
+    with pytest.raises(ValueError, match="no hand-written follow-up wording"):
+        capability_asks.mark_available(conn, "track_applications")
+
+    # And every slug that IS declarable has a sentence in all four tables, so the
+    # generic fallback is unreachable through the supported path.
+    for slug in ("email_results", "campaign_load", "add_leads_to_campaign"):
+        assert nudge_messages.wording_exists(slug)
+        capability_asks.mark_available(conn, slug)
     conn.close()
 
 

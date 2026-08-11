@@ -149,6 +149,9 @@ _CAPABILITY_OFFER = {
     "campaign_load": "I can now — want me to build it?",
     "reminders": "I can now — want me to set it up?",
     "contact_supplied": "I can now — want to send it again?",
+    "add_leads_to_campaign": "I can now — want me to add them?",
+    "load_leads_to_campaigns": "I can now — want me to load them?",
+    "create_salesforce_campaigns": "I can now — want me to create them?",
 }
 
 
@@ -160,7 +163,38 @@ _CAPABILITY_HEADLINE = {
     "campaign_load": "I can build that campaign now — want me to?",
     "reminders": "I can actually track that for you now — set it up?",
     "contact_supplied": "I can save contacts you give me now — want to re-send it?",
+    "add_leads_to_campaign": "I can put those leads into the campaign now — want me to?",
+    "load_leads_to_campaigns": (
+        "I can load those leads into the campaigns now — want me to?"
+    ),
+    "create_salesforce_campaigns": (
+        "I can create those campaigns now — want me to start?"
+    ),
 }
+
+
+def wording_exists(capability: str) -> bool:
+    """Whether this capability has a hand-written sentence in every map it needs.
+
+    DECLARING A CAPABILITY LIVE IS A BROADCAST. `mark_available` reopens every ask
+    waiting on it, so a slug with no wording does not degrade quietly — it sends the
+    generic "Good news — I can do that one now" to everybody who ever asked. Production
+    held nine open asks for one such slug, and `add_leads_to_campaign` was declared live
+    with three asks and no sentence, which is how this was noticed.
+
+    So `mark_available` refuses a slug that would fall back. Writing the sentence first
+    is a one-line change; discovering the generic text after it has gone to nine people
+    is not recoverable.
+    """
+    return all(
+        capability in table
+        for table in (
+            _CAPABILITY_OFFER,
+            _CAPABILITY_HEADLINE,
+            _OFFER_TO_DO,
+            _OFFER_ABOUT,
+        )
+    )
 
 
 def _capability_message(
@@ -297,6 +331,9 @@ _OFFER_TO_DO = {
     "campaign_load": "build that campaign",
     "reminders": "set that reminder up",
     "contact_supplied": "save the contact they gave me",
+    "add_leads_to_campaign": "add those leads to the campaign",
+    "load_leads_to_campaigns": "load those leads into the campaigns",
+    "create_salesforce_campaigns": "create those campaigns",
 }
 
 _OFFER_ABOUT = {
@@ -304,6 +341,9 @@ _OFFER_ABOUT = {
     "campaign_load": "building that campaign",
     "reminders": "setting that reminder up",
     "contact_supplied": "saving the contact they gave me",
+    "add_leads_to_campaign": "adding those leads to the campaign",
+    "load_leads_to_campaigns": "loading those leads into the campaigns",
+    "create_salesforce_campaigns": "creating those campaigns",
 }
 
 

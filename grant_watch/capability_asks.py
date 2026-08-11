@@ -137,6 +137,19 @@ def mark_available(
     # armable without a code change, or discovery just relocates the bottleneck.
     if not _SLUG.fullmatch(capability):
         raise ValueError("capability must be a short slug like 'email_results'")
+    # DECLARING IS A BROADCAST, so it refuses a capability with no wording. This call
+    # reopens EVERY ask waiting on the slug at once — production held nine for one of
+    # them — and a slug missing from the wording tables does not degrade quietly: it
+    # sends "Good news — I can do that one now" to all of them. Found because
+    # `add_leads_to_campaign` had been declared live with three asks and no sentence.
+    # Writing the sentence first is one line; unsending the generic one is impossible.
+    from .slack.nudge_messages import wording_exists
+
+    if not wording_exists(capability):
+        raise ValueError(
+            f"{capability!r} has no hand-written follow-up wording; add it to "
+            "slack/nudge_messages.py before declaring the capability live"
+        )
     cur = conn.execute(
         "UPDATE capability_asks SET available_since=? "
         "WHERE capability=? AND state='open' AND available_since IS NULL",
