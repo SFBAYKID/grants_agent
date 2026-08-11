@@ -530,7 +530,9 @@ def run(
                 )
                 response = client.chat_postMessage(
                     channel=candidate.audience,
-                    text=f"{text}\n{link}" if link else text,
+                    text=f"{text}\n{_labelled(link, candidate.subject_kind)}"
+                    if link
+                    else text,
                 )
             else:
                 response = client.chat_postMessage(
@@ -575,16 +577,24 @@ def run(
 
 
 def _plainify_mentions(text: str) -> str:
-    """Render `<@U…>` as "@Name" so a rehearsal notifies nobody.
+    """Render `<@U…>` as "at Name" so a rehearsal notifies nobody.
+
+    "at Anthony", NOT "@Anthony" — Chase's exact instruction, and he is right to
+    insist on the stricter form. A bare `@Anthony` in message text does not create a
+    Slack mention and so does not push a notification, but that is a fact about the
+    link syntax, not about the person: Slack also notifies on HIGHLIGHT WORDS, and a
+    great many people have their own first name in that list. The whole point of a
+    rehearsal is that no colleague's phone lights up, and "at" costs nothing.
 
     Resolved through the roster, so an id with no approved row renders as a neutral
-    "@teammate" rather than leaking a raw Slack id into a message a human reads.
+    "a teammate" rather than leaking a raw Slack id into a message a human reads.
     """
     names = {item.slack_id: item.name for item in roster.identities()}
 
     def replace(match: re.Match[str]) -> str:
-        """One mention, as the name a person would read."""
-        return f"@{names.get(match.group(1)) or 'teammate'}"
+        """One mention, as words that cannot notify anybody."""
+        name = names.get(match.group(1))
+        return f"at {name}" if name else "a teammate"
 
     return _MENTION_RE.sub(replace, text)
 
@@ -593,6 +603,19 @@ def _plainify_mentions(text: str) -> str:
 # for Enterprise Grid users; channel mentions (`<#C…>`) are deliberately not matched,
 # because they notify nobody and rewriting them would only break a link.
 _MENTION_RE = re.compile(r"<@([UW][A-Z0-9]+)>")
+
+# What the link at the bottom of an escalation points AT, in the reader's terms. A
+# raw permalink is 130 characters of query string under a one-line message, which
+# looks like machine output in a channel full of people talking.
+_LINK_LABEL = {
+    "card_escalated": "See the card",
+    "offer_unanswered": "See what I offered",
+}
+
+
+def _labelled(link: str, subject_kind: str) -> str:
+    """One Slack link with words on it rather than a naked URL."""
+    return f"<{link}|{_LINK_LABEL.get(subject_kind, 'Take a look')}>"
 
 
 # Slack refused because the destination is wrong. Retrying cannot help.

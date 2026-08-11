@@ -379,6 +379,16 @@ def _unanswered_offers(conn: sqlite3.Connection) -> list[NudgeCandidate]:
         # itself: no manager configured means no message rather than a guessed one.
         if not manager or manager == silent:
             continue
+        # ONLY IN A CHANNEL. An escalation is delivered where the offer was made, and
+        # production really does hold capability asks whose audience is a DM
+        # (`D0BGW7EP3K5`). Posting there would be wrong twice: the manager is not in
+        # that conversation, so a message addressed to them would be invisible and the
+        # escalation would silently do nothing — and it would report the contents of
+        # somebody's private conversation with Grant into that same private
+        # conversation, which is not what "tell the manager" means. Slack ids:
+        # `C…` is a channel, public or private; `D…` is a DM; `G…` a group DM.
+        if not str(row["audience"] or "").startswith("C"):
+            continue
         try:
             offered = json.loads(str(row["observed_json"] or "{}"))
         except json.JSONDecodeError:

@@ -155,7 +155,9 @@ def test_an_offer_nobody_answered_reaches_the_manager_in_the_channel(
     # "that campaign"; only the grammar around it differs ("offered to build" vs
     # "come back about building"), so the assertion pins the fact, not the phrasing.
     assert "that campaign" in text
-    assert "https://slack.example" in text  # with a link to the actual words
+    # A link with WORDS on it. A naked permalink is ~130 characters of query string
+    # under a one-line message, which reads as machine output in a channel of people.
+    assert "<https://slack.example/archives/C0TEST/p1|See what I offered>" in text
     conn.close()
 
 
@@ -242,6 +244,26 @@ def test_one_escalation_per_offer_ever(tmp_path: Path) -> None:
     later = nudges.run(client, conn, now=NOW + timedelta(days=1))
     assert "offer_unanswered" not in later
     assert len(client.posts) == 1
+    conn.close()
+
+
+def test_an_offer_made_in_a_dm_is_never_escalated(tmp_path: Path) -> None:
+    """A DM has no manager in it, so an escalation there does nothing but leak.
+
+    Production really does hold capability asks whose audience is a DM. Delivering
+    there would fail silently — the manager is not in that conversation and would
+    never see the message addressed to them — while repeating what somebody said in
+    private back into that same private thread. Found by reading the real rows rather
+    than by a test, which is why this one exists.
+    """
+    conn = _conn(tmp_path)
+    _delivered_offer(conn, NOW - timedelta(hours=27))
+    conn.execute("UPDATE followup_nudges SET audience='D0BGW7EP3K5'")
+    conn.commit()
+
+    assert not [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "offer_unanswered"
+    ]
     conn.close()
 
 
@@ -393,9 +415,15 @@ def test_every_tier_of_card_gets_chased(tmp_path: Path) -> None:
 def test_plain_mentions_render_a_name_and_notify_nobody(tmp_path: Path) -> None:
     """Chase's testing rule: "write at Anthony instead of actually tagging him".
 
+    THE "@" GOES TOO, and that is the stricter reading on purpose. A bare `@Anthony`
+    in message text creates no Slack mention and pushes no notification — but that is
+    a fact about the link syntax, not about the person. Slack also notifies on
+    HIGHLIGHT WORDS, and plenty of people keep their own first name in that list. A
+    rehearsal whose entire purpose is that no colleague is disturbed should not rest
+    on a technicality.
+
     It changes ONLY the rendering — the guards, caps and ledger writes are the live
-    ones — so a playground rehearsal exercises the real path without putting a phone
-    notification on a colleague's lock screen.
+    ones — so the rehearsal still exercises the real path.
     """
     conn = _conn(tmp_path)
     _delivered_offer(conn, NOW - timedelta(hours=27))
@@ -404,8 +432,9 @@ def test_plain_mentions_render_a_name_and_notify_nobody(tmp_path: Path) -> None:
     nudges.run(client, conn, now=NOW, plain_mentions=True)
     text = client.posts[0]["text"]
     assert "<@" not in text, "a rehearsal pinged a real person"
-    assert "@Anthony" in text
-    assert "@Jocelyn" in text
+    assert "@" not in text, "an @ can still trip a highlight-word notification"
+    assert "at Anthony" in text
+    assert "at Jocelyn" in text
     conn.close()
 
 
