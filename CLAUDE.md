@@ -123,6 +123,43 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-11, closing the deferred items)
+
+- `needs-testing` 2026-08-11 **DO NOT RUN `mark_available` ON ANY CAPABILITY UNTIL
+  `5238fe4` IS DEPLOYED.** Production is `43e6f1d`. Declaring a capability is a
+  BROADCAST — it reopens every ask waiting on that slug at once, and a slug with no
+  hand-written wording sends "Good news — I can do that one now" to all of them, which
+  cannot be unsent. **13 of the 19 distinct open slugs have no wording**, against 29
+  asks a single command can reopen. `5238fe4` makes `mark_available` refuse such a
+  slug; until it ships, nothing enforces it but this line. The CRON cannot trigger
+  this — all three asks that can currently fire (`campaign_load`, `contact_supplied`,
+  `reminders`) are covered, verified per row. **A person can.**
+- `verified` 2026-08-11 `add_leads_to_campaign` was ALREADY declared live with asks
+  waiting and no wording — which is how the whole class was noticed. Wordings written
+  for the campaign family; deliberately NOT written for slugs with no feature behind
+  them, because a wording implies the capability exists and inventing one sets the
+  exact trap the guard closes.
+- `verified` 2026-08-11 **`MIN_GAP` 4h → 2h, and it moves more than it looks.** At four
+  hours inside a six-hour band, any delay past the first drawn slot pushed the second
+  out of the band entirely — the delivery lost silently and reported as ordinary
+  pacing, halving the drain rate against a ~30-subject backlog. Safe to shorten because
+  `MAX_NUDGES_PER_TARGET_PER_DAY=1` already guarantees the day's two nudges go to
+  DIFFERENT people; this constant only ever guarded channel noise. **It changes which
+  slots are DRAWN, so re-measure the queue after deploying rather than carrying
+  tonight's positions forward.**
+- `verified` 2026-08-11 CAPACITY LOSS IS NO LONGER INVISIBLE. One card yields TWO
+  subjects, so a card every weekday consumes a channel's whole weekly budget before a
+  single capability ask. `_fair_order` shares that shortfall out; it cannot remove it,
+  and the tail retires with a permanent `stale` row that nobody would ever query.
+  `nudge-report` now counts what aged out unsent, per kind — silent capacity loss reads
+  exactly like "there was nothing to send", the one conclusion it must never support.
+- `verified` 2026-08-11 THE REP/MANAGER ASYMMETRY IS NOT A DEFECT, and the reasoning is
+  recorded rather than the conclusion. The rep's turn is a threaded reply while the
+  escalation naming them is a channel post — but `<@U…>` notifies identically from
+  either, so the rep is reached either way. What differs is CHANNEL VISIBILITY, which
+  is the point of an escalation. The unfair case is the manager hearing FIRST, and
+  `_escalation_is_premature` prevents exactly that.
+
 ## Current status (2026-08-11, the documents were stale in four ways)
 
 - `verified` 2026-08-11 **A DOC AUDIT FOUND FOUR CLAIMS THAT WERE SIMPLY FALSE**, each
