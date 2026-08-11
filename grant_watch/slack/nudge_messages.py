@@ -66,14 +66,21 @@ def build_message(
         count = candidate.observed.get(
             "unresolved", candidate.observed.get("organizations", 0)
         )
-        plural = "org" if count == 1 else "orgs"
+        # Full number agreement, not just the noun. "1 org here need your call on how
+        # to match them" is the kind of sentence that makes a colleague notice they are
+        # talking to software, and the singular case is the COMMON one — a batch is
+        # blocked when ANY item is unresolved, and usually that is one awkward name.
+        one = count == 1
+        noun, verb, them = (
+            ("org", "needs", "it") if one else ("orgs", "need", "them")
+        )
         if variant == "b":
             return (
-                f"{mention}{count} {plural} here need your call on how to match them. "
-                "Add the rest without them?"
+                f"{mention}{count} {noun} here {verb} your call on how to match "
+                f"{them}. Add the rest without {them}?"
             )
         return (
-            f"{mention}still stuck on {count} {plural} I can't match. "
+            f"{mention}still stuck on {count} {noun} I can't match. "
             "Want me to add the rest?"
         )
     if candidate.subject_kind == "crm_batch_partial":

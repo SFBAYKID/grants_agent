@@ -790,4 +790,9 @@ def test_the_batch_nudge_counts_only_the_orgs_that_are_stuck(
     text = nudges.build_message(candidate, "a", conn=conn)
     assert "1 org I can't match" in text, text
     assert "14" not in text
+    # And it agrees in number. The singular is the COMMON case — a batch blocks when
+    # ANY item is unresolved, usually one awkward name — so "1 org here need your
+    # call on how to match them" would be the sentence a rep actually saw.
+    other = nudges.build_message(candidate, "b", conn=conn)
+    assert "1 org here needs your call on how to match it" in other, other
     conn.close()

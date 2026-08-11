@@ -1,9 +1,33 @@
 ---
 name: deploy-c7d0d54-accusation-guards
-description: CURRENT PROD 2026-08-10 — c7d0d54, schema 39, PID 67420; four reproduced false-accusation paths closed; manager IS in C01DGT9D11D so the membership guard suppresses nothing
+description: CURRENT PROD 2026-08-10 — 43e6f1d (c7d0d54 + opt-out routing fix), schema 39, PID 67672; four false-accusation paths closed; manager IS in C01DGT9D11D so the membership guard suppresses nothing
 metadata:
   type: project
 ---
+
+## FINAL STATE FOR THE NIGHT: `43e6f1d6ec609d22e78ca1ef92f63e42c3097b85`, PID 67672
+
+Fifth and last deploy of 2026-08-10 (~20:35 PT), 3 files, schema 39, `.env`/crontab
+byte-identical, 0 new tracebacks, `followup_nudges` still 26. Everything below about
+`c7d0d54` still holds; this adds one fix on top.
+
+**AN OPTED-OUT TERRITORY OWNER FROZE A CARD FOREVER, SILENTLY.** `drip.py` drops the routing
+mention when the owner has opted out (the card still posts — the lead belongs to the channel),
+but `_unengaged_cards` recomputed `tagged` from territory WITHOUT that filter. `card_unengaged`
+then suppressed as `opted_out`, which is TRANSIENT and writes no ledger row, and
+`_escalation_is_premature` waited forever for a `card_unengaged` row that could never exist.
+Both subjects sat due and undeliverable until they aged out — **no error, no suppression row,
+no log line.** Fix: `if tagged and reminders.is_opted_out(conn, tagged, scope="nudges"):
+tagged = ""`.
+
+The durable shape: **a TRANSIENT suppression on a subject whose successor waits for the
+subject's ledger row is a permanent silent stall.** When adding a suppression reason, ask what
+downstream is waiting on the row it declines to write. Only PERMANENT reasons write a row.
+
+**`followup_optouts` state (checked before AND after): 1 row —
+`U01DPJVURHU`, scope `all`, `active=0`. `ACTIVE=1` count is ZERO.** So nobody is opted out and
+this fix changes no current tagging; it is latent correctness. Re-check this table before
+attributing any future tagging change to code.
 
 **PRODUCTION IS `c7d0d544f7190e0e0b1b02bf683351a8cb620381`, schema 39, listener PID 67420.**
 Deployed 2026-08-10 ~20:30 PT. 11 deployable files (9 mods + 2 adds: `tests/nudge_helpers.py`,
