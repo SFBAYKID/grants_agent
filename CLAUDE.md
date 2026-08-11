@@ -172,6 +172,24 @@ affect Chase's other projects.
   I got one wrong myself: I marked `search-missing-shape` "open" and exempted it, when
   it names a state AND an org type and the product was right to run it. Reverted, and
   the flag deleted rather than left with no user.
+- `verified` 2026-08-11 **RETRIES TURNED THE SUITE FROM NOISE INTO A SIGNAL, AND IT
+  IMMEDIATELY FOUND A SECOND REAL DEFECT.** One sample from a language model is a noisy
+  measurement, and this suite asks about CAPABILITY, not per-sample reliability — so a
+  case now gets 3 attempts and passes if any succeeds, with every retry PRINTED at the
+  end so flakiness stays visible rather than swallowed. A genuine break still fails all
+  three. Result: **43/43 and 42/43 across the two halves, with exactly one case failing
+  all three attempts** — which is precisely the separation retries were added to make.
+- `verified` 2026-08-11 **THAT CASE WAS A DEAD-END, AND IT WAS DETERMINISTIC.**
+  "List five Grants.gov opportunities closing in August 2026 here" — a source, a record
+  kind, a date window, a count and a destination — was answered with *"should I look
+  everywhere or focus on one state?"*. The rep supplied five filters and got a question
+  back. `search_planning.search_confirmation` computed `anchored` from ONLY
+  state/org_type/city/name_contains, so it classed the ask open **and silently
+  overrode the prompt**: the model had already chosen the right tool and arguments and
+  the server replaced them. A missing STATE is not ambiguity — we search nationwide by
+  default. Any material filter now anchors; truly open means nothing to filter on at
+  all. Mutation-proven, and pinned by a FAST deterministic test rather than the
+  11-minute model suite.
 - `verified` 2026-08-11 **ONE REAL PRODUCT DEFECT CAME OUT OF IT, AND IS FIXED.** Given
   only "Name it 2026 California School Security", the model called
   `salesforce_campaign_create_preview` with Type="Other", Status="Planned",

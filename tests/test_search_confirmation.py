@@ -251,3 +251,39 @@ def test_contact_by_entity_name_is_not_blocked() -> None:
         )
         == ""
     )
+
+
+def test_any_material_filter_anchors_the_ask() -> None:
+    """A missing STATE is not ambiguity — we search nationwide by default.
+
+    `anchored` used to count only state / org_type / city / name_contains, so "List
+    five Grants.gov opportunities closing in August 2026 here" — a source, a record
+    kind, a date window, a count and a destination — was classed OPEN and answered
+    with "should I look everywhere or focus on one state?". The rep supplied five
+    filters and got a question back, which is the dead-end the two-stage flow exists
+    to prevent.
+
+    Worse, it did so DETERMINISTICALLY, overriding the prompt: the model had already
+    chosen the right tool and arguments and the server replaced them. Found because
+    the real-model suite failed this case on all three retries while every other
+    failure passed on re-run — which is exactly the signal retries were added to
+    expose.
+    """
+    from grant_watch.slack.search_planning import SCOPING_MARKER, search_confirmation
+
+    anchoring = (
+        {"record_kind": "opportunity", "date_from": "2026-08-01"},
+        {"program": "SVPP"},
+        {"amount_min": 250000},
+        {"grade": "gold"},
+        {"enrollment_min": 5000},
+        {"state": "CA"},
+        {"org_type": "school"},
+    )
+    for arguments in anchoring:
+        assert SCOPING_MARKER not in search_confirmation(dict(arguments), "x"), (
+            f"{arguments} is anchored; asking a scoping question dead-ends the rep"
+        )
+
+    # Nothing to filter on at all is the one case the scoping question is for.
+    assert SCOPING_MARKER in search_confirmation({}, "find me some grants")

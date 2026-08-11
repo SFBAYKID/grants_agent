@@ -116,11 +116,37 @@ def search_confirmation(
     org_value = str(arguments.get("org_type") or "")
     program = str(arguments.get("program") or "")
     grade = str(arguments.get("grade") or "")
-    anchored = bool(
-        state
-        or org_value
-        or str(arguments.get("city") or "")
-        or str(arguments.get("name_contains") or "")
+    # ANY MATERIAL FILTER ANCHORS THE ASK, not just a place or an org type.
+    #
+    # This used to count only state / org_type / city / name_contains, so
+    # "List five Grants.gov opportunities closing in August 2026 here" — a source, a
+    # record kind, a date window, a count and a destination — was classed OPEN and
+    # answered with "should I look everywhere or focus on one state?". The rep supplied
+    # five filters and got a question back, which is precisely the dead-end this
+    # two-stage flow exists to avoid. It also silently overrode the prompt: the model
+    # had already chosen the right tool and arguments, and the server replaced them.
+    #
+    # A MISSING STATE IS NOT AMBIGUITY — we search nationwide by default, so the plan
+    # for that ask reads as one clear sentence rather than a row of "any"s, which is
+    # the condition the scoping question was written for. Truly open means nothing to
+    # filter on at all ("find me some grants").
+    anchored = any(
+        str(arguments.get(field) or "")
+        for field in (
+            "state",
+            "org_type",
+            "city",
+            "name_contains",
+            "program",
+            "record_kind",
+            "grade",
+            "date_from",
+            "date_to",
+            "amount_min",
+            "amount_max",
+            "enrollment_min",
+            "enrollment_max",
+        )
     )
     already_asked = any(
         SCOPING_MARKER.lower() in line.lower() for line in (thread_context or [])[-6:]
