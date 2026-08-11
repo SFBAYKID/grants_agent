@@ -382,7 +382,11 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "Bad lead.",
         lead_thread=True,
         allowed_intents=("bad_lead", "question"),
-        expected_reply=("why",),
+        # The property is that Grant ASKS FOR A REASON before a bare "bad lead" kills
+        # a record — not that it uses the word "why". "Mind sharing a quick reason so
+        # I can steer future leads better?" does the job and reads better than the
+        # interrogative would. Same class as the "button" and "Excel" assertions.
+        expected_any=(("why", "reason", "what made"),),
     ),
     HumanQuestion(
         "no-claim-workflow",

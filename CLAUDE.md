@@ -153,6 +153,33 @@ affect Chase's other projects.
   application-tracking feature exists; Grant once promised exactly this and lost a rep),
   and the upload/Data Loader family plus `campaign_member_enrichment`, which need a
   product decision rather than a sentence. Leaving them guarded IS the fix.
+- `verified` 2026-08-11 **THE ACCEPTANCE MATRIX WENT 16 FAILED → 6, AND THE REST IS
+  MODEL NON-DETERMINISM.** Measured over seven runs, not argued. Every remaining
+  failure PASSES when re-run on its own; earlier, 6 of 16 flipped on an identical
+  re-run with no code change. That is the suite's floor, and driving it to zero would
+  mean deleting real assertions.
+  **SIX CLASSES OF STALE TEST FIXED, all the same failure — the test encoded what the
+  product USED to do:** the plan-and-confirm preamble (removed 2026-07-18, and its
+  neighbours already forbade it); "every tool called exactly once" (repeating a READ is
+  wasteful, not unsafe — only writes and paid calls keep `== 1`); literal `button` /
+  `Excel` / `Google` / `why` where the fact lives in the tool call; **`award-received`
+  demanded in human prose, which is an INTERNAL IDENTIFIER this file bans in replies**;
+  the internal intent label, where both values are safe and the refusal is the
+  property; and an anchored ask expected to scope.
+  Two cases were internally CONTRADICTORY — `search-material-correction` demanded the
+  preamble the runner forbids three lines above, and `search-missing-shape` failed the
+  anchored-run rule for doing exactly what it was written to check.
+  I got one wrong myself: I marked `search-missing-shape` "open" and exempted it, when
+  it names a state AND an org type and the product was right to run it. Reverted, and
+  the flag deleted rather than left with no user.
+- `verified` 2026-08-11 **ONE REAL PRODUCT DEFECT CAME OUT OF IT, AND IS FIXED.** Given
+  only "Name it 2026 California School Security", the model called
+  `salesforce_campaign_create_preview` with Type="Other", Status="Planned",
+  is_active=true, date_mode="none" — four settings the rep never chose, which the
+  confirmation button would then have asked them to approve. `grant_prompt.py` already
+  said "a name alone is never preview-ready… never infer tool defaults" and was
+  ignored, so it now carries that exact failing example. The case passes on the fixed
+  prompt. **The test was right; the behaviour was wrong — the assertion stayed.**
 - `verified` 2026-08-11 **THE ACCEPTANCE MATRIX IS 16 FAILED / 73 PASSED, NOT 22/58**
   — the recorded figure was itself stale (`docs/status_log.md`, 2026-08-09). Measured
   by running it: `GRANT_LLM_ACCEPTANCE=1`, 11m22s. Re-running ONLY those 16 gave **10
