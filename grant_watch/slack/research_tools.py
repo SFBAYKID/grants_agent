@@ -241,12 +241,20 @@ def salesforce_campaign_status(name_or_link: str) -> str:
               AND i.verification_state='verified'""",
         (campaign_id,),
     ).fetchone()[0]
+    # WHAT WAS LEFT OUT IS `included=0`, NOT "not an exact match", and it only
+    # counts for a target that actually produced an approval. This asked
+    # `resolution_state != 'existing_record'`, which since organization-only Leads
+    # became includable reports the very organizations a run CREATED as missing:
+    # measured on a sandbox load of 33 that all succeeded, it told the rep
+    # "could NOT add: 4 ambiguous, 66 missing … missing from the Campaign". The
+    # `action_id IS NOT NULL` clause drops preparation attempts that were blocked
+    # and never ran — nothing was "not added" by a batch that never executed.
     unresolved = list(
         conn.execute(
             """SELECT i.resolution_state, COUNT(*) AS n
                  FROM crm_campaign_batch_items i
                  JOIN crm_campaign_batch_targets t ON t.id=i.target_id
-                WHERE t.campaign_id=? AND i.resolution_state!='existing_record'
+                WHERE t.campaign_id=? AND i.included=0 AND t.action_id IS NOT NULL
              GROUP BY i.resolution_state""",
             (campaign_id,),
         )

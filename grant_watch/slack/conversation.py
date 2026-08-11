@@ -568,7 +568,7 @@ def _single_execution_tool_key(name: str, arguments: dict[str, Any]) -> str:
         # written above for email applies here with more force, because money is less
         # recoverable than an email.
         #
-        # `MAX_CREDITS_PER_CALL = 40` bounds one CALL. It does not bound how many
+        # `MAX_CREDITS_PER_CALL` (100) bounds one CALL. It does not bound how many
         # calls a turn may make: six tool turns, several blocks each, and the result
         # cache keyed on exact arguments so varying `lead_ids` defeats it. One rep
         # saying "fill in all the gold leads" could otherwise spend the month.

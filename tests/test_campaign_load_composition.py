@@ -365,3 +365,78 @@ def test_the_manifest_records_exactly_what_the_action_holds(tmp_path: Path) -> N
     )
     assert payload["allow_org_leads"] is True
     assert payload["allow_resolved_only"] is True
+
+
+def test_an_approval_frozen_before_migration_40_still_confirms(
+    tmp_path: Path,
+) -> None:
+    """A hashed-shape change is a schema change to every approval in flight.
+
+    Migration 40 added `included` to the hashed manifest item, so a card frozen on
+    the previous release no longer matched and Confirm refused. For a `ready` card
+    that is merely annoying — but `reconcile_membership` runs the same check with
+    no TTL, on actions that have ALREADY written to Salesforce, where the refusal is
+    permanent and its "Nothing changed in Salesforce" is false.
+    """
+    conn, gateway, requests = _nelly_batch(tmp_path, "legacy-hash.db")
+    batch = prepare_campaign_batch(
+        conn,
+        gateway,
+        "TWORK",
+        "CGRANTS",
+        "1.0",
+        "UREP",
+        requests,
+        allow_org_leads=True,
+        allow_resolved_only=True,
+    )
+    action = batch.actions[0]
+    # Rewrite every manifest hash into the PRE-migration-40 shape, exactly as a card
+    # frozen on the older release carries it.
+    from grant_watch.enrich.salesforce_campaign_batch import _hash
+
+    target_id = conn.execute(
+        "SELECT id FROM crm_campaign_batch_targets LIMIT 1"
+    ).fetchone()[0]
+    legacy_payloads = []
+    for row in conn.execute(
+        "SELECT * FROM crm_campaign_batch_items WHERE target_id=? "
+        "ORDER BY canonical_entity_key",
+        (target_id,),
+    ):
+        legacy = {
+            "canonical_entity_key": row["canonical_entity_key"],
+            "representative_lead_id": row["representative_lead_id"],
+            "source_lead_ids": json.loads(str(row["source_lead_ids_json"])),
+            "grades": json.loads(str(row["grades_json"])),
+            "entity_name": row["entity_name"],
+            "state": row["state_code"],
+            "resolution_state": row["resolution_state"],
+            "salesforce_sobject": str(row["salesforce_sobject"] or ""),
+            "salesforce_id": str(row["salesforce_id"] or ""),
+            "salesforce_account_id": str(row["salesforce_account_id"] or ""),
+            "note": str(row["note"] or ""),
+        }
+        legacy_payloads.append(legacy)
+        conn.execute(
+            "UPDATE crm_campaign_batch_items SET item_hash=? WHERE id=?",
+            (_hash(legacy), row["id"]),
+        )
+    conn.execute(
+        "UPDATE crm_campaign_batch_targets SET selection_hash=? WHERE id=?",
+        (_hash(legacy_payloads), target_id),
+    )
+    conn.commit()
+
+    result = campaigns.confirm_action(
+        conn,
+        gateway,
+        action.action_id,
+        action.nonce,
+        "TWORK",
+        "CGRANTS",
+        "1.0",
+        "UREP",
+    )
+    assert result.state is CampaignActionState.COMPLETE, result.message
+    assert result.added == 9, result.message

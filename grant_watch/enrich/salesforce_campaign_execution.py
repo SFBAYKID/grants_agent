@@ -297,10 +297,29 @@ def _verify_frozen_scope(
             "salesforce_id": str(item["salesforce_id"] or ""),
             "salesforce_account_id": str(item["salesforce_account_id"] or ""),
             "note": str(item["note"] or ""),
-            "included": bool(item["included"]),
         }
-        if _hash(payload) != item["item_hash"]:
-            raise PermissionError("Campaign batch item hash does not match")
+        # ANY CHANGE TO THE HASHED SHAPE IS A SCHEMA CHANGE TO EVERY APPROVAL FROZEN
+        # IN FLIGHT. Migration 40 added `included`, so a manifest written before the
+        # deploy hashes the shape WITHOUT it. Rejecting those would be safe for a
+        # `ready` card (24h TTL, rebuild and move on) but not for an `unknown` one:
+        # `reconcile_membership` runs this same check, `_authorize_action` skips the
+        # TTL for it, and those actions have ALREADY written to Salesforce — so a
+        # refusal there is permanent, tells the rep "nothing changed in Salesforce"
+        # when something did, and leaves Grant unable to say whether the members
+        # exist. Both shapes are therefore accepted, newest first. Delete the legacy
+        # branch once no pre-40 manifest rows remain.
+        current = {**payload, "included": bool(item["included"])}
+        if _hash(current) == item["item_hash"]:
+            payload = current
+        elif _hash(payload) != item["item_hash"]:
+            # THIS STRING IS SHOWN TO A REP, verbatim, after they click Confirm —
+            # `salesforce_actions` relays it as "Salesforce was not changed: …",
+            # and it read as an internal assertion.
+            raise PermissionError(
+                "this approval was frozen against different data, so I won't write "
+                "it. Nothing changed in Salesforce. Ask me for the campaign again "
+                "and I'll rebuild the preview from what's there now."
+            )
         manifest_payloads.append(payload)
         # READ, NOT RECOMPUTED. This gate previously re-derived inclusion from
         # `completion_mode` and `resolution_state`, which cannot express "the rep

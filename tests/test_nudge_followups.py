@@ -904,12 +904,15 @@ def test_the_batch_nudge_counts_only_the_orgs_that_are_stuck(
             """INSERT INTO crm_campaign_batch_items
                  (id,target_id,canonical_entity_key,representative_lead_id,
                   source_lead_ids_json,grades_json,entity_name,state_code,item_hash,
-                  resolution_state)
-               VALUES (?,'t1',?,900,'[900]','["gold"]','ORG','CA','h',?)""",
+                  resolution_state,included)
+               VALUES (?,'t1',?,900,'[900]','["gold"]','ORG','CA','h',?,?)""",
             (
                 f"i{index}",
                 f"key{index}",
                 "existing_record" if index < 13 else "ambiguous",
+                # `included` is the stored decision the rep's choices produced; the
+                # 13 exact matches are in, the ambiguous one is what is stuck.
+                1 if index < 13 else 0,
             ),
         )
     conn.commit()

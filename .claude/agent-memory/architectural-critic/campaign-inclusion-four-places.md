@@ -50,3 +50,30 @@ is the only gate that can refuse after the human has committed.
 
 Related: [[sibling-caller-blind-spot]] — same failure shape (invariant fixed in one
 caller, the one that actually runs left alone).
+
+## Round 2 — 85bec38: fixed, and what the fix cost
+
+**FIXED, verified end to end.** Migration 40 stores `included` per organization,
+covered by `item_hash`. Card promises 9, `approved_org_count` 9, `crm_action_items`
+9, `confirm_action` → COMPLETE with **added: 9** and the 1 ambiguous org named.
+`payload_json` now records `allow_resolved_only: True`. All five sites read the
+stored flag.
+
+**BUT `_manifest_item` gaining a key changed every item_hash, and that is a deploy
+hazard.** Reproduced with a `git worktree` at the pre-deploy commit: prepare a batch
+on 4e20eef, confirm it on 85bec38 → `PermissionError` → 0 members, nonce spent.
+Worse for `reconcile_membership`, which also calls `_verify_frozen_scope`: an
+`unknown` action (Salesforce ALREADY written, awaiting verification) can never be
+reconciled, never expires (`_authorize_action(require_ready=False)` skips the TTL
+check), and the refusal says "Nothing changed in Salesforce" — false for exactly
+that population.
+
+**Two reporting surfaces were not converted** and still read
+`resolution_state != 'existing_record'`: `slack/research_tools.py:249` and
+`slack/nudge_sources.py:173`. Reproduced on a fully successful 9-org load
+(`included=1` on all nine, 9 added): `salesforce_campaign_status` reports
+*"It could NOT add: 8 missing. Those never reached Salesforce."* A false statement
+about a rep's CRM, and the first question anyone asks after a load.
+
+**The lesson generalises:** any change to `_manifest_item` is a schema change to
+every frozen approval in flight. Bump-and-drain, or version the hash.

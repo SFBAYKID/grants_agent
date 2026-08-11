@@ -47,3 +47,30 @@ lost writes, zero duplicate `request_key`s. A 6-thread barrier race on ONE lead
 produced exactly **one** paid provider call — `UNIQUE(request_key, attempt_no)` is
 the real guard, not the TOCTOU SELECT in `paid_calls.execute`; the losers get
 `IntegrityError` (an "error" cell, no double-spend).
+
+## Round 2 — 85bec38: fixed, and the new status leaks
+
+**FIXED, verified.** `paid_calls.execute(provably_unspent=(SourceUnreachable,))`
+files the attempt `failed`; pass 2 against a recovered source returns `verified`
+for all five leads. `finder._extract` now uses `Anthropic(timeout=60.0,
+max_retries=2)`; `ENRICH_TIME_BUDGET_S` went back to 420, not up to 600.
+
+**The new `needs_operator_retry` status is not in `ContactOutcome`'s docstring
+("status is exactly one of:" still lists six) and no consumer handles it:**
+- `search_presentation.contact_suffix` falls through to `f" · contact: {status}"`
+  and renders the raw slug to a rep — an internal identifier in a reply.
+- `tools.find_contact` falls through to *"I checked their website, LinkedIn, and
+  looked for a general organization mailbox — none produced a verifiable contact,
+  so I've logged this one as no contact found."* Measured: **finder called 0
+  times**, and no `not_found` row written. Two false assertions in one sentence.
+
+**H2 is improved, not closed.** Measured: model turns 18 min + budget 7 min = 25
+min against `STUCK_AFTER` 20 min, and ONE `find_contact` still bounds at 4x30 +
+7x60 + 7x180 = **30 minutes** for a single organization — the in-flight tail the
+"stop STARTING" budget does not cover.
+
+**`_require_priced_run` binds the lead set, not the bill.** Reproduced: priced at
+`max_credits=5`, confirmed at `max_credits=100` → `('priced', 5), ('SPENT', 100)`.
+A restart DOES fail closed (correct), and price→confirm in one turn with no human
+between is still reachable because `_single_execution_tool_key` returns `''` for
+`confirm=false`.

@@ -163,14 +163,16 @@ def _stalled_batches(conn: sqlite3.Connection) -> list[NudgeCandidate]:
     # set when ANY item is unresolved (`salesforce_campaign_batch.py:647`), so reporting
     # `unique_org_count` told a rep "still stuck on 14 orgs I can't match" about the
     # real California batch where 13 of 14 matched and exactly one was ambiguous. An
-    # item is resolved iff `resolution_state='existing_record'`.
+    # item counts as stuck iff the rep's choices do NOT include it — the stored
+    # `included` flag. It used to read `resolution_state='existing_record'`, which
+    # counts an organization-only Lead the rep already approved as still blocking.
     rows = conn.execute(
         """SELECT b.id,b.channel,b.thread_ts,b.requested_by,b.state,b.updated_at,
                   b.unique_org_count,
                   (SELECT COUNT(*) FROM crm_campaign_batch_items i
                      JOIN crm_campaign_batch_targets t ON t.id=i.target_id
                     WHERE t.batch_id=b.id
-                      AND i.resolution_state<>'existing_record') AS unresolved
+                      AND i.included=0) AS unresolved
              FROM crm_campaign_batches b
             WHERE b.state IN ('blocked_resolution','partial_by_user')"""
     ).fetchall()

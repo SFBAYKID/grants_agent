@@ -30,7 +30,11 @@ class ContactOutcome:
       linkedin_only      — a LinkedIn person (profile URL, no email claimed),
       org_email          — only the org's verified general mailbox, no named person,
       not_found          — person, LinkedIn, AND org mailbox all came up empty,
-      unreachable        — the source was down; NOTHING recorded, a retry re-attempts.
+      unreachable        — the source was down; NOTHING recorded, a retry re-attempts,
+      needs_operator_retry — a PRIOR paid attempt cannot be proven spent or unspent,
+                           so re-spending is refused. NOTHING was checked this time
+                           and no absence was established: it is emphatically not
+                           `not_found`, and every renderer must say so separately.
     """
 
     status: str

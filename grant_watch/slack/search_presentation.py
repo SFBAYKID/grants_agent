@@ -136,6 +136,13 @@ def contact_suffix(cell: list[object]) -> str:
         return " · contact: source unreachable — retry"
     if status == "error":
         return " · contact: lookup error"
+    if status == "needs_operator_retry":
+        # NOT "none found". Nothing was checked: an earlier paid attempt cannot be
+        # proven spent or unspent, so re-spending is refused until a human clears it.
+        return " · contact: not checked — an earlier lookup needs clearing by hand"
     if status:
-        return f" · contact: {status}"
+        # A status with no branch above is an internal slug, and this string is read
+        # by a rep. Say what is true — that there is nothing to show — rather than
+        # leaking the identifier, which this project bans in replies.
+        return " · contact: no result"
     return ""
