@@ -243,6 +243,28 @@ affect Chase's other projects.
   Cards are now ranked by the lead itself: tier, then money, then freshness, which is
   the grading this file already states. Every other kind keeps oldest-person-first.
   Mutation-proven both ways.
+- `verified` 2026-08-11 **THAT WORKED: NORTH PALOS IS POSITION 0**, head of the live
+  queue, measured on production. The three orderings, same filter each time: strict
+  age **26** → rotation only **29** → rotation + lead ranking **0**. Its escalation is
+  at 1 but is due 16:30, past the last tick, so it waits for Wednesday rather than
+  eating Tuesday's second slot. **The head moved** — `capability_now_available` id=4
+  slid to position 2 — and I had told the guardian "if the head moved, the fix is
+  wrong". That criterion was incompatible with this round's goal, since the card could
+  not reach the front without displacing something; the guardian flagged the conflict
+  rather than quietly picking one. Tuesday should now deliver North Palos AND the
+  oldest waiting person.
+- `needs-testing` 2026-08-11 **`posts.style` IS NOT A GRADE VOCABULARY, AND TREATING
+  IT AS ONE COST THE RANKING MOST OF ITS EFFECT.** `card_tier` was `style or kind`,
+  and `kind` holds `rich_award`/`nugget`/`bulletin` — never a tier — so an empty style
+  guaranteed rank 9, LAST. Measured on production: **seven $500,000 awards ranked
+  below a $364,891 gold card**; the grading was really operating on 3 of 10 live
+  cards. Locally `style` is worse, holding free text like `worth-a-look`. It fails
+  safe, which is exactly why nobody would notice it had stopped working. Now reads
+  `leads.lead_grade`, with `style` consulted first ONLY when it names a real rank
+  (platinum exists there and nowhere else). Fixed and mutation-proven, **NOT
+  DEPLOYED** — production is `885ad88` and this is a fourth restart that can wait for
+  daylight, on the guardian's advice. It does not affect North Palos, which wins on
+  all three keys.
 - `verified` 2026-08-11 TIMING, MEASURED RATHER THAN DERIVED: North Palos
   `card_unengaged` is due Tue 10:30:04 PT and first reachable at the **Tue 10:45**
   tick; `offer_unanswered` (Jocelyn's) and `card_escalated` are due Tue 16:15/16:30,

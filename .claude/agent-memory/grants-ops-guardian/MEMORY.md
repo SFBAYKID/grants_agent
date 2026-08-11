@@ -34,7 +34,7 @@
 
 ## Current production state
 
-- [Deploy a66f5d4 fair-order (CURRENT PROD)](fair-order-does-not-rescue-fresh-cards.md) — LIVE 2026-08-10, schema 39, PID 66149; the round-robin shipped healthy but did NOT rescue the card it was built for (26 → 29 of 30)
+- [Deploy 885ad88 lead-ranked cards (CURRENT PROD)](fair-order-does-not-rescue-fresh-cards.md) — LIVE 2026-08-10, schema 39, PID 66465; North Palos 26→29→**0**; rotation was not the error, the within-kind sort key was; `award-brief` sorts unranked
 - [Deploy 0f62485 nudge follow-ups](deploy-0f62485-nudge-followups.md) — schema 39; nudge cron ground truth `*/15 8-14`; dry-run blind without a Slack client; read-only future-clock queue recipe
 - [Session final 2f1ff77 + 1ffe7ce docs (superseded by 0f62485)](session-final-2f1ff77.md) — schema 39, PID 60352, TOOL_SCHEMAS 25; negation guard + per-turn spend key verified; user_memory EMPTY
 - [Session end state 750937b](session-end-state-20260810.md) — read the droplet clock before answering "has the cron fired"

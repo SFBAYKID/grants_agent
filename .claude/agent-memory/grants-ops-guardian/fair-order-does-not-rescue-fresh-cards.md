@@ -1,9 +1,59 @@
 ---
 name: fair-order-does-not-rescue-fresh-cards
-description: MEASURED 2026-08-10 — the _fair_order round-robin (a66f5d4) did NOT rescue the North Palos card; it moved it 26 -> 29 of 30, because a fresh card is the NEWEST member of the LARGEST kind
+description: MEASURED 2026-08-10 — rotation alone (a66f5d4) moved North Palos 26 -> 29 of 30; ranking cards by the LEAD (885ad88, CURRENT PROD) moved it to 0. Plus the award-brief tier hole
 metadata:
   type: project
 ---
+
+## RESOLVED IN `885ad88` — CURRENT PRODUCTION
+
+**PRODUCTION IS `885ad88efe6c459e8e569e79a7194a376ae0a696`, schema 39, PID 66465.**
+Deployed 2026-08-10 ~19:06 PT, 3 files, `.env`/crontab byte-identical, 26 rows untouched.
+
+The rotation was not the error — **the sort key inside the kind was.** `priority_at` means
+"how long has the PERSON waited", and **a card has no person waiting on it**, so applying it
+to a lead buries every new arrival behind older, worse ones. Cards are now ranked by
+`_lead_worth` = (tier, -amount, -freshness); every other kind keeps oldest-person-first.
+
+| subject | strict age | rotation only (a66f5d4) | + lead ranking (885ad88) |
+|---|---|---|---|
+| North Palos `card_unengaged` 34 | 26 | 29 | **0** |
+| North Palos `card_escalated` 34 | 27 | 27 | **1** |
+| `offer_unanswered` (Jocelyn) | 28 | 3 | 5 |
+
+**THE HEAD MOVED, deliberately.** Live head is now `card_unengaged` id=34, not
+`capability_now_available` id=4 (which slid to 2). The previous round's check "head unchanged
+⇒ fix is good" became the WRONG question once the goal was to surface a fresh card — the two
+criteria are mutually exclusive. Restating a criterion after the goal changes is the lesson.
+Tuesday should deliver North Palos `card_unengaged` (due 10:30, reachable) **and**
+`capability_now_available` id=4 — the card is rescued without costing the oldest waiting person
+their slot, because the `card_escalated` at position 1 is due 16:30, past the 14:45 last tick.
+
+## `award-brief` IS NOT IN `_TIER_RANK` — 7 OF 10 LIVE CARDS SORT UNRANKED
+
+Verified per-row on production rather than inferred (`_lead_worth` printed for every live card):
+
+```
+id=34 tier='gold'        amount=500000  -> (1, -500000, ...)
+id=32 tier='gold'        amount=500000  -> (1, ...)
+id=33 tier='gold'        amount=364891  -> (1, ...)
+id=31..25 tier='award-brief' amount=500000 -> (9, ...)   # unranked, sorts LAST
+```
+
+`card_tier` is built as `str(row["style"] or row["kind"] or "")`, but `_TIER_RANK` holds
+**style** vocabulary (`platinum/gold/rfp/silver/nugget`) while `kind` holds a DIFFERENT
+vocabulary (`rich_award`, `award-brief`). **So the `or kind` fallback can only ever produce an
+unrecognised tier — it is guaranteed rank 9 whenever `style` is empty.** Seven $500,000 awards
+therefore rank below a $364,891 gold card. It fails SAFE (docstring: "anything unrecognised
+sorts last rather than being guessed at") and it does not change North Palos, which wins on
+all three keys — but the tier grading is only really operating on 3 of 10 cards.
+
+**This is the [[row-get-wrong-column-false-null]] family**: a lookup miss and a real low rank
+are indistinguishable from the output alone. Print the computed key per row before trusting
+any ranking — that is the only reason this was visible.
+
+---
+## ORIGINAL FINDING (a66f5d4) — kept, because it is why the fix took two attempts
 
 **The fix shipped, is healthy, and does not achieve its stated purpose.** Deployed
 `a66f5d4b2a043fc3dde0bad17da7bf9cfab4d171` 2026-08-10 ~18:57 PT (PID 66149, schema 39,

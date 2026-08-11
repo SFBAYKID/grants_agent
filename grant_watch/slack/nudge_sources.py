@@ -202,7 +202,7 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
     """
     rows = conn.execute(
         """SELECT p.id,p.channel,p.ts,p.posted_at,p.lead_id,p.kind,p.style,
-                  l.entity_name,l.status,l.state,l.source,l.amount,
+                  l.entity_name,l.status,l.state,l.source,l.amount,l.lead_grade,
                   s.slack_user_id AS snapshot_tagged
              FROM posts p
              LEFT JOIN leads l ON l.id=p.lead_id
@@ -237,7 +237,7 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
             "amount_usd": int(row["amount"] or 0),
             "channel": str(row["channel"] or ""),
             "card_ts": str(row["ts"] or ""),
-            "card_tier": str(row["style"] or row["kind"] or ""),
+            "card_tier": _tier_of(row),
             "tagged_slack": tagged,
         }
         out.append(
@@ -558,9 +558,33 @@ def _fair_order(by_age: list[NudgeCandidate]) -> list[NudgeCandidate]:
 # Subjects that are about a LEAD rather than about a person waiting for an answer.
 _LEAD_KINDS = frozenset({"card_unengaged", "card_escalated"})
 
-# How good a card is, best first. Mirrors the drip's own presentation tiers; anything
-# unrecognised sorts last rather than being guessed at.
-_TIER_RANK = {"platinum": 0, "gold": 1, "rfp": 2, "silver": 2, "nugget": 3}
+# How good a card is, best first. Anything unrecognised sorts LAST rather than being
+# guessed at — which is safe, and was also how this quietly stopped working. See
+# `_tier_of`.
+_TIER_RANK = {"platinum": 0, "gold": 1, "rfp": 2, "silver": 2, "watch": 3, "nugget": 4}
+
+
+def _tier_of(row: sqlite3.Row) -> str:
+    """The card's grade, from the column that actually holds one.
+
+    `posts.style` IS NOT A GRADE VOCABULARY, and assuming it was cost the ranking most
+    of its effect. The first version read `style or kind`, which can only ever produce
+    an unrecognised value when `style` is empty — `kind` holds `rich_award`,
+    `award-brief`, `nugget`, none of which are tiers. Measured on production the day it
+    shipped: **seven $500,000 awards ranked below a $364,891 gold card**, all seven
+    scoring the unknown rank of 9. Locally `style` is worse still, holding free text
+    like `worth-a-look` and `reconciled-live-thread`.
+
+    `leads.lead_grade` is the real grading (gold/silver/watch). `style` is consulted
+    first only because PLATINUM exists there and nowhere else — it is a presentation
+    tier the drip assigns to an award fresh enough that a buy is imminent — and it is
+    trusted only when it actually names a rank, so free-text styles fall through to
+    the grade instead of poisoning it.
+    """
+    style = str(row["style"] or "").strip().lower()
+    if style in _TIER_RANK:
+        return style
+    return str(row["lead_grade"] or "").strip().lower()
 
 
 def _lead_worth(item: NudgeCandidate) -> tuple[int, int, float]:

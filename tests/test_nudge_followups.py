@@ -527,6 +527,55 @@ def test_the_best_lead_is_chased_first_not_the_oldest_card(tmp_path: Path) -> No
     conn.close()
 
 
+def test_the_grade_is_read_from_the_column_that_holds_one(tmp_path: Path) -> None:
+    """`posts.style` is not a grade vocabulary, and treating it as one broke ranking.
+
+    The first version read `style or kind`. `kind` holds `rich_award`, `award-brief`,
+    `nugget` — none of which are tiers — so whenever `style` was empty the tier was
+    guaranteed unrecognised and sorted LAST. Measured on production: seven $500,000
+    awards ranked below a $364,891 gold card. It failed safe, which is exactly why
+    nobody would have noticed the grading had stopped working.
+
+    Here the big award carries NO style and grade 'gold'; the small one carries the
+    real production free-text style `award-brief` and the same grade. The half-million
+    must win. (`award-brief` is a STYLE, not a kind — `posts.kind` carries a CHECK
+    constraint that rejects it, which is how this test first failed.)
+    """
+    conn = _conn(tmp_path)
+    for lead_id, grade, style, amount, days in (
+        (3100, "gold", "", 500_000, 2),
+        (900, "gold", "award-brief", 364_891, 3),
+    ):
+        conn.execute(
+            "INSERT INTO leads (id,source,source_item_id,entity_name,state,"
+            "detail_url,amount,status,lead_grade) VALUES (?,'usaspending:svpp',?,"
+            "'DISTRICT','IL','u',?,'new',?)",
+            (lead_id, f"x{lead_id}", amount, grade),
+        )
+        conn.execute(
+            "INSERT INTO posts (id,channel,ts,posted_at,lead_id,kind,style) "
+            "VALUES (?,?,?,?,?,'rich_award',?)",
+            (
+                lead_id,
+                CHANNEL,
+                f"8{lead_id}.1",
+                (NOW - timedelta(days=days)).isoformat(),
+                lead_id,
+                style,
+            ),
+        )
+    conn.commit()
+
+    cards = [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_unengaged"
+    ]
+    assert cards[0].observed["card_tier"] == "gold", (
+        "an empty style fell through to a post kind and scored as unranked"
+    )
+    assert [c.observed["lead_id"] for c in cards] == [3100, 900]
+    conn.close()
+
+
 # ------------------------------------------------------------------ the rehearsal
 
 
