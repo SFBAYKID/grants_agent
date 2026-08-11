@@ -489,6 +489,44 @@ def test_a_fresh_card_is_not_starved_behind_a_pile_of_old_asks(
     conn.close()
 
 
+def test_the_best_lead_is_chased_first_not_the_oldest_card(tmp_path: Path) -> None:
+    """A card has no person waiting on it, so age is the wrong priority for one.
+
+    THIS IS THE BUG THE FIRST FIX SHIPPED. Round-robin across kinds alone moved North
+    Palos from 26th to 29th of 30 — the card it existed to rescue came out LAST —
+    because interleaving helps the oldest member of a small kind, and a freshly posted
+    card is the newest member of the largest kind. The rotation was not the error; the
+    sort key inside the kind was. `priority_at` means "how long has the PERSON
+    waited", and applying it to a lead buries every new arrival behind older, worse
+    ones.
+
+    Cards are therefore ranked by the lead: tier, then money, then freshness — the
+    grading CLAUDE.md already states. Here the fresh $500k gold card must beat a
+    three-times-older nugget worth a tenth as much.
+    """
+    conn = _conn(tmp_path)
+    _card(conn, NOW - timedelta(days=2), kind="rich_award", style="gold", lead_id=3100)
+    conn.execute(
+        "INSERT INTO leads (id,source,source_item_id,entity_name,state,detail_url,"
+        "amount,status) VALUES (900,'usaspending:svpp','old','OLD SMALL DISTRICT',"
+        "'IL','u',50000,'new')"
+    )
+    conn.execute(
+        "INSERT INTO posts (id,channel,ts,posted_at,lead_id,kind,style) "
+        "VALUES (900,?,'900.1',?,900,'nugget','')",
+        (CHANNEL, (NOW - timedelta(days=6)).isoformat()),
+    )
+    conn.commit()
+
+    cards = [
+        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_unengaged"
+    ]
+    assert [c.observed["lead_id"] for c in cards] == [3100, 900], (
+        "the older, smaller lead was chased ahead of the fresh $500k gold one"
+    )
+    conn.close()
+
+
 # ------------------------------------------------------------------ the rehearsal
 
 

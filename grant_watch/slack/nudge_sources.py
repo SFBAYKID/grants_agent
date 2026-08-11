@@ -519,20 +519,56 @@ def _fair_order(by_age: list[NudgeCandidate]) -> list[NudgeCandidate]:
     a long tail; it is a feature that does not run.
 
     So kinds take turns. The kind whose oldest member has waited longest goes first,
-    then the next kind, and round again — so the July asks still lead, and a fresh
-    gold card still gets a slot the same day instead of queueing behind all of them.
-    Ordering within a kind is untouched, so `priority_at` still decides who among
-    Kerry, Nelly and Jocelyn is asked first.
+    then the next kind, and round again — so the July asks still lead. `priority_at`
+    still decides who among Kerry, Nelly and Jocelyn is asked first.
+
+    ROUND-ROBIN ALONE MADE IT WORSE, MEASURED. The first version of this function
+    only interleaved kinds, and North Palos moved from 26th to **29th of 30** — the
+    card it existed to rescue ended up last. Interleaving helps the OLDEST member of a
+    SMALL kind (`offer_unanswered`, a kind of one, leapt 28 → 3). A freshly-posted
+    card is the NEWEST member of the LARGEST kind, so it cannot help there, and
+    putting the small kinds first pushed every card back.
+
+    The deeper error was in the sort key, not the rotation. `priority_at` means "how
+    long has the PERSON been waiting" — and A CARD HAS NO PERSON WAITING ON IT. Using
+    `posted_at` there applies a people-fairness rule to a thing that is not a person,
+    and buries every new arrival behind older, worse leads. So cards are ordered by
+    the lead itself: tier first, then money, then freshness — the same grading
+    CLAUDE.md already states ("Freshness is everything. An award from last month beats
+    one from two years ago"). Every other kind keeps oldest-person-first, untouched.
     """
     queues: dict[str, list[NudgeCandidate]] = {}
     for item in by_age:
         queues.setdefault(item.subject_kind, []).append(item)
-    # Kind order is set by each kind's OLDEST member, so this cannot be gamed by a
-    # kind that simply has more rows, and the overall head of the queue is unchanged.
+    # Kind order is set by each kind's OLDEST member — computed from the age-sorted
+    # input BEFORE the re-sort below — so it cannot be gamed by a kind that simply has
+    # more rows, and the overall head of the queue is unchanged.
     rotation = list(queues)
+    for kind, queue in queues.items():
+        if kind in _LEAD_KINDS:
+            queue.sort(key=_lead_worth)
     out: list[NudgeCandidate] = []
     while any(queues[kind] for kind in rotation):
         for kind in rotation:
             if queues[kind]:
                 out.append(queues[kind].pop(0))
     return out
+
+
+# Subjects that are about a LEAD rather than about a person waiting for an answer.
+_LEAD_KINDS = frozenset({"card_unengaged", "card_escalated"})
+
+# How good a card is, best first. Mirrors the drip's own presentation tiers; anything
+# unrecognised sorts last rather than being guessed at.
+_TIER_RANK = {"platinum": 0, "gold": 1, "rfp": 2, "silver": 2, "nugget": 3}
+
+
+def _lead_worth(item: NudgeCandidate) -> tuple[int, int, float]:
+    """Which unworked lead most deserves the next slot: tier, then money, then fresh.
+
+    Negated numbers rather than `reverse=True`, because tier ascends while amount and
+    recency descend and a single key has to carry all three.
+    """
+    tier = str(item.observed.get("card_tier") or "").lower()
+    amount = int(item.observed.get("amount_usd") or 0)
+    return (_TIER_RANK.get(tier, 9), -amount, -item.stalled_at.timestamp())

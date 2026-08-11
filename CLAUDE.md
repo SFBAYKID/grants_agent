@@ -229,9 +229,20 @@ affect Chase's other projects.
   waited, which is right for one capability ask against another, but across ALL kinds
   it means every historical ask outranks every card forever — and cards are the kind
   that keeps arriving. A queue that never reaches a kind is not a long tail, it is a
-  feature that does not run. `_fair_order` now round-robins across kinds, oldest-first
-  WITHIN each kind, so the July asks still lead and a fresh gold card still gets a
-  slot the same day. Mutation-proven.
+  feature that does not run.
+- `verified` 2026-08-11 **MY FIRST FIX FOR THAT MADE IT WORSE, AND THE GUARDIAN
+  MEASURED IT RATHER THAN BELIEVING ME.** Round-robin across kinds alone moved North
+  Palos **26th → 29th of 30 — last**, and pushed every card back (the oldest live card
+  went 3 → 12). Interleaving helps the OLDEST member of a SMALL kind —
+  `offer_unanswered`, a kind of one, leapt 28 → 3 — and a freshly posted card is the
+  NEWEST member of the LARGEST kind, so it cannot help there at all. I shipped it and
+  claimed the head being unchanged was the check that mattered; it was the wrong
+  question of the right data.
+  **The rotation was not the error, the sort key inside the kind was.** `priority_at`
+  means "how long has the PERSON waited" — and A CARD HAS NO PERSON WAITING ON IT.
+  Cards are now ranked by the lead itself: tier, then money, then freshness, which is
+  the grading this file already states. Every other kind keeps oldest-person-first.
+  Mutation-proven both ways.
 - `verified` 2026-08-11 TIMING, MEASURED RATHER THAN DERIVED: North Palos
   `card_unengaged` is due Tue 10:30:04 PT and first reachable at the **Tue 10:45**
   tick; `offer_unanswered` (Jocelyn's) and `card_escalated` are due Tue 16:15/16:30,
