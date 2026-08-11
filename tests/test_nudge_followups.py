@@ -750,12 +750,55 @@ def test_a_capability_cannot_go_live_without_a_written_sentence(
     with pytest.raises(ValueError, match="no hand-written follow-up wording"):
         capability_asks.mark_available(conn, "track_applications")
 
-    # And every slug that IS declarable has a sentence in all four tables, so the
-    # generic fallback is unreachable through the supported path.
-    for slug in ("email_results", "campaign_load", "add_leads_to_campaign"):
-        assert nudge_messages.wording_exists(slug)
+    # Every slug with a REAL shipped feature behind it has a sentence in all four
+    # tables, so the generic fallback is unreachable through the supported path.
+    for slug in (
+        "email_results",
+        "campaign_load",
+        "add_leads_to_campaign",
+        "load_leads_to_campaigns",
+        "create_salesforce_campaigns",
+        "batch_contact_enrichment",
+        "bulk_contact_enrichment",
+        "contact_phone_mobile_enrichment",
+        "provide_phone_mobile_numbers",
+        "include_phone_mobile_in_notes",
+        "merge_contacts_to_export",
+        "salesforce_lookup",
+    ):
+        assert nudge_messages.wording_exists(slug), slug
         capability_asks.mark_available(conn, slug)
+
+    # `track_applications` stays UNWRITTEN on purpose. Grant once told a rep it would
+    # "keep watching these states and flag new awards here" and had no such capability;
+    # she never came back. Writing a sentence for it would re-arm exactly that promise,
+    # so the guard refusing to declare it IS the fix, not a gap in coverage.
+    assert not nudge_messages.wording_exists("track_applications")
     conn.close()
+
+
+def test_no_wording_promises_a_phone_line_the_vendor_will_not_sell(
+    tmp_path: Path,
+) -> None:
+    """`directPhone` is NOT licensed on this ZoomInfo plan, and search still hints at it.
+
+    Search reports `has_direct_phone`, so a direct line can be seen to EXIST while being
+    impossible to buy — asking for the column 400s the whole batch. A capability
+    follow-up is sent PROACTIVELY and quotes the person back to themselves, so a
+    promise of a direct line there is the worst kind of false promise: nobody asked for
+    it in that moment, and it cannot be kept. The mobile wordings say mobile.
+    """
+    from grant_watch.slack import nudge_messages
+
+    for table in (
+        nudge_messages._CAPABILITY_HEADLINE,
+        nudge_messages._CAPABILITY_OFFER,
+        nudge_messages._OFFER_TO_DO,
+        nudge_messages._OFFER_ABOUT,
+    ):
+        for slug, sentence in table.items():
+            assert "direct line" not in sentence.lower(), slug
+            assert "direct phone" not in sentence.lower(), slug
 
 
 def test_the_report_shows_what_the_queue_could_not_reach(tmp_path: Path) -> None:

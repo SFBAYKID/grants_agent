@@ -152,6 +152,13 @@ _CAPABILITY_OFFER = {
     "add_leads_to_campaign": "I can now — want me to add them?",
     "load_leads_to_campaigns": "I can now — want me to load them?",
     "create_salesforce_campaigns": "I can now — want me to create them?",
+    "batch_contact_enrichment": "I can now — want me to run the batch?",
+    "bulk_contact_enrichment": "I can now — want me to run the batch?",
+    "contact_phone_mobile_enrichment": "I can now — want me to pull them?",
+    "provide_phone_mobile_numbers": "I can now — want me to pull them?",
+    "include_phone_mobile_in_notes": "I can now — want me to add them?",
+    "merge_contacts_to_export": "I can now — want me to rebuild it?",
+    "salesforce_lookup": "I can now — want me to check?",
 }
 
 
@@ -170,6 +177,23 @@ _CAPABILITY_HEADLINE = {
     "create_salesforce_campaigns": (
         "I can create those campaigns now — want me to start?"
     ),
+    "batch_contact_enrichment": (
+        "I can enrich a whole batch in one go now — want me to?"
+    ),
+    "bulk_contact_enrichment": "I can enrich them in bulk now — want me to?",
+    # MOBILE ONLY, DELIBERATELY. `directPhone` is NOT licensed on this ZoomInfo plan —
+    # search still reports `has_direct_phone`, so a direct line can be seen to EXIST
+    # while being impossible to buy. Promising one would be a false promise made
+    # proactively, which is the worst kind. Mobile numbers ARE licensed.
+    "contact_phone_mobile_enrichment": ("I can pull mobile numbers now — want me to?"),
+    "provide_phone_mobile_numbers": "I can get mobile numbers now — want me to?",
+    "include_phone_mobile_in_notes": (
+        "I can include the phone and mobile now — want me to?"
+    ),
+    "merge_contacts_to_export": (
+        "I can put the contacts into the spreadsheet now — want it rebuilt?"
+    ),
+    "salesforce_lookup": "I can check Salesforce for you now — want me to?",
 }
 
 
@@ -334,6 +358,13 @@ _OFFER_TO_DO = {
     "add_leads_to_campaign": "add those leads to the campaign",
     "load_leads_to_campaigns": "load those leads into the campaigns",
     "create_salesforce_campaigns": "create those campaigns",
+    "batch_contact_enrichment": "enrich that batch",
+    "bulk_contact_enrichment": "enrich them in bulk",
+    "contact_phone_mobile_enrichment": "pull those mobile numbers",
+    "provide_phone_mobile_numbers": "get those mobile numbers",
+    "include_phone_mobile_in_notes": "include the phone and mobile",
+    "merge_contacts_to_export": "put the contacts into the spreadsheet",
+    "salesforce_lookup": "check Salesforce",
 }
 
 _OFFER_ABOUT = {
@@ -344,6 +375,13 @@ _OFFER_ABOUT = {
     "add_leads_to_campaign": "adding those leads to the campaign",
     "load_leads_to_campaigns": "loading those leads into the campaigns",
     "create_salesforce_campaigns": "creating those campaigns",
+    "batch_contact_enrichment": "enriching that batch",
+    "bulk_contact_enrichment": "enriching them in bulk",
+    "contact_phone_mobile_enrichment": "pulling those mobile numbers",
+    "provide_phone_mobile_numbers": "getting those mobile numbers",
+    "include_phone_mobile_in_notes": "including the phone and mobile",
+    "merge_contacts_to_export": "putting the contacts into the spreadsheet",
+    "salesforce_lookup": "checking Salesforce",
 }
 
 
