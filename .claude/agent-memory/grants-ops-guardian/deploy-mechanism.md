@@ -17,10 +17,17 @@ git merge-base --is-ancestor <sha> origin/main || { echo "REFUSED: not on main";
 ```
 
 **This does NOT mean "deploy whatever `main` is now."** Keep pinning the exact hash.
-Hash-pinning has twice caught what a branch name would have hidden: a dirty working tree
-carrying an unfinished migration ([[deploy-3cf9df0-campaign-status]]) and two commits
-landing mid-sync ([[deploy-2239a18-human-asserted]]). "Deploy `main`" and "deploy commit X,
-which is on `main`" differ exactly when somebody pushes while files are being copied.
+Hash-pinning has **three times** caught what a branch name would have hidden: a dirty working
+tree carrying an unfinished migration ([[deploy-3cf9df0-campaign-status]]), two commits
+landing mid-sync ([[deploy-2239a18-human-asserted]]), and a commit landing **during preflight**
+that silently retargeted the deploy ([[deploy-0f62485-nudge-followups]]). "Deploy `main`" and
+"deploy commit X, which is on `main`" differ exactly when somebody pushes while files are
+being copied.
+
+**PUT THE PIN IN THE SCRIPT, NOT IN YOUR HEAD.** The mid-preflight move was caught only
+because the rsync helper fails closed on `[ "$HEADSHA" = "$TARGET" ]`. Every deploy script
+gets all three guards: HEAD == target, clean tree, and `merge-base --is-ancestor <target>
+origin/main`.
 
 **Verify the assertion in BOTH directions before trusting it** — a check that can only
 ever pass proves nothing. Exercise it once against a commit that is NOT an ancestor and

@@ -205,12 +205,28 @@ affect Chase's other projects.
   false all-clear the fix exists to prevent, and cost a second listener restart within
   the hour — and a restart kills in-flight conversations. It traced the defect on the
   `c2a4e47` bytes instead of trusting the commit message.
-- `needs-testing` 2026-08-10 **NONE OF THIS IS DEPLOYED.** Production is `1ffe7ce`,
-  schema 39. Also open: 32 `capability_asks`
-  are still `open`, **nine of them one person asking repeatedly to get leads INTO
-  campaigns**, and `load_leads_to_campaigns` has no hand-written wording in
-  `_OFFER_ABOUT`/`_CAPABILITY_HEADLINE`, so it would fall back to generic text if
-  declared live.
+- `verified` 2026-08-11 **DEPLOYED. PRODUCTION IS `0f62485`, SCHEMA 39, PID 65500**,
+  one restart, ~2.5s outage, **0 new tracebacks** against the 1028-line `bot.log`
+  baseline. 11 files synced (7 modified, 4 new), all 11 remote sha256 matched the
+  target blobs programmatically, second sync empty, zero deletions. `.env` and
+  crontab **byte-identical** (sha compared, no 41st `.env` copy written).
+  `followup_nudges` still exactly the 26-row pre-deploy baseline.
+- `needs-testing` 2026-08-11 **NO PREVIEW HAS YET SHOWN A CANDIDATE, AND THE GUARDIAN
+  REFUSED TO LET ME PRETEND OTHERWISE.** `nudge --dry-run` returned `skip: outside
+  business hours` (droplet clock 18:40 PT) — which proves nothing about the fix,
+  because `in_window` short-circuits before any candidate is evaluated. A labelled
+  read-only `--dry-run --force` then returned `skip: daily nudge cap reached (2)`:
+  `--force` skips the window and the slot hold but NOT the cap, and today's two were
+  spent on Kerry (10:00 PT) and Jocelyn (14:15 PT). So the code that HID escalations
+  is gone and the module imports clean, but `offer_unanswered` is 0 rows and the
+  escalation path has never been observed producing a candidate in production. That
+  distinction is the guardian's, and it is the right one.
+- `needs-testing` 2026-08-11 **32 `capability_asks` ARE STILL OPEN, NINE OF THEM ONE
+  PERSON** asking repeatedly to get leads INTO campaigns ("Why theres no leads inside
+  these campaigns?"). That is the loudest unmet request in the data.
+  `load_leads_to_campaigns` has no hand-written wording in `_OFFER_ABOUT` or
+  `_CAPABILITY_HEADLINE`, so declaring it live today would reopen nine asks with
+  generic fallback text. Write the wording first.
 
 ## Current status (2026-08-10, the day it spoke first)
 

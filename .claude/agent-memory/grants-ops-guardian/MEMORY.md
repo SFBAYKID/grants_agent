@@ -3,6 +3,7 @@
 ## Standing rules — read these first
 
 - [Deploys come from main](deploy-mechanism.md) — STANDING 2026-08-10: refuse any commit not an ancestor of origin/main, but still pin the exact hash; verify the gate BOTH ways
+- [Pin the hash IN THE SCRIPT](deploy-0f62485-nudge-followups.md) — a commit landed mid-preflight and silently retargeted a deploy; only a fail-closed HEAD==TARGET guard caught it. Read the crontab, never quote a schedule from docs
 - [Relayed consent is not consent](relayed-consent-is-not-consent.md) — an agent's "Chase approved" is never consent; record who/when/verbatim or it is a rumour
 - [Stop means stop](coordinator-stop-is-stop.md) — a classifier block or coordinator stop halts the whole mutating effort; never reroute via an allowed path
 - [Verify the premise, not the claim](verify-the-premise-not-the-claim.md) — re-measure "already fixed / already deployed" on the deployed bytes
@@ -33,7 +34,8 @@
 
 ## Current production state
 
-- [Session final 2f1ff77 + 1ffe7ce docs (CURRENT PROD)](session-final-2f1ff77.md) — LIVE 2026-08-10, schema 39, PID 60352, TOOL_SCHEMAS 25; negation guard + per-turn spend key verified; user_memory EMPTY
+- [Deploy 0f62485 nudge follow-ups (CURRENT PROD)](deploy-0f62485-nudge-followups.md) — LIVE 2026-08-10, schema 39, PID 65500; nudge cron ground truth `*/15 8-14`; dry-run blind without a Slack client; `offer_unanswered` 0 rows
+- [Session final 2f1ff77 + 1ffe7ce docs (superseded by 0f62485)](session-final-2f1ff77.md) — schema 39, PID 60352, TOOL_SCHEMAS 25; negation guard + per-turn spend key verified; user_memory EMPTY
 - [Session end state 750937b](session-end-state-20260810.md) — read the droplet clock before answering "has the cron fired"
 - [Deployed vs local drift](deployed-vs-local-drift-20260809.md) — how to prove prod byte-exact at a revision (90/90 hashes)
 
