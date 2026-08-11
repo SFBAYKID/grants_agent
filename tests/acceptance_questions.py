@@ -30,6 +30,12 @@ class HumanQuestion:
     # fact about `state='TX'`, not about whether the sentence happened to contain the
     # word Texas. Values compare as lowercase strings so 10 and "10" both match.
     expected_tool_args: tuple[tuple[str, str, str], ...] = ()
+    # True when the case is deliberately UNDER-SPECIFIED and Grant should scope it with
+    # one short question rather than run it. The product rule is "run anchored asks,
+    # SCOPE open ones, never dead-end" (ce1295a) — both halves matter, and the runner
+    # could only express the first, so an open case failed the anchored-run rule while
+    # its own expected_reply asked for the scoping question.
+    scopes_rather_than_runs: bool = False
     expected_reply: tuple[str, ...] = ()
     expected_any: tuple[tuple[str, ...], ...] = ()
     allowed_intents: tuple[str, ...] = ("question",)
@@ -109,6 +115,10 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "search-missing-shape",
         "lead-search",
         "Can you find security grants for schools in Illinois?",
+        # Names a state and an org type but NO count and NO format, so this is the
+        # "open ask" half of the rule: Grant asks one short question instead of
+        # guessing a shape. Its own expected_reply has always said so.
+        scopes_rather_than_runs=True,
         expected_reply=("how many", "Excel"),
     ),
     HumanQuestion(
@@ -408,7 +418,11 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "search-google-sheet",
         "lead-search",
         "Top five GOLD school awards in Washington in a Google Sheet.",
-        expected_reply=("Google",),
+        # The destination is a fact about the CALL. `export='google_sheet'` is what
+        # makes it a Sheet; a reply that lists the award without naming the format is
+        # a good reply, not a failure.
+        expected_tools=("search_leads",),
+        expected_tool_args=(("search_leads", "export", "google_sheet"),),
     ),
     HumanQuestion(
         "search-all-excel",

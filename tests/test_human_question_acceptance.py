@@ -214,7 +214,11 @@ def test_real_model_understands_human_question_families(
     )
     reply = str(output["reply"])
     assert output["intent"] in case.allowed_intents
-    if case.family == "lead-search" and not case.context:
+    if (
+        case.family == "lead-search"
+        and not case.context
+        and not case.scopes_rather_than_runs
+    ):
         # AN ANCHORED ASK RUNS. THE PLAN-AND-CONFIRM FLOW WAS DELIBERATELY REMOVED.
         #
         # This block used to demand a "Search plan: … reply yes and I'll run it"
