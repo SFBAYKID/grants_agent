@@ -446,12 +446,15 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "description": "SECOND step only: after the rep says yes to "
                     "finding contacts, set true to add verified-or-not-found "
                     f"contact columns. Enriches AT MOST {MAX_ENRICH_ROWS} "
-                    "organizations per search — a hard server cap, roughly 30s "
-                    f"each — regardless of `limit`. Tell the rep {MAX_ENRICH_ROWS} "
-                    "when they ask how many you can do; never promise a larger "
-                    "batch and never invent a different cap. To cover more "
-                    "organizations, run further searches that select different "
-                    "ones. Never set true on the first search.",
+                    "organizations per search — a hard server cap — and honours "
+                    "`limit` below it, so set `limit` to how many the rep wants. "
+                    f"Tell the rep {MAX_ENRICH_ROWS} when they ask how many you "
+                    "can do; never promise a larger batch and never invent a "
+                    "different cap. If the reply says some were not checked "
+                    "within the time budget, say so and offer to run it again, "
+                    "repeating the tool's own wording about what is cached rather "
+                    "than promising the repeat is free. Never set true on the "
+                    "first search.",
                 },
             },
             "required": [],

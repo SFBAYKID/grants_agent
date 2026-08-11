@@ -25,7 +25,7 @@ from .salesforce_campaign_models import (
     PreparedAction,
 )
 from .salesforce_campaign_ownership import (
-    organization_lead_payload,
+    campaign_lead_payload,
     requester_owner,
 )
 from .salesforce_campaign_policy import (
@@ -231,6 +231,49 @@ def prepare_campaign_creation(
     return PreparedAction(action_id, nonce, preview, expires)
 
 
+def _is_organization_placeholder(ref: SalesforceRecordRef | None) -> bool:
+    """Whether this matched Lead is one of Grant's nameless organization-only shells.
+
+    Grant creates those with `LastName` and `Company` both set to the organization,
+    so Salesforce's derived `Name` equals `Company` and there is no person on the
+    record at all. Comparing the two costs no extra query and is exactly the shape
+    Grant itself writes.
+    """
+    if ref is None or ref.sobject != "Lead" or not ref.company:
+        return False
+    return (
+        db.canonical_entity_key(ref.name).partition("|")[0]
+        == db.canonical_entity_key(ref.company).partition("|")[0]
+    )
+
+
+def _current_membership(
+    gateway: SalesforceCampaignGateway,
+    campaign_id: str,
+    plans: list[MemberPlan],
+) -> tuple[set[str], bool]:
+    """Read which matched records are ALREADY on the Campaign, before approval.
+
+    Returns the member record ids and whether the read succeeded. A failed read
+    returns `False` rather than an empty set treated as fact — "nobody is on it"
+    and "I could not look" are different claims and the card says which one it has.
+    """
+    record_ids = [
+        plan.salesforce_ref.record_id
+        for plan in plans
+        if plan.operation == "existing_record" and plan.salesforce_ref is not None
+    ]
+    if not record_ids:
+        return set(), True
+    reader = getattr(gateway, "member_records", None)
+    if not callable(reader):
+        return set(), False
+    try:
+        return set(reader(campaign_id, record_ids)), True
+    except Exception:  # noqa: BLE001 — a failed read must not block a valid preview
+        return set(), False
+
+
 def prepare_membership(
     conn: sqlite3.Connection,
     gateway: SalesforceCampaignGateway,
@@ -245,8 +288,15 @@ def prepare_membership(
     canonical_keys: dict[int, str] | None = None,
     allow_org_leads: bool = False,
     allow_resolved_only: bool = False,
+    excluded_organizations: tuple[dict[str, str], ...] = (),
 ) -> PreparedAction:
-    """Resolve a frozen Grant lead set and persist the exact membership preview."""
+    """Resolve a frozen Grant lead set and persist the exact membership preview.
+
+    `excluded_organizations` are organizations the CALLER already decided to leave
+    out — the batch path filters them before this function ever sees them, so
+    without being told, the card counted zero skipped organizations while nine of
+    ten were being dropped.
+    """
     _validate_context(workspace, channel, thread_ts, requester)
     validate_record_id(campaign.record_id, "Campaign")
     unique_ids = list(dict.fromkeys(int(item) for item in lead_ids))
@@ -266,6 +316,7 @@ def prepare_membership(
     resolved_records = resolved_records or {}
     canonical_keys = canonical_keys or {}
     plans_by_key: dict[str, MemberPlan] = {}
+    created_people: dict[str, str] = {}
     organization_owner: SalesforceRecordRef | None = None
     organization_owner_email = ""
     for row in rows:
@@ -366,19 +417,19 @@ def prepare_membership(
                 organization_owner, organization_owner_email = requester_owner(
                     gateway, requester
                 )
+            proposed_lead, note, person_name = campaign_lead_payload(
+                conn, row, requester, action_seed, organization_owner
+            )
+            if person_name:
+                created_people[key] = person_name
             plan = MemberPlan(
                 int(row["id"]),
                 key,
                 str(row["entity_name"]),
                 str(row["state"] or ""),
                 "create_org_lead",
-                proposed_lead=organization_lead_payload(
-                    row, requester, action_seed, organization_owner
-                ),
-                note=(
-                    "No individual contact verified; organization name fills Company "
-                    f"and LastName; owner is {organization_owner.name}."
-                ),
+                proposed_lead=proposed_lead,
+                note=note,
             )
         else:
             plan = MemberPlan(
@@ -402,20 +453,28 @@ def prepare_membership(
         plans = [
             plan for plan in plans if plan.operation not in {"unresolved", "ambiguous"}
         ]
+    disclosures = [
+        {
+            "entity_name": plan.entity_name,
+            "state": plan.state,
+            "reason": plan.note,
+        }
+        for plan in excluded
+    ] + [
+        {
+            "entity_name": str(item.get("entity_name", "")),
+            "state": str(item.get("state", "")),
+            "reason": str(item.get("reason", "")),
+        }
+        for item in excluded_organizations
+    ]
     payload = {
         "campaign": asdict(campaign),
         "lead_ids": [plan.lead_id for plan in plans],
         "allow_org_leads": allow_org_leads,
         "allow_resolved_only": allow_resolved_only,
-        "excluded_organization_count": len(excluded),
-        "excluded_organizations": [
-            {
-                "entity_name": plan.entity_name,
-                "state": plan.state,
-                "reason": plan.note,
-            }
-            for plan in excluded
-        ],
+        "excluded_organization_count": len(disclosures),
+        "excluded_organizations": disclosures,
         "member_status": MEMBER_STATUS,
         "provenance_seed": action_seed,
         "organization_lead_owner": (
@@ -430,12 +489,21 @@ def prepare_membership(
     }
     existing = sum(plan.operation == "existing_record" for plan in plans)
     creating = sum(plan.operation == "create_org_lead" for plan in plans)
-    unresolved = sum(plan.operation in {"unresolved", "ambiguous"} for plan in plans)
+    unresolved = len(disclosures)
     if existing + creating == 0:
         raise ValueError(
             "No organizations can be added yet; resolve a Salesforce Lead/Contact "
             "or approve organization-only Leads before confirming"
         )
+    already_member, membership_known = _current_membership(
+        gateway, campaign.record_id, plans
+    )
+    placeholders_matched = [
+        plan
+        for plan in plans
+        if plan.operation == "existing_record"
+        and _is_organization_placeholder(plan.salesforce_ref)
+    ]
     action_id, nonce, expires = _store_action(
         conn,
         "add_campaign_members",
@@ -457,17 +525,63 @@ def prepare_membership(
                 f"{plan.salesforce_ref.name}: {plan.salesforce_ref.link}"
             )
         elif plan.operation == "create_org_lead":
+            person = created_people.get(plan.canonical_entity_key, "")
             mapping_lines.append(
-                f"• {label} → create organization-only Lead; no person fields"
+                f"• {label} → create Lead for {person}"
+                if person
+                else f"• {label} → create organization-only Lead; no person fields"
             )
         else:
             mapping_lines.append(f"• {label} → skipped: {plan.note}")
+    existing_to_add = existing - len(already_member)
+    header = f"Add leads to *{campaign.name}*\n"
+    if membership_known and existing_to_add + creating == 0:
+        # THE NO-OP CARD. On 2026-08-11 this preview said "Existing Leads/Contacts:
+        # 13" for a Campaign that had held those same 13 members since 06 August.
+        # Membership was only ever read at EXECUTION time, so the card could not
+        # say the one thing that mattered: confirming changes nothing.
+        header += (
+            f"Nothing would change — all {existing} organizations are already "
+            "members of this Campaign, so confirming adds nobody. (It would still "
+            f"create the '{MEMBER_STATUS}' member status on the Campaign if that "
+            "does not exist yet.)\n"
+        )
+    counted = [f"• Will be added now: {existing_to_add + creating}"]
+    if existing_to_add:
+        counted.append(f"    - {existing_to_add} existing Salesforce Leads/Contacts")
+    if creating:
+        with_person = len(created_people)
+        counted.append(
+            f"    - {creating} new Leads, created first then added"
+            + (
+                f" — {with_person} for a verified named person, "
+                f"{creating - with_person} organization-only with no contact name"
+                if with_person
+                else ", all organization-only with no contact name"
+            )
+        )
+    counted.append(
+        f"• Already on this Campaign, unchanged: {len(already_member)}"
+        if membership_known
+        else "• Already on this Campaign: could not be read from Salesforce, so "
+        "some of these may already be members"
+    )
+    counted.append(f"• Left out of this batch: {unresolved}")
+    if placeholders_matched:
+        # Nelly asked this exact question on 2026-08-11 — "Does this include the
+        # person's name and contact details?" — and had to ask, because the card
+        # never said. An organization-only Lead carries the organization's name in
+        # LastName and no person at all.
+        counted.append(
+            f"• Of the {existing} matched records, "
+            f"{existing - len(placeholders_matched)} name a real person and "
+            f"{len(placeholders_matched)} are organization-only placeholders with "
+            "no contact name on them yet"
+        )
     preview = (
-        f"Add leads to *{campaign.name}*\n"
-        f"• Existing Leads/Contacts: {existing}\n"
-        f"• Organization-only Leads to create: {creating}\n"
-        f"• Unresolved/ambiguous and skipped: {unresolved}\n"
-        f"• Campaign Member status: {MEMBER_STATUS} (not responded)\n"
+        header
+        + "\n".join(counted)
+        + f"\n• Campaign Member status: {MEMBER_STATUS} (not responded)\n"
         f"• Campaign: {campaign.link}\n"
         "Frozen organization mapping:\n" + "\n".join(mapping_lines)
     )
@@ -478,14 +592,14 @@ def prepare_membership(
             f"\n• New Lead owner: {organization_owner.name} "
             f"({organization_owner_email})"
         )
-    if excluded:
+    if disclosures:
         excluded_lines = "\n".join(
-            f"  - {plan.entity_name} ({plan.state or '?'}): {plan.note}"
-            for plan in excluded
+            f"  - {item['entity_name']} ({item['state'] or '?'}): {item['reason']}"
+            for item in disclosures
         )
         preview += (
-            "\n• Explicitly excluded unresolved/ambiguous organizations: "
-            f"{len(excluded)}\n{excluded_lines}"
+            f"\n• Left out of this batch and NOT added: {len(disclosures)}\n"
+            f"{excluded_lines}"
         )
     return PreparedAction(action_id, nonce, preview, expires)
 
@@ -635,6 +749,16 @@ def stored_action_result(
         name = str((payload.get("campaign") or {}).get("Name") or "Campaign")
         message = f"Salesforce Campaign {name} is already {state.value}" + (
             f" (ID {row['campaign_id']})." if row["campaign_id"] else "."
+        )
+    elif row["action_type"] == "create_contact_record":
+        # ONLY `create_campaign` USED TO BE SPECIAL-CASED, so re-clicking the
+        # confirm button on a person-Lead card replied "1 added, 0 already present,
+        # 0 unresolved, 0 failed, 0 unknown" — Campaign-membership vocabulary for an
+        # action that touched no Campaign at all. A rep reading that in the thread
+        # reasonably concludes somebody was added to their campaign.
+        message = (
+            f"That Salesforce record is already {state.value}; the button was "
+            "already used and nothing was written again."
         )
     else:
         message = (

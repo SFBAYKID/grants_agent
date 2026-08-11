@@ -123,9 +123,19 @@ def enrich_lead_contact(
             "legacy_contact_enrichment",
             f"legacy-contact:{lead_id}",
             discover,
+            # An unreachable source proves nothing was bought, so the attempt is
+            # filed retryable instead of indeterminate. Without this a single 429
+            # or timeout retired the lead permanently: `enrich_lead_contact` would
+            # raise `IndeterminatePaidCall` on every later pass and the rep would
+            # see `error` for a lead whose website came back minutes later.
+            provably_unspent=(finder.SourceUnreachable,),
         )
     except finder.SourceUnreachable:
         return ContactOutcome("unreachable")
+    except paid_calls.IndeterminatePaidCall:
+        # A lead burned before the fix above, or one whose spend genuinely cannot
+        # be established. Either way this is NOT "no contact exists" — say so.
+        return ContactOutcome("needs_operator_retry")
     except paid_calls.CompletedPaidCall:
         # Belt-and-braces behind _recall_prior_outcome: the ledger says this lead's
         # paid pass already ran, so re-spending is forbidden. Report whatever that

@@ -108,7 +108,7 @@ def test_unresolved_or_account_only_batch_has_no_confirmation(
         conn, gateway, "TWORK", "CGRANTS", "123.4", "UREP", (_requests()[0],)
     )
     assert batch.actions == ()
-    assert "no confirmation buttons" in batch.summary.lower()
+    assert "has not created any confirmation button" in batch.summary.lower()
     assert "IL Organization 000 (IL): missing" in batch.summary
     assert "IL Organization 001 (IL): account_only" in batch.summary
     states = {

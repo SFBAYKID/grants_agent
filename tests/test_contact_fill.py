@@ -610,3 +610,67 @@ def test_an_emailed_row_carries_a_clickable_link_not_slack_markup() -> None:
 
     chat_body, _ = search_leads(program="SVPP", limit=3)
     assert re.search(r"<https?://[^>]*\|", chat_body), "Slack lost its clickable links"
+
+
+def test_confirm_without_a_priced_run_spends_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`confirm=true` on the first call must not reach the provider.
+
+    The two-step protocol lived only in the tool DESCRIPTION — a prompt
+    instruction — while this module's own comment said the safety must be the
+    shape. Raising the ceiling from 40 to 100 credits made that gap worth 100
+    credits of un-approved spend from a single model turn, so the protocol is now
+    enforced here instead of described.
+    """
+    from grant_watch.slack import tools
+
+    tools._PRICED_RUNS.clear()
+    spent: list[object] = []
+    monkeypatch.setattr(
+        contact_fill,
+        "fill_contacts",
+        lambda *a, **k: spent.append(k) or _never_called(),
+    )
+    out = tools._zoominfo_fill_many([1, 2], 10, True, "U0REP")
+    assert out.startswith("ERROR:")
+    assert "priced" in out
+    assert spent == []
+
+
+def test_pricing_first_then_confirming_is_allowed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The control: the honest sequence still works, and only for that lead set."""
+    from grant_watch.slack import tools
+
+    tools._PRICED_RUNS.clear()
+    calls: list[bool] = []
+
+    class _Outcome:
+        """Minimal stand-in for a fill outcome."""
+
+        def summary(self) -> str:
+            """Describe the run."""
+            return "considered 2, filled 2"
+
+    def fake_fill(_conn: object, _ids: object, **kwargs: object) -> _Outcome:
+        """Record whether this was a priced run or a real one."""
+        calls.append(bool(kwargs["dry_run"]))
+        return _Outcome()
+
+    monkeypatch.setattr(contact_fill, "fill_contacts", fake_fill)
+    monkeypatch.setattr(contact_fill, "remaining_credits", lambda _c: 900)
+    monkeypatch.setattr(db, "connect", lambda *a, **k: sqlite3.connect(":memory:"))
+    assert tools._zoominfo_fill_many([1, 2], 10, False, "U0REP").startswith("PRICED")
+    assert tools._zoominfo_fill_many([1, 2], 10, True, "U0REP").startswith("BOUGHT")
+    assert calls == [True, False]
+    # A DIFFERENT lead set is not covered by that pricing.
+    assert tools._zoominfo_fill_many([3, 4], 10, True, "U0REP").startswith("ERROR:")
+    # Nor is a different rep.
+    assert tools._zoominfo_fill_many([1, 2], 10, True, "U0OTHER").startswith("ERROR:")
+
+
+def _never_called() -> object:
+    """Fail loudly if the provider path is reached."""
+    raise AssertionError("the paid path must not be reached")

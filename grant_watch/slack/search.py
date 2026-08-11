@@ -942,6 +942,17 @@ def search_leads(
         )
     else:
         trailer = ""
+    # ENRICHED-BUT-INVISIBLE. Contact lookups are bounded by MAX_ENRICH_ROWS (100)
+    # and the chat rendering by `display_cap` (15). While the ceiling was 10 those
+    # never disagreed, so nothing had to say which number was which. At 100 a rep
+    # can pay for 100 lookups, see 15 rows, and be told nothing about the other 85 —
+    # work done and not delivered, which reads exactly like work not done.
+    if contact_cells and len(contact_cells) > shown:
+        trailer += (
+            f"\nI looked up contacts for {len(contact_cells)} organizations; only "
+            f"the first {shown} fit here. Ask me to export and you'll get all "
+            f"{len(contact_cells)} with their contact columns."
+        )
     more = trailer + enrich_note
     inference_note = (
         "\nOrganization type is conservatively inferred from the entity name "

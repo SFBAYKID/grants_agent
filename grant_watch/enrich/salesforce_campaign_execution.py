@@ -272,6 +272,7 @@ def _verify_frozen_scope(
                       bi.source_lead_ids_json,bi.grades_json,bi.entity_name,
                       bi.state_code,bi.resolution_state,bi.salesforce_sobject,
                       bi.salesforce_id,bi.salesforce_account_id,bi.note,bi.item_hash,
+                      bi.included,
                       bi.crm_action_item_id,ai.action_id AS mapped_action_id,
                       ai.canonical_entity_key AS mapped_canonical_entity_key
                FROM crm_campaign_batch_items bi
@@ -296,15 +297,18 @@ def _verify_frozen_scope(
             "salesforce_id": str(item["salesforce_id"] or ""),
             "salesforce_account_id": str(item["salesforce_account_id"] or ""),
             "note": str(item["note"] or ""),
+            "included": bool(item["included"]),
         }
         if _hash(payload) != item["item_hash"]:
             raise PermissionError("Campaign batch item hash does not match")
         manifest_payloads.append(payload)
-        included = (
-            str(target["completion_mode"]) == "full"
-            or item["resolution_state"] == "existing_record"
-        )
-        if included:
+        # READ, NOT RECOMPUTED. This gate previously re-derived inclusion from
+        # `completion_mode` and `resolution_state`, which cannot express "the rep
+        # approved organization-only Leads" — so the moment both flags were needed
+        # it disagreed with the card the rep had just approved and refused the
+        # write after the nonce was spent. The stored flag is inside `item_hash`,
+        # verified three lines above, so reading it is no weaker than deriving it.
+        if bool(item["included"]):
             approved_manifest_keys.append(str(item["canonical_entity_key"]))
             if (
                 item["crm_action_item_id"] is None
@@ -443,7 +447,15 @@ def _create_organization_leads(
     action_id: str,
     rows: list[sqlite3.Row],
 ) -> tuple[dict[int, str], int]:
-    """Create and read back approved organization-only Leads."""
+    """Create and read back the approved new Leads, then verify each by GET.
+
+    These are NOT all organization-only: since 2026-08-11 a member plan carries a
+    PERSON payload wherever Grant holds a verified contact for the organization, so
+    "organization-only" here would over-count. The operation name `create_org_lead`
+    is kept because it is stored in `crm_action_items` on live rows; what varies is
+    the payload the rep approved, and the readback below checks Company/State,
+    which both shapes carry.
+    """
     if not rows:
         return {}, 0
     payloads = [
@@ -579,12 +591,18 @@ def _excluded_organizations(conn: sqlite3.Connection, action_id: str) -> list[st
         return []
     target_id = str(row["batch_target_id"] or "")
     if target_id:
+        # WHAT WAS LEFT OUT IS "did not reach the action", not "was not an exact
+        # match". Once organization-only Leads can be approved, a `missing`
+        # organization is CREATED and added — reporting it as excluded would tell a
+        # rep their Leads were skipped on the very run that created them. The link
+        # column is set only for manifest items that became action items, so it
+        # answers the question exactly and without knowing which flags were used.
         return [
             f"{item['entity_name']} ({item['state_code']})"
             for item in conn.execute(
                 """SELECT entity_name,state_code
                    FROM crm_campaign_batch_items
-                   WHERE target_id=? AND resolution_state!='existing_record'
+                   WHERE target_id=? AND crm_action_item_id IS NULL
                    ORDER BY canonical_entity_key""",
                 (target_id,),
             )

@@ -32,6 +32,7 @@ def execute(
     work: Callable[[], T],
     *,
     retry_indeterminate: bool = False,
+    provably_unspent: tuple[type[BaseException], ...] = (),
 ) -> T:
     """Reserve durably, execute once, and finalize the known callback outcome."""
     prior = conn.execute(
@@ -69,11 +70,22 @@ def execute(
         # Once the callback begins, a timeout cannot prove whether a paid provider
         # accepted the request. Preserve that ambiguity and require an explicit
         # operator retry rather than silently spending again on the next run.
+        #
+        # EXCEPT WHERE THE CALLER CAN PROVE NOTHING WAS BOUGHT. `SourceUnreachable`
+        # means no page was ever read — its own docstring says the caller must
+        # record nothing because the attempt is retryable. Filing that as
+        # `indeterminate` made a transient outage PERMANENT: every later pass
+        # raised `IndeterminatePaidCall`, the lead reported `error` forever, and
+        # the only cure was hand-editing SQLite. Measured by the architectural
+        # critic: with the source fully recovered after pass 1, the provider was
+        # still never called again on passes 2, 3 or 4.
+        unspent = bool(provably_unspent) and isinstance(exc, provably_unspent)
         with conn:
             conn.execute(
                 """UPDATE paid_enrichment_attempts
-                   SET state='indeterminate',finished_at=?,error=? WHERE id=?""",
+                   SET state=?,finished_at=?,error=? WHERE id=?""",
                 (
+                    "failed" if unspent else "indeterminate",
                     datetime.now(timezone.utc).isoformat(),
                     type(exc).__name__,
                     attempt_id,

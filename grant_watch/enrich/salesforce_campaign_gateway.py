@@ -645,6 +645,10 @@ class SalesforceCampaignGateway:
         """Return Lead/Contact IDs already present in the selected Campaign."""
         return set(self.member_records(campaign_id, record_ids))
 
+    # MEASURED, not assumed: at the 200-id ceiling this builds 8,524 raw SOQL
+    # characters (10,970 URL-encoded) because the id list is inlined TWICE, against
+    # Salesforce's 20,000-character statement and 16,384-byte GET URI limits. ~33%
+    # headroom. If a third clause is ever added, chunk the ids first.
     def member_records(
         self, campaign_id: str, record_ids: list[str]
     ) -> dict[str, tuple[str, str]]:

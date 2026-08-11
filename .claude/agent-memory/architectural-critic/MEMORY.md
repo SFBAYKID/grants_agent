@@ -1,5 +1,7 @@
 # Memory index — architectural-critic (grants_agent)
 
+- [Campaign inclusion lives in four places](campaign-inclusion-four-places.md) — REPRODUCED: `_includable` converted 2 of 4; card promises 9, Confirm raises PermissionError, 0 members — and no new test clicks Confirm
+- [Unreachable poisons a lead forever](enrichment-unreachable-poisons-lead.md) — REPRODUCED: SourceUnreachable → `indeterminate` ledger row nothing can clear → `error` forever, while the new pool advertises resumability; the 8-worker money path itself is sound
 - [Nudge subtype blindness](nudge-subtype-blindness.md) — REPRODUCED: a reply with a file or "also send to channel" is dropped by the listener AND by the silence guard, so the person is then publicly accused of not replying
 - [Silence guard: verified vs unknown](nudge-silence-verified-vs-unknown.md) — REPRODUCED: `False` claimed on a truncated 200-message page, on a reaction, and on "anyone but the manager spoke"; permanent burn on a stranger's comment
 - [Nudge pacing is per-audience](nudge-pacing-per-audience.md) — REPRODUCED: cap 2 delivered 4, per-person cap 1 delivered 2; `run` returns on a per-candidate pacing reason and starves the queue behind it

@@ -63,7 +63,7 @@ def test_a_selection_over_the_collection_limit_is_sliced_not_refused(
         ),
     )
     assert "batch 1 of 2" in first.summary
-    assert "201 organizations in total" in first.summary
+    assert "201 Grant rows over 201 organizations" in first.summary
 
     second = prepare_campaign_batch(
         conn,
@@ -218,7 +218,7 @@ def test_a_shifted_selection_refuses_instead_of_skipping_an_organization(
             ),
         ),
     )
-    assert "201 organizations in total" in first.summary
+    assert "201 Grant rows over 201 organizations" in first.summary
 
     # A rep marks one lead dead between the two batches.
     conn.execute("UPDATE leads SET status='dead' WHERE id=(SELECT MIN(id) FROM leads)")

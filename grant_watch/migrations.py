@@ -14,7 +14,10 @@ from datetime import datetime, timezone
 
 from .migration_runner import apply_migrations as _run_migrations
 from .migration_runner import execute_script as _execute_script
-from .migrations_campaign_batch import migration_27_exact_campaign_batches
+from .migrations_campaign_batch import (
+    migration_27_exact_campaign_batches,
+    migration_40_batch_item_inclusion,
+)
 from .migrations_campaign_preview import migration_28_single_ready_campaign_creation
 from .migrations_campaign_attempts import migration_31_campaign_attempts
 from .migrations_human_facts import migration_32_human_asserted_contacts
@@ -726,6 +729,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         39,
         "what Grant remembers about a colleague, and why it may",
         migration_39_user_memory,
+    ),
+    Migration(
+        40,
+        "whether the human's choices include this organization, stored once",
+        migration_40_batch_item_inclusion,
     ),
 )
 

@@ -93,6 +93,10 @@ def _manifest_item(item: dict[str, object]) -> dict[str, object]:
         "salesforce_id": ref.record_id if ref else "",
         "salesforce_account_id": ref.account_id if ref else "",
         "note": item["note"],
+        # Hashed like every other field so the inclusion decision is as
+        # tamper-evident as the identity it belongs to. `_verify_frozen_scope`
+        # rebuilds this exact dict from the stored row and compares.
+        "included": bool(item["included"]),
     }
 
 
@@ -228,6 +232,43 @@ def _resolution(
     return "missing", None, "No exact Salesforce Lead, Contact, or Account was found."
 
 
+def _includable(item: dict[str, object], allow_org_leads: bool) -> bool:
+    """Whether the flags the rep already approved cover this organization.
+
+    THE BUG THIS REPLACES. Inclusion used to mean `existing_record` and nothing
+    else, and the block that guarded it asked a separate question — "is anything
+    hard-blocked?" The two disagreed, so a batch of 200 with ONE ambiguous
+    organization had no reachable outcome at all: `allow_org_leads` alone was
+    refused because something was hard-blocked, and `allow_resolved_only` unblocked
+    the batch but then discarded every organization-only Lead on the way to the
+    action. A rep answered questions for over an hour on 2026-08-11 about a choice
+    that could only ever produce one member.
+
+    One predicate now decides both, so the block and the filter cannot drift again:
+    an exact record is always includable, a missing organization becomes includable
+    exactly when organization-only Leads are approved, and `ambiguous` /
+    `account_only` never are — picking one of several records, or duplicating an
+    existing Account, is a guess this repo does not make.
+    """
+    state = str(item["resolution_state"])
+    if state == "existing_record":
+        return True
+    return state == "missing" and allow_org_leads
+
+
+def _exclusion_reasons(items: list[dict[str, object]]) -> list[dict[str, str]]:
+    """Describe every organization the batch will leave out, for the approval card."""
+    return [
+        {
+            "entity_name": str(item["entity_name"]),
+            "state": str(item["state"] or ""),
+            "reason": str(item["note"] or item["resolution_state"]),
+        }
+        for item in items
+        if not item["included"]
+    ]
+
+
 def _insert_manifest(
     conn: sqlite3.Connection,
     *,
@@ -288,12 +329,9 @@ def _insert_manifest(
         )
         for target in targets:
             campaign = target["campaign"]
-            approved_items = [
-                item
-                for item in target["items"]
-                if target["completion_mode"] == "full"
-                or item["resolution_state"] == "existing_record"
-            ]
+            # THE ONE DECISION, READ BACK. This used to be a fourth independent
+            # expression and it disagreed with the action the rep was shown.
+            approved_items = [item for item in target["items"] if item["included"]]
             approved_keys = sorted(
                 str(item["canonical_entity_key"]) for item in approved_items
             )
@@ -333,8 +371,8 @@ def _insert_manifest(
                          (id,target_id,canonical_entity_key,representative_lead_id,
                           source_lead_ids_json,grades_json,entity_name,state_code,
                           item_hash,resolution_state,salesforce_sobject,salesforce_id,
-                          salesforce_account_id,note)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                          salesforce_account_id,note,included)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         str(uuid.uuid4()),
                         target["id"],
@@ -350,42 +388,63 @@ def _insert_manifest(
                         ref.record_id if ref else None,
                         ref.account_id if ref else None,
                         item["note"] or None,
+                        1 if item["included"] else 0,
                     ),
                 )
 
 
 def _target_summary(target: dict[str, object]) -> str:
-    """Render exact source, organization, and resolution counts for one Campaign."""
+    """Render exact source, organization, and resolution counts for one Campaign.
+
+    EVERY NUMBER HERE IS LABELLED WITH THE SET IT COUNTS. This line used to print
+    `source_row_count` — the row count of the WHOLE state/tier selection — directly
+    beside `len(items)`, the organization count of ONE SLICE, as though both
+    described the same thing, and "N per batch" (a ceiling) beside them as though it
+    were a size. Grant read its own summary back to a rep as "374 rows across 200
+    unique orgs, split into 2 batches of 200 each", which is not arithmetic that can
+    be true. A number a rep cannot attach to a set is worse than no number.
+    """
     counts: dict[str, int] = defaultdict(int)
     for item in target["items"]:
         counts[str(item["resolution_state"])] += 1
+    slice_rows = sum(len(item["source_lead_ids"]) for item in target["items"])
     slice_count = int(target.get("slice_count", 1) or 1)
-    position = ""
+    scope = (
+        f"{target['source_row_count']} Grant rows over "
+        f"{target.get('total_organizations')} organizations"
+    )
     if slice_count > 1:
         position = (
-            f" [batch {int(target.get('slice_index', 0)) + 1} of {slice_count}; "
-            f"{target.get('total_organizations')} organizations in total, "
-            f"{MAX_ACTION_ORGANIZATIONS} per batch]"
+            f" — batch {int(target.get('slice_index', 0)) + 1} of {slice_count}, "
+            f"holding {len(target['items'])} organizations "
+            f"({slice_rows} Grant rows) of the {scope} in this "
+            f"{target['state']} {'/'.join(target['grades'])} selection; a batch "
+            f"holds at most {MAX_ACTION_ORGANIZATIONS}"
         )
+    else:
+        position = (
+            f" — {len(target['items'])} organizations ({slice_rows} Grant rows), "
+            "the whole selection"
+        )
+    included = [item for item in target["items"] if item["included"]]
     summary = (
-        f"• {target['campaign'].name}{position}: {target['source_row_count']} Grant "
-        f"rows, {len(target['items'])} unique organizations — "
-        f"{counts['existing_record']} exact members, {counts['missing']} missing, "
-        f"{counts['account_only']} Account-only, {counts['ambiguous']} ambiguous"
+        f"• {target['campaign'].name}{position}\n"
+        f"  {counts['existing_record']} already have an exact Salesforce "
+        f"Lead/Contact, {counts['missing']} have no Salesforce record, "
+        f"{counts['account_only']} exist only as an Account, "
+        f"{counts['ambiguous']} match more than one record\n"
+        f"  {len(included)} of {len(target['items'])} can go on the Campaign with "
+        "the choices made so far"
     )
-    unresolved = [
-        item
-        for item in target["items"]
-        if item["resolution_state"] != "existing_record"
-    ]
-    if not unresolved:
+    left_out = [item for item in target["items"] if not item["included"]]
+    if not left_out:
         return summary
     details = "\n".join(
         f"  - {item['entity_name']} ({item['state']}): "
         f"{item['resolution_state']} — {item['note']}"
-        for item in unresolved
+        for item in left_out
     )
-    return f"{summary}\n  Unresolved organizations:\n{details}"
+    return f"{summary}\n  Not yet included:\n{details}"
 
 
 def _materialize_target_action(
@@ -401,12 +460,14 @@ def _materialize_target_action(
     allow_org_leads: bool,
     allow_resolved_only: bool,
 ) -> PreparedAction | None:
-    """Create and link one isolated child action from a frozen target manifest."""
-    included = list(target["items"])
-    if target["completion_mode"] == "partial_by_user":
-        included = [
-            item for item in included if item["resolution_state"] == "existing_record"
-        ]
+    """Create and link one isolated child action from a frozen target manifest.
+
+    The filter is the SAME predicate the block above uses. It used to be its own
+    `existing_record`-only expression, which is how `allow_org_leads=True` could be
+    accepted, recorded in the manifest, and then silently discarded here.
+    """
+    included = [item for item in target["items"] if item["included"]]
+    excluded = _exclusion_reasons(target["items"])
     lead_ids = [int(item["representative_lead_id"]) for item in included]
     if not lead_ids:
         return None
@@ -435,6 +496,8 @@ def _materialize_target_action(
             resolved_records=frozen_records,
             canonical_keys=canonical_keys,
             allow_org_leads=allow_org_leads,
+            allow_resolved_only=allow_resolved_only,
+            excluded_organizations=tuple(excluded),
         )
         action_rows = list(
             conn.execute(
@@ -639,11 +702,12 @@ def _prepare_campaign_batch(
                     f"Salesforce record {record_id} matched multiple authoritative "
                     "Grant organizations."
                 )
-        unresolved = [
-            item
-            for item in resolved_items
-            if item["resolution_state"] != "existing_record"
-        ]
+        # THE INCLUSION DECISION IS MADE EXACTLY HERE, ONCE, and everything
+        # downstream — the block, the card, the manifest, the action filter and the
+        # click-time gate — reads it back rather than recomputing it.
+        for item in resolved_items:
+            item["included"] = _includable(item, allow_org_leads)
+        unresolved = [item for item in resolved_items if not item["included"]]
         target_state = "blocked_resolution" if unresolved else "ready"
         targets.append(
             {
@@ -661,24 +725,15 @@ def _prepare_campaign_batch(
                 "total_organizations": total_organizations,
             }
         )
-    blocked = any(
-        item["resolution_state"] != "existing_record"
-        for target in targets
-        for item in target["items"]
-    )
-    hard_blocked = any(
-        item["resolution_state"] in {"ambiguous", "account_only"}
-        for target in targets
-        for item in target["items"]
-    )
+    pending = [
+        item for target in targets for item in target["items"] if not item["included"]
+    ]
+    blocked = bool(pending)
     batch_state = "blocked_resolution" if blocked else "ready"
     if blocked and allow_resolved_only:
         batch_state = "partial_by_user"
         for target in targets:
-            if any(
-                item["resolution_state"] != "existing_record"
-                for item in target["items"]
-            ):
+            if any(not item["included"] for item in target["items"]):
                 target["target_state"] = "partial_by_user"
                 target["completion_mode"] = "partial_by_user"
     _insert_manifest(
@@ -696,13 +751,43 @@ def _prepare_campaign_batch(
         ),
     )
     lines = [_target_summary(target) for target in targets]
-    if blocked and not allow_resolved_only and (not allow_org_leads or hard_blocked):
+    if blocked and not allow_resolved_only:
+        counts: dict[str, int] = defaultdict(int)
+        for item in pending:
+            counts[str(item["resolution_state"])] += 1
+        # Name the exact remedy for each reason. "Resolve exact records" told a rep
+        # nothing about WHICH lever clears WHICH organization, and Grant relayed the
+        # refusal as Salesforce's ("Salesforce didn't hand back a confirmation
+        # button") when it is this function's own policy.
+        remedies: list[str] = []
+        if counts["missing"]:
+            remedies.append(
+                f"{counts['missing']} have no Salesforce record at all — approve "
+                "organization-only Leads so I can create them"
+            )
+        if counts["ambiguous"]:
+            remedies.append(
+                f"{counts['ambiguous']} match more than one Salesforce record — "
+                "you can tell me to leave those out, or fix them in Salesforce; "
+                "Grant never picks between duplicates"
+            )
+        if counts["account_only"]:
+            remedies.append(
+                f"{counts['account_only']} exist only as an Account, which cannot be "
+                "a Campaign Member — you can tell me to leave those out, or add a "
+                "Lead/Contact in Salesforce"
+            )
         summary = (
-            f"Salesforce batch {batch_id} is blocked before approval.\n"
+            f"Grant has not created any confirmation button yet, because "
+            f"{len(pending)} organization(s) still need a decision from you. "
+            "This is Grant's own check, not a Salesforce error, and nothing has "
+            "been written.\n"
             + "\n".join(lines)
-            + "\nNo confirmation buttons were created. Resolve exact records or "
-            "explicitly approve organization-only Leads for missing organizations; "
-            "existing Accounts and ambiguous identities are never silently duplicated."
+            + "\n"
+            + "\n".join(f"- {remedy}" for remedy in remedies)
+            + "\nIf the rep says to go ahead without them, re-run with "
+            "allow_resolved_only: everything the other choices already cover is "
+            "prepared and every organization left out is listed by name."
         )
         return PreparedCampaignBatch(batch_id, summary)
 

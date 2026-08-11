@@ -830,6 +830,55 @@ def test_with_contacts_caps_and_discloses(
         return _verified(f"lead-{lead_id}")
 
     monkeypatch.setattr(tools, "enrich_lead_contact", counting)
-    text, _ = search_leads(with_contacts=True, limit=15, db_path=_bulk_db(tmp_path, 30))
+    over_the_cap = MAX_ENRICH_ROWS + 50
+    text, _ = search_leads(
+        with_contacts=True,
+        limit=over_the_cap,
+        db_path=_bulk_db(tmp_path, over_the_cap),
+    )
     assert calls == MAX_ENRICH_ROWS
-    assert f"top {MAX_ENRICH_ROWS}" in text
+    assert f"capped at {MAX_ENRICH_ROWS} organizations" in text
+
+
+def test_with_contacts_honours_a_limit_below_the_ceiling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rep asking for 100 gets 100, not the old hard-coded ten.
+
+    The ceiling used to be 10 and there is no offset, so repeating a search with
+    the SAME filters always re-enriched the same ten. Other filters could shift the
+    window, but nothing could ask for "the next ten" — which is what a rep loading a
+    14-organization campaign actually needs.
+    """
+    seen: list[int] = []
+
+    def counting(_c: object, lead_id: int, _p: object = None) -> ContactOutcome:
+        """Provide test-local behavior for counting."""
+        seen.append(lead_id)
+        return _verified(f"lead-{lead_id}")
+
+    monkeypatch.setattr(tools, "enrich_lead_contact", counting)
+    search_leads(with_contacts=True, limit=100, db_path=_bulk_db(tmp_path, 120))
+    assert len(seen) == 100
+    assert len(set(seen)) == 100
+
+
+def test_enriched_rows_that_do_not_fit_the_chat_are_still_declared(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Paying for 100 lookups and showing 15 must not read as 15 lookups.
+
+    Contact enrichment is bounded at MAX_ENRICH_ROWS (100) and the Slack rendering
+    at 15. While the ceiling was 10 the two never disagreed; at 100, 85 results were
+    invisible and nothing in the reply mentioned them.
+    """
+
+    def enriched(_c: object, lead_id: int, _p: object = None) -> ContactOutcome:
+        """Provide test-local behavior for enriched."""
+        return _verified(f"lead-{lead_id}")
+
+    monkeypatch.setattr(tools, "enrich_lead_contact", enriched)
+    text, _ = search_leads(with_contacts=True, limit=40, db_path=_bulk_db(tmp_path, 60))
+    assert "I looked up contacts for 40 organizations" in text
+    assert "only the first 15 fit here" in text
+    assert "export" in text

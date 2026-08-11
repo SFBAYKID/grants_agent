@@ -378,7 +378,13 @@ def _scrape(url: str, *, raise_on_failure: bool = False) -> str:
 
 def _extract(page_text: str, entity: str, source_url: str) -> ContactCandidate | None:
     """Claude reads ONE page; code verifies every claim against the same page."""
-    client = Anthropic()
+    # AN EXPLICIT TIMEOUT, because the SDK default is read=600s with two retries —
+    # up to 30 minutes for ONE extraction, and `find_contact` can make several.
+    # That is unbounded tail latency inside a Slack turn, and it is what put a
+    # working enrichment past the watchdog's STUCK_AFTER so the rep was told
+    # "Nothing was saved" while contacts were still landing. The chat client
+    # already uses exactly these values.
+    client = Anthropic(timeout=60.0, max_retries=2)
     titles = _titles_for(entity)
     prompt = (
         f'Below is a page from the website of (or about) "{entity}". Find the best '

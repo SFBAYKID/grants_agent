@@ -160,3 +160,36 @@ def migration_27_exact_campaign_batches(conn: sqlite3.Connection) -> None:
         "crm_campaign_batch_targets",
         "completion_mode TEXT NOT NULL DEFAULT 'full'",
     )
+
+
+def migration_40_batch_item_inclusion(conn: sqlite3.Connection) -> None:
+    """Record, per organization, whether the human's choices actually include it.
+
+    WHY A COLUMN AND NOT AN EXPRESSION. Four different places answered "is this
+    organization in this batch": the pre-approval block, the action filter, the
+    approved-count written into the manifest, and `_verify_frozen_scope`, the gate
+    that runs when a human clicks Confirm. On 2026-08-11 two of them were changed so
+    that approving organization-only Leads alongside skipping one ambiguous
+    organization finally worked — and the other two still read
+    `resolution_state == 'existing_record'`. The card offered nine organizations,
+    the action held nine, the manifest recorded one, and Confirm refused with
+    "Excluded Campaign batch item is unexpectedly mapped to an action" after the
+    nonce had already been consumed. The rep could not even click again.
+
+    The decision is now computed ONCE, at manifest time, and stored beside the
+    organization it describes. It is covered by `item_hash` like every other field,
+    so it is as tamper-evident as the rest of the frozen manifest, and there is no
+    second expression left to drift.
+    """
+    _add_column(
+        conn,
+        "crm_campaign_batch_items",
+        "included INTEGER NOT NULL DEFAULT 0",
+    )
+    # Existing rows predate the column. Their action linkage already records the
+    # decision that was actually made, so it is the honest backfill: an item that
+    # became an action item was included, and one that did not was not.
+    conn.execute(
+        "UPDATE crm_campaign_batch_items "
+        "SET included = CASE WHEN crm_action_item_id IS NOT NULL THEN 1 ELSE 0 END"
+    )

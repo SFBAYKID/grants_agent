@@ -46,7 +46,7 @@ def test_resolved_only_preview_and_result_name_excluded_organization(
         lead_ids,
         allow_resolved_only=True,
     )
-    assert "Explicitly excluded unresolved/ambiguous organizations: 1" in action.preview
+    assert "Left out of this batch and NOT added: 1" in action.preview
     assert "IL Organization 001 (IL)" in action.preview
     payload = json.loads(
         conn.execute(

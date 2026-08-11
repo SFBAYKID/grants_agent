@@ -12,6 +12,7 @@ cell builder must never drift apart.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -28,10 +29,31 @@ def _noop(_message: str) -> None:
 _NOOP: Progress = _noop
 
 
-MAX_ENRICH_ROWS = 10  # hard ceiling on per-search contact lookups (cost + latency)
+# A REP MUST BE ABLE TO ENRICH A WHOLE CAMPAIGN'S WORTH IN ONE ASK. This was 10,
+# with no offset and a deterministic sort (recency, then amount, then id), so a
+# repeat call with the same filters returned the SAME top ten: on 2026-08-11 Grant told a rep "the tool keeps returning the same
+# top 10 regardless of the filter I add" and simply could not reach the other four
+# organizations of fourteen. Ten was never a Salesforce or vendor limit — it was a
+# wall-clock guess made when this loop was sequential.
+MAX_ENRICH_ROWS = 100
+# Lookups are network-bound and independent per organization, so they run in a
+# bounded pool. Each worker opens its OWN SQLite connection: `enrich_lead_contact`
+# writes (contacts, and the paid-attempt reservation), and one connection shared
+# across threads is not safe. WAL plus busy_timeout=10s covers the commit overlap,
+# and the paid ledger is keyed per lead so two workers can never reserve the same
+# spend.
+# NOT A RATE LIMIT — a bounded concurrency. It caps in-flight lookups at 8, but
+# Firecrawl's and Anthropic's actual per-account ceilings are UNVERIFIED, and
+# `finder` has no backoff or 429 handling, where a 429 surfaces as SourceUnreachable.
+# Tunable without a deploy so it can be lowered the moment a real limit is measured.
+ENRICH_WORKERS = max(1, int(os.environ.get("GRANT_ENRICH_WORKERS", "8")))
 ENRICH_TIME_BUDGET_S = (
-    420.0  # stop enriching past this wall-clock; disclose the partial. Raised
-    # from 240 when the per-org fallback chain (LinkedIn + org mailbox) landed.
+    420.0  # stop STARTING new lookups past this wall-clock; disclose the partial.
+    # 240 -> 420 when the per-org fallback chain (LinkedIn + org mailbox) landed.
+    # Deliberately NOT raised for the 10 -> 100 ceiling: eight workers are what make
+    # 100 reachable, not a longer wall clock, and this budget has to sit inside the
+    # watchdog's STUCK_AFTER along with the model turns or a live enrichment gets
+    # reported to the rep as a lost conversation.
 )
 
 _CONTACT_COLUMNS = (
@@ -85,39 +107,77 @@ def _enrich_contacts(
     per input row, always) plus a disclosure note. Runs AFTER the read-only snapshot is
     closed. Per-org failures degrade to an explicit cell, never sink the batch or
     fabricate a contact; an unreachable source records nothing (retryable)."""
+    import threading
     import time
+    from concurrent.futures import ThreadPoolExecutor
 
     from . import tools  # local import: avoids the tools<->search cycle at module load
 
     say = on_progress or _NOOP
-    cells: list[list[object]] = []
-    conn = db.connect(db_target)
     deadline = time.monotonic() + ENRICH_TIME_BUDGET_S
-    try:
-        for index, row in enumerate(rows, start=1):
-            if time.monotonic() > deadline:
-                cells.append(_contact_cell(status="not checked (time budget)"))
-                continue
-            say(f"Looking for contacts ({index}/{len(rows)})")
-            try:
-                outcome = tools.enrich_lead_contact(conn, int(row["id"]), say)
-                cells.append(
-                    _contact_cell(
-                        name=outcome.name,
-                        title=outcome.title,
-                        email=outcome.email,
-                        status=outcome.status,
-                        phone=outcome.phone,
-                        org_phone=outcome.org_phone,
-                    )
-                )
-            except Exception:  # noqa: BLE001 — one org's failure must not sink the batch
-                cells.append(_contact_cell(status="error"))
-    finally:
-        conn.close()
-    note = (
-        f" (Contacts limited to the top {MAX_ENRICH_ROWS} to stay responsive.)"
-        if requested_limit > MAX_ENRICH_ROWS
-        else ""
-    )
-    return cells, note
+    lock = threading.Lock()
+    done = 0
+    skipped = 0
+
+    def enrich_one(row: sqlite3.Row) -> list[object]:
+        """Look up ONE organization on its own connection; never raise into the pool.
+
+        The connection is opened AND closed inside the worker. A `sqlite3`
+        connection is bound to the thread that created it, so a pool-wide handle
+        cached in a `threading.local` cannot be cleaned up afterwards from the main
+        thread — that raised `ProgrammingError` and the suite caught it. Reopening
+        costs a schema-version check against a 30-second network lookup.
+        """
+        nonlocal done, skipped
+        if time.monotonic() > deadline:
+            with lock:
+                skipped += 1
+            return _contact_cell(status="not checked (time budget)")
+        conn = db.connect(db_target)
+        try:
+            outcome = tools.enrich_lead_contact(conn, int(row["id"]), None)
+            cell = _contact_cell(
+                name=outcome.name,
+                title=outcome.title,
+                email=outcome.email,
+                status=outcome.status,
+                phone=outcome.phone,
+                org_phone=outcome.org_phone,
+            )
+        except Exception:  # noqa: BLE001 — one org's failure must not sink the batch
+            cell = _contact_cell(status="error")
+        finally:
+            conn.close()
+        with lock:
+            done += 1
+            position = done
+        # `say` performs a Slack chat_update. Calling it INSIDE the lock serialized
+        # all eight workers behind one network round-trip each, which is how a pool
+        # quietly becomes sequential. The counter is still read under the lock, so
+        # the number itself is never torn.
+        say(f"Looking for contacts ({position}/{len(rows)})")
+        return cell
+
+    workers = max(1, min(ENRICH_WORKERS, len(rows)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        # `map` preserves input order, which the caller zips against its rows.
+        cells = list(pool.map(enrich_one, rows))
+    notes: list[str] = []
+    if requested_limit > MAX_ENRICH_ROWS:
+        notes.append(
+            f"Contacts are capped at {MAX_ENRICH_ROWS} organizations per search."
+        )
+    if skipped:
+        # RESUMABILITY IS THE POINT OF SAYING THIS — but only as far as it is true.
+        # A completed lookup is cached, so asking again does continue rather than
+        # repeat. An organization whose source was UNREACHABLE is not cached: that
+        # attempt is filed retryable on purpose, so it is checked again and may
+        # cost again. The first version of this sentence promised "costs nothing
+        # extra" for exactly the population an 8-worker burst produces most of.
+        notes.append(
+            f"{done} of {len(rows)} organizations were checked before the time "
+            f"budget and {skipped} were not; ask again and I'll carry on with "
+            "those. Ones already checked are cached and cost nothing to repeat; "
+            "any whose source was unreachable are retried properly."
+        )
+    return cells, (" (" + " ".join(notes) + ")" if notes else "")
