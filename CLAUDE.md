@@ -554,7 +554,8 @@ affect Chase's other projects.
   SHIP, not the ask, so an old ask is not stale — no bigger `DROP_AFTER` could fix
   that, because the gap grows a day every day. `card_escalated` DMs the manager once
   after 4 days (roster `manager: true`, fails closed if zero or several rows carry
-  it). `thread_abandoned` reopens on GRANT'S OWN admission of failure
+  it). *(Superseded 2026-08-11: it is a CHANNEL post at 30h, and it now covers
+  untagged cards too. The `manager: true` fail-closed rule still holds.)* `thread_abandoned` reopens on GRANT'S OWN admission of failure
   (`needs_reconciliation`), never if the person posted again. Card follow-ups now
   address the rep the card actually tagged, via the SAME verified-source gate the card
   used. Where Grant made a FALSE PROMISE ("I'll keep watching these states"), the

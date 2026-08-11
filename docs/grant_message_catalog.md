@@ -76,6 +76,50 @@ The remaining messages below describe the existing flag-OFF legacy behavior.
 > Note: the "you forgot the email / add notes / meeting notes" cards seen in the
 > channel earlier are **Persequor / the Monarch website co-pilot**, not Grant.
 
+### 4. Proactive follow-ups — chasing work nobody came back to  (`followup_nudges`)
+
+Added 2026-08-11. Live on cron `*/15 8-14 * * 1-5`, delivered inside a randomly drawn
+08:30–14:30 PT slot, **max 2 per channel per day, 1 per person per day**, and **one per
+subject EVER** (a UNIQUE constraint, not worker logic). Two hand-written wordings per
+kind; `slack/nudge_variants.py` records which was sent and whether anyone replied.
+
+Every closing offer is **computed from the lead**, not written into the sentence —
+`nudge_promises.best_offer` uses the same `contact_status='verified'` predicate the
+outreach path requires, so a named offer cannot be answered by "I couldn't verify a
+contact". It offers a DRAFT FOR APPROVAL and never a send: a human approves and
+Persequor sends, and `outreach.sent_at` has no writer, so Grant cannot know an email
+was delivered and must never say it was.
+
+| kind | when | where | says |
+|---|---|---|---|
+| `crm_preview_expired` | approval lapsed +1h | thread | *"that approval timed out, so nothing got written. Want me to rebuild it? 🙂"* |
+| `crm_batch_blocked` | +1d | thread | *"still stuck on {n} orgs I can't match. Want me to add the rest?"* |
+| `crm_batch_partial` | +2d | thread | *"only the ones I could match went in. Want me to have another go at the rest?"* |
+| `card_unengaged` | card +24h | thread | *"Anyone want {org}? {$amount}, and nothing's come back here on it. {offer}"* |
+| `capability_now_available` | on ship | thread | *"{opener} you asked: “{quote}” I couldn't do it then. I can now — want me to?"* |
+| `card_escalated` | card +30h | **channel** | *"heads up — {$amount} {org} went to {rep} and nothing's come back here. May be handled offline. {offer}"* |
+| `offer_unanswered` | offer +26h | **channel** | *"I offered to {thing} for {person} and nothing's come back here — they first asked back on {date}. Worth a poke from you, or shall I leave it?"* |
+| `thread_abandoned` | +1d | thread | *"I never got you an answer on this one. Want me to pick it back up?"* |
+
+**The two channel kinds are the only messages Grant sends that are ABOUT one colleague
+and addressed TO another**, so they carry extra guards:
+
+- Silence is established by **reading the thread in Slack**, never from
+  `slack_event_receipts` (which undercounts — a reply Grant never woke for would read
+  as being ignored). `nudge_silence.replied_since` answers True / False / **None**, and
+  None ("couldn't tell") is treated exactly like "they replied". An outage produces
+  silence, never an accusation — and the suppression is transient, so the true claim
+  survives until Slack is readable.
+- A manager is never told before the rep has had their own turn: `card_escalated` is
+  suppressed while no `card_unengaged` row exists for that card. Structural, because a
+  cap or an outage can delay the rep's nudge past any grace period.
+- An **opt-out protects the person being talked ABOUT**, not just the addressee — the
+  addressee here is the manager.
+- Never posted into a DM: the manager is not in it, so the message would be invisible
+  while repeating private words back into a private thread.
+- Wording may only report what Grant saw. "Nothing's come back **here**" and "may be
+  handled offline" are load-bearing — the rep may have phoned the district from the car.
+
 ---
 
 ## REACTIVE — Grant answers a mention or thread reply

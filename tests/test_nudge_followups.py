@@ -605,6 +605,52 @@ def test_plain_mentions_render_a_name_and_notify_nobody(tmp_path: Path) -> None:
     conn.close()
 
 
+# ------------------------------------------------------------------- the catalogue
+
+
+def test_the_message_catalog_does_not_drift_from_the_code() -> None:
+    """`docs/grant_message_catalog.md` claims to quote the code, so hold it to that.
+
+    DOC DRIFT IS NOT COSMETIC HERE, and this project has the scar. The nudge band's
+    own comment asserted one cron and CLAUDE.md asserted another; both were written
+    from memory and neither matched the droplet, and the value recorded in the docs
+    would have stranded 17.6% of delivery slots. The catalogue is the document a human
+    reviews Grant's VOICE from — if it quotes sentences the code no longer produces,
+    the review is of fiction.
+
+    Cheap to keep true: every subject kind must be named, and a sampled fragment from
+    each of three quoted templates must really appear in that kind's rendered message.
+    """
+    catalog = (
+        Path(__file__).resolve().parent.parent
+        / "docs"
+        / "grant_message_catalog.md"
+    ).read_text()
+
+    for kind in nudges.NUDGE_SUBJECT_KINDS:
+        assert kind in catalog, f"{kind} can be sent but is not in the catalogue"
+
+    quoted = {
+        "crm_preview_expired": "that approval timed out, so nothing got written",
+        "thread_abandoned": "I never got you an answer on this one",
+        "offer_unanswered": "Worth a poke from you, or shall I leave it?",
+    }
+    for kind, fragment in quoted.items():
+        assert fragment in catalog, f"the sampled quote for {kind} left the catalogue"
+        candidate = nudges.NudgeCandidate(
+            kind,
+            "1",
+            CHANNEL,
+            MANAGER,
+            "1.1",
+            NOW,
+            {"silent_slack": JOCELYN, "capability": "campaign_load"},
+        )
+        assert fragment in nudges.build_message(candidate, "a"), (
+            f"the catalogue quotes wording {kind} no longer produces"
+        )
+
+
 # --------------------------------------------------------------- the silence reader
 
 
