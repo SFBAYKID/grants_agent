@@ -6,38 +6,55 @@ Salesforce by hand. So a nudge never says "you didn't follow up". It says what G
 observed IN ITS OWN RECORDS, and then asks. The difference between those two sentences
 is the whole of rule 1 in a message that goes to a team channel.
 
-EVERY NUDGE IS A THREADED REPLY, never a new channel post. That is a product choice
-and a schema choice at once: it puts the nudge where the work already is, it lets a
-reply re-enter a live Grant thread for free, and it means a nudge needs neither a
-`posts` row nor a `proactive_daily_slots` claim — both of which carry CHECK constraints
-that would reject a new kind and require rebuilding a table with live foreign-key
-children.
+WHERE A NUDGE LANDS DEPENDS ON WHO IT IS FOR. Most are THREADED REPLIES, which puts
+them where the work already is, lets a reply re-enter a live Grant thread for free, and
+needs neither a `posts` row nor a `proactive_daily_slots` claim — both carry CHECK
+constraints that would reject a new kind. ESCALATIONS are the exception: they go to the
+channel at top level, because their whole purpose is that somebody sees them (Chase,
+2026-08-10). They carry a permalink instead of a thread.
 
 ONE NUDGE PER SUBJECT, EVER. Enforced by the schema, not by this worker. Grant has no
 evidence anyone read the first one, so a second is nagging; a rep who has deliberately
 parked something should not be asked about it again every morning.
+
+This module decides WHETHER, WHEN and TO WHOM. `nudge_sources.py` decides what is
+outstanding, `nudge_messages.py` decides what it says, `nudge_promises.py` decides what
+may be promised, and `nudge_silence.py` decides whether "nobody answered" is sayable.
 """
 
 from __future__ import annotations
 
 import json
+import random
+import re
 import sqlite3
 import uuid
-from dataclasses import dataclass
-import random
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
-from typing import Any
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-from .. import capability_asks, db, reminders, roster, territory
+from .. import capability_asks, db, reminders, roster
 from ..migrations_nudges import NUDGE_SUBJECT_KINDS
+from . import nudge_silence, nudge_variants
 from .drip import PT as BUSINESS_TZ
 from .drip import in_window
-from . import nudge_variants
 from .nudge_messages import build_message
+from .nudge_sources import DROP_AFTER, GRACE, NudgeCandidate, candidates
+from .nudge_sources import parse_ts as _parse
+
+# Re-exported so `nudges.X` keeps working for every existing caller and test after the
+# split. The names below are part of this module's public surface by long use.
+__all__ = [
+    "DROP_AFTER",
+    "GRACE",
+    "NUDGE_SUBJECT_KINDS",
+    "NudgeCandidate",
+    "build_message",
+    "candidates",
+    "run",
+]
 
 # Bumping this re-opens every subject for one more nudge under the new rules. It is
 # part of the schema's uniqueness key precisely so that is a deliberate act.
@@ -71,408 +88,65 @@ MIN_GAP = timedelta(hours=4)
 NUDGE_BAND_START_PT = time(8, 30)
 NUDGE_BAND_END_PT = time(14, 30)
 
-# How long after the work stalls Grant waits, and how long before it gives up. A
-# nudge about something from three weeks ago is noise, not help.
-GRACE = {
-    "crm_preview_expired": timedelta(hours=1),
-    "crm_batch_blocked": timedelta(days=1),
-    "crm_batch_partial": timedelta(days=2),
-    "card_unengaged": timedelta(days=2),
-    # No grace. The other kinds wait to see whether a human quietly finishes the work
-    # anyway; there is nothing to wait for here, because the event being reported is
-    # that Grant itself gained an ability.
-    "capability_now_available": timedelta(0),
-    # A manager hears about it only after the rep has had a fair run at it: the
-    # rep's own follow-up lands at 2 days, so 4 gives them two clear business days
-    # to answer before anyone else is told. Escalating sooner turns a nudge into
-    # telling on a colleague.
-    "card_escalated": timedelta(days=4),
-    # A day is long enough that someone who simply got pulled away has had a chance
-    # to come back on their own, and short enough that the thread is still live.
-    # ONE DAY, AND IT NOW MEANS SOMETHING DIFFERENT THAN IT DID. The watchdog runs
-    # every ten minutes and marks a receipt reviewed as soon as it repairs the
-    # spinner, so on the happy path this subject is gone within half an hour and this
-    # follow-up never fires. That reads like dead code and is not: the watchdog leaves
-    # `reviewed_at` NULL whenever the Slack edit FAILS, which is precisely the case
-    # where a person is still looking at "Thinking…" a day later.
-    #
-    # So this became the fallback for a repair that did not work, rather than the
-    # primary path — a strictly better division of labour, arrived at by accident when
-    # TOO_OLD was widened. Recorded because "it can never fire" is the kind of
-    # observation that gets something deleted.
-    "thread_abandoned": timedelta(days=1),
-}
+# Kinds posted to the CHANNEL at top level rather than threaded under the work.
+#
+# THIS REVERSES AN EARLIER DECISION, deliberately. Escalations used to be a DM to the
+# manager, on the reasoning that reporting a colleague's silence does not belong where
+# they can see it. Chase asked for the opposite (2026-08-10): "the system messages in
+# the main Monarch Cloud Team channel and says something like, Hey @Anthony, @Jocelyn
+# has not responded to me." His call, and the social cost is real — which is why every
+# escalation wording says "nothing's come back here" and "may be handled offline", and
+# never asserts that the person did nothing.
+#
+# A top-level post has no thread to reply into, so these carry a permalink instead.
+CHANNEL_POST_KINDS = frozenset({"card_escalated", "offer_unanswered"})
 
-# Kinds delivered as a DIRECT MESSAGE rather than a threaded reply. Everything else
-# in this worker is a reply in the thread the work lives in; an escalation is about
-# someone else's silence and does not belong in the channel where they can see it
-# being reported.
-DM_KINDS = frozenset({"card_escalated"})
+# Kinds whose whole claim is "nobody answered". These MUST be verified against Slack
+# itself before they are sent — see `nudge_silence`.
+SILENCE_CLAIM_KINDS = frozenset({"card_escalated", "offer_unanswered"})
+
+# Kinds that tell one person about another person's silence. An escalation may never
+# be the FIRST thing that happens: the rep whose lead it is gets asked first.
+ESCALATION_KINDS = frozenset({"card_escalated"})
 
 # The wordings a follow-up may use. Two, deliberately: enough to learn which reads
 # better, few enough that every one is written and reviewed by a person rather than
 # generated. See slack/nudge_variants.py for how one is chosen and measured.
 VARIANTS = ("a", "b")
-# How long a subject stays worth mentioning. Five days made the eligible window only
-# THREE days wide (grace takes the first two), which had a consequence nobody
-# intended: every subject that accumulated while this feature was switched off aged
-# past it before the feature could ever look at them. Measured on production the day
-# it shipped, 28 of 36 due subjects were ALREADY unreachable — the follow-up worker
-# could not work the very backlog it exists to work, and would have reported "nothing
-# to follow up on" while a fortnight of abandoned previews sat there. Fourteen days is
-# still recent enough that a rep recognises what is being asked about, and wide enough
-# that a one-a-day cap can actually drain a queue.
-DROP_AFTER = timedelta(days=14)
-
-# A BIGGER CONSTANT IS NOT ALWAYS THE FIX. Widening the window above rescues stalled
-# work, but it cannot rescue a queue that STOPPED BEING FED: the playground's newest
-# subject was already 22 days old when the 14-day window shipped, and the threshold
-# needed to reach it grows by a day every day. That is a receding target, and the
-# temptation is to keep raising the number until the test passes.
-#
-# `capability_now_available` sidesteps it by measuring from the right event instead.
-# Its clock starts when the CAPABILITY shipped, not when the ask was made — see
-# `_capability_asks`, which uses `available_since` as the stall time. "You asked me in
-# July to email you those leads and I couldn't — I can now" is exactly as true four
-# months later as it was the next morning, so the ask's age is simply not what
-# staleness means for this kind. No special horizon is needed once the clock is
-# anchored correctly.
 
 # Suppression reasons that are FACTS ABOUT THE SUBJECT and will never stop being
 # true. Only these may be written to the ledger, because that write is permanent:
 # the uniqueness key retires the subject under this policy version forever.
+#
+# `answered_since_offer` joins them because a person answering is exactly as permanent
+# as the other four — once Jocelyn replies, there is nothing left to escalate about,
+# and the subject should be retired rather than reconsidered every half hour.
 PERMANENT_SUPPRESSIONS = frozenset(
-    {"stale", "resolved_since_queued", "engaged_since_queued", "lead_parked"}
+    {
+        "stale",
+        "resolved_since_queued",
+        "engaged_since_queued",
+        "lead_parked",
+        "answered_since_offer",
+    }
 )
 
 
-@dataclass(frozen=True)
-class NudgeCandidate:
-    """One piece of unfinished work, with the evidence its wording rests on."""
-
-    subject_kind: str
-    subject_id: str
-    audience: str
-    target_slack: str
-    anchor_ts: str
-    stalled_at: datetime
-    observed: dict[str, Any]
-
-    @property
-    def due_at(self) -> datetime:
-        """When this becomes worth mentioning."""
-        return self.stalled_at + GRACE.get(self.subject_kind, timedelta(days=1))
-
-    @property
-    def drop_after(self) -> datetime:
-        """After this it is stale; Grant drops it rather than posting late."""
-        return self.stalled_at + DROP_AFTER
-
-    @property
-    def priority_at(self) -> datetime:
-        """Queue position: how long the PERSON has been waiting, oldest first.
-
-        DIFFERENT FROM `stalled_at`, and the difference is the whole point. For a
-        capability ask, `stalled_at` is when the CAPABILITY shipped — which is right
-        for staleness, because the thing worth reporting is that Grant can now do it.
-        But using the same value to order the queue timestamps every reopened ask to
-        "now", so they sort BEHIND every other subject.
-
-        Measured on live data: declaring the four capabilities put Kerry, Jocelyn and
-        Nelly at positions 14-18 of 19, roughly seven days of delivery behind the
-        existing backlog — so the feature built to reach exactly those three people
-        would not have reached any of them. Ordering by the date they actually ASKED
-        puts a July question ahead of an August card, which is the honest priority.
-        """
-        asked = _parse(self.observed.get("asked_at_iso"))
-        return asked or self.stalled_at
-
-
-def _parse(value: object) -> datetime | None:
-    """Parse a stored ISO timestamp, returning None rather than guessing."""
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-
-
-def _abandoned_previews(conn: sqlite3.Connection) -> list[NudgeCandidate]:
-    """Previews a human was shown and never clicked.
-
-    `state='ready'` past `expires_at` means exactly that Grant offered a button and
-    the offer lapsed — NOT that the underlying work is undone. The wording downstream
-    is careful about that distinction.
-    """
-    rows = conn.execute(
-        """SELECT id,action_type,workspace,channel,thread_ts,requested_by,expires_at
-             FROM crm_actions
-            WHERE state='ready' AND expires_at IS NOT NULL"""
-    ).fetchall()
-    out: list[NudgeCandidate] = []
-    for row in rows:
-        expires = _parse(row["expires_at"])
-        if expires is None:
-            continue
-        out.append(
-            NudgeCandidate(
-                subject_kind="crm_preview_expired",
-                subject_id=str(row["id"]),
-                audience=str(row["channel"] or ""),
-                target_slack=str(row["requested_by"] or ""),
-                anchor_ts=str(row["thread_ts"] or ""),
-                stalled_at=expires,
-                observed={
-                    "action_type": str(row["action_type"] or ""),
-                    "expires_at": str(row["expires_at"] or ""),
-                },
-            )
-        )
-    return out
-
-
-def _stalled_batches(conn: sqlite3.Connection) -> list[NudgeCandidate]:
-    """Campaign batches that stopped for a human and never restarted."""
-    rows = conn.execute(
-        """SELECT id,channel,thread_ts,requested_by,state,updated_at,unique_org_count
-             FROM crm_campaign_batches
-            WHERE state IN ('blocked_resolution','partial_by_user')"""
-    ).fetchall()
-    out: list[NudgeCandidate] = []
-    for row in rows:
-        stalled = _parse(row["updated_at"])
-        if stalled is None:
-            continue
-        kind = (
-            "crm_batch_blocked"
-            if str(row["state"]) == "blocked_resolution"
-            else "crm_batch_partial"
-        )
-        out.append(
-            NudgeCandidate(
-                subject_kind=kind,
-                subject_id=str(row["id"]),
-                audience=str(row["channel"] or ""),
-                target_slack=str(row["requested_by"] or ""),
-                anchor_ts=str(row["thread_ts"] or ""),
-                stalled_at=stalled,
-                observed={"organizations": int(row["unique_org_count"] or 0)},
-            )
-        )
-    return out
-
-
-def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandidate]:
-    """Cards that drew no reply, no reaction, and no CRM action.
-
-    Grant knows only what happened in Slack and in its own tables. That is why the
-    message says "nothing has come back HERE", never "nobody followed up".
-    """
-    rows = conn.execute(
-        """SELECT p.id,p.channel,p.ts,p.posted_at,p.lead_id,
-                  l.entity_name,l.status,l.state,l.source,l.amount,
-                  s.slack_user_id AS snapshot_tagged
-             FROM posts p
-             LEFT JOIN leads l ON l.id=p.lead_id
-             LEFT JOIN rich_card_snapshots s ON s.id=p.snapshot_id
-            WHERE p.lead_id IS NOT NULL
-              AND NOT EXISTS (SELECT 1 FROM engagement e WHERE e.post_id=p.id)
-            ORDER BY p.id DESC LIMIT 60"""
-    ).fetchall()
-    out: list[NudgeCandidate] = []
-    for row in rows:
-        posted = _parse(row["posted_at"])
-        if posted is None or posted > now:
-            continue
-        # WHO DID THE CARD ACTUALLY TAG? Recomputed through the SAME gate the card
-        # used, so the follow-up can only name a rep the card itself named. Using
-        # `owner_for_state` alone would tag people on cards that went out untagged,
-        # because an inferred state can own a territory but may never tag a human.
-        # PREFER WHAT THE CARD ACTUALLY RECORDED. A rich card routes through the
-        # Salesforce call owner, then the account owner, then the opportunity owner,
-        # and only THEN territory — so recomputing from the state alone can name a
-        # different person entirely. Telling a manager "this went to X and nothing
-        # came back" about someone who was never asked is the worst thing this
-        # feature could do, so the persisted value wins and the recomputation is only
-        # a fallback for legacy cards that carry no snapshot.
-        tagged = str(row["snapshot_tagged"] or "")
-        if not tagged and territory.state_is_verified(row["source"]):
-            tagged = territory.owner_for_state(row["state"]) or ""
-        observed = {
-            "entity_name": str(row["entity_name"] or ""),
-            "lead_status": str(row["status"] or ""),
-            "lead_id": int(row["lead_id"] or 0),
-            "amount_usd": int(row["amount"] or 0),
-            "channel": str(row["channel"] or ""),
-            "card_ts": str(row["ts"] or ""),
-            "tagged_slack": tagged,
-        }
-        out.append(
-            NudgeCandidate(
-                subject_kind="card_unengaged",
-                subject_id=str(row["id"]),
-                audience=str(row["channel"] or ""),
-                # A tagged card is one person's to answer; an untagged one belongs to
-                # the channel and is still asked about without naming anybody.
-                target_slack=tagged,
-                anchor_ts=str(row["ts"] or ""),
-                stalled_at=posted,
-                observed=observed,
-            )
-        )
-        manager = roster.manager_slack_id()
-        # ESCALATION IS A SEPARATE SUBJECT so it carries its own grace, its own
-        # one-shot key, and its own opt-out check. It only exists when a specific
-        # person was asked and did not answer — an untagged card has nobody to
-        # escalate ABOUT, and telling a manager "nobody replied" is not actionable.
-        if tagged and manager and manager != tagged:
-            out.append(
-                NudgeCandidate(
-                    subject_kind="card_escalated",
-                    subject_id=str(row["id"]),
-                    audience=manager,
-                    target_slack=manager,
-                    anchor_ts=str(row["ts"] or ""),
-                    stalled_at=posted,
-                    observed=observed,
-                )
-            )
-    return out
-
-
-def _capability_asks(conn: sqlite3.Connection) -> list[NudgeCandidate]:
-    """Asks Grant refused for want of a feature that now exists.
-
-    `stalled_at` is `available_since` — WHEN THE CAPABILITY SHIPPED, not when the
-    person asked. That is what makes this kind work without a special staleness
-    horizon: the thing worth reporting is the change in what Grant can do, so the
-    clock starts there. Anchoring it to the ask date instead would have made every
-    historical ask permanently stale on the day it was recorded.
-    """
-    rows = conn.execute(
-        """SELECT * FROM capability_asks
-            WHERE state='open' AND available_since IS NOT NULL
-            ORDER BY asked_at"""
-    ).fetchall()
-    out: list[NudgeCandidate] = []
-    for row in rows:
-        shipped = _parse(row["available_since"])
-        if shipped is None:
-            continue
-        asked_at = _parse(row["asked_at"])
-        out.append(
-            NudgeCandidate(
-                subject_kind="capability_now_available",
-                subject_id=str(row["id"]),
-                audience=str(row["audience"]),
-                target_slack=str(row["slack_user"] or ""),
-                anchor_ts=str(row["thread_ts"] or ""),
-                stalled_at=shipped,
-                observed={
-                    "ask_text": str(row["ask_text"] or ""),
-                    "capability": str(row["capability"] or ""),
-                    "correction": str(row["correction"] or ""),
-                    # Queue priority is how long the PERSON has waited, which is the
-                    # ask date — not `available_since`, which is only the staleness
-                    # clock. See NudgeCandidate.priority_at.
-                    "asked_at_iso": str(row["asked_at"] or ""),
-                    "asked_on": asked_at.astimezone(BUSINESS_TZ).strftime("%-d %B")
-                    if asked_at
-                    else "",
-                    "evidence_url": str(row["evidence_url"] or ""),
-                },
-            )
-        )
-    return out
-
-
-def _abandoned_threads(conn: sqlite3.Connection) -> list[NudgeCandidate]:
-    """Conversations where Grant demonstrably failed to answer, and nobody came back.
-
-    THE SIGNAL IS GRANT'S OWN ADMISSION, not an inference about the human. A receipt
-    reaches `needs_reconciliation` when the turn's action or its final message did not
-    complete — the "I'm having trouble thinking right now" replies, the messages
-    truncated mid-word, the turns that produced nothing at all. Reading it this way
-    means the follow-up says "I didn't get back to you", which Grant can prove, rather
-    than "you didn't finish", which it cannot: the rep may well have gone and done the
-    work by hand.
-
-    `processing` IS INCLUDED, AND THAT IS THE IMPORTANT HALF. `claim_slack_event`
-    writes that state before the work starts and `finish_slack_event` overwrites it
-    after — so a process that DIES mid-turn leaves it there permanently. Observed
-    live: a deploy restarted the listener 43 seconds into a question, and the thread
-    still shows a "Thinking…" spinner that will never resolve. Every recovery path in
-    the codebase looked only for `needs_reconciliation`, so that conversation was
-    invisible to all of them — the precise shape of dead-end that lost reps in July.
-    The grace period does the filtering: a turn takes seconds, so anything still
-    `processing` a day later is dead, not busy.
-
-    Only the LATEST receipt in a thread qualifies. If the person sent anything
-    afterwards they came back on their own, and there is nothing to apologise for.
-    """
-    rows = conn.execute(
-        """SELECT r.event_id,r.channel,r.thread_ts,r.slack_user,r.received_at,r.error
-             FROM slack_event_receipts r
-            WHERE r.state IN ('needs_reconciliation','processing')
-              AND r.reviewed_at IS NULL
-              AND r.thread_ts IS NOT NULL
-              AND r.slack_user IS NOT NULL
-              AND NOT EXISTS (
-                    SELECT 1 FROM slack_event_receipts later
-                     WHERE later.channel=r.channel
-                       AND later.thread_ts=r.thread_ts
-                       AND later.received_at>r.received_at)
-            ORDER BY r.received_at DESC LIMIT 40"""
-    ).fetchall()
-    out: list[NudgeCandidate] = []
-    for row in rows:
-        received = _parse(row["received_at"])
-        if received is None:
-            continue
-        out.append(
-            NudgeCandidate(
-                subject_kind="thread_abandoned",
-                subject_id=str(row["event_id"]),
-                audience=str(row["channel"] or ""),
-                target_slack=str(row["slack_user"] or ""),
-                anchor_ts=str(row["thread_ts"] or ""),
-                stalled_at=received,
-                observed={"error": str(row["error"] or "")},
-            )
-        )
-    return out
-
-
-def candidates(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandidate]:
-    """Every piece of unfinished work Grant can honestly ask about, oldest first."""
-    found = (
-        _abandoned_previews(conn)
-        + _stalled_batches(conn)
-        + _unengaged_cards(conn, now)
-        + _capability_asks(conn)
-        + _abandoned_threads(conn)
-    )
-    ready = [
-        item
-        for item in found
-        if item.subject_kind in NUDGE_SUBJECT_KINDS
-        and item.anchor_ts
-        and item.audience
-        and item.due_at <= now
-    ]
-    return sorted(ready, key=lambda item: item.priority_at)
-
-
 def suppress_reason(
-    conn: sqlite3.Connection, candidate: NudgeCandidate, now: datetime
+    conn: sqlite3.Connection,
+    candidate: NudgeCandidate,
+    now: datetime,
+    *,
+    client: WebClient | None = None,
 ) -> str:
     """Why this nudge must NOT be sent, or '' when it may go.
 
     Re-checked immediately before the send, inside the reservation, so a subject that
     resolved while it sat in the queue produces silence rather than a false claim.
+
+    `client` is optional so every existing caller and test keeps working, but a
+    silence-claiming kind CANNOT PASS WITHOUT ONE: `_silence_reason` returns a
+    suppression when it has no way to check. Fail closed is the whole design here.
     """
     if now > candidate.drop_after:
         return "stale"
@@ -482,6 +156,16 @@ def suppress_reason(
         conn, candidate.target_slack, scope="nudges"
     ):
         return "opted_out"
+    # AN OPT-OUT PROTECTS THE PERSON BEING TALKED ABOUT, NOT JUST THE ADDRESSEE.
+    # `target_slack` on an escalation is the MANAGER, so the check above asks whether
+    # the manager wants quiet — and would happily post "Jocelyn never answered" in a
+    # public channel about somebody who had explicitly asked Grant to leave her alone.
+    # Someone who opts out of follow-ups is opting out of being followed up ABOUT.
+    subject_person = str(candidate.observed.get("silent_slack") or "") or str(
+        candidate.observed.get("tagged_slack") or ""
+    )
+    if subject_person and reminders.is_opted_out(conn, subject_person, scope="nudges"):
+        return "subject_opted_out"
     if candidate.subject_kind == "crm_preview_expired":
         row = conn.execute(
             "SELECT state FROM crm_actions WHERE id=?", (candidate.subject_id,)
@@ -527,6 +211,69 @@ def suppress_reason(
             "not_relevant",
         }:
             return "lead_parked"
+    if candidate.subject_kind in ESCALATION_KINDS:
+        waiting = _escalation_is_premature(conn, candidate)
+        if waiting:
+            return waiting
+    if candidate.subject_kind in SILENCE_CLAIM_KINDS:
+        return _silence_reason(client, candidate)
+    return ""
+
+
+def _escalation_is_premature(
+    conn: sqlite3.Connection, candidate: NudgeCandidate
+) -> str:
+    """'' once the rep has had their own turn; a transient reason while they have not.
+
+    THE ORDERING IS STRUCTURAL, NOT JUST A CONSTANT. `GRACE` already puts the rep's
+    nudge at 24h and the manager's at 30h, but a constant is a hope: if the rep's
+    nudge is held by the daily cap, or by their own working-hours gate, or by a Slack
+    outage, the escalation can still come due and go out FIRST. A manager hearing that
+    a colleague has not answered a message the colleague was never sent is the exact
+    failure mode the grace period exists to prevent.
+
+    An untagged card has no rep to wait for, so it escalates on its own timetable.
+    Transient by design — this becomes false the moment the rep's nudge lands.
+    """
+    if not str(candidate.observed.get("tagged_slack") or ""):
+        return ""
+    row = conn.execute(
+        """SELECT state FROM followup_nudges
+            WHERE subject_kind='card_unengaged' AND subject_id=? AND policy_version=?""",
+        (candidate.subject_id, POLICY_VERSION),
+    ).fetchone()
+    # ANY row means the rep's turn has happened. A suppressed rep-nudge counts: the
+    # reasons that suppress it permanently (parked, engaged, stale) also suppress this
+    # escalation in the checks above, so anything still here was suppressed for a
+    # reason that does not apply to the manager's copy.
+    return "rep has not been asked yet" if row is None else ""
+
+
+def _silence_reason(client: WebClient | None, candidate: NudgeCandidate) -> str:
+    """'' only when Grant has POSITIVELY established that nobody replied.
+
+    Both other answers suppress: a reply means there is nothing to escalate, and an
+    unreadable thread means Grant cannot honestly say what happened in it. Neither is
+    permanent — a reply is recorded by the caller as `answered_since_offer`, which is,
+    and an unreadable thread is a transient failure that must not burn the subject.
+    """
+    channel = str(candidate.observed.get("channel") or candidate.audience)
+    anchor = str(candidate.anchor_ts or "")
+    # For an unanswered offer the clock starts at the OFFER, not the thread's start:
+    # everything before it is the conversation the offer was made in.
+    since = str(candidate.observed.get("offer_ts") or "") or anchor
+    replied = nudge_silence.replied_since(
+        client,
+        channel,
+        anchor,
+        since,
+        # The manager's own passing comment must not be read as the REP answering.
+        exclude_user=candidate.target_slack,
+    )
+    if replied is True:
+        return "answered_since_offer"
+    if replied is None:
+        return "could not verify silence"
     return ""
 
 
@@ -699,12 +446,20 @@ def run(
     force: bool = False,
     now: datetime | None = None,
     audience: str = "",
+    plain_mentions: bool = False,
 ) -> str:
     """Deliver at most ONE nudge per invocation, reserving before Slack is called.
 
     Ordering is guard → suppression → pacing → reserve → post, and the reservation is
     committed BEFORE the Slack call so a crash mid-send cannot produce a second nudge
     on the next tick. A dry run returns before any write.
+
+    `plain_mentions` renders `<@U…>` as a plain "@Name" so a rehearsal in the
+    playground reads exactly like the real thing without sending anyone a phone
+    notification. Chase asked for this explicitly while testing: "write at Anthony
+    instead of actually tagging him so you do not ping him in Slack during testing."
+    It changes ONLY the rendering — every guard, cap and ledger write is the live one,
+    so what is being exercised is the real path.
     """
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     # SCOPE A FORCED RUN TO ONE CHANNEL. `--force` skips the business-hours guard, so
@@ -729,16 +484,17 @@ def run(
         ).fetchone()
         if already is not None:
             continue
-        reason = suppress_reason(conn, candidate, current)
+        reason = suppress_reason(conn, candidate, current, client=client)
         if reason:
             # ONLY a permanent reason may be written. `_record` inserts the row whose
-            # uniqueness key retires this subject forever, and two of the reasons are
-            # transient: `channel_guard_active` is a Slack outage, `opted_out` can be
-            # reversed. Recording those would mean one bad afternoon — or one rep
-            # asking for quiet and later changing their mind — silently destroying
-            # every pending follow-up in that channel, with nothing to show it had
-            # happened. Measured on production, a single run during an outage would
-            # have burned 22 subjects permanently.
+            # uniqueness key retires this subject forever, and several of the reasons
+            # are transient: `channel_guard_active` is a Slack outage, `opted_out` can
+            # be reversed, `could not verify silence` is an unreadable thread.
+            # Recording those would mean one bad afternoon — or one rep asking for
+            # quiet and later changing their mind — silently destroying every pending
+            # follow-up in that channel, with nothing to show it had happened.
+            # Measured on production, a single run during an outage would have burned
+            # 22 subjects permanently.
             if not dry_run and reason in PERMANENT_SUPPRESSIONS:
                 _record(conn, candidate, current, state="suppressed", reason=reason)
             continue
@@ -746,7 +502,9 @@ def run(
         if waiting:
             return f"skip: {waiting}"
         variant = nudge_variants.choose(conn, candidate.subject_kind, VARIANTS)
-        text = build_message(candidate, variant)
+        text = build_message(candidate, variant, conn=conn)
+        if plain_mentions:
+            text = _plainify_mentions(text)
         if dry_run:
             return f"[dry-run] would nudge {candidate.subject_kind} ({variant}): {text}"
         nudge_id = _record(
@@ -755,15 +513,20 @@ def run(
         if client is None:
             return "skip: no Slack client configured"
         try:
-            if candidate.subject_kind in DM_KINDS:
-                # A DM has no thread to reply into, so the card is linked instead.
-                # The permalink is fetched from Slack rather than assembled from a
-                # guessed workspace URL — a broken link in an escalation is worse
-                # than no link, because the whole message is "go look at this".
+            if candidate.subject_kind in CHANNEL_POST_KINDS:
+                # A top-level post has no thread to reply into, so the work it is
+                # about is linked instead. The permalink is fetched from Slack rather
+                # than assembled from a guessed workspace URL — a broken link in an
+                # escalation is worse than no link, because the whole message is "go
+                # look at this".
                 link = _permalink(
                     client,
-                    str(candidate.observed.get("channel") or ""),
-                    str(candidate.observed.get("card_ts") or ""),
+                    str(candidate.observed.get("channel") or candidate.audience),
+                    str(
+                        candidate.observed.get("card_ts")
+                        or candidate.observed.get("offer_ts")
+                        or candidate.anchor_ts
+                    ),
                 )
                 response = client.chat_postMessage(
                     channel=candidate.audience,
@@ -811,6 +574,27 @@ def run(
     return "skip: nothing to follow up on"
 
 
+def _plainify_mentions(text: str) -> str:
+    """Render `<@U…>` as "@Name" so a rehearsal notifies nobody.
+
+    Resolved through the roster, so an id with no approved row renders as a neutral
+    "@teammate" rather than leaking a raw Slack id into a message a human reads.
+    """
+    names = {item.slack_id: item.name for item in roster.identities()}
+
+    def replace(match: re.Match[str]) -> str:
+        """One mention, as the name a person would read."""
+        return f"@{names.get(match.group(1)) or 'teammate'}"
+
+    return _MENTION_RE.sub(replace, text)
+
+
+# A Slack mention as it appears on the wire. Slack ids are `U…` for people and `W…`
+# for Enterprise Grid users; channel mentions (`<#C…>`) are deliberately not matched,
+# because they notify nobody and rewriting them would only break a link.
+_MENTION_RE = re.compile(r"<@([UW][A-Z0-9]+)>")
+
+
 # Slack refused because the destination is wrong. Retrying cannot help.
 _BAD_TARGET = frozenset(
     {
@@ -832,7 +616,7 @@ _RETRYABLE = frozenset(
 )
 
 
-def _release(conn: sqlite3.Connection, nudge_id: int, *, error: str) -> None:
+def _release(conn: sqlite3.Connection, nudge_id: str, *, error: str) -> None:
     """Give a reserved subject its chance back after a definitively-failed send.
 
     Only ever called for errors where Slack rejected the request outright, so this

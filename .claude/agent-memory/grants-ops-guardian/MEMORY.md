@@ -1,92 +1,87 @@
 # Guardian memory index (grants-ops-guardian)
 
-- [Tenant + layout](tenant-and-layout.md) — grantwatch user, home, repo/venv paths, DB name/role, bot manager, cron jobs
-- [Deploy mechanism + gotchas](deploy-mechanism.md) — proven rsync recipe; zsh `:gr` destination trap (brace ${h}!); marker ground-truth check; broken .venv/bin/pip
-- [Deploys come from main](deploy-mechanism.md) — STANDING 2026-08-10: refuse any commit that is not an ancestor of origin/main, but keep pinning the exact hash; verify the gate in BOTH directions
-- [macOS archive safety](macos-archive-safety.md) — avoid Bash `mapfile`; fail closed before `git archive` so an empty delta cannot expand to the full tracked tree
-- [Google Sheets export verify](google-sheets-export-verify.md) — droplet Drive export wiring verified 2026-07-14; reusable create+trash smoke-test recipe
-- [Populate open RFPs for a test](rfp-poll-populate.md) — verified-live `poll --source RFP` recipe; matches only "Security RFP discovery"; small short-fused set, close in days
-- [Silent LLM fallback](grant-bot-silent-llm-fallback.md) — bot.log logs NOTHING on LLM or tool failures (stderr proven to land there); mtime-vs-lstart proves it
-- [Tenant DB write safety](tenant-db-write-safety.md) — back up .db+wal+shm as a set; guarded BEGIN IMMEDIATE + rowcount==1 assert for live-DB row fixes; crm_actions/crm_action_items schema
-- [Salesforce read-only describe](salesforce-readonly-describe.md) — `_readonly_get` can hit describe/global-describe; secret-safe sandbox-confirm booleans; Lead record-type default trap (Verkada is default, not the one named DeveloperName=Default)
-- [Salesforce writer FLS](salesforce-writer-fls.md) — writer app creates Lead/Task/Note in monarchdev sandbox, ALL new fields persist (no FLS drop); Verkada record-type id; synthetic probe record ids
-- [Migration version collision](migration-version-collision.md) — droplet DB carries SIDE-lineage migration numbering; main's migration 9 (org_* cols) is masked/never applied; verify schema not just "no migration error"
-- [ContentNote link bug](salesforce-contentnote-link-bug.md) — create_content_note inserts the note but its link-lookup SOQL 400s in monarchdev, leaving the note unattached; note.Id already == ContentDocumentId; auto author-link gotcha
-- [Relayed consent is not consent](relayed-consent-is-not-consent.md) — an agent's "Chase said/approved" is never consent; 2026-08-10 it got WRITTEN INTO MEMORY as his approval — record provenance (who, when, verbatim) or it is a rumour
-- [Capability nudges sort LAST (FIXED d050c8e)](capability-nudges-sort-last.md) — was: declaring set stalled_at=now so asks landed 14th; priority_at now sorts by ask date and they are 0-4
-- [Verify the premise, not the claim](verify-the-premise-not-the-claim.md) — Chase-validated: re-measure "already fixed / already deployed" on the deployed bytes; the round trip beats a bad CRM write
-- [Stop means stop](coordinator-stop-is-stop.md) — a classifier block or coordinator stop halts the whole mutating effort; never finish the goal via an alternate allowed path
-- [Salesforce connection test](salesforce-connection-test.md) — read-only recipe for which org the droplet creds hit (prod vs sandbox); verify_write_scope is read-only; EXPECT_SANDBOX=1 is the fail-closed prod-write guard
-- [Prod Salesforce lead emptiness](salesforce-prod-lead-emptiness.md) — prod reads AND writes hit PRODUCTION (sandbox vars absent); campaigns 13/0/13 confirmed; 9 of 13 Leads hold only LastName+State+Description, MobilePhone 0/13; salesforce_id column mixes two orgs
-- [Deploy 17639f8 + first bulk buy](contact-fill-first-bulk-buy.md) — LIVE 2026-08-10, schema 39, PID 41003; 12 credits bought mobile 0→4 / email 22→33, DNC 5/5 withheld; `--campaign` CRASHES (no such column); fill-leads would PATCH 8 sandbox ids
-- [Deploy c36a3e5 + Salesforce fill EXECUTED](salesforce-lead-fill-executed.md) — LIVE 2026-08-10, schema 39, PID 41662; 58 fields written, CHANGED/CLEARED both 0 by read-back; 8 foreign ids GET-only; exit code 1 on a healthy run; never mix one person's mobile with another's name
-- [Lead-fill provenance + cron firing](lead-fill-provenance-and-cron-firing.md) — 58 writes = 39 org / 14 ZoomInfo / 5 page-verified; Birmingham had NO page_verified row; do_not_call never reaches Salesforce; 5 of 10 cron jobs have NEVER fired
-- [Deploy ec1c4a4 + DNC retroactive gap](dnc-retroactive-marking.md) — LIVE 2026-08-10, schema 39, PID 42839; DNC warning proven on all 6 real rows; 2 live Leads name a DNC person unmarked; DoNotCall can't ride the string-shaped fill path
-- [Session end state 750937b](session-end-state-20260810.md) — LIVE 2026-08-10 01:53 PT, schema 39, PID 43889; droplet == branch head; 5 of 10 cron jobs fired, 5 still AHEAD of their first slot; nothing proactive delivered yet; read the droplet clock before answering "has it fired"
-- [Deploy 850cccc + email_results STOP](email-results-cannot-send-a-long-list.md) — LIVE 2026-08-10, schema 39, PID 55908; email_results emails "would you like an Excel file?" for any result set >15 so Kerry's list was NOT sent; 22 tools; 34 capability_asks; 4th false-zero grep (`nces bind:`)
-- [Deploy 801b762 + Kerry's email SENT](kerry-email-sent-and-the-15-row-cap.md) — LIVE 2026-08-10, schema 39, PID 57077, 23 tools; for_chat fixed the 93-char question but a SECOND 15-row cap remains, so the email carries 15 of 81 and says so; check ancestry BOTH ways
-- [Closing pass 78000cf](closing-pass-78000cf.md) — LIVE 2026-08-10, schema 39, PID 58929; 40-credit cap PROVEN by ledger; BudgetExhausted + the app_id guard only HALF landed; TOO_OLD==DROP_AFTER silently retired thread_abandoned; 2 chat-isms still on the email path
-- [Session final 2f1ff77 + 1ffe7ce docs (CURRENT PROD)](session-final-2f1ff77.md) — LIVE 2026-08-10, schema 39, PID 60352, TOOL_SCHEMAS 25; negation guard + per-turn spend key both verified; user_memory EMPTY so the broken guard never wrote a claim about anyone
-- [Drip pacing + daily cap](drip-pacing-and-cap.md) — ONE card/day (DAILY_CAP=1, `(N)` is the cap not the count); slot model replaced the coin flip 2026-07-22; gold pool now OPEN (544)
-- [Drip slot vs cron granularity](drip-slot-band-vs-cron-granularity.md) — a ≤30-min band on a `*/30` cron collapses to one clock time: 10:30–11:00 posts at 11:00 PT on 19 of 20 weekdays
-- [Identical RFP card text](identical-rfp-card-text.md) — a "repeated" Slack card can be 2 different leads; build_rfp_alert prints entity+keyword+due only, never the title
-- [RFP dedup key drift](rfp-dedup-key-drift.md) — dup RFP leads = 6-token→full-title KEY migration (not case); recompute-key proof; orphan gold RFP #9534; gold backlog has no usable award dates
-- [Disk footprint + cruft](disk-footprint-and-cruft.md) — 26 snapshot venvs purged 2026-07-22 (home 7.7G→1.9G, / 95%→83%); safe-purge recipe; `du -b` under-predicts df; no log rotation
-- [Grant Slack event flow](grant-slack-event-flow.md) — both app_mention+message handlers exist; slack_event_receipts has no event-type col; message-handler receipt is gated by thread-ownership; private channels need message.groups/groups:history
-- [Firecrawl paid-call surface](firecrawl-paid-call-surface.md) — only 3 paths spend credits; RFP poller is the sole scheduled one (≤40 calls/weekday); 402/429/billing greps are all false positives
-- [Campaign fix 359c1e3 DEPLOYED](campaign-fix-359c1e3-preflight.md) — LIVE 2026-07-26 schema 28; migration 28 MUTATES crm_actions; live-traffic counters are floors not invariants; post-quiesce gate; `select *` backup-diff KeyError trap
-- [Codex parallel-writer forensics](codex-parallel-writer-forensics.md) — the other toolchain's staging/backup/handoff signatures; silent keepalive tick = crontab mid-restore, not damage; origin can be AHEAD of local
-- [Campaign writes flag ARMED in prod](campaign-writes-flag-armed-in-prod.md) — SALESFORCE_CAMPAIGN_WRITES_ENABLED=1 live vs PRODUCTION Salesforce; 4 ready create_campaign previews
-- [Rich-card deploy e8ecf0c](rich-card-deploy-e8ecf0c.md) — COMPLETED 2026-07-24 flag-OFF: tldextract 5.3.1 installed, migrations 14-26 applied (MAX 26, cron self-heal), bot pid 597044; buttons need tldextract (boot/cron don't); rollback snapshot at 20260724T214420Z
-- [Rich-card ENABLED 2026-08-05](rich-card-enable-20260805.md) — GRANT_RICH_CARD_ENABLED=1 LIVE (Chase waived shadow gate); crontab now 5 lines sha 70e309aa…; seed C2 resolved: 22 completed/3 indeterminate, 7 verified/15 not_found
-- [Deploy 5f09200 fallback+routing](deploy-5f09200-fallback-routing.md) — LIVE 2026-08-06 no-restart; AST-diff for "no migration" claims; --files-from surgical rsync; cutoff now 11:30, cutoff-miss falls back to daily
-- [Edit cards in place](edit-cards-in-place.md) — STANDING: fix a posted card with chat.update, never post a replacement; read-only conn, snapshot stays immutable
-- [First rich card posted](first-rich-card-posted.md) — 2026-08-06 ts 1786049660.891549; all 6 blocks accepted; Slack auto-linkifies emails to mailto in blocks AND text
-- [Feeder cron scheduling evidence](feeder-cron-scheduling-evidence.md) — poll really takes 9m10s; salesforce-sync's unordered LIMIT 500 churns ids 229-378 forever; most NCES-pending leads can never bind
-- [pycache purge destroys forensics](pycache-purge-destroys-forensics.md) — capture .pyc mtimes before a deploy purge when another writer may be active; purge still correct
-- [Deploy d66802b card comma](deploy-d66802b-card-comma.md) — 2-file surgical deploy, no restart (card.py outside the bot's import closure); 0-files-compared "PASS" trap; --post classifier-blocked
-- [One-offs need load_dotenv](oneoff-scripts-need-load-dotenv.md) — cwd does NOT load .env; only 3 entrypoints call load_dotenv(), so one-offs degrade silently and can still write state
-- [NCES binding blocks rich card](nces-binding-blocks-rich-card.md) — null nces_id ⇒ entity_kind_unsupported, always; USAspending "…NO 46" names never exact-match NCES LEA_NAME
-- [SLACK_WORKSPACE_ID never set](slack-workspace-id-missing.md) — every rich-card button refuses; .env+restart needed; run_bot.sh sources .env so /proc/environ is authoritative; render_inputs_json leaks PII
-- [Roster deploy 4c6a543 (Nelly)](roster-deploy-4c6a543.md) — LIVE 2026-08-06; ALWAYS gate a reps.json row on a prod Salesforce User.Email==1 probe first; reps.json re-read per call (no restart); .claude/agent-memory is not on the droplet
-- [Tenant .env ops + baselines](env-zoominfo-20260809.md) — append recipe (check last byte, prove prefix sha) + pgrep -f self-matches over ssh; its .env/crontab/PID baselines are SUPERSEDED by [[deploy-b4a8046-reminders-email]]
-- [Conversation audit 2026-08-09](conversation-audit-20260809.md) — every human thread graded; rival Monarch_Sales_Agent hijacks threads; CompletedPaidCall crash; lightning.force.com links rejected; PROD Salesforce campaign writes HAVE fired
-- [Deployed vs local drift 2026-08-09](deployed-vs-local-drift-20260809.md) — prod is byte-exact at 90f0420 (90/90 hashes); 8 commits undeployed incl. a security fix; ZoomInfo code never shipped
-- [Read-only DB forensics recipe](readonly-db-forensics-recipe.md) — `mode=ro` works on the hot WAL (zero writes); no `conversation_sessions` table; all 10 crontab lines characterized; OregonBuys 404s every poll
-- [Stage-1 preflight baseline 2026-08-09](stage1-preflight-baseline-20260809.md) — prod fingerprints at 90f0420/schema 28; DB+code rollback artifacts + sha256s; VACUUM INTO works on a read-only conn (superseded by Stage 3)
-- [First ZoomInfo live spend](zoominfo-first-live-spend-20260809.md) — ledger correct (2 credits) but `requested_by` always ''; DNC suppression lives in save_vendor_contact; crm_campaign_attempts is batch-only; redaction regex ate ISO dates
-- [Deploy fe56807 Stage 3](deploy-fe56807-stage3.md) — LIVE 2026-08-09: schema 28→31, PID 12836, ~4s outage; migrations applied with the bot DOWN; allowlist proved behaviorally
-- [Deploy 3cf9df0 campaign-status](deploy-3cf9df0-campaign-status.md) — LIVE 2026-08-09 code-only, schema stayed 31, PID 14494; rsync needs `--no-perms`; pinned hash beat a dirty tree carrying an unfinished migration
-- [Deploy 2239a18 human-asserted](deploy-2239a18-human-asserted.md) — LIVE 2026-08-09 schema 31→32, PID 15679, ~1s outage; tools are 17 not the stated 18; backfill step-3 was a no-op; Chase committed twice mid-deploy
-- [Deploy 70afa75 refusal ceiling (CURRENT PROD)](deploy-70afa75-refusal-ceiling.md) — LIVE 2026-08-09 code-only, schema stayed 32 (AST-proven), PID 16804, 2s outage; a same-day `-mmin 20` audit over-reaches into the prior deploy
-- [Deploy beb0520 nudge --force (CURRENT PROD)](deploy-beb0520-nudge-force.md) — LIVE 2026-08-09 code-only, schema 32, PID 17737, ~1s outage; full-tree rsync would DELETE root run_bot.sh + ship .claude memory + revert .codex — use `--files-from`
-- [Nudge queue state 2026-08-09](nudge-queue-state-20260809.md) — 36 due but 28 suppressed `stale`; DROP_AFTER=5d makes the backlog undrainable; `nudge --dry-run --force` is a safe read-only queue inspector
-- [Deploy b4a8046 reminders+email (superseded)](deploy-b4a8046-reminders-email.md) — LIVE 2026-08-09 schema 32→35, PID 22742, 6th cron line; an unquoted spaced `.env` value BREAKS `source .env` and aborts it at that line (repaired in 14221fc)
-- [Deploy 26153bd DROP_AFTER 14d](deploy-26153bd-drop-after-14d.md) — LIVE 2026-08-09, schema 32, PID 19225; 14d still does NOT reach the playground (newest subject 22d old); nudge NOT fired; `--execute` permanently burns every suppressed subject it walks past
-- [Prod config audit 2026-08-09](prod-config-audit-20260809.md) — all 32 .env keys non-empty AND all in the live process; only SALESFORCE_WRITE_EXPECT_SANDBOX=0 is off; droplet .env.example is STALE — diff against `git show <rev>:`; schema lives in schema_migrations not user_version
-- [First human_asserted row verified](human-asserted-row-verified.md) — prod id 84 correct on every field; `verified` 19→20 was an UNRELATED lead; contacts has NO created_at; a deploy backup doubles as a forensic pre-state
-- [Dating undated contacts rows](dating-undated-contacts-rows.md) — bot.log tool-turn order ↔ search_requests.created_at pins an undated write to the minute; CompletedPaidCall = "errored out" on data that exists; no delete audit, zero id gaps
-- [Deploy 14221fc email-coaching fix (CURRENT PROD)](deploy-14221fc-email-coaching-fix.md) — LIVE 2026-08-09, schema stayed 35, PID 24507, ~3s outage; `.env` quote-in-place repair (line-set proof, not prefix-sha); 3 more dead SALESFORCE_* flags remain
-- [Org column coverage](org-column-coverage-20260810.md) — leads.org_* was ~0.2% populated; first enrich-orgs sweep took gold street 16→32; per-run yield + the dup-entity and ORDER BY traps
-- [Deploy d664548 follow-ups LIVE (superseded by a718066)](deploy-d664548-followups-live.md) — LIVE 2026-08-09 schema 35→36, PID 25636, 0.76s outage; 12th cron line arms `nudge --execute`; first tick permanently burns 25 stale subjects
-- [Nudge A/B variants (mostly FIXED)](nudge-variant-ab-is-inert.md) — a718066 gave 6 kinds real second wordings; card_escalated + capability_now_available still emit identical text for both labels
-- [SSH rate limit + stdin traps](ssh-rate-limit-and-stdin-traps.md) — `ssh -n … < file` uploads an EMPTY file and exits 0; a burst of sessions gets port 22 REJECTED; multiplex with a SHORT ControlPath
-- [Deploy a718066 mobile_phone (superseded)](deploy-a718066-mobile-phone.md) — LIVE 2026-08-09 schema 36→37, PID 26876, 0.91s outage; A/B wordings proven distinct on deployed bytes; `--delete` is wrong for staging-dir rsync; zsh `:gr` eats git revspecs too
-- [Deploy d050c8e priority_at (superseded)](deploy-d050c8e-priority-at.md) — LIVE 2026-08-09 code-only, schema stayed 37, PID 27714, 0.21s outage; capability asks moved eligible 14-18 -> 0-4; fill-leads lists 22; `declare -A` false pass
-- [fill-leads org_website laundering (FIXED 0716a17)](fill-leads-org-website-laundering.md) — STOPPED --execute 2026-08-09; org_profile_status='not_found' still yielded cde.ca.gov/a CDN; fill-blanks errors are self-sealing
-- [Deploy 65f05c7 fill-leads fix (superseded)](deploy-65f05c7-fill-leads-fix.md) — LIVE 2026-08-09 code-only, schema stayed 37, PID 29164, 0.30s outage; both fill-leads traps PROVEN fixed on live data; `tarfile` strips the dir-entry slash so the `/$` filter fails
-- [Deploy 0716a17 org-profile gate](deploy-0716a17-org-profile-gate.md) — LIVE 2026-08-09, schema 37, PID 30207, 47s outage (my pkill-without-relaunch); 27 real SF writes, never-overwrite PASS; bare host vs deep link
-- [Deploy e905cc2 nudge --audience (superseded)](deploy-e905cc2-nudge-audience.md) — LIVE 2026-08-09 code-only, schema 37, PID 30759, 1s outage; scoping cuts a forced run's permanent burn 24→3; a third DM audience exists
-- [Deploy b42b015 rep timezone (superseded)](deploy-b42b015-rep-timezone.md) — LIVE 2026-08-09 code-only, schema 37, PID 31228; a nudge refuses outside 08-18 in the MENTIONED rep's zone and --force does NOT skip it
-- [Deploy cadfefe nudge slots + cron (superseded)](deploy-cadfefe-nudge-slots.md) — LIVE 2026-08-09 code + coupled `*/30 8-15` crontab, schema 37, PID 31756, 0.20s outage; Monday delivers 10:00 PT; Kerry's ET clock kills the 15:00+15:30 ticks; old cron silenced slot1 on 74/100 days
-- [Deploy f894801 announce (superseded)](deploy-f894801-announce.md) — LIVE 2026-08-10 schema 37→38, PID 32750, 13th cron line; its 2 findings (corrections never re-seeded; email line false for all but Chase) are FIXED by 2159d67
-- [Deploy 2159d67 RESEND_TEST_EMAIL (superseded)](deploy-2159d67-resend-test-email.md) — LIVE 2026-08-10 code-only, schema stayed 38, PID 33390, 0.22s outage; `capability-seed` prints "0 recorded" on the run that DID update; a probe's own AttributeError read as "verify_write_scope FAILED"
-- [Deploy cdfdaf9 thread-scan + cron (superseded)](deploy-cdfdaf9-threadscan.md) — LIVE 2026-08-10 code-only, schema 38, PID 34654, 0.147s outage; the nudge job was ALREADY in cron (premise false), now `*/15 8-14`; `announce --load` prints "0 new" on the run that DID update
-- [scan-threads silently truncates](thread-scan-ratelimit-truncation.md) — 295 of 507 threads dropped as `ratelimited` into a bare `except: continue`; three runs saw 29/13/4 and every one read as a complete scan; cron slot 04:40 Mon keeps the burst off everyone's hours
-- [Deploy 7837cda watchdog (superseded by 8cb557a)](deploy-7837cda-watchdog.md) — added the `3-59/10` 24/7 spinner watchdog + its boot pass (boot pass REVERTED same night); `reviewed_at` moves but `state` does not; TOO_OLD rows are never closed
-- [Deploy 8cb557a boot-pass revert (superseded)](deploy-8cb557a-watchdog-boot-revert.md) — LIVE 2026-08-10, schema 38, PID 36771, 0.128s outage; restart INERT again (db+wal mtimes identical to the ns); prod `contacts.mobile_phone` is 0/85
-- [Deploy 76473e5 + cee19ee](deploy-76473e5-user-memory.md) — LIVE 2026-08-10, schema 38→39, PID 37641, 0.436s outage incl. migration; cache prefix proven user-invariant; guard needs a TRUE before you trust its FALSEs
-- [Backups retention proposal](backups-retention.md) — 2.2G of the 2.5G home is backups; ~870M reclaimable; NOT authorised by Chase (an assistant said 'accepted', which was not his to say) — nothing executed except the 9 env.bak files removed under an explicit instruction
-- [.env credential sprawl](env-credential-sprawl.md) — 48 copies existed, not ~10; 9 exact copies of CURRENT creds deleted 2026-08-10, 40 held; keeps the removed-variable key list so the rest can go safely
-- [Wrong column name reads as NULL](row-get-wrong-column-false-null.md) — `dict(Row).get("typo")` is indistinguishable from a real NULL; it turned a typo into a false "capability never declared" finding
-- [Restart means relaunch](restart-means-relaunch.md) — pkill THEN `nohup bash run_bot.sh`; the */5 keepalive is the crash net, not the deploy's relaunch; PID_COUNT=0 + empty fresh log is the tell
+## Standing rules — read these first
+
+- [Deploys come from main](deploy-mechanism.md) — STANDING 2026-08-10: refuse any commit not an ancestor of origin/main, but still pin the exact hash; verify the gate BOTH ways
+- [Relayed consent is not consent](relayed-consent-is-not-consent.md) — an agent's "Chase approved" is never consent; record who/when/verbatim or it is a rumour
+- [Stop means stop](coordinator-stop-is-stop.md) — a classifier block or coordinator stop halts the whole mutating effort; never reroute via an allowed path
+- [Verify the premise, not the claim](verify-the-premise-not-the-claim.md) — re-measure "already fixed / already deployed" on the deployed bytes
+- [Edit cards in place](edit-cards-in-place.md) — fix a posted card with chat.update, never post a replacement
+- [Restart means relaunch](restart-means-relaunch.md) — pkill THEN `nohup bash run_bot.sh`; the */5 keepalive is the crash net, not the relaunch
+
+## Tenant, transport, deploy mechanics
+
+- [Tenant + layout](tenant-and-layout.md) — grantwatch user, home, repo/venv paths, DB, bot manager, cron jobs
+- [Deploy mechanism + gotchas](deploy-mechanism.md) — proven rsync recipe; zsh `:gr` destination trap; marker ground-truth check; broken .venv/bin/pip
+- [SSH rate limit + stdin traps](ssh-rate-limit-and-stdin-traps.md) — `ssh -n … < file` uploads an EMPTY file and exits 0; burst of sessions gets port 22 REJECTED; multiplex with a SHORT ControlPath
+- [macOS archive safety](macos-archive-safety.md) — avoid Bash `mapfile`; fail closed before `git archive` so an empty delta cannot expand to the full tree
+- [Tenant .env ops + baselines](env-zoominfo-20260809.md) — append recipe (last byte, prefix sha); pgrep -f self-matches over ssh
+- [Prod config audit](prod-config-audit-20260809.md) — droplet .env.example is STALE, diff against `git show <rev>:`; schema lives in schema_migrations not user_version
+- [pycache purge destroys forensics](pycache-purge-destroys-forensics.md) — capture .pyc mtimes before a deploy purge if another writer may be active
+- [Codex parallel-writer forensics](codex-parallel-writer-forensics.md) — the other toolchain's staging/backup signatures; origin can be AHEAD of local
+- [Disk footprint + cruft](disk-footprint-and-cruft.md) — snapshot-venv purge recipe; `du -b` under-predicts df; no log rotation
+
+## Read-only forensics + measurement traps
+
+- [Read-only DB forensics recipe](readonly-db-forensics-recipe.md) — `mode=ro` works on the hot WAL (zero writes); crontab lines characterized; OregonBuys 404s every poll
+- [Wrong column name reads as NULL](row-get-wrong-column-false-null.md) — `dict(Row).get("typo")` is indistinguishable from a real NULL
+- [Silent LLM fallback](grant-bot-silent-llm-fallback.md) — bot.log logs NOTHING on LLM failures; a clean log is not evidence of success
+- [Dating undated rows](dating-undated-contacts-rows.md) — bot.log tool-turn order ↔ search_requests.created_at pins an undated write to the minute
+- [One-offs need load_dotenv](oneoff-scripts-need-load-dotenv.md) — cwd does NOT load .env; one-offs degrade silently and can still write state
+- [Tenant DB write safety](tenant-db-write-safety.md) — back up .db+wal+shm as a set; guarded BEGIN IMMEDIATE + rowcount==1 assert
+- [Migration version collision](migration-version-collision.md) — droplet carries SIDE-lineage numbering; verify schema, not just "no migration error"
+
+## Current production state
+
+- [Session final 2f1ff77 + 1ffe7ce docs (CURRENT PROD)](session-final-2f1ff77.md) — LIVE 2026-08-10, schema 39, PID 60352, TOOL_SCHEMAS 25; negation guard + per-turn spend key verified; user_memory EMPTY
+- [Session end state 750937b](session-end-state-20260810.md) — read the droplet clock before answering "has the cron fired"
+- [Deployed vs local drift](deployed-vs-local-drift-20260809.md) — how to prove prod byte-exact at a revision (90/90 hashes)
+
+## Outreach, follow-ups, cards
+
+- [Persequor outreach path state](persequor-outreach-path-state.md) — 7 briefs REALLY accepted (2xx) 07-15..18; `sent_at` has no writer so the DB never proves delivery; card button dead 3 ways; one real click swallowed as Unhandled
+- [SLACK_WORKSPACE_ID never set](slack-workspace-id-missing.md) — gates ONLY campaign/actions.py rich-card clicks, not salesforce_confirm; render_inputs_json leaks PII
+- [email_results cannot send a long list](email-results-cannot-send-a-long-list.md) — >15 rows emails a question instead of the list; and [Kerry's email SENT](kerry-email-sent-and-the-15-row-cap.md) — a SECOND 15-row cap remains
+- [Nudge queue state](nudge-queue-state-20260809.md) — `nudge --dry-run --force` is a safe read-only queue inspector; `--execute` permanently burns suppressed subjects it walks past
+- [Nudge A/B variants (mostly FIXED)](nudge-variant-ab-is-inert.md) — card_escalated + capability_now_available still emit identical text for both labels
+- [Capability nudges sort LAST (FIXED d050c8e)](capability-nudges-sort-last.md) — priority_at now sorts by ask date
+- [scan-threads silently truncates](thread-scan-ratelimit-truncation.md) — 295 of 507 threads dropped as `ratelimited` into a bare `except: continue`
+- [Drip pacing + daily cap](drip-pacing-and-cap.md) — ONE card/day (DAILY_CAP=1; `(N)` is the cap, not the count)
+- [Drip slot vs cron granularity](drip-slot-band-vs-cron-granularity.md) — a ≤30-min band on a `*/30` cron collapses to one clock time
+- [First rich card posted](first-rich-card-posted.md) — 2026-08-06; Slack auto-linkifies emails to mailto in blocks AND text
+- [Identical RFP card text](identical-rfp-card-text.md) — a "repeated" card can be 2 different leads; build_rfp_alert never prints the title
+- [RFP dedup key drift](rfp-dedup-key-drift.md) — dup RFP leads = 6-token→full-title KEY migration; orphan gold RFP #9534
+- [NCES binding blocks rich card](nces-binding-blocks-rich-card.md) — null nces_id ⇒ entity_kind_unsupported, always
+- [Grant Slack event flow](grant-slack-event-flow.md) — message-handler receipt gated by thread-ownership; private channels need message.groups
+- [Feeder cron scheduling evidence](feeder-cron-scheduling-evidence.md) — poll really takes 9m10s; salesforce-sync's unordered LIMIT 500 churns forever
+
+## Salesforce + vendors
+
+- [Prod Salesforce lead emptiness](salesforce-prod-lead-emptiness.md) — prod reads AND writes hit PRODUCTION; salesforce_id column mixes two orgs
+- [Salesforce connection test](salesforce-connection-test.md) — read-only recipe for which org the creds hit; EXPECT_SANDBOX=1 is the fail-closed guard
+- [Salesforce read-only describe](salesforce-readonly-describe.md) — Lead record-type default trap (Verkada is default, not DeveloperName=Default)
+- [Salesforce writer FLS](salesforce-writer-fls.md) — sandbox writer keeps all new fields; Verkada record-type id
+- [ContentNote link bug](salesforce-contentnote-link-bug.md) — note inserts but its link-lookup SOQL 400s, leaving it unattached
+- [Campaign writes flag ARMED in prod](campaign-writes-flag-armed-in-prod.md) — SALESFORCE_CAMPAIGN_WRITES_ENABLED=1 vs PRODUCTION Salesforce
+- [Lead-fill provenance + cron firing](lead-fill-provenance-and-cron-firing.md) — do_not_call never reaches Salesforce; DNC can't ride the string-shaped fill path
+- [fill-leads org_website laundering (FIXED 0716a17)](fill-leads-org-website-laundering.md) — `not_found` still yielded a CDN host; fill-blanks errors are self-sealing
+- [Org column coverage](org-column-coverage-20260810.md) — per-run yield + the dup-entity and ORDER BY traps
+- [First human_asserted row verified](human-asserted-row-verified.md) — contacts has NO created_at; a deploy backup doubles as a forensic pre-state
+- [First ZoomInfo live spend](zoominfo-first-live-spend-20260809.md) — `requested_by` always ''; DNC suppression lives in save_vendor_contact
+- [Firecrawl paid-call surface](firecrawl-paid-call-surface.md) — only 3 paths spend credits; 402/429 greps are all false positives
+- [Roster deploy 4c6a543](roster-deploy-4c6a543.md) — ALWAYS gate a reps.json row on a prod Salesforce User.Email==1 probe; reps.json re-read per call
+- [Google Sheets export verify](google-sheets-export-verify.md) — reusable create+trash smoke-test recipe
+- [Populate open RFPs for a test](rfp-poll-populate.md) — verified-live `poll --source RFP` recipe
+
+## Secrets + retention (both UNAUTHORISED — do not act)
+
+- [Backups retention proposal](backups-retention.md) — ~870M reclaimable but NOT authorised by Chase; only the 9 env.bak files were removed, under an explicit instruction
+- [.env credential sprawl](env-credential-sprawl.md) — 48 copies existed; 9 exact dupes deleted 2026-08-10, 40 HELD; keeps the removed-variable key list
+
+## Superseded deploy records (kept for rollback fingerprints + one-off lessons)
+
+- Schema 28→32 chain: [fe56807](deploy-fe56807-stage3.md) (migrations with the bot DOWN) · [3cf9df0](deploy-3cf9df0-campaign-status.md) (rsync needs `--no-perms`; pinned hash beat a dirty tree) · [2239a18](deploy-2239a18-human-asserted.md) (Chase committed twice mid-deploy) · [70afa75](deploy-70afa75-refusal-ceiling.md) (`-mmin 20` audit over-reaches) · [beb0520](deploy-beb0520-nudge-force.md) (use `--files-from`, full-tree rsync DELETES run_bot.sh) · [stage-1 baseline](stage1-preflight-baseline-20260809.md)
+- Schema 32→37 chain: [b4a8046](deploy-b4a8046-reminders-email.md) (unquoted spaced .env value BREAKS `source .env`) · [14221fc](deploy-14221fc-email-coaching-fix.md) (quote-in-place repair) · [26153bd](deploy-26153bd-drop-after-14d.md) · [d664548](deploy-d664548-followups-live.md) · [a718066](deploy-a718066-mobile-phone.md) (`--delete` wrong for staging rsync) · [d050c8e](deploy-d050c8e-priority-at.md) · [65f05c7](deploy-65f05c7-fill-leads-fix.md) (tarfile strips the dir-entry slash) · [0716a17](deploy-0716a17-org-profile-gate.md) (47s outage from pkill-without-relaunch) · [e905cc2](deploy-e905cc2-nudge-audience.md) · [b42b015](deploy-b42b015-rep-timezone.md) · [cadfefe](deploy-cadfefe-nudge-slots.md)
+- Schema 37→39 chain: [f894801](deploy-f894801-announce.md) · [2159d67](deploy-2159d67-resend-test-email.md) ("0 recorded" on the run that DID update) · [cdfdaf9](deploy-cdfdaf9-threadscan.md) · [7837cda](deploy-7837cda-watchdog.md) · [8cb557a](deploy-8cb557a-watchdog-boot-revert.md) · [76473e5](deploy-76473e5-user-memory.md) (guard needs a TRUE before you trust its FALSEs) · [17639f8](contact-fill-first-bulk-buy.md) (`--campaign` CRASHES) · [c36a3e5](salesforce-lead-fill-executed.md) (exit code 1 on a healthy run) · [ec1c4a4](dnc-retroactive-marking.md) · [850cccc](email-results-cannot-send-a-long-list.md) · [801b762](kerry-email-sent-and-the-15-row-cap.md) · [78000cf](closing-pass-78000cf.md)
+- Rich-card rollout: [e8ecf0c](rich-card-deploy-e8ecf0c.md) (tldextract needed for buttons) · [enabled 2026-08-05](rich-card-enable-20260805.md) · [5f09200](deploy-5f09200-fallback-routing.md) (AST-diff for "no migration" claims) · [d66802b](deploy-d66802b-card-comma.md) (0-files-compared "PASS" trap) · [359c1e3](campaign-fix-359c1e3-preflight.md) (`select *` backup-diff KeyError trap)
+- [Conversation audit 2026-08-09](conversation-audit-20260809.md) — rival Monarch_Sales_Agent hijacks threads; lightning.force.com links rejected

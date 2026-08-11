@@ -28,12 +28,21 @@ NOW = datetime(2026, 8, 12, 18, 0, tzinfo=timezone.utc)
 
 
 class _Client:
-    """Slack stand-in recording posts, or failing the way Slack does."""
+    """Slack stand-in recording posts, or failing the way Slack does.
 
-    def __init__(self, error: str = "") -> None:
+    `replies` is what `conversations_replies` returns, and it defaults to a thread
+    containing only Grant's own message — i.e. verified silence. Any kind whose claim
+    is "nobody answered" reads this, so a double that did not implement it would
+    suppress every escalation and the tests would pass while proving nothing.
+    """
+
+    def __init__(
+        self, error: str = "", replies: list[dict[str, Any]] | None = None
+    ) -> None:
         """Record posts, or raise the named Slack error on every send."""
         self.posts: list[dict[str, Any]] = []
         self.error = error
+        self.replies = replies if replies is not None else [{"bot_id": "B1", "ts": "1"}]
 
     def chat_postMessage(self, **kwargs: Any) -> dict[str, Any]:
         """Record one post or raise a SlackApiError with the configured code."""
@@ -43,6 +52,14 @@ class _Client:
             raise SlackApiError(self.error, {"error": self.error})
         self.posts.append(kwargs)
         return {"ok": True, "ts": "999.1"}
+
+    def conversations_replies(self, **kwargs: Any) -> dict[str, Any]:
+        """The thread as Slack would return it, for the silence check."""
+        return {"ok": True, "messages": self.replies}
+
+    def chat_getPermalink(self, **kwargs: Any) -> dict[str, Any]:
+        """A permalink for the message an escalation points at."""
+        return {"ok": True, "permalink": "https://slack.example/archives/C0TEST/p1"}
 
 
 def _conn(tmp_path: Path) -> sqlite3.Connection:
@@ -512,34 +529,51 @@ def test_an_inferred_state_still_cannot_name_a_human(tmp_path: Path) -> None:
     ]
     assert found and found[0].target_slack == ""
     assert "<@" not in nudges.build_message(found[0])
-    # And with nobody tagged there is nobody to escalate about.
-    assert not [
+    # An untagged card DOES still escalate (Chase, 2026-08-10 — North Palos went out
+    # to the channel with nobody tagged and drew nothing), but the escalation may name
+    # only the manager, because no rep was ever asked.
+    escalations = [
         c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_escalated"
     ]
+    assert len(escalations) == 1
+    text = nudges.build_message(escalations[0])
+    assert "<@U01DFJWQQJ3>" in text  # the manager, who is being told
+    assert text.count("<@") == 1, "an untagged card must not name a rep it never tagged"
     conn.close()
 
 
 def test_the_manager_hears_about_it_only_after_the_rep_has_had_a_fair_run(
     tmp_path: Path,
 ) -> None:
-    """Escalating on day one turns a follow-up into telling on a colleague."""
-    conn = _conn(tmp_path)
-    _card(conn, NOW - timedelta(days=2))
-    assert not [
-        c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_escalated"
-    ], "the manager was told before the rep had a chance to answer"
+    """Escalating before the rep is asked turns a follow-up into telling on a colleague.
 
-    conn.execute("DELETE FROM posts")
-    conn.execute("DELETE FROM leads")
+    THE ORDERING IS NOW STRUCTURAL, NOT A CONSTANT. It used to rest on `card_escalated`
+    having a longer grace than `card_unengaged`, which is only a hope: the rep's own
+    nudge can be held by the daily cap, by their working-hours gate, or by a Slack
+    outage, and the escalation would then arrive first. So the guard asks whether the
+    rep's nudge actually EXISTS, and this test drives `suppress_reason` rather than
+    reading the grace constants back.
+    """
+    conn = _conn(tmp_path)
     _card(conn, NOW - timedelta(days=5))
+    client = _Client()
     escalations = [
         c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_escalated"
     ]
     assert len(escalations) == 1
     escalation = escalations[0]
-    # It is a DM to the manager, not a reply in the channel the rep can see.
-    assert escalation.audience == "U01DFJWQQJ3"
-    assert escalation.subject_kind in nudges.DM_KINDS
+    assert (
+        nudges.suppress_reason(conn, escalation, NOW, client=client)
+        == "rep has not been asked yet"
+    )
+
+    # The rep's own follow-up goes out; only now may the manager hear about it.
+    assert "nudged card_unengaged" in nudges.run(client, conn, now=NOW)
+    assert nudges.suppress_reason(conn, escalation, NOW, client=client) == ""
+
+    # It is a CHANNEL post, not a DM: Chase asked for it where the team can see it.
+    assert escalation.audience == CHANNEL
+    assert escalation.subject_kind in nudges.CHANNEL_POST_KINDS
     text = nudges.build_message(escalation)
     assert "<@U01DFJWQQJ3>" in text
     assert "$500,000" in text

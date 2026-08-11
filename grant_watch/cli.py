@@ -442,7 +442,12 @@ def cmd_salesforce_followups(dry_run: bool, smoke: bool) -> int:
     return 1 if outcome.startswith("unknown:") else 0
 
 
-def cmd_nudge(dry_run: bool, force: bool = False, audience: str = "") -> int:
+def cmd_nudge(
+    dry_run: bool,
+    force: bool = False,
+    audience: str = "",
+    plain_mentions: bool = False,
+) -> int:
     """Deliver at most one proactive follow-up about work left unfinished.
 
     A dry run opens a READ-ONLY connection, so any accidental write raises rather
@@ -455,7 +460,14 @@ def cmd_nudge(dry_run: bool, force: bool = False, audience: str = "") -> int:
 
     client = None if dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     conn = db.connect_readonly() if dry_run else db.connect()
-    outcome = nudges.run(client, conn, dry_run=dry_run, force=force, audience=audience)
+    outcome = nudges.run(
+        client,
+        conn,
+        dry_run=dry_run,
+        force=force,
+        audience=audience,
+        plain_mentions=plain_mentions,
+    )
     print(f"nudge: {outcome}")
     return 1 if outcome.startswith("nudge failed") else 0
 
@@ -737,6 +749,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip the business-hours window only; caps and dedup still apply",
     )
+    p_nudge.add_argument(
+        "--plain-mentions",
+        action="store_true",
+        help="render @mentions as plain text so a rehearsal notifies nobody",
+    )
     p_remind = sub.add_parser(
         "remind", help="deliver reminders a rep asked for that have come due"
     )
@@ -898,6 +915,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=not args.execute,
             force=bool(args.force),
             audience=str(args.audience or ""),
+            plain_mentions=bool(args.plain_mentions),
         )
     if args.command == "remind":
         # Same default as nudge: never send because someone forgot a flag.

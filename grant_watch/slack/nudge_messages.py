@@ -15,15 +15,22 @@ what Grant observed and then ask.
 
 from __future__ import annotations
 
+import sqlite3
 from typing import TYPE_CHECKING
 
 from ..presentation import display_entity_name
+from . import nudge_promises
 
 if TYPE_CHECKING:  # import-only: the runtime path needs attribute access, not the class
-    from .nudges import NudgeCandidate
+    from .nudge_sources import NudgeCandidate
 
 
-def build_message(candidate: "NudgeCandidate", variant: str = "a") -> str:
+def build_message(
+    candidate: "NudgeCandidate",
+    variant: str = "a",
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> str:
     """One short, human line that is hard to ignore — and still only claims what
     Grant actually observed.
 
@@ -63,7 +70,9 @@ def build_message(candidate: "NudgeCandidate", variant: str = "a") -> str:
     if candidate.subject_kind == "capability_now_available":
         return _capability_message(candidate, mention, variant)
     if candidate.subject_kind == "card_escalated":
-        return _escalation_message(candidate, mention, variant)
+        return _escalation_message(candidate, mention, variant, conn)
+    if candidate.subject_kind == "offer_unanswered":
+        return _unanswered_offer_message(candidate, mention, variant)
     if candidate.subject_kind == "thread_abandoned":
         if variant == "b":
             return f"{mention}I dropped the ball here and never answered. Another go?"
@@ -174,7 +183,10 @@ def _capability_message(
 
 
 def _escalation_message(
-    candidate: "NudgeCandidate", mention: str, variant: str = "a"
+    candidate: "NudgeCandidate",
+    mention: str,
+    variant: str = "a",
+    conn: sqlite3.Connection | None = None,
 ) -> str:
     """Tell a manager one lead went unanswered — briefly, and without accusing anyone.
 
@@ -183,21 +195,97 @@ def _escalation_message(
     true and "she never followed up" is not — the rep may have phoned the district
     from the car. Naming the money and the person is the point (it is what makes the
     message actionable), so the sentence around them has to be exact.
+
+    THE CLOSING OFFER IS COMPUTED, NOT WRITTEN. Chase's example ended "I can easily
+    have Sean Joyce send an email. Do you want me to do that?" — the right instinct,
+    and the wrong sentence twice over: Grant does not send prospect email (a human
+    approves and Persequor sends, Constitution rule 10), and the specific name is only
+    available when a verified contact with an email actually exists on that lead. So
+    `nudge_promises.best_offer` reads the lead and returns the strongest promise Grant
+    can keep — the named draft when there is a contact to name, a narrower one when
+    there is not. Without a connection it degrades to the offer that is always true.
+
+    TWO CASES, AND THE UNTAGGED ONE IS THE ONE THAT PROMPTED THIS. North Palos went out
+    to the whole channel and nobody answered; there is no rep to name, and "nobody's
+    picked it up" is exactly what a manager needs to hear.
     """
     entity = display_entity_name(str(candidate.observed.get("entity_name") or ""))
     amount = int(candidate.observed.get("amount_usd") or 0)
     who = str(candidate.observed.get("tagged_slack") or "")
     money = f"${amount:,} " if amount > 0 else ""
-    owner = f"<@{who}>" if who else "the territory rep"
     subject = entity or "a lead"
+    offer = (
+        nudge_promises.best_offer(conn, int(candidate.observed.get("lead_id") or 0))
+        if conn is not None
+        else nudge_promises.Offer("find_contact", "Want me to find a contact?")
+    )
+    if not who:
+        # Nobody was tagged, so nobody can be named. "Here" is load-bearing: the card
+        # went to a channel, and Grant can only speak for what came back to it.
+        if variant == "b":
+            return (
+                f"{mention}nobody's picked up {money}{subject} here. "
+                f"{offer.question}"
+            )
+        return (
+            f"{mention}heads up — {money}{subject} has been sitting here with no "
+            f"takers. Good money, and the window's open. {offer.question}"
+        )
+    owner = f"<@{who}>"
     if variant == "b":
         return (
             f"{mention}{money}{subject} has been sitting with {owner} — nothing back "
-            "here, though it may be offline. Want a contact?"
+            f"here, though it may be offline. {offer.question}"
         )
     # "nothing back here" and "may be handled offline" are load-bearing: Grant sees
     # Slack and its own tables, so it must not tell a manager the rep did nothing.
     return (
         f"{mention}heads up — {money}{subject} went to {owner} and nothing's come "
-        "back here. May be handled offline. Want me to find a contact?"
+        f"back here. May be handled offline. {offer.question}"
+    )
+
+
+# What Grant offered, in the words a colleague would use to describe it. Keyed by
+# capability so the sentence stays tied to the thing that actually shipped, and
+# hand-written for the same reason as `_CAPABILITY_HEADLINE`: assembling these from
+# fragments produced text no person would say.
+_OFFER_ABOUT = {
+    "email_results": "emailing that list over",
+    "campaign_load": "building that campaign",
+    "reminders": "setting that reminder up",
+    "contact_supplied": "saving the contact they gave me",
+}
+
+
+def _unanswered_offer_message(
+    candidate: "NudgeCandidate", mention: str, variant: str = "a"
+) -> str:
+    """Tell the manager that an offer Grant made was never answered.
+
+    THE GAP CHASE NAMED: "if Jocelyn does not respond, and let's say after 24 to 30
+    hours, the system messages in the main Monarch Cloud Team channel and says
+    something like, Hey @Anthony, @Jocelyn has not responded to me."
+
+    This is the ONE follow-up whose central claim is about a specific person's silence,
+    so it is also the one with the least room for error. It is sayable at all only
+    because `nudge_silence.replied_since` asks SLACK — not the local receipts table,
+    which is known to undercount — and refuses to send when it cannot get an answer.
+    Even so the wording stays inside what was observed: "hasn't come back to me"
+    describes Grant's inbox, not the colleague's day. She may well have built the
+    campaign by hand.
+    """
+    silent = str(candidate.observed.get("silent_slack") or "")
+    who = f"<@{silent}>" if silent else "whoever I asked"
+    about = _OFFER_ABOUT.get(
+        str(candidate.observed.get("capability") or ""), "something I offered to do"
+    )
+    when = str(candidate.observed.get("asked_on") or "").strip()
+    # The original ask date is what makes this worth raising rather than nagging: the
+    # request is old, the answer is new, and it is still sitting there.
+    since = f" — they first asked back on {when}" if when else ""
+    if variant == "b":
+        return f"{mention}{who} hasn't come back to me about {about}. Any ideas?"
+    return (
+        f"{mention}I offered {who} {about}{since}, and nothing's come back here. "
+        "Worth a poke from you, or shall I leave it?"
     )
