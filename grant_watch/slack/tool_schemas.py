@@ -152,14 +152,26 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "lead_stats",
         "description": "Return real lead counts from an allowlisted view, optionally "
-        "grouped by source, state, program, grade, or status. Use for "
+        "grouped by source, state, program, grade, status, or contact. Use for "
         "count/summary questions; never write SQL.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "group_by": {
                     "type": "string",
-                    "enum": ["source", "state", "program", "grade", "status"],
+                    "enum": [
+                        "source",
+                        "state",
+                        "program",
+                        "grade",
+                        "status",
+                        "contact",
+                    ],
+                    "description": "`contact` counts leads by the best contact "
+                    "Grant holds for each (verified / vendor_licensed / "
+                    "linkedin_only / not_found / none) — use it for 'how many of "
+                    "these actually have a contact?', which is otherwise "
+                    "unanswerable without exporting.",
                 },
                 "state": {"type": "string"},
                 "program": {"type": "string"},

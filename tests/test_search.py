@@ -882,3 +882,37 @@ def test_enriched_rows_that_do_not_fit_the_chat_are_still_declared(
     assert "I looked up contacts for 40 organizations" in text
     assert "only the first 15 fit here" in text
     assert "export" in text
+
+
+def test_lead_stats_can_count_leads_by_whether_they_have_a_contact(
+    tmp_path: Path,
+) -> None:
+    """ "How many of these actually have a contact?" had no tool behind it.
+
+    Asked that in production on 2026-08-11, Grant correctly refused to guess and
+    offered a spreadsheet so the rep could tally a column by hand — an honest answer
+    to a question the data can answer directly. A lead is counted by its BEST
+    finding, and a lead with none counts as `none` rather than disappearing.
+    """
+    path = _bulk_db(tmp_path, 4)
+    conn = db.connect(path)
+    ids = [int(r[0]) for r in conn.execute("SELECT id FROM leads ORDER BY id")]
+    conn.executemany(
+        """INSERT INTO contacts (lead_id,name,title,email,phone,source_url,
+                                 confidence,contact_status,provenance)
+           VALUES (?,?,'','','','https://e.test','high',?,'page_verified')""",
+        [
+            (ids[0], "A", "verified"),
+            (ids[0], "B", "linkedin_only"),  # best-of wins, not row order
+            (ids[1], "C", "linkedin_only"),
+            (ids[2], "D", "not_found"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    out = tools.lead_stats(group_by="contact", db_path=path)
+    assert "verified: 1" in out
+    assert "linkedin_only: 1" in out
+    assert "not_found: 1" in out
+    assert "none: 1" in out  # the lead with no contact row at all

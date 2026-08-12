@@ -100,7 +100,22 @@ def lead_stats(
         "grade": "lead_grade",
         "status": "status",
     }
-    column = columns.get(group_by or "grade")
+    # "HOW MANY OF THESE ACTUALLY HAVE A CONTACT?" WAS UNANSWERABLE. Asked exactly
+    # that in production on 2026-08-11, Grant had to reply that it had no tool for
+    # it and offer a spreadsheet export so the rep could tally a column by hand —
+    # an honest answer to a question the data can answer directly. Contact status
+    # lives on `contacts`, one row per finding, so a lead is counted by its BEST
+    # finding and a lead with none counts as `none` rather than vanishing.
+    contact_rank = (
+        "CASE c.contact_status WHEN 'verified' THEN 1 WHEN 'vendor_licensed' THEN 2 "
+        "WHEN 'linkedin_only' THEN 3 WHEN 'not_found' THEN 4 ELSE 5 END"
+    )
+    column = (
+        "COALESCE((SELECT c.contact_status FROM contacts c WHERE c.lead_id=leads.id "
+        f"ORDER BY {contact_rank} LIMIT 1), 'none')"
+        if (group_by or "grade") == "contact"
+        else columns.get(group_by or "grade")
+    )
     if column is None:
         return f"ERROR: unsupported grouping '{group_by}'."
     where = [db.SEARCHABLE_LEAD_PREDICATE]
