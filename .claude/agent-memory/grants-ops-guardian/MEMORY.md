@@ -34,7 +34,9 @@
 
 ## Current production state
 
-- [02377ae — CURRENT PROD, deployed + verified](prod-state-02377ae-verified.md) — 2026-08-11, schema 39, PID 71882, 0.19s outage; wording guard now bites on the DELIVERY path, proven True→False with a control; the 3 armed asks named
+- [9fb6813 — CURRENT PROD, deployed + verified](prod-state-9fb6813-verified.md) — 2026-08-11, **schema 40**, PID 86114, 0.55s outage; CRONS apply migrations (watchdog every 10 min), not the restart — deploy in a cron gap; pre-40 item_hash shim proven on a real rep's pending approval
+- [Droplet pytest baseline is 1 FAILED](droplet-pytest-rich-card-flag.md) — `GRANT_RICH_CARD_ENABLED=1` in prod .env breaks one test_cli case; environmental, pre-existing, never roll back over it
+- [02377ae (superseded by 9fb6813)](prod-state-02377ae-verified.md) — 2026-08-11, schema 39, PID 71882, 0.19s outage; wording guard now bites on the DELIVERY path, proven True→False with a control; the 3 armed asks named
 - [9ef2ad7 (superseded by 02377ae)](prod-state-9ef2ad7-verified.md) — schema 39, PID 71366, 0.18s outage; the branch name is not `main` and that is fine — check `merge-base`, not the name
 - [f7cff1d (superseded by 9ef2ad7)](prod-state-f7cff1d-verified.md) — still the reference for the manifest-diff noise floor (6 always-benign paths); 2 nudges REALLY delivered; nudge cron's 3 log vocabularies
 - [Deploy 43e6f1d (superseded by f7cff1d)](deploy-c7d0d54-accusation-guards.md) — schema 39, PID 67672; four false-accusation paths closed + opt-out routing stall; manager IS in the channel so the membership guard suppresses nothing
