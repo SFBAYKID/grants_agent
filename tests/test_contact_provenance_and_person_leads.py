@@ -216,3 +216,48 @@ def test_a_campaign_lead_stays_organization_only_without_a_verified_person(
     assert person == ""
     assert payload["LastName"] == "CORNING UNION HIGH SCHOOL DISTRICT"
     assert "Title" not in payload
+
+
+def test_the_search_grid_labels_an_organization_mailbox() -> None:
+    """ "Rabbi Yossi Gross, Executive Director — office@ygla.org" was printed live.
+
+    True that the page carried both; false that the address is his. `choose_email`
+    was fixed for the Salesforce write path; this renderer had the identical gap
+    because the label depended on which column held the address, not the address.
+    """
+    from grant_watch.slack.search_presentation import contact_suffix
+
+    general = contact_suffix(
+        [
+            "Rabbi Yossi Gross",
+            "Executive Director",
+            "office@ygla.org",
+            "verified",
+            "",
+            "",
+        ]
+    )
+    assert "organization mailbox, not their own" in general
+
+    personal = contact_suffix(
+        [
+            "Dana Reyes",
+            "Director of Technology",
+            "dreyes@imperialusd.org",
+            "verified",
+            "",
+            "",
+        ]
+    )
+    assert "organization mailbox" not in personal
+    assert "dreyes@imperialusd.org" in personal
+
+
+def test_a_burned_lead_is_not_reported_as_no_contact() -> None:
+    """`needs_operator_retry` must never render as "none found" or as a raw slug."""
+    from grant_watch.slack.search_presentation import contact_suffix
+
+    out = contact_suffix(["", "", "", "needs_operator_retry", "", ""])
+    assert "not checked" in out
+    assert "none found" not in out
+    assert "needs_operator_retry" not in out

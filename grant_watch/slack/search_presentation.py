@@ -119,7 +119,20 @@ def contact_suffix(cell: list[object]) -> str:
     main_line = f" · main line {org_phone}" if org_phone else ""
     if status == "verified":
         who = f"{name} ({title})".strip()
-        return f" · contact: {who} {email}{direct}{main_line}".rstrip()
+        # AN ORGANIZATION MAILBOX BESIDE A PERSON'S NAME READS AS THEIRS. Grant
+        # printed "Rabbi Yossi Gross, Executive Director — office@ygla.org" in
+        # production on 2026-08-11: true that the page carried both, false that the
+        # address is his. `choose_email` was fixed for the Salesforce write path the
+        # same day; this renderer had the identical gap, because the label depended
+        # on which column held the address rather than on the address itself.
+        from ..enrich.salesforce_contact_fields import email_is_general
+
+        shown = (
+            f"{email} (organization mailbox, not their own)"
+            if email and email_is_general(str(email))
+            else email
+        )
+        return f" · contact: {who} {shown}{direct}{main_line}".rstrip()
     if status == "linkedin_org_email":
         who = f"{name} ({title})".strip() if title else str(name)
         return f" · contact: {who} via LinkedIn; org mailbox {email}{main_line}"
