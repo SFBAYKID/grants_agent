@@ -18,7 +18,12 @@ import requests
 from .. import db
 
 API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
-MAX_ACTION_ORGANIZATIONS = 200
+# Salesforce's collection limit is 200 and that is the hard ceiling this must never
+# exceed. 100 is Chase's call, 2026-08-11 — "please send them 100 at a time" — after
+# a real 374-organization load came back as cards of 199 and 173. A card a rep is
+# asked to read and approve should be a size they can actually review, and a smaller
+# slice also bounds what one rejected write can take down with it.
+MAX_ACTION_ORGANIZATIONS = 100
 MEMBER_STATUS = "Identified by Grant"
 # Grant never creates Salesforce activity Tasks (Chase, 2026-07-18: "we don't use
 # tasks — log it as a note"). Task is deliberately absent from the allowlist so a

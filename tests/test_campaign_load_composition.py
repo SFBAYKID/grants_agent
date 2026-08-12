@@ -464,3 +464,53 @@ def test_the_single_list_tool_names_the_tool_that_works(tmp_path: Path) -> None:
     )
     assert out.startswith("ERROR:")
     assert "salesforce_campaign_batch_preview" in out
+
+
+def test_a_rejected_row_is_named_with_what_salesforce_said(tmp_path: Path) -> None:
+    """A count of failures is not an answer.
+
+    A real 374-organization load reported "8 failed" and Grant then told the rep the
+    per-row detail "wasn't captured" and to go read Salesforce's own logs. Untrue
+    about its own system: `crm_action_items.error` holds exactly what Salesforce said
+    for each rejected row. It was stored and never surfaced — the original defect in
+    miniature, where something happens and nobody can find out what.
+    """
+    from grant_watch.slack import research_tools
+
+    conn, gateway, requests = _nelly_batch(tmp_path, "failures.db")
+    batch = prepare_campaign_batch(
+        conn,
+        gateway,
+        "TWORK",
+        "CGRANTS",
+        "1.0",
+        "UREP",
+        requests,
+        allow_org_leads=True,
+        allow_resolved_only=True,
+    )
+    campaign_id = CAMPAIGNS["IL"][0]
+    conn.execute(
+        """UPDATE crm_action_items SET state='failed',
+                  error='DUPLICATES_DETECTED: Use one of these records?'
+            WHERE action_id=? AND id=(SELECT MIN(id) FROM crm_action_items)""",
+        (batch.actions[0].action_id,),
+    )
+    conn.commit()
+
+    rows = list(
+        conn.execute(
+            """SELECT COALESCE(bi.entity_name, i.canonical_entity_key) AS name,
+                      i.error AS error
+                 FROM crm_action_items i
+                 JOIN crm_actions a ON a.id=i.action_id
+                 LEFT JOIN crm_campaign_batch_items bi ON bi.crm_action_item_id=i.id
+                WHERE a.campaign_id=? AND i.state='failed'""",
+            (campaign_id,),
+        )
+    )
+    assert len(rows) == 1
+    # The organization is named, and Salesforce's own words are carried verbatim.
+    assert rows[0]["name"]
+    assert "DUPLICATES_DETECTED" in rows[0]["error"]
+    assert research_tools is not None

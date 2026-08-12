@@ -1,4 +1,8 @@
-"""Slicing a state/tier selection that exceeds Salesforce's 200-record limit.
+"""Slicing a state/tier selection that exceeds one approval card's organization cap.
+
+Sizes here are derived from MAX_ACTION_ORGANIZATIONS, never written as literals:
+the cap is a tuning decision (200 -> 100 on 2026-08-11, Chase's call) and a test
+that hardcodes it breaks on the tuning rather than on the behaviour it guards.
 
 Split from test_salesforce_campaign_batches.py at the 1000-line cap. These cover the
 request that dead-ended an SDR: a whole tier is routinely larger than one collection
@@ -18,6 +22,10 @@ from grant_watch import db
 from grant_watch.enrich.salesforce_campaign_batch import prepare_campaign_batch
 from grant_watch.enrich.salesforce_campaign_batch_models import CampaignTargetRequest
 from grant_watch.models import LeadGrade
+from grant_watch.enrich.salesforce_campaign_gateway import (
+    MAX_ACTION_ORGANIZATIONS as CAP,
+)
+
 from campaign_batch_support import (
     CAMPAIGNS,
     BatchGateway,
@@ -39,7 +47,7 @@ def _writer_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_a_selection_over_the_collection_limit_is_sliced_not_refused(
     tmp_path: Path,
 ) -> None:
-    """201 organizations become two ordered batches, and the rep is told so.
+    """One more than the cap becomes two ordered batches, and the rep is told so.
 
     This used to raise "refine the request below the 200-record Salesforce limit" —
     advice the tool cannot take, because its only filters are state and grade and
@@ -47,7 +55,7 @@ def test_a_selection_over_the_collection_limit_is_sliced_not_refused(
     something impossible, which is how the request dead-ended.
     """
     conn = db.connect(tmp_path / "batch.db")
-    _insert_leads(conn, "IL", LeadGrade.GOLD, 201, 0)
+    _insert_leads(conn, "IL", LeadGrade.GOLD, CAP + 1, 0)
 
     first = prepare_campaign_batch(
         conn,
@@ -63,7 +71,7 @@ def test_a_selection_over_the_collection_limit_is_sliced_not_refused(
         ),
     )
     assert "batch 1 of 2" in first.summary
-    assert "201 Grant rows over 201 organizations" in first.summary
+    assert f"{CAP + 1} Grant rows over {CAP + 1} organizations" in first.summary
 
     second = prepare_campaign_batch(
         conn,
@@ -97,10 +105,10 @@ def test_a_selection_over_the_collection_limit_is_sliced_not_refused(
             (second.batch_id,),
         )
     }
-    assert len(first_keys) == 200
+    assert len(first_keys) == CAP
     assert len(second_keys) == 1
     assert not (first_keys & second_keys)
-    assert len(first_keys | second_keys) == 201
+    assert len(first_keys | second_keys) == CAP + 1
 
 
 def test_a_slice_beyond_the_end_is_refused_rather_than_returning_nothing(
@@ -108,7 +116,7 @@ def test_a_slice_beyond_the_end_is_refused_rather_than_returning_nothing(
 ) -> None:
     """Asking for batch 3 of 2 must say so, not silently prepare an empty batch."""
     conn = db.connect(tmp_path / "batch.db")
-    _insert_leads(conn, "IL", LeadGrade.GOLD, 201, 0)
+    _insert_leads(conn, "IL", LeadGrade.GOLD, CAP + 1, 0)
     with pytest.raises(ValueError, match="does not exist"):
         prepare_campaign_batch(
             conn,
@@ -204,7 +212,7 @@ def test_a_shifted_selection_refuses_instead_of_skipping_an_organization(
     total back turns that into an explicit refusal.
     """
     conn = db.connect(tmp_path / "batch.db")
-    _insert_leads(conn, "IL", LeadGrade.GOLD, 201, 0)
+    _insert_leads(conn, "IL", LeadGrade.GOLD, CAP + 1, 0)
     first = prepare_campaign_batch(
         conn,
         BatchGateway(),
@@ -218,7 +226,7 @@ def test_a_shifted_selection_refuses_instead_of_skipping_an_organization(
             ),
         ),
     )
-    assert "201 Grant rows over 201 organizations" in first.summary
+    assert f"{CAP + 1} Grant rows over {CAP + 1} organizations" in first.summary
 
     # A rep marks one lead dead between the two batches.
     conn.execute("UPDATE leads SET status='dead' WHERE id=(SELECT MIN(id) FROM leads)")
@@ -238,7 +246,7 @@ def test_a_shifted_selection_refuses_instead_of_skipping_an_organization(
                     "IL",
                     ("gold",),
                     slice_index=1,
-                    expected_total_organizations=201,
+                    expected_total_organizations=CAP + 1,
                 ),
             ),
         )
@@ -248,7 +256,7 @@ def test_a_shifted_selection_refuses_instead_of_skipping_an_organization(
 def test_an_unchanged_selection_still_slices_normally(tmp_path: Path) -> None:
     """The guard must not block the ordinary case it exists to protect."""
     conn = db.connect(tmp_path / "batch.db")
-    _insert_leads(conn, "IL", LeadGrade.GOLD, 201, 0)
+    _insert_leads(conn, "IL", LeadGrade.GOLD, CAP + 1, 0)
     second = prepare_campaign_batch(
         conn,
         BatchGateway(),
@@ -262,7 +270,7 @@ def test_an_unchanged_selection_still_slices_normally(tmp_path: Path) -> None:
                 "IL",
                 ("gold",),
                 slice_index=1,
-                expected_total_organizations=201,
+                expected_total_organizations=CAP + 1,
             ),
         ),
     )

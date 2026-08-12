@@ -259,6 +259,27 @@ def salesforce_campaign_status(name_or_link: str) -> str:
             (campaign_id,),
         )
     )
+    # A COUNT OF FAILURES IS NOT AN ANSWER. On 2026-08-11 a real load reported
+    # "8 failed" and Grant then told the rep the per-row detail "wasn't captured"
+    # and to go and read Salesforce's own logs. That was untrue about its own
+    # system: `crm_action_items.error` holds exactly what Salesforce said for each
+    # rejected row. It was stored and simply never surfaced, which is the original
+    # defect in miniature — something happened and nobody could find out what.
+    # The organization NAME is not on `crm_action_items` — it lives on the frozen
+    # manifest row that points at it, so this LEFT JOINs to recover it and falls
+    # back to the canonical key for a non-batch action rather than showing nothing.
+    failures = list(
+        conn.execute(
+            """SELECT COALESCE(bi.entity_name, i.canonical_entity_key) AS name,
+                      i.error AS error
+                 FROM crm_action_items i
+                 JOIN crm_actions a ON a.id=i.action_id
+                 LEFT JOIN crm_campaign_batch_items bi ON bi.crm_action_item_id=i.id
+                WHERE a.campaign_id=? AND i.state='failed'
+             ORDER BY name""",
+            (campaign_id,),
+        )
+    )
     try:
         # COUNT(Id), NOT COUNT(). A bare SELECT COUNT() puts its total in the
         # response's totalSize and returns ZERO records, so counting rows reported
@@ -287,6 +308,15 @@ def salesforce_campaign_status(name_or_link: str) -> str:
         lines.append(
             f"It could NOT add: {detail}. Those never reached Salesforce, so they are "
             "missing from the Campaign unless someone added them by hand."
+        )
+    if failures:
+        detail = "\n".join(
+            f"  - {row['name']}: {row['error'] or 'Salesforce gave no reason'}"
+            for row in failures
+        )
+        lines.append(
+            f"Salesforce REJECTED {len(failures)} of them during the write, and this "
+            f"is exactly what it said about each:\n{detail}"
         )
     lines.append(
         # The first sentence is a FACT a rep should see; only the instruction after
