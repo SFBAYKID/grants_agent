@@ -86,6 +86,8 @@ grant_watch/
 ├── notify/             # Resend transport; the signature takes a Slack id, never an address
 ├── slack/              # channel-only bot, drip, search/export, tools, Persequor handoff,
 │                       #   follow-ups (nudge_*.py), reminders, watchdog, thread scanning
+│                       #   approval_blocks.py holds the confirm/cancel card renderers,
+│                       #   split from grant.py at the 1000-line cap (pure, no app state)
 ├── roster.py           # the reviewed Slack-id/email/manager map; every external action resolves here
 ├── territory.py        # state -> rep ownership, and which sources may tag a human at all
 ├── reminders.py        # rep-requested reminders and the follow-up opt-out register
@@ -398,6 +400,14 @@ The load-bearing constraints, each of which cost a real defect to learn:
   `slack_event_receipts`, which undercounts. It pages (`has_more`), counts reactions, and treats
   only an explicit DENY list of subtypes as non-human — `file_share`, `thread_broadcast` and
   `me_message` are people talking.
+- **`NON_HUMAN_SUBTYPES` IS SHARED WITH THE LISTENER, and that is the point.** It lives in
+  `slack/nudge_silence.py` and `slack/grant.py` imports it; both `on_mention` and `on_message`
+  use it. The deny list was written for `replied_since` in August 2026 while the LISTENER kept
+  the original "has a subtype" test for another day — so a rep ticking "also send to channel"
+  got silence from Grant, with no error and no receipt row (2026-08-12). One list, one
+  definition of a person. The default direction is deliberate: an unknown subtype counts as
+  HUMAN, because treating software as a person costs a wasted turn while treating a person as
+  software costs the reply.
 - **Promises are computed from the data**, using the same predicate the consumer requires
   (`contact_status='verified'`), and never promise a SEND: a human approves and Persequor sends,
   and `outreach.sent_at` has no writer, so the database cannot know an email was delivered.

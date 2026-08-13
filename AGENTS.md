@@ -45,7 +45,7 @@ it was skipped through five production deploys on 2026-08-11 and five files had 
 python -m pip install -r requirements-dev.txt
 ruff format --check grant_watch tests
 ruff check grant_watch tests
-vulture grant_watch --min-confidence 80
+vulture grant_watch --min-confidence 60   # see the warning below: 80 finds NOTHING
 python -m grant_watch.health
 python -m pytest tests -q
 python -m grant_watch.source_discovery
@@ -58,6 +58,20 @@ python -m grant_watch.incorporated_place_universe
 
 Also check module/function documentation and annotations when adding code, review file sizes, and run
 `git diff --check`. Report each result as `verified`, `assumed`, or `needs-testing`.
+
+**The dead-code line was a placebo until 2026-08-12, and rule 5 quietly went unenforced.**
+`vulture --min-confidence 80` returns **zero entries on this repository, always** — vulture scores
+unused functions, classes, methods and module constants at **60%**, and reserves 90–100% for unused
+imports, which `ruff check` (F401) already catches independently. So the gate line could only ever
+agree with ruff and could never find a dead function. Dropping it to 60 surfaces real findings, and
+it is NOISY BY DESIGN: Bolt decorator handlers (`on_message`), dataclass fields, and enum members
+reached by value all look unused to it and are not. **Do not delete on vulture's word.** Count real
+references first — across `grant_watch`, `tests`, `docs` and `config`, since a name may be reached
+from a test or named in a doc — and read each survivor before removing it. A constant with zero
+references is often not junk but a rule nobody wired up: four of them on 2026-08-12 were guards
+(a paid-scrape budget, an honesty rule about award amounts, two state vocabularies whose comments
+promised validation that did not exist). Wiring those up was the fix; deleting them would have
+satisfied the linter and thrown away the intent.
 
 The permanent core live check is intentionally outside the default health gate. Run it manually with
 `GRANT_LIVE_VERIFICATION=1 python -m grant_watch.live_verification --execute-live`. It is read-only,

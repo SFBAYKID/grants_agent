@@ -9,6 +9,7 @@
 - [Verify the premise, not the claim](verify-the-premise-not-the-claim.md) — re-measure "already fixed / already deployed" on the deployed bytes
 - [Edit cards in place](edit-cards-in-place.md) — fix a posted card with chat.update, never post a replacement
 - [Restart means relaunch](restart-means-relaunch.md) — pkill THEN `nohup bash run_bot.sh`; the */5 keepalive is the crash net, not the relaunch
+- [Nudge replies are silently dropped](nudge-replies-are-silently-dropped.md) — a plain reply to ANY nudge dies at `post is None and not general_thread`; @-mention works, plain reply does not. U01DFJWQQJ3 is Anthony, NOT "the manager"
 
 ## Tenant, transport, deploy mechanics
 
@@ -26,6 +27,7 @@
 
 - [Read-only DB forensics recipe](readonly-db-forensics-recipe.md) — `mode=ro` works on the hot WAL (zero writes); crontab lines characterized; OregonBuys 404s every poll
 - [Wrong column name reads as NULL](row-get-wrong-column-false-null.md) — `dict(Row).get("typo")` is indistinguishable from a real NULL
+- [UTC day vs Pacific day](utc-day-vs-pacific-day-trap.md) — `substr(ts,1,10)` files a PT evening under the NEXT day; print the full date or you will misdate a burst by 24h
 - [Silent LLM fallback](grant-bot-silent-llm-fallback.md) — bot.log logs NOTHING on LLM failures; a clean log is not evidence of success
 - [Dating undated rows](dating-undated-contacts-rows.md) — bot.log tool-turn order ↔ search_requests.created_at pins an undated write to the minute
 - [One-offs need load_dotenv](oneoff-scripts-need-load-dotenv.md) — cwd does NOT load .env; one-offs degrade silently and can still write state
