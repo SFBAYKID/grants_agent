@@ -21,7 +21,11 @@ from typing import Protocol
 
 from dotenv import load_dotenv
 
-from .firecrawl_client import FirecrawlClient, SearchOutcome
+from .firecrawl_client import (
+    SearchOutcome,
+    failure_outcome,
+    search_outcome_from_payload,
+)
 from .source_discovery_store import (
     ALLOWED_NAMESPACES,
     BatchLock,
@@ -96,6 +100,71 @@ class SearchClient(Protocol):
     def search_once(self, query: str, result_limit: int) -> SearchOutcome:
         """Execute exactly one bounded search call."""
         ...
+
+
+@dataclass(frozen=True)
+class AccountGatewaySearchClient:
+    """Adapt the sole account-metered gateway to immutable discovery evidence."""
+
+    retry_indeterminate: bool = False
+
+    def search_once(self, query: str, result_limit: int) -> SearchOutcome:
+        """Execute one search through central reservation/rate/backoff authority."""
+        from .enrich import firecrawl_gateway
+
+        api_key = os.environ.get("FIRECRAWL_API_KEY", "").strip()
+        if not api_key:
+            return failure_outcome(
+                "account_unavailable",
+                error_code="account_credential_missing",
+                retryable=False,
+                systemic=True,
+            )
+        try:
+            with (
+                firecrawl_gateway.bind_workflow("source_discovery_batch"),
+                firecrawl_gateway.allow_indeterminate_retry(self.retry_indeterminate),
+            ):
+                payload = firecrawl_gateway.search_payload(query, result_limit)
+        except firecrawl_gateway.FirecrawlRateLimited as exc:
+            return failure_outcome(
+                "rate_limited",
+                retry_after_seconds=exc.retry_after_seconds,
+                error_code="account_rate_limited",
+                retryable=True,
+            )
+        except firecrawl_gateway.FirecrawlIndeterminate:
+            return failure_outcome(
+                "indeterminate",
+                error_code="account_request_indeterminate",
+                retryable=True,
+            )
+        except firecrawl_gateway.FirecrawlCredentialRejected:
+            return failure_outcome(
+                "account_unavailable",
+                error_code="account_credential_or_billing",
+                retryable=False,
+                systemic=True,
+            )
+        except (
+            firecrawl_gateway.FirecrawlBudgetExhausted,
+            firecrawl_gateway.FirecrawlBudgetNotConfigured,
+        ):
+            return failure_outcome(
+                "account_unavailable",
+                error_code="account_budget_unavailable",
+                retryable=False,
+                systemic=True,
+            )
+        except firecrawl_gateway.FirecrawlUnavailable:
+            return failure_outcome(
+                "gateway_failure",
+                error_code="account_gateway_failure",
+                retryable=False,
+            )
+        return search_outcome_from_payload(
+            payload, result_limit, secret_values=(api_key,)
+        )
 
 
 def utc_now() -> datetime:
@@ -408,6 +477,16 @@ def execute_batch(
                 last_completion = max(
                     item for item in (last_completion, recovered_at) if item is not None
                 )
+            if (
+                checkpoint.terminal_status == "retryable_failure"
+                and checkpoint.attempts
+                and checkpoint.attempts[-1].outcome == "indeterminate"
+                and not retry_indeterminate
+            ):
+                raise RuntimeError(
+                    "batch contains an indeterminate account attempt; "
+                    "retry requires --retry-indeterminate"
+                )
             if checkpoint.terminal_status in {
                 "success",
                 "zero_results",
@@ -444,6 +523,15 @@ def execute_batch(
                 )
                 replace_checkpoint(batch_dir, checkpoint)
                 last_completion = completed_at
+                if outcome.outcome == "indeterminate":
+                    # The flag authorizes only state already indeterminate when this
+                    # run began. A newly lost response needs a fresh operator choice;
+                    # pre-authorizing unknown future failures would be an implicit
+                    # retry disguised as a command-line option.
+                    raise RuntimeError(
+                        "Firecrawl account attempt is indeterminate; "
+                        "rerun with --retry-indeterminate after reconciliation"
+                    )
                 if outcome.systemic:
                     raise RuntimeError(
                         "Firecrawl authorization or billing rejected the batch"
@@ -495,7 +583,7 @@ def _execute_from_cli(
         root,
         manifest,
         checkpoints,
-        FirecrawlClient(key),
+        AccountGatewaySearchClient(retry_indeterminate),
         retry_indeterminate=retry_indeterminate,
     )
     statuses = ", ".join(

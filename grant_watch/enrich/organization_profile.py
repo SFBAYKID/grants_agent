@@ -11,24 +11,23 @@ fetched, or it is dropped. It records nothing it could not read (honest
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from anthropic import Anthropic
 
+from ..llm import anthropic_client_options
+from . import evidence
 from .finder import (
     MODEL,
     Progress,
     SourceUnreachable,
     _NOOP,
-    _EMAIL_RE,
     _host,
     _looks_official,
-    _phone_on_page,
     _scrape,
     _search,
-    _text_field_on_page,
 )
 
 # Contact-style pages most likely to carry an org's address, phone, and general
@@ -51,9 +50,10 @@ _GENERIC_LOCALPARTS = (
 
 @dataclass
 class OrgProfile:
-    """Org-level facts, each verified verbatim on ``source_url`` (or blank)."""
+    """Organization facts proven together on one fetched evidence page."""
 
     website: str = ""
+    website_candidate: str = ""
     general_email: str = ""
     phone: str = ""
     street: str = ""
@@ -62,6 +62,17 @@ class OrgProfile:
     postal_code: str = ""
     source_url: str = ""
     status: str = "not_found"  # found | not_found | unreachable
+    field_evidence: dict[str, evidence.EvidenceMatch] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SiteCandidate:
+    """One resolved site with evidence saying whether it is authoritative."""
+
+    origin: str
+    host: str
+    evidence: evidence.EvidenceMatch
+    authoritative: bool = False
 
 
 def _general_email_on_page(page_text: str, email: str) -> bool:
@@ -69,38 +80,73 @@ def _general_email_on_page(page_text: str, email: str) -> bool:
 
     It must also read like a shared mailbox (info@/office@/…), so a stray
     personal address on the page is not mistaken for the organization's."""
-    if not email or not _EMAIL_RE.fullmatch(email):
-        return False
-    if email.lower() not in page_text.lower():
+    if evidence.exact_email(page_text, email, "", field="general_email") is None:
         return False
     localpart = email.split("@", 1)[0].lower()
-    return any(
-        localpart == generic or localpart.startswith(generic)
-        for generic in _GENERIC_LOCALPARTS
-    )
+    return localpart in _GENERIC_LOCALPARTS
 
 
-def _resolve_site(conn: sqlite3.Connection, lead: sqlite3.Row) -> str:
-    """Find the organization's official host — from a verified contact or search."""
+def _origin(url: str) -> str:
+    """Return the HTTP(S) origin for a URL, preserving its proven scheme."""
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return ""
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme.lower()}://{parsed.hostname.lower()}{port}"
+
+
+def _resolve_site(conn: sqlite3.Connection, lead: sqlite3.Row) -> SiteCandidate | None:
+    """Find a state-bound website candidate from verified contact evidence or search."""
     from .. import db
 
+    nces_website = str(lead["nces_website"] or "").strip()
+    nces_source = str(lead["nces_website_source_url"] or "").strip()
+    if str(lead["nces_website_status"] or "") == "verified" and nces_website:
+        origin = _origin(nces_website)
+        host = _host(nces_website)
+        if origin and host and nces_source:
+            match = evidence.recorded_match(
+                "website",
+                origin,
+                nces_source,
+                "exact NCES district record published this organization website",
+            )
+            return SiteCandidate(origin, host, match, authoritative=True)
     for contact in db.contacts_for_lead(conn, int(lead["id"])):
+        if not db.contact_is_page_verified(contact):
+            continue
         domain = str(contact["official_domain"] or "").strip()
-        if domain:
-            return domain
+        source_url = str(contact["source_url"] or "").strip()
+        origin = _origin(source_url) or (f"https://{domain}" if domain else "")
+        if domain and origin:
+            match = evidence.recorded_match(
+                "website_candidate",
+                origin,
+                source_url,
+                "website host inherited from a page-verified contact",
+            )
+            return SiteCandidate(origin, domain, match)
     entity = str(lead["entity_name"] or "")
     state = str(lead["state"] or "")
-    for result in _search(f"{entity} {state} official website", limit=5):
+    for result in _search(f"{entity} {state} official website", limit=5, conn=conn):
         if _looks_official(entity, state, result):
-            host = _host(str(result.get("url") or ""))
-            if host:
-                return host
-    return ""
+            result_url = str(result.get("url") or "")
+            host = _host(result_url)
+            origin = _origin(result_url)
+            if host and origin:
+                excerpt = " ".join(
+                    str(result.get(key) or "") for key in ("title", "description")
+                ).strip()
+                match = evidence.recorded_match(
+                    "website_candidate", origin, result_url, excerpt[:500]
+                )
+                return SiteCandidate(origin, host, match)
+    return None
 
 
 def _extract_org(page_text: str, entity: str, source_url: str) -> dict[str, str]:
     """Claude reads ONE page; the caller verifies every field against that page."""
-    client = Anthropic()
+    client = Anthropic(**anthropic_client_options())
     prompt = (
         f'Below is a page from the official website of "{entity}". Extract the '
         "ORGANIZATION's own contact details (not a vendor's, not a person's private "
@@ -122,31 +168,158 @@ def _extract_org(page_text: str, entity: str, source_url: str) -> dict[str, str]
 
 
 def _merge(profile: OrgProfile, page_text: str, data: dict[str, str], url: str) -> None:
-    """Fill any still-blank profile field with a value verified on THIS page."""
-    if not profile.source_url:
-        profile.source_url = url
+    """Fill one profile only from values proven on this exact page."""
+    if profile.source_url and profile.source_url != url:
+        raise ValueError("one organization profile cannot merge evidence across pages")
+    accepted: dict[str, evidence.EvidenceMatch] = {}
     email = str(data.get("general_email") or "").strip()
-    if not profile.general_email and _general_email_on_page(page_text, email):
-        profile.general_email = email
-    phone = str(data.get("phone") or "").strip()
-    if not profile.phone and _phone_on_page(page_text, phone):
-        profile.phone = phone
-    street = str(data.get("street") or "").strip()
-    if not profile.street and _text_field_on_page(page_text, street):
-        profile.street = street
-    city = str(data.get("city") or "").strip()
-    if not profile.city and _text_field_on_page(page_text, city):
-        profile.city = city
-    state = str(data.get("state") or "").strip()
-    if not profile.state and _text_field_on_page(page_text, state):
-        profile.state = state
-    postal = str(data.get("postal_code") or "").strip()
+    email_match = evidence.exact_email(page_text, email, url, field="general_email")
     if (
-        not profile.postal_code
-        and re.fullmatch(r"\d{5}(?:-\d{4})?", postal)
-        and postal in page_text
+        not profile.general_email
+        and email_match is not None
+        and email.split("@", 1)[0].lower() in _GENERIC_LOCALPARTS
     ):
-        profile.postal_code = postal
+        profile.general_email = email
+        accepted["general_email"] = email_match
+    phone = str(data.get("phone") or "").strip()
+    phone_match = evidence.phone(page_text, phone, url)
+    if not profile.phone and phone_match is not None:
+        profile.phone = phone
+        accepted["phone"] = phone_match
+    address_matches = evidence.address_block(
+        page_text,
+        {
+            field_name: str(data.get(field_name) or "").strip()
+            for field_name in ("street", "city", "state", "postal_code")
+        },
+        url,
+    )
+    for field_name, match in address_matches.items():
+        if not getattr(profile, field_name):
+            setattr(profile, field_name, match.value)
+            accepted[field_name] = match
+    if accepted:
+        profile.source_url = url
+        profile.field_evidence.update(accepted)
+
+
+def _profile_score(profile: OrgProfile) -> tuple[int, int]:
+    """Rank one-page profiles by useful verified facts, then address completeness."""
+    values = (
+        profile.general_email,
+        profile.phone,
+        profile.street,
+        profile.city,
+        profile.state,
+        profile.postal_code,
+    )
+    return sum(bool(value) for value in values), sum(
+        bool(value)
+        for value in (profile.street, profile.city, profile.state, profile.postal_code)
+    )
+
+
+def _combine_profiles(candidates: list[OrgProfile], site: SiteCandidate) -> OrgProfile:
+    """Project the best field values while retaining each field's exact page.
+
+    The most complete page wins a duplicate field, then weaker pages fill gaps. The
+    legacy single ``source_url`` is only a compatibility projection (prefer the
+    general-mailbox page); truth-bearing consumers use ``field_evidence``.
+    """
+    combined = OrgProfile(website_candidate=site.origin, status="found")
+    field_names = ("general_email", "phone")
+    for candidate in sorted(candidates, key=_profile_score, reverse=True):
+        for field_name in field_names:
+            if getattr(combined, field_name) or not getattr(candidate, field_name):
+                continue
+            setattr(combined, field_name, getattr(candidate, field_name))
+            combined.field_evidence[field_name] = candidate.field_evidence[field_name]
+    # Address components are one compound fact. Copy them from exactly one page;
+    # never fill a missing ZIP/state from a second address elsewhere on the site.
+    address_fields = ("street", "city", "state", "postal_code")
+    address_candidates = [
+        candidate
+        for candidate in candidates
+        if any(getattr(candidate, field_name) for field_name in address_fields)
+    ]
+    if address_candidates:
+        address = max(
+            address_candidates,
+            key=lambda candidate: sum(
+                bool(getattr(candidate, field_name)) for field_name in address_fields
+            ),
+        )
+        for field_name in address_fields:
+            value = getattr(address, field_name)
+            if value:
+                setattr(combined, field_name, value)
+                combined.field_evidence[field_name] = address.field_evidence[field_name]
+    combined.website = site.origin if site.authoritative else ""
+    anchor = combined.field_evidence.get("general_email") or next(
+        iter(combined.field_evidence.values())
+    )
+    combined.source_url = anchor.source_url
+    if site.authoritative:
+        combined.field_evidence["website"] = site.evidence
+    return combined
+
+
+def evidenced_profile(conn: sqlite3.Connection, lead: sqlite3.Row) -> OrgProfile:
+    """Return only current org projections proven by exact field evidence.
+
+    This read-side gate protects user-facing and CRM consumers even if a legacy row
+    or direct SQL edit populated compatibility columns without using
+    :func:`db.save_org_profile`. Address components are all dropped if their current
+    evidence cites more than one page.
+    """
+    lead_id = int(lead["id"])
+    rows = list(
+        conn.execute(
+            """SELECT field_name,field_value,source_url
+                 FROM organization_field_evidence
+                WHERE lead_id=? AND status='current'""",
+            (lead_id,),
+        )
+    )
+    evidence_rows = {str(row["field_name"]): row for row in rows}
+    columns = {
+        "website": "org_website",
+        "general_email": "org_general_email",
+        "phone": "org_phone",
+        "street": "org_street",
+        "city": "org_city",
+        "state": "org_state",
+        "postal_code": "org_postal_code",
+    }
+    values: dict[str, str] = {}
+    for field_name, column in columns.items():
+        row = evidence_rows.get(field_name)
+        projected = str(lead[column] or "")
+        if row is not None and projected and str(row["field_value"]) == projected:
+            values[field_name] = projected
+    address_fields = ("street", "city", "state", "postal_code")
+    address_sources = {
+        str(evidence_rows[field_name]["source_url"])
+        for field_name in address_fields
+        if field_name in values
+    }
+    if len(address_sources) > 1:
+        for field_name in address_fields:
+            values.pop(field_name, None)
+    source_row = evidence_rows.get("general_email")
+    if source_row is None and evidence_rows:
+        source_row = next(iter(evidence_rows.values()))
+    return OrgProfile(
+        website=values.get("website", ""),
+        general_email=values.get("general_email", ""),
+        phone=values.get("phone", ""),
+        street=values.get("street", ""),
+        city=values.get("city", ""),
+        state=values.get("state", ""),
+        postal_code=values.get("postal_code", ""),
+        source_url=str(source_row["source_url"]) if source_row is not None else "",
+        status="found" if values else "not_found",
+    )
 
 
 def enrich_org_profile(
@@ -163,45 +336,62 @@ def enrich_org_profile(
     lead = db.get_lead(conn, lead_id)
     if lead is None:
         raise ValueError(f"unknown Grant lead id {lead_id}")
-    if str(lead["org_profile_status"] or "") == "found":
-        return OrgProfile(
-            website=str(lead["org_website"] or ""),
-            general_email=str(lead["org_general_email"] or ""),
-            phone=str(lead["org_phone"] or ""),
-            street=str(lead["org_street"] or ""),
-            city=str(lead["org_city"] or ""),
-            state=str(lead["org_state"] or ""),
-            postal_code=str(lead["org_postal_code"] or ""),
-            source_url=str(lead["org_profile_source_url"] or ""),
-            status="found",
-        )
+    current_evidence = conn.execute(
+        """SELECT 1 FROM organization_field_evidence
+           WHERE lead_id=? AND status='current' LIMIT 1""",
+        (lead_id,),
+    ).fetchone()
+    if str(lead["org_profile_status"] or "") == "found" and current_evidence:
+        return evidenced_profile(conn, lead)
     p("Looking up the organization's website")
-    host = _resolve_site(conn, lead)
-    if not host:
+    site = _resolve_site(conn, lead)
+    if site is None:
         db.save_org_profile(conn, lead_id, OrgProfile(status="not_found"))
         return OrgProfile(status="not_found")
-    profile = OrgProfile(website=f"https://{host}")
     entity = str(lead["entity_name"] or "")
     read_any = False
+    candidates: list[OrgProfile] = []
     for path in _CONTACT_PATHS[:_MAX_PAGES]:
-        url = f"https://{host}{path}"
+        url = f"{site.origin}{path}"
         p("Reading the organization's website")
-        page_text = _scrape(url)
+        page_text = _scrape(url, conn=conn)
         if not page_text:
             continue
         read_any = True
-        _merge(profile, page_text, _extract_org(page_text, entity, url), url)
-        if profile.street and profile.general_email and profile.phone:
-            break
+        page_profile = OrgProfile(website_candidate=site.origin)
+        _merge(page_profile, page_text, _extract_org(page_text, entity, url), url)
+        if page_profile.field_evidence:
+            candidates.append(page_profile)
     if not read_any:
         # We never actually read a page — honest retryable non-result.
         db.save_org_profile(conn, lead_id, OrgProfile(status="unreachable"))
         raise SourceUnreachable(f"could not read any page for {entity}")
-    profile.status = (
-        "found" if (profile.street or profile.general_email) else "not_found"
-    )
+    if not candidates:
+        profile = OrgProfile(website_candidate=site.origin, status="not_found")
+        db.save_org_profile(conn, lead_id, profile)
+        return profile
+    profile = _combine_profiles(candidates, site)
     db.save_org_profile(conn, lead_id, profile)
     return profile
+
+
+def summarize_org_profile(profile: OrgProfile) -> str:
+    """Render a previously obtained profile without causing another lookup."""
+    if profile.status != "found":
+        return " I couldn't verify the organization's contact details on its site."
+    found: list[str] = []
+    if profile.general_email:
+        found.append(f"the organization's general email {profile.general_email}")
+    if profile.phone:
+        found.append(f"switchboard phone {profile.phone}")
+    if profile.street or profile.city or profile.postal_code:
+        address = ", ".join(
+            part for part in (profile.street, profile.city, profile.postal_code) if part
+        )
+        found.append(f"address {address}")
+    if profile.website:
+        found.append(f"website {profile.website}")
+    return " I also verified " + ", ".join(found) + "." if found else ""
 
 
 def org_enrichment_summary(
@@ -229,18 +419,4 @@ def org_enrichment_summary(
         print("[tool-error] org_enrichment_summary:", file=sys.stderr)
         traceback.print_exc()
         return ""
-    found: list[str] = []
-    if profile.general_email:
-        found.append(f"the organization's general email {profile.general_email}")
-    if profile.phone:
-        found.append(f"phone {profile.phone}")
-    if profile.street or profile.city or profile.postal_code:
-        address = ", ".join(
-            part for part in (profile.street, profile.city, profile.postal_code) if part
-        )
-        found.append(f"address {address}")
-    if profile.website:
-        found.append(f"website {profile.website}")
-    if not found:
-        return " I couldn't verify the organization's address or general email on its site."
-    return " From the organization's website I also added " + "; ".join(found) + "."
+    return summarize_org_profile(profile)

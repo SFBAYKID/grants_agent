@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from .. import db, persequor_client, roster
+from . import contact_evidence
 from .snapshot import FrozenSnapshot, load
 
 Submitter = Callable[
@@ -83,14 +84,14 @@ def _fresh_contact(
     if snapshot_expires.tzinfo is None:
         snapshot_expires = snapshot_expires.replace(tzinfo=timezone.utc)
     current = conn.execute(
-        "SELECT status,email,evidence_hash FROM contact_evidence WHERE id=?",
+        "SELECT * FROM contact_evidence WHERE id=?",
         (draft.contact_evidence_id,),
     ).fetchone()
     return bool(
         contact_expires > now
         and snapshot_expires > now
         and current is not None
-        and current["status"] == "verified"
+        and contact_evidence.contact_fact_is_verified(current)
         and current["email"] == draft.contact_email
         and current["evidence_hash"] == draft.contact_evidence_hash
     )

@@ -9,8 +9,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import requests
 
 import grant_watch.source_discovery_batch as batch
+from grant_watch.enrich import firecrawl_gateway
 from grant_watch.firecrawl_client import (
     SearchOutcome,
     SearchResultEvidence,
@@ -31,6 +33,7 @@ from grant_watch.source_discovery_batch import (
 )
 from grant_watch.source_discovery_models import make_task_id
 from grant_watch.source_discovery_store import load_checkpoints
+from tests.paid_provider_support import configure_firecrawl_runtime
 
 
 @dataclass
@@ -58,6 +61,21 @@ class CrashingClient:
         """Raise at the transport boundary where paid-call completion is unknown."""
         del query, result_limit
         raise RuntimeError("simulated process crash")
+
+
+class _GatewayResponse:
+    """Minimal successful requests-shaped Firecrawl response."""
+
+    status_code = 200
+    headers: dict[str, str] = {}
+
+    def __init__(self, payload: dict[str, object]) -> None:
+        """Store one already decoded response payload."""
+        self._payload = payload
+
+    def json(self) -> dict[str, object]:
+        """Return the configured payload."""
+        return self._payload
 
 
 def _target(
@@ -497,19 +515,25 @@ def test_main_resumes_existing_batch_from_immutable_manifest(
     from grant_watch.source_discovery_store import initialize_batch
 
     initialize_batch(tmp_path, manifest, checkpoints)
-    client = FakeClient([_success()])
+    calls: list[dict[str, object]] = []
 
     def skip_dotenv() -> None:
         """Avoid reading the developer's real environment file in this unit test."""
 
-    def client_factory(key: str) -> FakeClient:
-        """Return the injected client while proving the configured key was read."""
-        assert key == "test-key"
-        return client
+    def post(*_args: object, **kwargs: object) -> _GatewayResponse:
+        """Record the sole centrally reserved discovery HTTP call."""
+        calls.append(dict(kwargs))
+        return _GatewayResponse(
+            {
+                "success": True,
+                "creditsUsed": 1,
+                "data": [{"url": "https://example.gov/bids", "title": "Bids"}],
+            }
+        )
 
-    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    configure_firecrawl_runtime(tmp_path, monkeypatch, limit=100)
     monkeypatch.setattr(batch, "load_dotenv", skip_dotenv)
-    monkeypatch.setattr(batch, "FirecrawlClient", client_factory)
+    monkeypatch.setattr(firecrawl_gateway.requests, "post", post)
     assert (
         main(
             [
@@ -521,9 +545,131 @@ def test_main_resumes_existing_batch_from_immutable_manifest(
         )
         == 0
     )
-    assert len(client.calls) == 1
+    assert len(calls) == 1
     stored = load_checkpoints(tmp_path / manifest.batch_id)
     assert stored[0].terminal_status == "success"
+    ledger = firecrawl_gateway.connect_ledger()
+    try:
+        attempt = ledger.execute(
+            "SELECT workflow,state FROM firecrawl_runtime_attempts"
+        ).fetchone()
+        period = ledger.execute(
+            "SELECT reserved_calls FROM firecrawl_runtime_periods"
+        ).fetchone()
+        rate = ledger.execute(
+            "SELECT next_call_at FROM firecrawl_runtime_rate_state WHERE singleton=1"
+        ).fetchone()
+    finally:
+        ledger.close()
+
+    assert tuple(attempt) == ("source_discovery_batch", "completed")
+    assert period[0] == 1
+    assert rate[0]
+
+
+def test_runtime_and_discovery_share_one_account_ceiling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A runtime call consumes the same fixed cap seen by a discovery batch."""
+    configure_firecrawl_runtime(tmp_path, monkeypatch, limit=1)
+    calls = 0
+
+    def post(*_args: object, **_kwargs: object) -> _GatewayResponse:
+        """Return one success while counting actual vendor-bound calls."""
+        nonlocal calls
+        calls += 1
+        return _GatewayResponse({"success": True, "data": []})
+
+    monkeypatch.setattr(firecrawl_gateway.requests, "post", post)
+    with firecrawl_gateway.bind_workflow("runtime_test"):
+        assert firecrawl_gateway.search("runtime request", 1) == []
+
+    outcome = batch.AccountGatewaySearchClient().search_once("discovery request", 1)
+
+    assert outcome.systemic is True
+    assert outcome.error_code == "account_budget_unavailable"
+    assert calls == 1
+    ledger = firecrawl_gateway.connect_ledger()
+    try:
+        assert (
+            ledger.execute(
+                "SELECT reserved_calls FROM firecrawl_runtime_periods"
+            ).fetchone()[0]
+            == 1
+        )
+    finally:
+        ledger.close()
+
+
+def test_discovery_indeterminate_account_call_requires_explicit_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A timeout is durable in both ledgers and cannot retry in the same run."""
+    configure_firecrawl_runtime(tmp_path, monkeypatch, limit=3)
+    manifest, checkpoints = _plan([_target()], max_attempts=2)
+    calls = 0
+
+    def timeout(*_args: object, **_kwargs: object) -> _GatewayResponse:
+        """Lose the response after central reservation reaches HTTP."""
+        nonlocal calls
+        calls += 1
+        raise requests.Timeout("lost response")
+
+    monkeypatch.setattr(firecrawl_gateway.requests, "post", timeout)
+    with pytest.raises(RuntimeError, match="--retry-indeterminate"):
+        execute_batch(
+            tmp_path,
+            manifest,
+            checkpoints,
+            batch.AccountGatewaySearchClient(),
+            now=_fixed_now,
+            sleeper=lambda _seconds: None,
+        )
+
+    stored = load_checkpoints(tmp_path / manifest.batch_id)[0]
+    assert stored.attempts[-1].outcome == "indeterminate"
+    assert calls == 1
+    ledger = firecrawl_gateway.connect_ledger()
+    try:
+        assert (
+            ledger.execute("SELECT state FROM firecrawl_runtime_attempts").fetchone()[0]
+            == "indeterminate"
+        )
+    finally:
+        ledger.close()
+
+    monkeypatch.setattr(
+        firecrawl_gateway.requests,
+        "post",
+        lambda *_args, **_kwargs: _GatewayResponse(
+            {"success": True, "data": [{"url": "https://example.gov/bids"}]}
+        ),
+    )
+    summary = execute_batch(
+        tmp_path,
+        manifest,
+        checkpoints,
+        batch.AccountGatewaySearchClient(retry_indeterminate=True),
+        now=_fixed_now,
+        sleeper=lambda _seconds: None,
+        retry_indeterminate=True,
+    )
+    assert summary.statuses == Counter({"success": 1})
+    final = load_checkpoints(tmp_path / manifest.batch_id)[0]
+    assert [attempt.outcome for attempt in final.attempts] == [
+        "indeterminate",
+        "success",
+    ]
+    ledger = firecrawl_gateway.connect_ledger()
+    try:
+        assert [
+            row[0]
+            for row in ledger.execute(
+                "SELECT state FROM firecrawl_runtime_attempts ORDER BY attempt_number"
+            )
+        ] == ["indeterminate", "completed"]
+    finally:
+        ledger.close()
 
 
 def test_summary_distinguishes_pending_zero_and_success() -> None:

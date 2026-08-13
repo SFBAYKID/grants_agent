@@ -72,9 +72,9 @@ grants_agent/
 ```
 grant_watch/
 ├── __init__.py
-├── models.py           # typed source, funding-event, lead, and run dataclasses
+├── models.py           # typed raw-source, lead, grade, and run models
 ├── db.py               # SQLite repository operations; schema lives in migrations.py
-├── migrations*.py      # 39 ordered migrations across several modules; NEVER mutate one in place
+├── migrations*.py      # 46 ordered migrations across several modules; NEVER mutate one in place
 ├── source_catalog.py   # typed candidate catalog, evidence validation, generated reports
 ├── source_discovery.py # immutable Firecrawl search and scrape fingerprints
 ├── coverage_universe.py # pinned Census county universe and per-entity research status
@@ -110,8 +110,12 @@ hammer live government servers.
 - `source_observations`: immutable evidence payloads and observation hashes.
 - `funding_events`: typed event, evidenced date/precision, verification and suppression state.
 - `leads`: current projection used by search, ranking, Slack and enrichment.
+- `organization_field_evidence`: current/superseded per-field proof; legacy lead columns are
+  compatibility projections and cannot establish strict action provenance by themselves.
 - durable workflow tables: Slack receipts, search snapshots, export jobs, outreach outbox,
   notification outbox, outcomes/rewards, Salesforce snapshots and CRM action approvals.
+- provider/scheduler state: monotonic poll lease tokens in the app DB, plus separately configured
+  private Firecrawl and ZoomInfo account ledgers bound to one host capability.
 
 Unknown amount, date, enrollment, contact, or CRM state stays unknown. Observation time never becomes
 an award date, and an old backfill is suppressed from "new" notifications.
@@ -137,11 +141,12 @@ upgrades. Until then, these fields must not be presented as product capabilities
 `docs/source_inventory/README.md` and its generated CSVs are the nationwide candidate map. Neither
 document turns a discovered URL into an integrated poller.
 
-Verified live through 2026-07-14: USAspending prime awards and NSGP subawards, Grants.gov, SAM.gov,
-WEBS fetch/parser, California Grants Portal feeds, and the OregonBuys recent-bids feed. NCES district
-enrollment/location enrichment was also verified live. OregonBuys returned no security matches during
-the live check, so positive-row entity extraction remains needs-testing. See the source inventory for
-the per-source evidence and limitations.
+Historical live checks through 2026-07-14 covered USAspending prime awards and NSGP subawards,
+Grants.gov, SAM.gov, WEBS fetch/parser, California Grants Portal feeds, OregonBuys' then-published
+recent-bids feed, and NCES district data. Current behavior is recorded separately: Oregon's PDF now
+returns 404 and its poller is disabled; WEBS remains parser-tested with a real positive result
+`needs-testing`; the stricter SAM parser is fixture-verified and requires a new positive live check.
+See the source inventory for per-axis evidence and limitations.
 
 Discipline for every source: official API > published PDF > scraped portal; respect robots.txt;
 rate-limit; record `verified`/`assumed`/`needs-testing` per source in code and in summaries.
@@ -205,6 +210,34 @@ Source discovery and source integration are deliberately separate:
 The discovery catalog is durable research memory, not an automatic crawler and not a lead table. It
 must never promote `discovered` into `verified` merely because a URL was found.
 
+Operational Firecrawl traffic is separate from discovery research. Every runtime search/scrape goes
+through `enrich/firecrawl_gateway.py`; the application DB supplies only a workflow label and is never
+spend authority. One private standalone ledger owns the UTC-month ceiling, attempts, provider
+backoff, and proactive account-wide next-call timestamp across app DBs, processes, and workers. The
+gateway commits an opaque `in_flight` attempt and reserves one call before waiting for the bounded
+rate slot and crossing HTTP. A wait that cannot finish inside the hard bound is finalized as a
+definite no-HTTP failure. The row carries the full deterministic canonical request hash and attempt
+number. An exact `in_flight`/`indeterminate` request cannot cross HTTP again without the operator-only
+retry context; 429 retries honor persisted `Retry-After` and stop after three exact attempts.
+Credential/billing responses open a shared circuit. A separate in-memory 200-call budget bounds one
+high-level enrichment batch, but does not replace the durable account ceiling/rate. The immutable
+source-discovery collector retains its stricter batch attempt cap, root lock, and raw evidence, but
+its HTTP now crosses this same gateway; there is one Firecrawl endpoint holder and one combined
+account ceiling/rate. Discovery still cannot promote its raw evidence automatically.
+
+Both paid providers additionally require `GRANT_PAID_PROVIDER_MODE=authority` and an owner-only,
+non-symlinked host capability outside the deploy tree. Every call revalidates its provider,
+`authority_id`, stable vendor `account_scope_id`, credential, ceiling, and bound standalone ledger.
+Runtime creates none of those artifacts. SQLite coordinates the chosen host; vendor-side credential
+rotation/revocation is what proves no laptop or other machine can spend on the same account. The
+backup, merge, preflight, rollback, and sole-host sequence is in
+`docs/paid_provider_cutover.md`.
+
+Poll writes use a renewable monotonic fencing lease. A dedicated connection heartbeats during
+blocking source reads; token ownership is checked inside every run/upsert/completion/reconciliation
+transaction. Takeover advances the token, stale release is harmless, and a hard configured maximum
+runtime stops renewal and prevents later writes even if a network call eventually returns.
+
 The current catalog is a manually reviewed snapshot. New selected checks persist a query, retrieval
 date, selected rank/title/snippet, deterministic evidence hash, and scraped-content fingerprint.
 Historical Firecrawl rows from before this evidence schema remain `needs-testing`. The raw discovery
@@ -232,7 +265,8 @@ only; the rich card that actually posts in production carries award facts, a con
 Salesforce context and separately labelled links (see §5.2)**. Humans engage only by replying in that
 thread or mentioning @Grant in the configured channel; there are no slash commands or DMs. Grant runs
 in **Socket Mode** (no public URL). Scheduled CLI workers for polling, drip delivery, outreach retry,
-and Salesforce sync expose tested dry-run boundaries. The long-lived Socket Mode listener intentionally
+and Salesforce sync expose tested dry-run boundaries; Persequor retry has a tested entrypoint but is
+not installed in production cron. The long-lived Socket Mode listener intentionally
 posts replies and has no dry-run flag, so exercise it through offline tests unless a real channel
 interaction is explicitly intended. Grant never fabricates a lead, contact, or award figure.
 
@@ -313,16 +347,16 @@ to the pre-existing drip unchanged — but it is **set to 1 on the droplet** (Ch
 instruction, 2026-08-05, waiving the five-business-day shadow gate), so in production this is the
 path that actually posts. Three `rich_award` cards have been delivered.
 
-Two things measured on production 2026-08-11 that the design above does not imply, and that anyone
-reading this section will otherwise assume work:
+The read-only 2026-08-12 production audit measured two deployment gaps that local code now fails
+closed around:
 
-- **The card's control surface is dead three ways.** `card.py` appends its buttons only when the
-  card is not `research_needed`; that mode is unreachable because `leads.nces_website` is 0 of 10,721
-  rows with no writer anywhere. Even if a button rendered, `SLACK_WORKSPACE_ID` is absent from the
-  droplet environment, so `actions._authorized_snapshot` raises `PermissionError` at its first gate.
-  `rich_card_actions` is 0 rows. A human DID once press "Ask Persequor to draft" before the handler
-  existed and received nothing at all — one `Unhandled request` line in `bot.log` and no database
-  row — so **`rich_card_actions = 0` must never be read as "nobody tried".**
+- **The deployed card's control surface is still unreachable.** Production has 340 NCES-linked rows
+  but zero `nces_website` values, and `SLACK_WORKSPACE_ID` is absent. Locally, the NCES binder now
+  accepts only an exact same-state, ID-bound official detail record and persists its safe website
+  with provenance; the listener refuses startup when rich actions are enabled without an exact
+  workspace identity. Those fixes are not deployed. `rich_card_actions` is 0 rows, but a human once
+  pressed the button before its handler existed and got only `Unhandled request`, so zero rows must
+  never be read as “nobody tried.”
 - Cards therefore land with no buttons, and often with **no `@`-mention** (`routing_reason`
   `unassigned`), which is why the follow-up system in §5.3 exists.
 
@@ -333,9 +367,11 @@ reading this section will otherwise assume work:
 - Migrations 14–24 add completed-run confirmation, rich post/snapshot/action/contact
   state, exact Salesforce owner/activity evidence, forward organization-kind evidence, and
   durable paid-enrichment attempts, and one atomic cross-worker daily-slot claim.
-  Historical migrations are unchanged. (Schema has since reached **39**; later migrations add
+  Historical migrations are unchanged. (Schema has since reached **46**; later migrations add
   campaign batches, nudges, reminders, capability asks, announcements, user memory and the
-  ZoomInfo credit ledger.)
+  ZoomInfo credit history, field evidence, legacy runtime Firecrawl state, poll fencing, historical
+  Starbridge provenance correction, exact Firecrawl retry identity, and quarantine of pre-verifier
+  contact/organization claims.)
 - `prepare_worker.py` bounds pre-window contact/activity work. Contact discovery commits
   `in_flight` before possibly paid HTTP and refuses silent restart retry; dry-run makes
   no HTTP call or write. `preparation.py`/`report.py` join persisted evidence and produce
@@ -425,25 +461,37 @@ Three surfaces have consequences no test can undo. Each is safe because of its S
 caller is careful — that distinction is the design, and a refactor that preserves behaviour while
 losing the shape has broken it.
 
-- **ZoomInfo** (`enrich/zoominfo*`, migrations for the credit ledger). Contact SEARCH is free and
+- **ZoomInfo** (`enrich/zoominfo*`, `zoominfo_ledger_migration.py`). Contact SEARCH is free and
   returns `hasEmail`/`hasDirectPhone`/`hasMobilePhone` plus do-not-call flags, so a rep can be quoted
   an exact cost before a credit is spent; ENRICH bills 1 credit per returned record. Vendor data
   stores as `vendor_licensed` and **never** `verified`, do-not-call numbers are withheld, and mobile
   is its own column because collapsing it into `Phone` put a mobile where every rep reads a desk
   line. Two live-only facts: Okta refuses a `client_credentials` grant naming no scope, and
-  `directPhone` is NOT licensed on this plan — asking for it 400s the whole batch. **The credit
-  ledger is per-DATABASE, not a vendor balance**; two databases drawing on one account each believe
-  they have the full allowance.
+  `directPhone` is NOT licensed on this plan — asking for it 400s the whole batch. Paid IDs are
+  normalized/deduplicated and capped before reservation; response IDs must be an exact subset.
+  Authorization lives in one private standalone account ledger named by
+  `ZOOMINFO_CREDIT_LEDGER_PATH`, shared by every app database on the sole authority host. Runtime
+  refuses a missing, symlinked, wrong-owner, permissive, unknown-schema, or authority/account-mismatched
+  ledger on every call, including when an access token is cached. The repeatable-source,
+  dry-by-default migration fences all sources, reconciles and merges exact spend history, verifies
+  tuples/integrity, fsyncs, and publishes without replacement. Production has 7 rows / 14 credits;
+  the known laptop history has 2 rows / 3 credits, so the expected combined history is 9 / 17 unless
+  vendor reconciliation identifies an exact clone or newer spend. The credential rotation and
+  cutover remain production work; see `docs/paid_provider_cutover.md`.
 - **Resend email** (`notify/resend_client.py`), a sending-only key scoped to monarchconnected.com.
   **The guardrail is the signature:** `send_to_rep` takes a SLACK USER ID and resolves it through the
   reviewed roster itself. No parameter anywhere accepts an address, so no prompt and no scraped page
   can aim Grant's mail at an outside inbox. A test asserts on the SIGNATURE so a refactor cannot
-  loosen it. This is INTERNAL mail to a rep; prospect outreach is Persequor's and is human-approved.
+  loosen it. A requested result email may carry one generated bounded `.xlsx` built from the same
+  frozen search; callers cannot supply a filesystem path, and owned temporary storage is cleaned on
+  success or failure. This is INTERNAL mail to a rep; prospect outreach is Persequor's and is
+  human-approved.
 - **Persequor outreach.** Grant builds an `outreach-request.v1` brief and POSTs it; seven were
   accepted 2026-07-15/18. `sent_at` and `response` have **no writer anywhere in the codebase**, so
   the database can confirm handoff accepted and can NEVER confirm an email was sent. Nothing may
-  claim delivery. An unreachable endpoint queues locally and says so, falling back to a copyable
-  draft — but there is no `outreach-retry` cron line, so a queued row would sit indefinitely.
+  claim delivery. An unreachable endpoint queues locally and says so. The CAS/idempotent retry worker
+  and overdue count/oldest-age status are tested, but production has no `outreach-retry` cron line;
+  installing one is an explicitly authorized outbound operation, not a code-only fix.
 
 ---
 
@@ -505,6 +553,12 @@ for SAM, Firecrawl, the Salesforce reader secret, and URL `api_key` parameters. 
 for every exception/log path is `needs-testing`; code must therefore avoid logging request headers,
 payload credentials, or raw secret-bearing exceptions. Source metadata stores environment-variable
 names only.
+
+Firecrawl and ZoomInfo credentials are also capabilities at the vendor boundary. A local authority
+file cannot neutralize a copied credential on another machine. Production centralization therefore
+requires vendor-side rotation/revocation and installing the replacement only on the sole authority
+host; the private file contains opaque identity bindings, never credential values. The exact
+cutover/rollback protocol is `docs/paid_provider_cutover.md`.
 
 ---
 

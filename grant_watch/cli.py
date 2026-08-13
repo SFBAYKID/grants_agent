@@ -37,7 +37,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from . import db, scoring
+from . import db, poll_lease, scoring
 from .cli_ops import cmd_fill_contacts, cmd_scan_threads, cmd_watchdog
 from .config import primary_channel_id
 from .migrations_nudges import CAPABILITY_KINDS
@@ -55,27 +55,13 @@ Poller = Callable[[], list[RawItem]]
 
 
 def _active_pollers() -> list[tuple[str, Poller]]:
-    """The static registry plus SAM.gov when its key is configured."""
+    """Return reviewed runtime pollers, plus SAM.gov when its key is configured."""
     pollers = list(POLLERS)
     sam_key = os.environ.get("SAM_API_KEY", "")
     if sam_key:
         pollers.append(("SAM.gov", lambda: sam_gov.poll(sam_key)))
     else:
         print("[skip] SAM.gov — set SAM_API_KEY in .env to enable", file=sys.stderr)
-    # RFP discovery is paid, so it is opt-in (like SAM.gov's key gate) and never in the
-    # free static POLLERS list. The AGGREGATOR source (Starbridge listing) is the one
-    # wired: it finds the OPEN target-state RFPs cheaply (one scrape). The `.gov`-page
-    # hunt (sources/rfp.py) is kept available but not wired — it found ~0 open pages
-    # (Chase 2026-07-18: most individual RFP pages are already closed).
-    if os.environ.get("RFP_DISCOVERY_ENABLED", "").strip() in ("1", "true", "yes"):
-        from .sources import rfp_aggregator
-
-        pollers.append(("Security RFP discovery", rfp_aggregator.poll))
-    else:
-        print(
-            "[skip] Security RFP discovery — set RFP_DISCOVERY_ENABLED=1 to enable",
-            file=sys.stderr,
-        )
     return pollers
 
 
@@ -96,11 +82,20 @@ def cmd_poll(only_source: str | None, dry_run: bool) -> int:
     errors = 0
     selected = 0
     lock_owner = str(uuid.uuid4())
-    if conn is not None and not db.acquire_poll_lock(conn, "poll", lock_owner):
+    lease = poll_lease.acquire(conn, "poll", lock_owner) if conn is not None else None
+    if conn is not None and lease is None:
         print(
             "poll already running; refusing overlapping source writes", file=sys.stderr
         )
+        conn.close()
         return 2
+    keeper = (
+        poll_lease.LeaseKeeper(conn, lease)
+        if conn is not None and lease is not None
+        else None
+    )
+    if keeper is not None:
+        keeper.__enter__()
 
     try:
         for name, poll_fn in _active_pollers():
@@ -108,19 +103,31 @@ def cmd_poll(only_source: str | None, dry_run: bool) -> int:
                 continue
             selected += 1
             stats = RunStats(source=name)
+            if keeper is not None:
+                keeper.checkpoint(conn)
             # Open the run BEFORE processing so confirmation freshness can bind to it,
             # but advance freshness ONLY on a durably-complete success (Chase A1).
-            run_id = db.begin_run(conn, name, started) if conn is not None else None
+            run_id = (
+                db.begin_run(conn, name, started, lease=lease)
+                if conn is not None
+                else None
+            )
             confirmed_keys: list[tuple[str, str]] = []
             try:
                 items = poll_fn()
+                if keeper is not None:
+                    keeper.checkpoint(conn)
                 stats.items_seen = len(items)
                 for item in items:
+                    if keeper is not None:
+                        # Parsed responses can also outlive the hard runtime; check
+                        # each item before the lease authorizes another write.
+                        keeper.checkpoint(conn)
                     lead = scoring.grade(item)
                     if dry_run:
                         continue
                     assert conn is not None
-                    if db.upsert_lead(conn, lead):
+                    if db.upsert_lead(conn, lead, lease=lease):
                         stats.items_new += 1
                         fresh = " [FRESH]" if scoring.is_fresh(item) else ""
                         amt = f" ${item.amount:,.0f}" if item.amount else ""
@@ -131,6 +138,8 @@ def cmd_poll(only_source: str | None, dry_run: bool) -> int:
                     # Every item SEEN in this run (new or unchanged) is a candidate for
                     # confirmation, applied only if the run completes successfully.
                     confirmed_keys.append((item.source, str(item.item_id)))
+            except poll_lease.LeaseLost:
+                raise
             except Exception as exc:  # continue other sources, but fail the command
                 stats.errors = _redact_error(exc)
                 stats.complete = False
@@ -139,9 +148,9 @@ def cmd_poll(only_source: str | None, dry_run: bool) -> int:
                 print(f"[{name}] ERROR: {stats.errors}", file=sys.stderr)
             if conn is not None and run_id is not None:
                 if stats.complete:
-                    db.complete_run(conn, run_id, stats, confirmed_keys)
+                    db.complete_run(conn, run_id, stats, confirmed_keys, lease=lease)
                 else:
-                    db.fail_run(conn, run_id, stats)
+                    db.fail_run(conn, run_id, stats, lease=lease)
             print(
                 f"[{name}] {stats.items_seen} items, {stats.items_new} new"
                 f"{' (dry-run: nothing written)' if dry_run else ''}"
@@ -150,13 +159,20 @@ def cmd_poll(only_source: str | None, dry_run: bool) -> int:
             print("no poller matched --source", file=sys.stderr)
             return 2
         if conn is not None:
-            retired = db.reconcile_seed_duplicates(conn)
+            retired = db.reconcile_seed_duplicates(conn, lease=lease)
             if retired:
                 print(f"[reconcile] {retired} seed rows superseded by live award rows")
         return 1 if errors else 0
+    except poll_lease.LeaseLost as exc:
+        print(f"poll lease lost; stopping writes ({exc})", file=sys.stderr)
+        return 2
     finally:
+        if keeper is not None:
+            keeper.__exit__(None, None, None)
+        if conn is not None and lease is not None:
+            poll_lease.release(conn, lease)
         if conn is not None:
-            db.release_poll_lock(conn, "poll", lock_owner)
+            conn.close()
 
 
 def cmd_seed() -> int:
@@ -168,10 +184,16 @@ def cmd_seed() -> int:
 
 
 def cmd_status() -> int:
-    """Print lead counts by source and grade."""
+    """Print lead counts plus any overdue outbound handoff work."""
+    from . import persequor_client
+
     conn = db.connect()
     for source, grade_, count in db.status_summary(conn):
         print(f"{source:24s} {grade_:7s} {count}")
+    retry = persequor_client.retry_pending(conn, dry_run=True)
+    if retry.due:
+        print(f"outreach-retry overdue={retry.due} oldest={retry.oldest_due_minutes}m")
+    conn.close()
     return 0
 
 
@@ -301,7 +323,8 @@ def cmd_nces_bind(limit_states: int, dry_run: bool) -> int:
         for row in conn.execute(
             """SELECT state, COUNT(*) AS pending FROM leads
                WHERE lead_grade='gold' AND COALESCE(status,'new')='new'
-                 AND (nces_id IS NULL OR nces_id='')
+                 AND ((nces_id IS NULL OR nces_id='')
+                      OR COALESCE(nces_website_status,'') IN ('','unavailable'))
                  AND LENGTH(COALESCE(state,''))=2
                GROUP BY state ORDER BY pending DESC, state"""
         )
@@ -399,9 +422,11 @@ def cmd_outreach_retry(dry_run: bool) -> int:
 
     conn = db.connect_readonly() if dry_run else db.connect()
     summary = persequor_client.retry_pending(conn, dry_run=dry_run)
+    overdue = f", oldest overdue {summary.oldest_due_minutes}m" if summary.due else ""
     print(
         f"outreach retry: {summary.due} due, {summary.submitted} submitted, "
         f"{summary.queued} queued, {summary.rejected} rejected"
+        f"{overdue}"
         f"{' (dry-run: no requests or writes)' if dry_run else ''}"
     )
     return 1 if not dry_run and (summary.queued or summary.rejected) else 0

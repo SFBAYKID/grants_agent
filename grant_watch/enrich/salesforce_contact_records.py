@@ -112,18 +112,22 @@ def contact_lead_payload(
     mobile = _row_value(contact, "mobile_phone")
     if mobile:
         payload["MobilePhone"] = mobile
-    if lead["state"] or _lead_value(lead, "org_state"):
-        payload["State"] = str(lead["state"] or "") or _lead_value(lead, "org_state")
+    if lead["state"] or _lead_value(lead, "evidenced_org_state"):
+        payload["State"] = str(lead["state"] or "") or _lead_value(
+            lead, "evidenced_org_state"
+        )
     # City: the org's mailing city (address) is preferred over the NCES office city.
-    org_city = _lead_value(lead, "org_city")
+    org_city = _lead_value(lead, "evidenced_org_city")
     if org_city or lead["location_city"]:
         payload["City"] = org_city or str(lead["location_city"])
-    if _lead_value(lead, "org_street"):
-        payload["Street"] = _lead_value(lead, "org_street")
-    if _lead_value(lead, "org_postal_code"):
-        payload["PostalCode"] = _lead_value(lead, "org_postal_code")
-    website = _lead_value(lead, "org_website") or (
-        f"https://{contact['official_domain']}" if contact["official_domain"] else ""
+    if _lead_value(lead, "evidenced_org_street"):
+        payload["Street"] = _lead_value(lead, "evidenced_org_street")
+    if _lead_value(lead, "evidenced_org_postal_code"):
+        payload["PostalCode"] = _lead_value(lead, "evidenced_org_postal_code")
+    website = (
+        _lead_value(lead, "nces_website")
+        if _lead_value(lead, "nces_website_status") == "verified"
+        else ""
     )
     if website:
         payload["Website"] = website
@@ -156,10 +160,10 @@ def _contact_title_phrase(lead: sqlite3.Row, contact: sqlite3.Row) -> str:
 
 def _address_line(lead: sqlite3.Row) -> str:
     """Compose '901 S 4th St, DeKalb, IL 60115' from whatever the org profile has."""
-    street = _lead_value(lead, "org_street")
-    city = _lead_value(lead, "org_city") or str(lead["location_city"] or "")
-    state = str(lead["state"] or "") or _lead_value(lead, "org_state")
-    postal = _lead_value(lead, "org_postal_code")
+    street = _lead_value(lead, "evidenced_org_street")
+    city = _lead_value(lead, "evidenced_org_city") or str(lead["location_city"] or "")
+    state = str(lead["state"] or "") or _lead_value(lead, "evidenced_org_state")
+    postal = _lead_value(lead, "evidenced_org_postal_code")
     locality = " ".join(part for part in (state, postal) if part)
     return ", ".join(part for part in (street, city, locality) if part)
 
@@ -191,7 +195,7 @@ def grant_note_payload(
     grant behind it), then the contact facts a rep needs — each line present only
     when Grant actually has the value, so the note never implies unknown data."""
     email = str(contact["email"] or "")
-    general = _lead_value(lead, "org_general_email")
+    general = _lead_value(lead, "evidenced_org_general_email")
     email_line = {
         "direct": f"• Email: {email} (direct, verified)",
         "general": (
@@ -284,8 +288,12 @@ def _resolve_existing_record(
 
 def _select_contact(contacts: list[sqlite3.Row], contact_id: int | None) -> sqlite3.Row:
     """Choose the evidence-backed contact, failing closed on any ambiguity."""
+    from .. import db
+
     usable = [
-        c for c in contacts if str(c["contact_status"]) in _USABLE_CONTACT_STATUSES
+        c
+        for c in contacts
+        if str(c["contact_status"]) == "linkedin_only" or db.contact_is_page_verified(c)
     ]
     if not usable:
         raise ValueError(
@@ -297,7 +305,7 @@ def _select_contact(contacts: list[sqlite3.Row], contact_id: int | None) -> sqli
             if int(c["id"]) == int(contact_id):
                 return c
         raise ValueError(f"contact {contact_id} is not a usable contact for this lead")
-    verified = [c for c in usable if str(c["contact_status"]) == "verified"]
+    verified = [c for c in usable if db.contact_is_page_verified(c)]
     pool = verified or usable
     if len(pool) > 1:
         names = ", ".join(f"#{c['id']} {c['name']}" for c in pool)

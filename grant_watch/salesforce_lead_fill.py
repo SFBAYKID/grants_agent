@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from typing import Mapping
 
+from . import db
 from .enrich.salesforce_campaign_gateway import SalesforceCampaignGateway
 from .enrich.salesforce_contact_records import organization_fields
 
@@ -41,6 +43,14 @@ class FillOutcome:
             f"considered {self.considered}, filled {self.filled}, "
             f"already complete {self.already_complete}, errored {self.failed}"
         )
+
+
+@dataclass(frozen=True)
+class LeadFillPlan:
+    """Fields and compliance state derived from one exact selected contact."""
+
+    fields: Mapping[str, object]
+    do_not_call: bool
 
 
 def linked_leads(conn: sqlite3.Connection, limit: int = 25) -> list[sqlite3.Row]:
@@ -74,8 +84,8 @@ def linked_leads(conn: sqlite3.Connection, limit: int = 25) -> list[sqlite3.Row]
     )
 
 
-def proposed_fields(conn: sqlite3.Connection, lead_id: int) -> dict[str, object]:
-    """Everything Grant knows about this lead that a Salesforce Lead has a home for.
+def build_fill_plan(conn: sqlite3.Connection, lead_id: int) -> LeadFillPlan:
+    """Build one typed CRM plan from the organization and one selected contact.
 
     Organization facts come first because they need no contact to have been found —
     that asymmetry is what left the org-only records so thin. The person's details
@@ -83,20 +93,20 @@ def proposed_fields(conn: sqlite3.Connection, lead_id: int) -> dict[str, object]
     is used rather than the organization switchboard, which would read on the record
     as their direct line.
     """
-    from . import db
-
     lead = db.get_lead(conn, lead_id)
     if lead is None:
-        return {}
+        return LeadFillPlan({}, False)
     fields: dict[str, object] = dict(organization_fields(lead))
     # Gated on the profile's own verdict for the same reason `organization_fields`
     # is: a `not_found` lookup leaves these columns holding whatever the search
     # landed on, and the fill path can only write into an EMPTY field — so a wrong
     # value here seals that field against every later correction.
-    if str(lead["org_profile_status"] or "") == "found" and str(
-        lead["org_phone"] or ""
-    ):
-        fields["Phone"] = str(lead["org_phone"])
+    try:
+        org_phone = str(lead["evidenced_org_phone"] or "")
+    except (IndexError, KeyError):
+        org_phone = ""
+    if org_phone:
+        fields["Phone"] = org_phone
 
     # A LINKEDIN CLAIM MUST NOT BECOME A SALESFORCE FIELD. `linkedin_only` means
     # exactly "we found a profile and ownership is unproven" — this repo says so
@@ -108,11 +118,17 @@ def proposed_fields(conn: sqlite3.Connection, lead_id: int) -> dict[str, object]
     usable = [
         row
         for row in contacts
-        if str(row["contact_status"]) in {"verified", "vendor_licensed"}
+        if str(row["contact_status"]) == "vendor_licensed"
+        or db.contact_is_page_verified(row)
     ]
-    verified = [row for row in usable if str(row["contact_status"]) == "verified"]
+    verified = [row for row in usable if db.contact_is_page_verified(row)]
     best = verified[0] if verified else (usable[0] if usable else None)
+    do_not_call = False
     if best is not None:
+        try:
+            do_not_call = bool(int(best["do_not_call"] or 0))
+        except (IndexError, KeyError, TypeError, ValueError):
+            do_not_call = False
         for column, field in (
             ("title", "Title"),
             ("email", "Email"),
@@ -124,7 +140,12 @@ def proposed_fields(conn: sqlite3.Connection, lead_id: int) -> dict[str, object]
                 value = ""
             if value:
                 fields[field] = value
-    return fields
+    return LeadFillPlan(fields, do_not_call)
+
+
+def proposed_fields(conn: sqlite3.Connection, lead_id: int) -> dict[str, object]:
+    """Compatibility view of the ordinary fields in :func:`build_fill_plan`."""
+    return dict(build_fill_plan(conn, lead_id).fields)
 
 
 def run(
@@ -138,28 +159,55 @@ def run(
     rows = linked_leads(conn, limit)
     if dry_run:
         for row in rows:
-            fields = proposed_fields(conn, int(row["lead_id"]))
+            plan = build_fill_plan(conn, int(row["lead_id"]))
             print(f"  lead #{row['lead_id']} -> {row['salesforce_id']}")
-            if not fields:
+            if plan.do_not_call:
+                print("      Description: prepend fixed DO NOT CALL marker")
+            if not plan.fields and not plan.do_not_call:
                 print("      (nothing to offer)")
             # PRINT THE VALUES, NOT JUST THE FIELD NAMES. A preview that lists
             # "Website" tells an operator nothing about whether that Website is the
             # district's or the state education department's — and on production it
             # was cde.ca.gov for two leads. The names looked perfect while the
             # payload was wrong, so the review step could not do its job.
-            for name, value in sorted(fields.items()):
+            for name, value in sorted(plan.fields.items()):
                 print(f"      {name}: {value}")
         return FillOutcome(len(rows), 0, 0, 0)
 
     client = gateway or SalesforceCampaignGateway()
     filled = complete = failed = elsewhere = 0
     for row in rows:
-        fields = proposed_fields(conn, int(row["lead_id"]))
-        if not fields:
+        plan = build_fill_plan(conn, int(row["lead_id"]))
+        if not plan.fields and not plan.do_not_call:
             complete += 1
             continue
+        marker_changed = False
+        if plan.do_not_call:
+            try:
+                marker = client.mark_lead_do_not_call(str(row["salesforce_id"]))
+            except Exception as exc:  # noqa: BLE001 — never fill after ambiguous DNC
+                failed += 1
+                print(f"  #{row['lead_id']}: do-not-call {type(exc).__name__}")
+                continue
+            if marker.error == "not in this org":
+                elsewhere += 1
+                print(f"  #{row['lead_id']}: skipped, {marker.error}")
+                continue
+            if not marker.success:
+                failed += 1
+                print(f"  #{row['lead_id']}: {marker.error}")
+                continue
+            marker_changed = marker.error == "marked do-not-call"
+        if not plan.fields:
+            if marker_changed:
+                filled += 1
+            else:
+                complete += 1
+            continue
         try:
-            result = client.fill_lead_blanks(str(row["salesforce_id"]), fields)
+            result = client.fill_lead_blanks(
+                str(row["salesforce_id"]), dict(plan.fields)
+            )
         except Exception as exc:  # noqa: BLE001 — one bad record cannot end the sweep
             failed += 1
             print(f"  #{row['lead_id']}: {type(exc).__name__}")
@@ -179,6 +227,8 @@ def run(
         elif result.error and result.error.startswith("filled"):
             filled += 1
             print(f"  #{row['lead_id']} {row['salesforce_id']}: {result.error}")
+        elif marker_changed:
+            filled += 1
         else:
             complete += 1
     if elsewhere:

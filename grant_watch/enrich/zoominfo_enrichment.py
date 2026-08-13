@@ -172,7 +172,10 @@ def apply_for_lead(
     proved was free. Callers must have shown `preview_for_lead(...).summary()` and
     taken an explicit yes first — this function does not ask.
     """
-    ids = [pid.strip() for pid in person_ids if pid.strip()]
+    # Validate and collapse the approved set before reserving account credits. A
+    # local malformed ID is not an ambiguous vendor attempt, and duplicates cannot
+    # honestly cost one credit each.
+    ids = zoominfo.normalize_person_ids(person_ids)
     if not ids:
         return ZoomInfoApplied(stored=0, billed=0, suppressed_numbers=0)
     # One bounded pull per lead per approved set: re-approving the same people is an

@@ -9,6 +9,7 @@ from pathlib import Path
 from threading import Barrier
 from typing import Any
 
+import pytest
 from slack_sdk.errors import SlackApiError
 
 from grant_watch import db
@@ -16,6 +17,12 @@ from grant_watch.campaign import delivery, pacing
 from tests.test_rich_preparation import _eligible_conn
 
 READY = datetime(2026, 7, 22, 17, 59, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _workspace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make draft-ready delivery actions reachable unless a test removes the gate."""
+    monkeypatch.setenv("SLACK_WORKSPACE_ID", "TWORKSPACE")
 
 
 class FakeSlack:
@@ -171,6 +178,23 @@ def test_dry_run_is_write_free_and_calls_no_slack(tmp_path: Path) -> None:
     assert conn.total_changes == before
     assert client.calls == []
     assert conn.execute("SELECT COUNT(*) FROM rich_card_snapshots").fetchone()[0] == 0
+
+
+def test_draft_ready_card_is_blocked_when_workspace_identity_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Grant cannot post a button its callback must reject on the first gate."""
+    monkeypatch.delenv("SLACK_WORKSPACE_ID", raising=False)
+    conn = _eligible_conn(tmp_path / "missing-workspace.db")
+    client = FakeSlack(conn)
+    before = conn.total_changes
+
+    outcome = delivery.run(client, "CGRANTS", conn, force=True, now=READY)
+
+    assert outcome.startswith("blocked:")
+    assert "SLACK_WORKSPACE_ID" in outcome
+    assert client.calls == []
+    assert conn.total_changes == before
 
 
 def test_reservation_precedes_one_slack_post_and_finalizes_all_state(

@@ -1,4 +1,4 @@
-# FINDINGS — Integrated Grant Lead Research (through 2026-07-24)
+# FINDINGS — Integrated Grant Lead Research (through 2026-08-12)
 
 This records live integrations, verified lead findings, and open implementation work. It is not the
 complete nationwide candidate list. See `docs/source_inventory/README.md` and its generated CSVs for
@@ -28,20 +28,97 @@ the canonical discovery catalog.
   added two exact Leads with CampaignMember readback, repeated the same add without duplicates,
   blocked an unresolved organization with no approval control, and added only the explicitly
   approved resolved subset. Salesforce, Slack, and the immutable action/batch ledgers agreed.
-  Production Salesforce writes remain separately gated and `needs-testing`.
+  At that date production writes remained separately gated and `needs-testing`; this was superseded
+  by the human-confirmed 2026-08-10 execution recorded below.
 - **verified (live read-only, 2026-07-13/14):** USAspending, Grants.gov, SAM.gov, WEBS fetch/parser,
   California Grants Portal, OregonBuys recent-bids fetch/table parse, and NCES district data.
-- **needs-testing:** Salesforce and Persequor live round trips, a positive OregonBuys security bid,
-  Salesforce Campaign sandbox creation, production cron, and production deployment.
+- **verified (historical external execution):** Persequor accepted seven draft-intake handoffs;
+  Salesforce Campaign membership was exercised in `monarchdev`, and a human-confirmed production
+  Campaign action added and read back 13 California Gold Leads on 2026-08-10.
+- **needs-testing:** a positive strict SAM/WEBS security row under the new gates, an OregonBuys
+  replacement source, and production deployment/cutover of the 2026-08-12 remediation.
+
+## Thirty-finding remediation ledger (2026-08-12)
+
+Items 1–27 are `verified` by offline regression tests on this branch. Items 28–30 have a verified
+local implementation and an explicitly separate production step; no deployment or external write is
+claimed here.
+
+1. Exact parsed email tokens replace substring email acceptance.
+2. Ordered name tokens must occur in the email's bounded local evidence block.
+3. Phones are matched as individual phone-shaped spans; page-wide digits never combine.
+4. City, ZIP, and state evidence uses boundaries plus the real state/DC vocabulary; ordinary words
+   such as “or” cannot stand for Oregon, and explicit-state lead resolution never falls back to an
+   out-of-state name match.
+5. Organization fields retain their own page URL, excerpt, hash, and verifier version; unchecked or
+   legacy projections cannot cross a strict evidence gate.
+6. Campaign counts, selection, preview, and click-time revalidation share the explicit eligible
+   dispositions `new`, `surfaced`, and `contacted`; `snoozed`, `not_relevant`, and `dead` are out.
+7. Every operational Firecrawl search/scrape crosses one durable pre-HTTP gateway.
+8. A switchboard-only organization profile is `found` and is never presented as a person's line.
+9. Search/contact-derived sites remain candidates; only an exact NCES-bound site becomes official.
+10. One contact request runs organization enrichment at most once; rendering is network-free.
+11. Runtime Firecrawl calls persist workflow, an opaque unique key, a deterministic full request
+    hash, attempt number, and `in_flight` before HTTP. Exact indeterminate repeats require the
+    existing operator-only `--retry-indeterminate` path.
+12. Clean misses, unavailable sources, rate limits, and indeterminate calls are distinct outcomes;
+    exact 429 retries wait for persisted `Retry-After` and stop after three attempts.
+13. A host-bound standalone Firecrawl ledger owns the UTC-month ceiling, exact attempts, provider
+    backoff, and a proactive next-call timestamp that spaces independent processes before HTTP; a
+    separate shared 200-call enrichment budget constrains all eight enrichment workers. Raw source
+    discovery retains its immutable batch budget/evidence but crosses the same account reservation,
+    rate, backoff, and indeterminate-request boundary. Legacy histories merge without adding
+    ceilings, and merged usage above a reviewed cap is refused.
+14. RFP and bulletin proactive queries accept only untouched `new` leads.
+15. RFP selection is semantic: verified open `rfp_posted` events from strict SAM or directly verified
+    official pages qualify; Starbridge does not.
+16. SAM promotion requires exact requested/place state, reviewed solicitation type, active state,
+    future deadline, physical-security scope, and a notice-ID-bound official link.
+17. Starbridge has its own research-only namespace and `needs-testing` evidence. Migration 44 renames,
+    downgrades, and suppresses historical aggregator rows that had shared `source='rfp'`.
+18. OregonBuys' moved/404 PDF poller is absent from the runtime registry and visible as disabled.
+19. WEBS is labeled parser-tested; a real positive security result remains `needs-testing`.
+20. ZoomInfo IDs are numeric, positive, bounded, deduplicated, and capped before reservation; vendor
+    responses must be an exact subset without duplicates.
+21. Every Anthropic client uses the bounded shared timeout/retry policy.
+22. Enrichment worker count is parsed lazily and restricted to 1–8.
+23. `GRANT_WATCH_STATES` accepts only the 50 states plus DC; shape-valid `ZZ` is rejected.
+24. Requested result emails attach the same frozen search as one generated, bounded XLSX; roster-only
+    delivery and temporary-artifact cleanup remain structural.
+25. Canonical architecture, Grant, source-inventory, roadmap, rich-card, message, and status documents
+    now distinguish historical verification, current local behavior, and production state.
+26. The unused `SourceObservation` and `FundingEvent` dataclasses were removed; their active database
+    tables remain unchanged.
+27. Poll ownership is a renewable monotonic fencing lease, checked inside every write, with a hard
+    maximum runtime and stale-token-safe release.
+28. Exact same-state NCES detail evidence can now populate website provenance, and enabled rich
+    actions fail startup without a workspace identity. `needs-testing` in production: the audited
+    database has 340 NCES IDs but zero NCES websites and the workspace variable is absent.
+29. Persequor retry already has durable CAS/idempotency; overdue count/age now appears in `status`.
+    `needs-testing` in production: no retry cron is installed and adding outbound retries requires
+    explicit authorization.
+30. ZoomInfo spend authority is now one private standalone account ledger, not one counter per app
+    database. Firecrawl and ZoomInfo ledgers are both bound to an owner-only host capability and
+    stable vendor-account scope; every call revalidates the binding. Repeatable-source,
+    dry-by-default atomic migrations preserve exact history. `needs-testing` in production: stop all
+    old writers, revoke/rotate credentials off every non-authority host, and merge the observed
+    production 14 credits / 7 spends with the known laptop 3 credits / 2 spends. The expected result
+    is 17 credits / 9 spends unless vendor reconciliation identifies an exact clone or newer spend.
+
+Policy assumptions kept explicit: Campaign eligibility includes `surfaced`/`contacted` as well as
+`new`; Firecrawl's configured UTC-month ceiling and request rate are internal safety caps, not claims
+about the vendor contract; ZoomInfo's reset period remains an assumed Pacific calendar month pending
+written contract confirmation; the generated attachment cap is 28 MiB raw; and no Persequor retry
+cadence or production alert owner is approved yet.
 
 ## Nationwide discovery snapshot
 
-- **verified (catalog validation):** 270 candidate and integrated source records validate across
+- **verified (catalog validation):** 271 candidate and integrated source records validate across
   federal, state, county, city, school-district, specialized-jurisdiction, multi-jurisdiction, and
   portal-family levels.
 - **verified (access evidence):** 34 no-auth sources have verified access, 11 additional no-auth
   classifications remain candidates, 2 public APIs require keys, 15 sources require free accounts,
-  4 require supplier accounts, and 204 candidates still have unknown access.
+  4 require supplier accounts, and 205 candidates still have unknown access.
 - **verified (gap pass):** exact official endpoints were added for Ada County, Troy School District,
   Houston ISD, and Seattle Public Schools. Connecticut is an evidenced `not_applicable` county layer
   because its official FAQ states that county government was dissolved in 1960.
@@ -69,10 +146,13 @@ the canonical discovery catalog.
 
 ## What remains
 
-- **needs-testing:** verify live contact enrichment and positive RFP extraction against real rows.
-- **needs-testing:** complete Persequor status reflection and one test-mode end-to-end brief.
-- **needs-testing:** run Salesforce match-quality shadow testing, then a sandbox-only Campaign action.
-- **needs-testing:** deploy only a committed revision through grants-ops-guardian and install scoped cron.
+- **needs-testing:** verify current live contact enrichment and one positive strict SAM/WEBS RFP row.
+- **needs-testing:** deploy only a committed revision through grants-ops-guardian and follow
+  `docs/paid_provider_cutover.md`: rotate/revoke credentials, preserve and merge every Firecrawl and
+  ZoomInfo history, prove the sole authority host, set the exact Slack workspace identity, and let
+  the existing NCES cron populate evidence before a separately authorized rich-button smoke test.
+- **needs-testing:** run one Persequor retry dry-run; install a scoped retry cron only after explicit
+  authorization for its future outbound POSTs and database writes.
 - **assumed roadmap:** PA PCCD parser, MI CSSGP, COPS announcement, SSE state-subgrant, board-agenda,
   and additional compliant RFP watchers remain valuable next sources.
 

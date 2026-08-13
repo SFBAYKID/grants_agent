@@ -25,6 +25,7 @@ from typing import Any  # Anthropic tool-use response payloads are runtime-shape
 
 from anthropic import Anthropic
 
+from ..llm import anthropic_client_options
 from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact
 from . import tools
@@ -666,7 +667,7 @@ def respond(
     # ANTHROPIC_API_KEY from env. 60s covers a slow tool-planning turn without
     # letting one hung request stall the Slack worker; 2 retries absorb the
     # transient 429/5xx/connection errors that previously surfaced as failures.
-    client = Anthropic(timeout=60.0, max_retries=2)
+    client = Anthropic(**anthropic_client_options())
     say = on_progress or (lambda _msg: None)
     # Keep a wider window so the confirmed filters (STEP 1) survive a few interleaved
     # messages before the rep replies "yes, top 5" (architectural-critic H1).

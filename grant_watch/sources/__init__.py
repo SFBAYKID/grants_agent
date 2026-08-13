@@ -1,19 +1,18 @@
 """Source registry: one module per data source, each exposing poll() -> list[RawItem].
 
-Verification labels (Constitution rule 1) — status through 2026-07-14:
+Verification labels (Constitution rule 1) — status through 2026-08-12:
     usaspending   verified   (live SVPP prime awards + NSGP subaward shape)
     grants.gov    verified   (live opportunities)
     sam.gov       verified   (live run with Chase's key)
     ca_grants     verified   (live CKAN/CSV parse; 831 records in dry-run)
-    oregon_buys   verified   (live fetch/table/zero match; positive row needs-testing)
-    webs          verified   (live fetch/parser/zero match; positive row needs-testing)
-    rfp            available   (verbatim .gov-page RFP extraction; NOT wired — found ~0
-                               open pages, superseded by the aggregator below)
-    rfp_aggregator needs-testing (open target-state RFPs from a bid aggregator listing;
-                               env-gated, the WIRED RFP source)
+    oregon_buys   unavailable (published PDF moved/withdrawn; runtime disabled)
+    webs          parser-tested (live fetch/zero match; positive row needs-testing)
+    rfp            needs-testing (verbatim .gov-page RFP extraction; NOT wired — found
+                                 ~0 open pages during historical research)
+    rfp_aggregator needs-testing (third-party Starbridge fixture parser; NOT wired)
 
 cli.py iterates POLLERS; sam.gov is appended there only when SAM_API_KEY is set, and the
-paid `rfp_aggregator` source only when RFP_DISCOVERY_ENABLED=1 (see cli._active_pollers).
+direct RFP probe and third-party aggregator remain research-only until separately reviewed.
 """
 
 from __future__ import annotations
@@ -28,7 +27,6 @@ POLLERS: list[tuple[str, Callable[[], list[RawItem]]]] = [
     ("Grants.gov", grants_gov.poll),
     ("USASpending SVPP", usaspending.poll),
     ("California Grants Portal", ca_grants.poll),
-    ("OregonBuys recent bids", oregon_buys.poll),
     ("WEBS bid calendar", webs.poll),
 ]
 

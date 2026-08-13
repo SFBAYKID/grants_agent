@@ -80,6 +80,7 @@ def campaign_lead_payload(
 
     from ..enrich.zoominfo_enrichment import DECISION_MAKER_TITLES
 
+    row = db.get_lead(conn, int(row["id"])) or row
     entity = str(row["entity_name"] or "")
     entity_key = db.canonical_entity_key(entity).partition("|")[0]
 
@@ -99,7 +100,7 @@ def campaign_lead_payload(
         (
             contact
             for contact in db.contacts_for_lead(conn, int(row["id"]))
-            if str(contact["contact_status"] or "") == "verified"
+            if db.contact_is_page_verified(contact)
         ),
         key=rank,
         reverse=True,

@@ -2,16 +2,18 @@
 
 Chase's copilot vision: Grant shouldn't just answer — it should *notice* things and
 offer the next action, unprompted. The legacy flag-off path posts the bare award/RFP/
-bulletin ladder. A rich award-card campaign is implemented locally behind
-`GRANT_RICH_CARD_ENABLED=0`; it is not enabled, merged, deployed, scheduled, or shadow-
-validated against production. The remaining entries are proposals.
+bulletin ladder. The rich award-card campaign is live in production with
+`GRANT_RICH_CARD_ENABLED=1`, but its draft-action control remains unreachable there:
+the 2026-08-12 audit found zero NCES websites and no workspace identity. Exact NCES
+website binding plus startup validation are implemented locally and await a guarded
+cutover. The remaining entries are proposals unless marked otherwise.
 
 Every proposal keeps the honesty invariants: real evidence only, a source link on
 every funding claim, human approval before any write/email, no fabricated contacts.
 
 ---
 
-## A. Upgrade the award nugget into an actionable card  `implemented locally · OFF`
+## A. Upgrade the award nugget into an actionable card  `live card · action cutover pending`
 Today: `Commerce ISD in TX has a verified $500,000 SVPP funding award. Source: …`
 Proposed: chain discovery → contact → offer, in one card:
 > **Peoria Unified School District (AZ)** has a verified **$500,000 SVPP** award
@@ -25,8 +27,8 @@ Proposed: chain discovery → contact → offer, in one card:
   state, exact-link, contact, and CRM evidence rule. No RFP/bulletin fallback exists.
 - One immutable snapshot binds Block Kit, thread answers, feedback, and Persequor.
 - `rich-prepare` defaults to a no-HTTP/no-write preview; `rich-shadow` is DB-read-only.
-- Production viability and presentation remain `needs-testing` in a separately approved
-  five-business-day guardian-run shadow review.
+- Card rendering/delivery is live. Exact NCES-site population, workspace configuration,
+  and one human-authorized draft-button smoke remain `needs-testing` through the guardian.
 
 ## B. "Contact found" nudge  `proposed · small`
 After enrichment lands a verified contact on a surfaced lead:
@@ -57,6 +59,10 @@ clearly-labeled *digest* is the honest way to work them:
 > {Entity} still needs follow-up in Salesforce.
 Exists and is tested; needs a cron entry + Chase's go to schedule.
 
+The separate Persequor intake retry worker is also built, CAS/idempotency-tested, and
+visible through overdue status, but has no production cron. Its cron is an outbound
+POST/database-write authorization decision, not an automatic part of deploying code.
+
 ## G. Owner/duplicate alert  `proposed · medium`
 When a fresh award matches an existing Salesforce account:
 > New award for **X** — but they're already in Salesforce, owned by {rep}. Want me to
@@ -69,7 +75,7 @@ When a fresh award matches an existing Salesforce account:
 ---
 
 ## Recommended build order
-1. **A** (actionable nugget) — run the separately approved shadow validation; keep OFF.
+1. **A** (actionable nugget) — guarded NCES/workspace cutover and button smoke.
 2. **E** (backlog digest) — unlocks 855 stranded leads honestly.
 3. **F** (schedule the follow-up nudge) — already built, just wire the cron.
 4. **C/D** (deadline watch + weekly digest) — recurring proactive value.

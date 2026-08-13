@@ -7,8 +7,8 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 ## What Grant does
 
 1. **Individual proactive alerts.** Grant never posts multi-lead digests. With the rich-card feature
-   OFF (the default), the existing award/RFP/bulletin ladder is unchanged. The implemented-but-OFF
-   rich path instead permits at most one fully evidenced school/district award card per weekday,
+   OFF (the code default), the existing award/RFP/bulletin ladder is unchanged. Production has the
+   flag ON; the rich path permits at most one fully evidenced school/district award card per weekday,
    with Block Kit, fresh public contact, typed read-only CRM context, accurate links, exact/unassigned
    routing, and safe draft/feedback buttons. It never fills the slot with an RFP or bulletin.
 2. **Natural engagement.** A human replies in the alert thread for details, or types `@Grant` followed
@@ -31,12 +31,20 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
    Mention-led threads are persisted so a plain follow-up such as “85 is fine—Excel”
    continues the original search instead of being dropped.
 6. **Contact enrichment (second step).** After the list, Grant *offers* to find the best contact for
-   each org — never automatically, because each lookup scrapes the org's site (~30s). On a yes, it
-   enriches the top N (capped at 10 to stay responsive), adding verified-or-honest contact columns to
-   the summary and the export. A contact is stored only if its email appears verbatim on a fetched page;
-   a genuine miss is `not_found`; a source outage records **nothing** (retryable) — never a false
-   `not_found`.
-7. **Source-discovery status.** A rep can ask Grant for the nationwide or state-specific source
+   each org — never automatically, because each lookup scrapes the org's site. On a yes, it enriches
+   a bounded top N (maximum 100) with 1–8 workers and one shared 200-call batch budget, adding
+   verified-or-honest contact columns to the summary and export. Every runtime Firecrawl call also
+   crosses the sole host-bound account ledger: durable monthly ceiling, exact attempt identity,
+   cross-process proactive request spacing, and persisted 429/circuit backoff. Email, nearby name,
+   title, phone, address, state, and ZIP use field-specific bounded evidence; address components
+   cannot cross a page/address block, and a phone-only organization result is labeled a switchboard.
+   A genuine clean miss is `not_found`; any unavailable or legacy-indeterminate source leaves the
+   result retryable/operator-gated. One request runs organization lookup once and rendering performs
+   no network call.
+7. **Internal result email.** A rostered rep may ask Grant to email the current frozen search. Grant
+   sends one generated bounded Excel attachment through Resend; no caller-supplied path/address is
+   accepted, and the temporary workbook is removed after either success or failure.
+8. **Source-discovery status.** A rep can ask Grant for the nationwide or state-specific source
    inventory, Census research coverage, manually reviewed candidates, or recent validated batch
    summaries. Supported examples include `@Grant show source discovery status`, `@Grant show
    school-district research coverage in California`, `@Grant list reviewed sources in New Hampshire`,
@@ -76,7 +84,16 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 - **Rich campaign modules:** `grant_watch/campaign/` owns strict policy, bounded preparation,
   durable possibly-paid-call state, exact routing, immutable snapshots, Block Kit, delivery,
   shadow reporting, and actions. `rich-prepare` previews by default; `rich-shadow` is write-free.
-  `GRANT_RICH_CARD_ENABLED` remains OFF until separately approved production shadow validation.
+  `GRANT_RICH_CARD_ENABLED` defaults OFF in code and is ON in production. Draft-ready actions require
+  exact NCES website provenance plus `SLACK_WORKSPACE_ID`; the listener now refuses an enabled but
+  unreachable action configuration at startup. The 2026-08-12 audit found the production workspace
+  variable absent and 0 NCES websites, so the corrected control surface remains `needs-testing` until
+  a reviewed deploy/cutover and human-authorized smoke test.
+- **Paid-provider authority:** copied credentials do not authorize this process. Runtime requires
+  `GRANT_PAID_PROVIDER_MODE=authority`, a private host capability, and matching standalone Firecrawl
+  and ZoomInfo ledgers. The listener and `python -m grant_watch.paid_provider_runtime_check` fail
+  closed on a missing/mismatched binding. Cross-machine exclusivity additionally requires
+  vendor-side credential rotation/revocation; see `docs/paid_provider_cutover.md`.
 - **Google Sheets export (Grant-owned):** email is Persequor's domain; data export is Grant's. Grant
   creates each export as a Sheet in the "Grant Exports" shared drive using its own service account
   (`GOOGLE_SA_KEY_PATH`, `GRANT_EXPORTS_DRIVE_ID`), writes rows with `valueInputOption=RAW` so no cell
@@ -97,7 +114,8 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
   created a Campaign, added two exact existing Leads with verified CampaignMember readback, repeated
   the add without duplicates, blocked one unresolved organization, and added only the explicitly
   approved resolved subset. Typed approval text caused no write; requester-bound button taps did.
-  Production Salesforce writes remain separately gated and needs-testing.
+  Production writes remain separately credentialed and gated; a human-confirmed action added and
+  read back 13 California Gold Leads on 2026-08-10.
 
 ## Slack app config
 
@@ -117,8 +135,9 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 
 - Rich award-card campaign: `verified` offline with fixtures/fakes for policy, migrations,
   preparation, activity evidence, routing, snapshots, Block Kit, pacing, delivery ambiguity,
-  action replay, Persequor wire keys, and frozen thread context. It is OFF and not deployed;
-  production readiness/card volume/live Slack rendering remain `needs-testing` through the guardian.
+  action replay, Persequor wire keys, and frozen thread context. The path is live in production, but
+  the exact NCES website writer, workspace startup gate, and reachable-button remediation are local
+  only; production activation of those fixes remains `needs-testing` through the guardian.
 
 - Slack app and core bot: `verified` live (provisioned, installed, Socket Mode connected).
 - Removal of the live `/grant` command, DM subscription/scopes, and `chat:write.public` is

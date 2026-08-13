@@ -5,9 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import requests
 
 from grant_watch.campaign import contact_evidence, paid_calls, prepare_worker
-from grant_watch.enrich import finder, salesforce_activity
+from grant_watch.enrich import finder, firecrawl_gateway, salesforce_activity
+from tests.contact_support import verified_contact_evidence
+from tests.paid_provider_support import configure_firecrawl_runtime
 from tests.test_rich_preparation import NOW, _eligible_conn
 
 
@@ -73,6 +76,12 @@ def test_contact_refresh_supersedes_old_evidence_with_new_hash(tmp_path: Path) -
         "jane@montebello.k12.ca.us",
         "https://montebello.k12.ca.us/directory",
         "montebello.k12.ca.us",
+        verified_contact_evidence(
+            "Jane Doe",
+            "jane@montebello.k12.ca.us",
+            "https://montebello.k12.ca.us/directory",
+            title="Technology Director",
+        ),
     )
     status = contact_evidence.refresh(conn, 1, finder_fn=lambda _lead: fact, now=NOW)
     assert status == "verified"
@@ -129,6 +138,60 @@ def test_paid_timeout_requires_explicit_retry(tmp_path: Path) -> None:
         )
         == "operator-retried"
     )
+
+
+def test_contact_retry_authority_reaches_exact_firecrawl_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The operator flag reopens both durable paid ledgers, never just the outer one."""
+    conn = _eligible_conn(tmp_path / "firecrawl-retry.db")
+    conn.execute("UPDATE contact_evidence SET expires_at='2026-07-01T00:00:00+00:00'")
+    conn.commit()
+    configure_firecrawl_runtime(tmp_path, monkeypatch, limit=5)
+    calls = 0
+
+    class Response:
+        """Minimal successful search response for the explicit second attempt."""
+
+        status_code = 200
+        headers: dict[str, str] = {}
+
+        def json(self) -> dict[str, object]:
+            """Return a definite empty provider result."""
+            return {"data": []}
+
+    def post(*_args: object, **_kwargs: object) -> Response:
+        """Lose the first response and complete the explicitly retried request."""
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise requests.Timeout("lost response")
+        return Response()
+
+    def lookup(_lead: object) -> contact_evidence.ContactFact | None:
+        """Exercise the real gateway from inside the paid contact callback."""
+        firecrawl_gateway.search("exact contact query", conn=conn)
+        return None
+
+    monkeypatch.setattr(firecrawl_gateway.requests, "post", post)
+    with pytest.raises(firecrawl_gateway.FirecrawlIndeterminate):
+        contact_evidence.refresh(conn, 1, finder_fn=lookup, now=NOW)
+    assert (
+        contact_evidence.refresh(
+            conn, 1, finder_fn=lookup, retry_indeterminate=True, now=NOW
+        )
+        == "removed"
+    )
+    assert calls == 2
+    ledger = firecrawl_gateway.connect_ledger()
+    assert [
+        tuple(row)
+        for row in ledger.execute(
+            """SELECT attempt_number,state FROM firecrawl_runtime_attempts
+                 ORDER BY rowid"""
+        )
+    ] == [(1, "indeterminate"), (2, "completed")]
+    ledger.close()
 
 
 def test_worker_preview_does_no_calls_or_writes(tmp_path: Path) -> None:
@@ -262,7 +325,10 @@ def test_worker_discovers_a_missing_website_exactly_once(tmp_path: Path) -> None
     Anthropic) on every weekday run forever.
     """
     conn = _eligible_conn(tmp_path / "website.db")
-    conn.execute("UPDATE leads SET org_website='', org_profile_status=''")
+    conn.execute(
+        """UPDATE leads SET org_website='',org_profile_status='',
+                  nces_website='',nces_website_status=NULL"""
+    )
     conn.commit()
     attempts: list[int] = []
 
@@ -295,6 +361,30 @@ def test_worker_discovers_a_missing_website_exactly_once(tmp_path: Path) -> None
         now=NOW,
     )
     assert attempts == [1], "a recorded not_found must not be re-scraped and re-billed"
+
+
+def test_worker_skips_paid_website_discovery_when_nces_verified_it(
+    tmp_path: Path,
+) -> None:
+    """An exact NCES site closes the website gap without Firecrawl or Anthropic."""
+    conn = _eligible_conn(tmp_path / "nces-site.db")
+    conn.execute("UPDATE leads SET org_website='',org_profile_status=''")
+    conn.commit()
+
+    def fail(_conn: object, _lead_id: int) -> object:
+        """No paid organization lookup may run behind authoritative evidence."""
+        raise AssertionError("NCES-verified site triggered paid website discovery")
+
+    summary = prepare_worker.run(
+        conn,
+        "CGRANTS",
+        dry_run=False,
+        contact_finder=lambda _lead: None,
+        website_finder=fail,
+        now=NOW,
+    )
+    assert summary.website_checked == 0
+    conn.close()
 
 
 def test_worker_refreshes_missing_crm_state_for_its_own_targets(

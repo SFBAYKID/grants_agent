@@ -129,6 +129,12 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
     # 32 lets a rep supply a contact fact, recorded with who said it;
     # 40 stores, per organization, whether the rep's choices include it — one
     # decision instead of four expressions that disagreed at click time.
+    # 41 adds per-field organization evidence and exact NCES website provenance;
+    # 42 adds the centralized Firecrawl call/budget ledger;
+    # 43 replaces the fixed poll lock with renewable fenced leases;
+    # 44 renames and downgrades historical Starbridge aggregator evidence;
+    # 45 adds exact runtime Firecrawl retry identity.
+    # 46 quarantines legacy contact/org claims that have no typed evidence.
     assert versions == [
         1,
         2,
@@ -167,6 +173,12 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
         38,
         39,
         40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
     ]
     crm_tables = {
         row[0]

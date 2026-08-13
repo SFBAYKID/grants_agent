@@ -25,8 +25,9 @@ from pathlib import Path
 
 import pytest
 
-from grant_watch import reminders
+from grant_watch import db, reminders
 from grant_watch.slack import nudge_promises, nudges
+from tests.contact_support import verified_contact_evidence
 
 from nudge_helpers import (
     BRETT,
@@ -255,6 +256,27 @@ def test_an_opt_out_does_not_permanently_burn_the_subject(tmp_path: Path) -> Non
 # ------------------------------------------------------------- what may be promised
 
 
+def _verified_sean(conn: sqlite3.Connection) -> int:
+    """Store the page-evidenced person used by the promise control cases."""
+    source_url = "https://npd117.test/staff"
+    return db.save_contact(
+        conn,
+        900,
+        "Sean Joyce",
+        "Director of Technology",
+        "sjoyce@npd117.net",
+        "",
+        source_url,
+        "high",
+        field_evidence=verified_contact_evidence(
+            "Sean Joyce",
+            "sjoyce@npd117.net",
+            source_url,
+            title="Director of Technology",
+        ),
+    )
+
+
 def test_the_offer_matches_what_the_outreach_path_will_actually_accept(
     tmp_path: Path,
 ) -> None:
@@ -277,8 +299,7 @@ def test_the_offer_matches_what_the_outreach_path_will_actually_accept(
     conn.commit()
     assert nudge_promises.best_offer(conn, 900).kind == "find_email"
 
-    conn.execute("UPDATE contacts SET contact_status='verified' WHERE lead_id=900")
-    conn.commit()
+    _verified_sean(conn)
     offer = nudge_promises.best_offer(conn, 900)
     assert offer.kind == "draft_intro"
     assert offer.contact_name == "Sean"
@@ -307,12 +328,7 @@ def test_the_escalation_carries_the_real_offer_for_that_lead(tmp_path: Path) -> 
     """The manager is told something actionable, and it is true for THIS lead."""
     conn = _conn(tmp_path)
     _card(conn, NOW - timedelta(days=2))
-    conn.execute(
-        "INSERT INTO contacts (lead_id,name,title,email,contact_status) "
-        "VALUES (900,'Sean Joyce','Director of Technology',"
-        "'sjoyce@npd117.net','verified')"
-    )
-    conn.commit()
+    _verified_sean(conn)
     escalation = next(
         c for c in nudges.candidates(conn, NOW) if c.subject_kind == "card_escalated"
     )

@@ -16,8 +16,10 @@ source link; no internal identifiers or emoji in alerts; short paragraphs.
 ### 0. Rich verified award card — feature flag ON in production 2026-08-05  (kind `rich_award`)
 - **Status:** `GRANT_RICH_CARD_ENABLED=1` in production since 2026-08-05 (Chase's
   explicit instruction; the five-business-day shadow gate was waived by him the same
-  day). First live render/notification still `needs-testing` until a human confirms
-  the first posted card.
+  day). Rich cards have posted, but draft buttons remain `needs-testing`: the read-only
+  2026-08-12 audit found zero production NCES websites and no `SLACK_WORKSPACE_ID`.
+  Local code now writes only exact NCES-bound website evidence and refuses enabled
+  rich-action startup without the workspace identity; those fixes are not deployed.
 - **Fires only when:** a Gold verified award for an NCES-linked district has a
   precision-safe recent award date, event-owned positive finite amount, currently open
   spend window, recent completed source run, safe exact award URL, evidenced official
@@ -128,7 +130,8 @@ and addressed TO another**, so they carry extra guards:
 - **Bare `@Grant`:** `Hey! What can I help you with?`
 - **Working spinner:** a rotating `/ Thinking…` / `Reading their website…` /
   `Searching for the contact…` message, edited into the final answer when done.
-  (Orphans from a crash are swept at boot and finalized honestly.)
+  (Orphans from a crash are handled by the scheduled watchdog; listener startup is
+  deliberately read/write inert.)
 
 ### Search flow
 - **Scoping question (only when the ask names no state/org/city/entity):**
@@ -148,8 +151,12 @@ and addressed TO another**, so they carry extra guards:
 ### Contact flow (escalation chain)
 - **Verified:** `Found him: {Name}, {Title} — {email}, verified directly on their site.`
 - **LinkedIn + org mailbox / LinkedIn only / org mailbox only:** each stated plainly.
+- **Organization phone only:** labeled as a switchboard, never placed beside a person's
+  name as though it were a direct line.
 - **None found:** `I checked their website, LinkedIn, and looked for a general`
   `organization mailbox — none produced a verifiable contact.`
+- **Unavailable:** says the website/search could not be checked and remains retryable;
+  it never uses the none-found wording.
 
 ### Salesforce flow (human-approved writes)
 - **Preview card** with `Confirm in Salesforce` / `Cancel` buttons, listing every
@@ -166,6 +173,9 @@ and addressed TO another**, so they carry extra guards:
 - **Handoff:** `Persequor accepted the request and will prepare a new Gmail draft`
   `for your review. Nothing was sent.` (Persequor then posts its own draft card
   with Send / Edit in Gmail / Dismiss.)
+- **Retry:** unreachable intake is queued under the same request ID. The CLI `status`
+  command exposes overdue count/age, but production has no retry cron; scheduling outbound
+  retries still needs explicit authorization.
 
 ### Honest refusals & clarifications
 - **Award timing:** offers the verified announcement date / discovery date /

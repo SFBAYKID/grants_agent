@@ -26,6 +26,7 @@ from typing import Any
 from .presentation import for_human
 from .reminders import search_kwargs
 from .slack.search import NO_MATCH_PREFIX, search_leads
+from .spreadsheets import GeneratedArtifact
 
 
 def render(spec: dict[str, Any]) -> str:
@@ -64,4 +65,39 @@ def render(spec: dict[str, Any]) -> str:
     return (
         f"No exact matches{scope} for those filters. Here are the closest I have:"
         f"\n\n{wider}"
+    )
+
+
+def render_with_spreadsheet(
+    spec: dict[str, Any],
+) -> tuple[str, GeneratedArtifact | None]:
+    """Render email-safe results and create a matching Excel attachment when found.
+
+    The frozen search still passes through the reminder allowlist, so the email tool
+    cannot smuggle identity, filesystem, or connector arguments into ``search_leads``.
+    When a state-scoped search is empty, the same documented broadening used by
+    :func:`render` supplies both the body and the workbook; the attachment can never
+    silently describe a different query from the accompanying text.
+    """
+    kwargs = search_kwargs(spec)
+    if not kwargs or set(kwargs) == {"limit"}:
+        return "", None
+    text, artifact = search_leads(**kwargs, for_chat=False, export="excel")
+    body = for_human(text)
+    if artifact is not None or not body.startswith(NO_MATCH_PREFIX):
+        return body, artifact
+
+    broadened = {key: value for key, value in kwargs.items() if key != "state"}
+    if broadened == kwargs:
+        return body, None
+    wider, wider_artifact = search_leads(**broadened, for_chat=False, export="excel")
+    wider_body = for_human(wider)
+    if wider_artifact is None or wider_body.startswith(NO_MATCH_PREFIX):
+        return body, None
+    where = str(kwargs.get("state", "")).upper()
+    scope = f" in {where}" if where else ""
+    return (
+        f"No exact matches{scope} for those filters. I attached the closest "
+        f"results I have instead.\n\n{wider_body}",
+        wider_artifact,
     )

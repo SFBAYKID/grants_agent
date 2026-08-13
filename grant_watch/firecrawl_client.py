@@ -1,9 +1,10 @@
-"""Typed, secret-redacting Firecrawl search transport for source research.
+"""Typed, secret-redacting Firecrawl search evidence for source research.
 
-Why: nationwide discovery spends API credits and receives runtime-shaped JSON.
-This module contains the HTTP boundary, response-size guard, recursive redaction,
-and explicit outcome classification so orchestration never stores credentials or
-confuses throttling, malformed responses, and truthful zero-result searches.
+Nationwide discovery receives runtime-shaped JSON, but its HTTP authority lives only
+in :mod:`grant_watch.enrich.firecrawl_gateway`. This module converts an already
+account-metered response into secret-free immutable batch evidence. Keeping transport
+out of this module makes it impossible for discovery to bypass the shared account
+ceiling, proactive rate slot, provider backoff, or indeterminate-request ledger.
 """
 
 from __future__ import annotations
@@ -15,10 +16,6 @@ from dataclasses import dataclass
 from typing import TypeAlias
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
-import requests
-
-
-FIRECRAWL_SEARCH_URL = "https://api.firecrawl.dev/v1/search"
 MAX_RESPONSE_BYTES = 2_000_000
 SECRET_KEY_PATTERN = re.compile(
     r"(?:api[_-]?key|authorization|credential|password|secret|token)", re.I
@@ -132,17 +129,7 @@ def canonical_json_hash(value: JsonValue) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def _retry_after(response: requests.Response) -> float:
-    """Parse a numeric Retry-After value without trusting arbitrary header text."""
-    value = response.headers.get("Retry-After", "").strip()
-    try:
-        seconds = float(value)
-    except ValueError:
-        return 0.0
-    return max(0.0, seconds)
-
-
-def _failure(
+def failure_outcome(
     outcome: str,
     *,
     http_status: int = 0,
@@ -166,156 +153,66 @@ def _failure(
     )
 
 
-class FirecrawlClient:
-    """Make one bounded Firecrawl search call with explicit failure classification."""
-
-    def __init__(
-        self,
-        api_key: str,
-        *,
-        endpoint: str = FIRECRAWL_SEARCH_URL,
-        timeout_seconds: float = 30.0,
-        max_response_bytes: int = MAX_RESPONSE_BYTES,
-        session: requests.Session | None = None,
-    ) -> None:
-        """Configure the transport without ever exposing the supplied credential."""
-        if not api_key:
-            raise ValueError("Firecrawl API key is required")
-        if timeout_seconds <= 0 or max_response_bytes <= 0:
-            raise ValueError("Firecrawl transport bounds must be positive")
-        self._api_key = api_key
-        self._endpoint = endpoint
-        self._timeout_seconds = timeout_seconds
-        self._max_response_bytes = max_response_bytes
-        self._session = session or requests.Session()
-
-    def search_once(self, query: str, result_limit: int) -> SearchOutcome:
-        """Execute one call and return a typed result without retrying implicitly."""
-        if not query or not 1 <= result_limit <= 5:
-            raise ValueError("Firecrawl search requires a query and result_limit 1..5")
-        try:
-            response = self._session.post(
-                self._endpoint,
-                headers={"Authorization": f"Bearer {self._api_key}"},
-                json={"query": query, "limit": result_limit},
-                timeout=self._timeout_seconds,
-                stream=True,
-            )
-        except requests.Timeout:
-            return _failure("timeout", error_code="requests_timeout", retryable=True)
-        except requests.RequestException:
-            return _failure("http_error", error_code="requests_error", retryable=True)
-
-        status = response.status_code
-        retry_after = _retry_after(response)
-        if status in {401, 402, 403}:
-            failure = _failure(
-                "http_error",
-                http_status=status,
-                error_code=f"http_{status}",
-                retryable=False,
-                systemic=True,
-            )
-            response.close()
-            return failure
-        if status == 429:
-            failure = _failure(
-                "rate_limited",
-                http_status=status,
-                retry_after_seconds=retry_after,
-                error_code="http_429",
-                retryable=True,
-            )
-            response.close()
-            return failure
-        if status >= 500:
-            failure = _failure(
-                "http_error",
-                http_status=status,
-                error_code=f"http_{status}",
-                retryable=True,
-            )
-            response.close()
-            return failure
-        if status >= 400:
-            failure = _failure(
-                "http_error",
-                http_status=status,
-                error_code=f"http_{status}",
-                retryable=False,
-            )
-            response.close()
-            return failure
-        try:
-            body = bytearray()
-            for chunk in response.iter_content(chunk_size=65_536):
-                body.extend(chunk)
-                if len(body) > self._max_response_bytes:
-                    return _failure(
-                        "oversized_response",
-                        http_status=status,
-                        error_code="response_too_large",
-                        retryable=False,
-                    )
-            raw_payload: object = json.loads(body)
-            payload = redact_json(raw_payload, secret_values=(self._api_key,))
-        except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-            return _failure(
-                "malformed_response",
-                http_status=status,
-                error_code="invalid_json_shape",
-                retryable=False,
-            )
-        except requests.RequestException:
-            return _failure(
-                "http_error",
-                error_code="response_stream_error",
-                retryable=True,
-            )
-        finally:
-            response.close()
-        if not isinstance(payload, dict):
-            return _failure(
-                "malformed_response",
-                http_status=status,
-                error_code="root_not_object",
-                retryable=False,
-            )
-        raw_results = payload.get("data")
-        if payload.get("success") is not True or not isinstance(raw_results, list):
-            return _failure(
-                "malformed_response",
-                http_status=status,
-                error_code="missing_success_data",
-                retryable=False,
-            )
-        if len(raw_results) > result_limit:
-            return _failure(
-                "malformed_response",
-                http_status=status,
-                error_code="result_limit_exceeded",
-                retryable=False,
-            )
-        results: list[SearchResultEvidence] = []
-        for rank, item in enumerate(raw_results, start=1):
-            if not isinstance(item, dict):
-                return _failure(
-                    "malformed_response",
-                    http_status=status,
-                    error_code="result_not_object",
-                    retryable=False,
-                )
-            results.append(SearchResultEvidence(rank=rank, metadata=item))
-        metadata = {key: value for key, value in payload.items() if key != "data"}
-        return SearchOutcome(
-            outcome="success" if results else "zero_results",
-            http_status=status,
-            retry_after_seconds=retry_after,
-            response_sha256=canonical_json_hash(payload),
-            response_metadata=metadata,
-            results=tuple(results),
-            error_code="",
-            sanitized_error="",
+def search_outcome_from_payload(
+    payload: object,
+    result_limit: int,
+    *,
+    secret_values: tuple[str, ...] = (),
+) -> SearchOutcome:
+    """Convert one metered successful HTTP payload into immutable safe evidence."""
+    if not 1 <= result_limit <= 5:
+        raise ValueError("Firecrawl result_limit must be from 1 to 5")
+    try:
+        redacted = redact_json(payload, secret_values=secret_values)
+    except ValueError:
+        return failure_outcome(
+            "malformed_response",
+            http_status=200,
+            error_code="invalid_json_shape",
             retryable=False,
-            systemic=False,
         )
+    if not isinstance(redacted, dict):
+        return failure_outcome(
+            "malformed_response",
+            http_status=200,
+            error_code="root_not_object",
+            retryable=False,
+        )
+    raw_results = redacted.get("data")
+    if redacted.get("success") is not True or not isinstance(raw_results, list):
+        return failure_outcome(
+            "malformed_response",
+            http_status=200,
+            error_code="missing_success_data",
+            retryable=False,
+        )
+    if len(raw_results) > result_limit:
+        return failure_outcome(
+            "malformed_response",
+            http_status=200,
+            error_code="result_limit_exceeded",
+            retryable=False,
+        )
+    results: list[SearchResultEvidence] = []
+    for rank, item in enumerate(raw_results, start=1):
+        if not isinstance(item, dict):
+            return failure_outcome(
+                "malformed_response",
+                http_status=200,
+                error_code="result_not_object",
+                retryable=False,
+            )
+        results.append(SearchResultEvidence(rank=rank, metadata=item))
+    metadata = {key: value for key, value in redacted.items() if key != "data"}
+    return SearchOutcome(
+        outcome="success" if results else "zero_results",
+        http_status=200,
+        retry_after_seconds=0.0,
+        response_sha256=canonical_json_hash(redacted),
+        response_metadata=metadata,
+        results=tuple(results),
+        error_code="",
+        sanitized_error="",
+        retryable=False,
+        systemic=False,
+    )

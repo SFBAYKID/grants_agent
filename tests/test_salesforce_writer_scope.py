@@ -183,8 +183,12 @@ class _FillTransport:
 
     def __init__(self, existing: dict[str, object]) -> None:
         """Start from what the Lead already holds."""
-        self.existing = existing
+        self.existing = {
+            **existing,
+            "LastModifiedDate": "2026-08-13T12:34:56.000+0000",
+        }
         self.patched: dict[str, object] | None = None
+        self.patch_headers: dict[str, str] = {}
 
     def get(self, url: str, **kwargs: object) -> object:
         """Return the current field values."""
@@ -195,6 +199,7 @@ class _FillTransport:
         """Capture the write instead of performing it."""
         del url
         self.patched = dict(kwargs.get("json") or {})
+        self.patch_headers = dict(kwargs.get("headers") or {})
         return _Response(204, {})
 
 
@@ -252,6 +257,9 @@ def test_filling_a_lead_never_overwrites_a_field_that_has_a_value(
         "Title": "Director of Technology",
         "MobilePhone": "555-0100",
     }, f"an existing value would have been overwritten: {transport.patched}"
+    assert transport.patch_headers["If-Unmodified-Since"] == (
+        "Thu, 13 Aug 2026 12:34:56 GMT"
+    )
 
 
 def test_filling_a_lead_cannot_touch_identity_or_ownership(

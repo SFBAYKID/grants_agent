@@ -1,14 +1,13 @@
 """Security-RFP discovery source — OPEN school/city physical-security solicitations.
 
-VERIFICATION: needs-testing (live smoke gated behind RFP_DISCOVERY_ENABLED). Feasibility
+VERIFICATION: needs-testing (research-only; not in the runtime registry). Feasibility
 proven live 2026-07-18: Firecrawl search surfaced real current listings (City of Kemah
 TX RFP 2026-05, City of Woodland WA police cameras, Irvington NJ) and their official
 `.gov`/`.us` pages scrape with verbatim entity/due-date/status.
 
 This is a paid, LLM-backed DISCOVERY probe, not an exhaustive feed — the query set below
 IS the coverage, and it samples what Firecrawl ranks that run. It is therefore:
-  * wired into cli._active_pollers() ONLY behind RFP_DISCOVERY_ENABLED (like SAM.gov),
-    never the free static POLLERS list;
+  * not wired into cli._active_pollers(); an explicit reviewed research run is required;
   * hard-capped on total Firecrawl calls per run;
   * per-query fault-isolated — one failing query never fails the rest, and if EVERY
     query fails we raise SourceUnreachable (Constitution rule 1: "could not look" is
@@ -26,6 +25,7 @@ from datetime import date
 
 from anthropic import Anthropic
 
+from ..llm import anthropic_client_options
 from ..models import RawItem
 from ..enrich.finder import MODEL, SourceUnreachable, _scrape, _search
 from . import rfp_parse
@@ -52,7 +52,7 @@ def _extract_rfp(page_text: str, url: str) -> dict[str, str]:
     Critically it must copy the SUBMISSION-deadline date EXACTLY as printed (so the
     page-adjacency gate can find it) and identify the GOVERNMENT issuing the RFP.
     """
-    client = Anthropic()
+    client = Anthropic(**anthropic_client_options())
     prompt = (
         "Below is one page scraped from a government procurement website. If it is a "
         "SINGLE open Request for Proposals/Qualifications/bid for PHYSICAL security "

@@ -13,13 +13,10 @@ from grant_watch.enrich.salesforce_campaign_batch import prepare_campaign_batch
 from grant_watch.enrich.salesforce_campaign_batch_models import CampaignTargetRequest
 from grant_watch.enrich.salesforce_campaign_gateway import (
     CreateResult,
-    SalesforceCampaignGateway,
     SalesforceOrganizationIdentity,
     SalesforceRecordRef,
 )
-from grant_watch.enrich.salesforce_campaign_policy import record_matches_organization
 from grant_watch.models import LeadGrade
-from grant_watch.slack import tools as slack_tools
 from campaign_batch_support import (
     CAMPAIGNS,
     BatchGateway,
@@ -772,11 +769,20 @@ def test_three_target_resolved_only_batch_never_loses_partial_mode(
     assert target_states == {"partial_by_user"}
 
 
-def test_batch_selection_excludes_dead_rows_like_normal_search(tmp_path: Path) -> None:
-    """Campaign scope shares the ordinary Slack search eligibility predicate."""
+def test_batch_selection_honors_every_human_disposition(tmp_path: Path) -> None:
+    """Snoozed, rejected, and dead leads never enter a mutating Campaign scope."""
     conn = db.connect(tmp_path / "batch.db")
-    _insert_leads(conn, "IL", LeadGrade.GOLD, 2, 0)
-    conn.execute("UPDATE leads SET status='dead' WHERE id=2")
+    _insert_leads(conn, "IL", LeadGrade.GOLD, 6, 0)
+    conn.executemany(
+        "UPDATE leads SET status=? WHERE id=?",
+        (
+            ("surfaced", 2),
+            ("contacted", 3),
+            ("snoozed", 4),
+            ("not_relevant", 5),
+            ("dead", 6),
+        ),
+    )
     conn.commit()
     batch = prepare_campaign_batch(
         conn,
@@ -796,7 +802,44 @@ def test_batch_selection_excludes_dead_rows_like_normal_search(tmp_path: Path) -
            FROM crm_campaign_batch_targets WHERE batch_id=?""",
         (batch.batch_id,),
     ).fetchone()
-    assert tuple(target) == (1, 1)
+    assert tuple(target) == (3, 3)
+
+
+def test_campaign_click_rechecks_disposition_before_any_write(tmp_path: Path) -> None:
+    """A lead snoozed after preview invalidates the button before Salesforce I/O."""
+    conn = db.connect(tmp_path / "batch.db")
+    _insert_leads(conn, "IL", LeadGrade.GOLD, 1, 0)
+    gateway = BatchGateway()
+    batch = prepare_campaign_batch(
+        conn,
+        gateway,
+        "TWORK",
+        "CGRANTS",
+        "123.4",
+        "UREP",
+        (
+            CampaignTargetRequest(
+                _link("Campaign", CAMPAIGNS["IL"][0]), "IL", ("gold",)
+            ),
+        ),
+    )
+    action = batch.actions[0]
+    conn.execute("UPDATE leads SET status='snoozed'")
+    conn.commit()
+
+    with pytest.raises(ValueError, match="became ineligible"):
+        campaigns.confirm_action(
+            conn,
+            gateway,
+            action.action_id,
+            action.nonce,
+            "TWORK",
+            "CGRANTS",
+            "123.4",
+            "UREP",
+        )
+
+    assert gateway.create_member_calls == 0
 
 
 def test_untagged_row_cannot_inherit_a_neighboring_nces_identity(
@@ -887,94 +930,3 @@ def test_distinct_nces_entities_cannot_share_one_salesforce_member(
         row[0]
         for row in conn.execute("SELECT resolution_state FROM crm_campaign_batch_items")
     } == {"ambiguous"}
-
-
-def test_legacy_incomplete_search_snapshot_cannot_prepare_members(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The former frozen-ID path rejects snapshots without completeness proof."""
-    conn = db.connect(tmp_path / "batch.db")
-    _insert_leads(conn, "IL", LeadGrade.GOLD, 1, 0)
-    snapshot_id = db.save_search_request(
-        conn,
-        "TWORK:CGRANTS:123.4:UREP",
-        "UREP",
-        {"state": "IL", "grade": "gold"},
-        "all",
-        None,
-        "slack",
-        [1],
-        1,
-        False,
-    )
-    monkeypatch.setattr(slack_tools.db, "connect", lambda: conn)
-    monkeypatch.setattr(campaigns, "SalesforceCampaignGateway", lambda: BatchGateway())
-    result = slack_tools.salesforce_campaign_members_preview(
-        {
-            "campaign_link": _link("Campaign", CAMPAIGNS["IL"][0]),
-            "search_request_id": snapshot_id,
-        },
-        "UREP",
-        "TWORK",
-        "CGRANTS",
-        "123.4",
-    )
-    assert "not the complete state/tier set" in result
-    # The refusal must also name the tool that works, or the model retries this one.
-    assert "salesforce_campaign_batch_preview" in result
-    assert conn.execute("SELECT COUNT(*) FROM crm_actions").fetchone()[0] == 0
-
-
-def test_identity_matching_requires_exact_nonblank_organization_state() -> None:
-    """Blank or cross-state records can never become automatic Campaign members."""
-    exact = SalesforceRecordRef(
-        "Lead",
-        "00Q000000000001",
-        "Person",
-        _link("Lead", "00Q000000000001"),
-        company="Springfield School District",
-        state="IL",
-    )
-    blank_state = SalesforceRecordRef(
-        "Lead",
-        "00Q000000000002",
-        "Person",
-        _link("Lead", "00Q000000000002"),
-        company="Springfield School District",
-        state="",
-    )
-    assert record_matches_organization(exact, "Springfield School District", "IL")
-    assert not record_matches_organization(exact, "Springfield School District", "TX")
-    assert not record_matches_organization(exact, "Springfield School District", "")
-    assert not record_matches_organization(
-        blank_state, "Springfield School District", "IL"
-    )
-
-
-def test_contact_identity_uses_account_billing_not_person_mailing_state(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A Contact's personal mailing address cannot bind the organization state."""
-    gateway = SalesforceCampaignGateway()
-    captured: dict[str, str] = {}
-
-    def fake_get(_path: str, params: dict[str, str]) -> dict[str, object]:
-        """Return a Contact whose person and organization states differ."""
-        captured.update(params)
-        return {
-            "Id": "003000000000001",
-            "Name": "Person",
-            "MailingState": "TX",
-            "Account": {
-                "Id": "001000000000001",
-                "Name": "Springfield School District",
-                "BillingState": "IL",
-            },
-        }
-
-    monkeypatch.setattr(gateway, "_get", fake_get)
-    monkeypatch.setattr(gateway, "lightning_link", _link)
-    record = gateway.get_record("Contact", "003000000000001")
-    assert record.state == "IL" and record.account_id == "001000000000001"
-    assert "Account.BillingState" in captured["fields"]
-    assert "MailingState" not in captured["fields"]

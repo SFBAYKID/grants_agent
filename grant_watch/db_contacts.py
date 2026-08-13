@@ -26,6 +26,122 @@ from .db_common import _now
 # ---------------------------------------------------------------- contacts (Phase 2)
 
 
+def _field_evidence_json(field_evidence: dict[str, object] | None) -> str | None:
+    """Serialize complete typed contact evidence or refuse an untyped claim."""
+    if not field_evidence:
+        raise ValueError("verified contact requires typed email and name evidence")
+    payload: dict[str, dict[str, str]] = {}
+    for field_name, match in field_evidence.items():
+        values = {
+            "field": str(getattr(match, "field", "")),
+            "value": str(getattr(match, "value", "")),
+            "source_url": str(getattr(match, "source_url", "")),
+            "excerpt": str(getattr(match, "excerpt", ""))[:500],
+            "evidence_hash": str(getattr(match, "evidence_hash", "")),
+            "verifier_version": str(getattr(match, "verifier_version", "")),
+        }
+        if values["field"] != field_name or not all(values.values()):
+            raise ValueError(f"contact field {field_name!r} lacks typed evidence")
+        payload[field_name] = values
+    return json.dumps(payload, sort_keys=True)
+
+
+def _verified_contact_evidence_json(
+    name: str,
+    title: str,
+    email: str,
+    phone: str,
+    source_url: str,
+    field_evidence: dict[str, object] | None,
+) -> str:
+    """Require typed proof for every fact written as page-verified.
+
+    A verified person must have exact name and email evidence from the same source
+    page. Optional title and phone values are persisted only when their own evidence
+    is present too. This is the write boundary that prevents a direct caller from
+    bypassing finder's parser with an untyped boolean or a legacy status string.
+    """
+    serialized = _field_evidence_json(field_evidence)
+    assert serialized is not None
+    payload = json.loads(serialized)
+    required = {"name": name.strip(), "email": email.strip()}
+    for field_name, expected in required.items():
+        item = payload.get(field_name)
+        if not expected or not isinstance(item, dict):
+            raise ValueError("verified contact requires typed email and name evidence")
+        actual = str(item.get("value") or "").strip()
+        values_match = (
+            actual.lower() == expected.lower()
+            if field_name == "email"
+            else " ".join(actual.split()) == " ".join(expected.split())
+        )
+        if not values_match or str(item.get("source_url") or "") != source_url:
+            raise ValueError(
+                f"verified contact {field_name} evidence does not match the row"
+            )
+    for field_name, expected in (("title", title), ("phone", phone)):
+        if not expected.strip():
+            continue
+        item = payload.get(field_name)
+        if not isinstance(item, dict) or str(item.get("value") or "").strip() != (
+            expected.strip()
+        ):
+            raise ValueError(
+                f"verified contact {field_name} lacks matching typed evidence"
+            )
+        if str(item.get("source_url") or "") != source_url:
+            raise ValueError(
+                f"verified contact {field_name} evidence does not match the row"
+            )
+    return serialized
+
+
+def contact_is_page_verified(contact: sqlite3.Row) -> bool:
+    """Return whether a stored row still has exact complete typed person evidence.
+
+    Migration/trigger guards are the primary invariant. This read-side predicate is
+    defense in depth for external-action consumers and for any read-only legacy copy
+    opened before its migration has run.
+    """
+    if str(contact["contact_status"] or "") != "verified":
+        return False
+    try:
+        payload = json.loads(str(contact["field_evidence_json"] or ""))
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    source_url = str(contact["source_url"] or "")
+    expected = {
+        "name": str(contact["name"] or "").strip(),
+        "email": str(contact["email"] or "").strip(),
+    }
+    for optional in ("title", "phone"):
+        value = str(contact[optional] or "").strip()
+        if value:
+            expected[optional] = value
+    for field_name, value in expected.items():
+        item = payload.get(field_name)
+        if not value or not isinstance(item, dict):
+            return False
+        actual = str(item.get("value") or "").strip()
+        equal = (
+            actual.lower() == value.lower()
+            if field_name == "email"
+            else " ".join(actual.split()) == " ".join(value.split())
+        )
+        if not equal or str(item.get("field") or "") != field_name:
+            return False
+        if str(item.get("source_url") or "") != source_url:
+            return False
+        if any(
+            not str(item.get(key) or "").strip()
+            for key in ("excerpt", "evidence_hash", "verifier_version")
+        ):
+            return False
+    return True
+
+
 def save_contact(
     conn: sqlite3.Connection,
     lead_id: int,
@@ -36,9 +152,12 @@ def save_contact(
     source_url: str,
     confidence: str,
     official_domain: str = "",
-    field_evidence: dict[str, bool] | None = None,
+    field_evidence: dict[str, object] | None = None,
 ) -> int:
-    """Store a VERIFIED contact (finder.py's gate already ran). Returns contact id."""
+    """Store a fully evidenced VERIFIED contact and return its local id."""
+    evidence_json = _verified_contact_evidence_json(
+        name, title, email, phone, source_url, field_evidence
+    )
     cur = conn.execute(
         """INSERT INTO contacts
              (lead_id,name,title,email,phone,source_url,confidence,contact_status,
@@ -53,7 +172,7 @@ def save_contact(
             source_url,
             confidence,
             official_domain or None,
-            json.dumps(field_evidence, sort_keys=True) if field_evidence else None,
+            evidence_json,
         ),
     )
     conn.commit()

@@ -132,22 +132,22 @@ def test_a_corrected_memory_replaces_the_old_one(conn: sqlite3.Connection) -> No
         said=SAID,
         now=NOW,
     )
-    later = "actually I picked up Louisiana last month"
+    later = "I only cover California, not Texas or Oklahoma, now"
     new = user_memory.remember(
         conn,
         slack_user=KERRY,
         kind="territory",
-        fact="Also covers Louisiana",
-        evidence="I picked up Louisiana last month",
+        fact="Covers California only",
+        evidence="I only cover California, not Texas or Oklahoma, now",
         said=later,
         now=NOW + timedelta(days=30),
     )
     assert old and new
-    assert user_memory.supersede(conn, old, new)
+    assert user_memory.supersede(conn, old, new, now=NOW + timedelta(days=30))
     facts = [
         m.fact for m in user_memory.recall(conn, KERRY, now=NOW + timedelta(days=31))
     ]
-    assert facts == ["Also covers Louisiana"], facts
+    assert facts == ["Covers California only"], facts
     conn.close()
 
 

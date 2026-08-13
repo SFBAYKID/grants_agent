@@ -82,7 +82,7 @@ def test_canonical_counts_and_exact_coverage_match_published_inventory() -> None
         JurisdictionLevel.EDUCATION_SERVICE_AGENCY: 3,
         JurisdictionLevel.FEDERAL: 19,
         JurisdictionLevel.MULTI_JURISDICTION: 1,
-        JurisdictionLevel.PORTAL_FAMILY: 10,
+        JurisdictionLevel.PORTAL_FAMILY: 11,
         JurisdictionLevel.REGIONAL_GOVERNMENT: 1,
         JurisdictionLevel.SCHOOL_DISTRICT: 59,
         JurisdictionLevel.SPECIAL_DISTRICT: 1,
@@ -103,7 +103,7 @@ def test_canonical_counts_and_exact_coverage_match_published_inventory() -> None
         AccessMode.PUBLIC_API_KEY: 2,
         AccessMode.PUBLIC_NO_AUTH: 45,
         AccessMode.SUPPLIER_ACCOUNT: 4,
-        AccessMode.UNKNOWN: 204,
+        AccessMode.UNKNOWN: 205,
     }
     assert (
         sum(

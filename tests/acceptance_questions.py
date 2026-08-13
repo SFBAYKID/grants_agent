@@ -46,7 +46,7 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "discovery-summary",
         "source-discovery",
         "Grant, what's our source discovery status nationwide?",
-        expected_reply=("270 candidate sources",),
+        expected_reply=("271 candidate sources",),
     ),
     HumanQuestion(
         "discovery-ca-districts",

@@ -112,7 +112,7 @@ def _selection_rows(
         expected = int(
             conn.execute(
                 f"""SELECT COUNT(*) FROM leads
-                    WHERE {db.SEARCHABLE_LEAD_PREDICATE}
+                    WHERE {db.CAMPAIGN_ELIGIBLE_LEAD_PREDICATE}
                       AND UPPER(state)=?
                       AND LOWER(lead_grade) IN ({placeholders})""",
                 params,
@@ -122,7 +122,7 @@ def _selection_rows(
             conn.execute(
                 f"""SELECT id,entity_name,state,lead_grade,canonical_entity_key,nces_id
                 FROM leads
-                WHERE {db.SEARCHABLE_LEAD_PREDICATE}
+                WHERE {db.CAMPAIGN_ELIGIBLE_LEAD_PREDICATE}
                   AND UPPER(state)=?
                   AND LOWER(lead_grade) IN ({placeholders})
                 ORDER BY id""",

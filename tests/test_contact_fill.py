@@ -342,7 +342,10 @@ class _Sf:
 
             def json(self) -> dict[str, object]:
                 """The stored record."""
-                return {"Description": outer.description}
+                return {
+                    "Description": outer.description,
+                    "LastModifiedDate": "2026-08-13T12:34:56.000+0000",
+                }
 
         return _R()
 

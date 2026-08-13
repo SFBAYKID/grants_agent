@@ -29,6 +29,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from . import db
 from .enrich import zoominfo_credits, zoominfo_enrichment
 from .enrich.zoominfo_credits import (
     AlreadySpent,
@@ -115,12 +116,11 @@ def _has_contact(conn: sqlite3.Connection, lead_id: int) -> bool:
     `linkedin_only` or `not_found` row does not, which is exactly the 73% of the
     contacts table holding no email, phone or mobile at all.
     """
-    row = conn.execute(
-        """SELECT COUNT(*) n FROM contacts
-            WHERE lead_id=? AND contact_status IN ('verified','vendor_licensed')""",
-        (lead_id,),
-    ).fetchone()
-    return int(row["n"]) > 0
+    return any(
+        str(row["contact_status"] or "") == "vendor_licensed"
+        or db.contact_is_page_verified(row)
+        for row in db.contacts_for_lead(conn, lead_id)
+    )
 
 
 def fill_contacts(

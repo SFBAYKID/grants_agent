@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any  # vendor JSON is runtime-shaped; parsed into typed models below
@@ -47,6 +48,7 @@ USER_AGENT = "MonarchConnected-GrantWatch/1.0 (+chase@monarchconnected.com)"
 
 # Vendor-imposed ceiling on matchPersonInput; exceeding it is a 400, not a truncation.
 MAX_ENRICH_BATCH = 25
+PERSON_ID_RE = re.compile(r"[1-9][0-9]{0,18}\Z")
 # Vendor-imposed ceiling on page[size] for search.
 MAX_SEARCH_PAGE_SIZE = 100
 
@@ -239,6 +241,12 @@ def _auth(force: bool = False) -> str:
         raise ZoomInfoConfigurationError(
             "ZoomInfo is not configured; missing " + ", ".join(missing)
         )
+    from . import zoominfo_credits
+
+    try:
+        zoominfo_credits.validate_provider_call()
+    except zoominfo_credits.BudgetNotConfigured as exc:
+        raise ZoomInfoConfigurationError(str(exc)) from exc
     now = time.time()
     if (
         not force
@@ -374,6 +382,33 @@ def quote(matches: list[ZoomInfoContactMatch]) -> CreditQuote:
     return CreditQuote(matches=tuple(matches))
 
 
+def normalize_person_ids(person_ids: list[str]) -> list[str]:
+    """Validate and deduplicate vendor person IDs while preserving approval order.
+
+    Validation must happen before the account ledger reserves credits. Otherwise a
+    malformed ID fails while building the HTTP body and leaves a wholly local input
+    error recorded as an indeterminate vendor charge. Deduplication is equally
+    important: the vendor bills records, not repeated copies of the same approved ID.
+    """
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_id in person_ids:
+        person_id = raw_id.strip()
+        if not person_id:
+            continue
+        if not PERSON_ID_RE.fullmatch(person_id):
+            raise ValueError(f"invalid ZoomInfo person ID: {person_id!r}")
+        if person_id not in seen:
+            seen.add(person_id)
+            normalized.append(person_id)
+    if len(normalized) > MAX_ENRICH_BATCH:
+        raise ValueError(
+            f"ZoomInfo enrich accepts at most {MAX_ENRICH_BATCH} records per call; "
+            f"got {len(normalized)} — chunk before calling."
+        )
+    return normalized
+
+
 def enrich_contacts(person_ids: list[str]) -> list[ZoomInfoContactDetail]:
     """Retrieve actual emails and phone numbers. COSTS ONE CREDIT PER RETURNED RECORD.
 
@@ -395,14 +430,9 @@ def enrich_contacts(person_ids: list[str]) -> list[ZoomInfoContactDetail]:
     So a direct line can be seen to EXIST while being unavailable to buy. Never
     promise a rep one.
     """
-    ids = [pid.strip() for pid in person_ids if pid.strip()]
+    ids = normalize_person_ids(person_ids)
     if not ids:
         return []
-    if len(ids) > MAX_ENRICH_BATCH:
-        raise ValueError(
-            f"ZoomInfo enrich accepts at most {MAX_ENRICH_BATCH} records per call; "
-            f"got {len(ids)} — chunk before calling."
-        )
     body = _post(
         "/data/v1/contacts/enrich",
         {
@@ -416,12 +446,22 @@ def enrich_contacts(person_ids: list[str]) -> list[ZoomInfoContactDetail]:
         },
     )
     details: list[ZoomInfoContactDetail] = []
+    returned_ids: set[str] = set()
     for record in body.get("data") or []:
         attrs: dict[str, Any] = record.get("attributes") or {}
         meta: dict[str, Any] = record.get("meta") or {}
+        returned_id = str(record.get("id") or "").strip()
+        if returned_id not in ids or returned_id in returned_ids:
+            # HTTP has already happened, so the ledger caller must retain the full
+            # reservation as indeterminate. Storing a foreign/duplicate person or
+            # refunding from an unreconcilable response would both understate risk.
+            raise ZoomInfoUnavailable(
+                "ZoomInfo enrich response could not be reconciled to approved IDs"
+            )
+        returned_ids.add(returned_id)
         details.append(
             ZoomInfoContactDetail(
-                person_id=str(record.get("id") or ""),
+                person_id=returned_id,
                 first_name=str(attrs.get("firstName") or ""),
                 last_name=str(attrs.get("lastName") or ""),
                 job_title=str(attrs.get("jobTitle") or ""),

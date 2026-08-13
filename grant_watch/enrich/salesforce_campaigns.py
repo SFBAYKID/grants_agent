@@ -311,6 +311,10 @@ def prepare_membership(
     )
     if len(rows) != len(unique_ids):
         raise ValueError("One or more Grant lead IDs are stale or unknown")
+    if any(not db.campaign_status_eligible(item["status"]) for item in rows):
+        raise ValueError(
+            "Campaign actions may include only new, surfaced, or contacted Grant leads"
+        )
     action_seed = str(uuid.uuid4())
     supplied_links = supplied_links or {}
     resolved_records = resolved_records or {}
@@ -654,6 +658,21 @@ def _authorize_action(
     ]
     if _hash(_stable_json(stored_items)) != row["items_hash"]:
         raise ValueError("Salesforce approval item mapping changed after preview")
+    if require_ready and row["action_type"] == "add_campaign_members":
+        dispositions = list(
+            conn.execute(
+                """SELECT DISTINCT l.id,l.status FROM crm_action_items i
+                   JOIN leads l ON l.id=i.lead_id WHERE i.action_id=?""",
+                (row["id"],),
+            )
+        )
+        if any(
+            not db.campaign_status_eligible(item["status"]) for item in dispositions
+        ):
+            raise ValueError(
+                "One or more Grant leads were snoozed, rejected, or otherwise "
+                "became ineligible after the preview; prepare a fresh Campaign action"
+            )
 
 
 def cancel_action(conn: sqlite3.Connection, action_id: str, requester: str) -> bool:

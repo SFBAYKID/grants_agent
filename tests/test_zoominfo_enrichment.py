@@ -20,6 +20,13 @@ import pytest
 
 from grant_watch import db
 from grant_watch.enrich import zoominfo, zoominfo_credits, zoominfo_enrichment
+from tests.paid_provider_support import configure_zoominfo_runtime
+
+
+@pytest.fixture(autouse=True)
+def _shared_account_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use one explicit account ledger per test, separate from every app DB."""
+    configure_zoominfo_runtime(tmp_path, monkeypatch, limit=50)
 
 
 def _lead(tmp_path: Path) -> tuple[sqlite3.Connection, int]:
@@ -238,8 +245,10 @@ def test_a_paid_pull_records_who_asked_for_it(
 
     zoominfo_enrichment.apply_for_lead(conn, lead_id, ["1"], requested_by="U0REP")
 
-    row = conn.execute("SELECT requested_by FROM zoominfo_credit_spends").fetchone()
+    ledger = zoominfo_credits.connect_ledger()
+    row = ledger.execute("SELECT requested_by FROM zoominfo_credit_spends").fetchone()
     assert row["requested_by"] == "U0REP"
+    ledger.close()
     conn.close()
 
 
@@ -272,6 +281,54 @@ def test_the_slack_tool_passes_the_requester_through(
     assert not out.startswith("ERROR"), out
 
     check = real_connect(tmp_path / "z.db")
-    row = check.execute("SELECT requested_by FROM zoominfo_credit_spends").fetchone()
+    ledger = zoominfo_credits.connect_ledger()
+    row = ledger.execute("SELECT requested_by FROM zoominfo_credit_spends").fetchone()
     assert row is not None and row["requested_by"] == "U0REP"
+    ledger.close()
     check.close()
+
+
+def test_invalid_person_id_is_refused_before_reservation_or_vendor_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A local input error must not become an indeterminate paid attempt."""
+    monkeypatch.setenv("ZOOMINFO_MONTHLY_CREDITS", "50")
+    conn, lead_id = _lead(tmp_path)
+
+    def explode(ids: list[str]) -> list[zoominfo.ZoomInfoContactDetail]:
+        """Prove validation runs ahead of the paid transport."""
+        raise AssertionError("invalid IDs must never reach ZoomInfo")
+
+    monkeypatch.setattr(zoominfo, "enrich_contacts", explode)
+    with pytest.raises(ValueError, match="invalid ZoomInfo person ID"):
+        zoominfo_enrichment.apply_for_lead(conn, lead_id, ["not-an-id"])
+
+    assert zoominfo_credits.remaining(conn) == 50
+    ledger = zoominfo_credits.connect_ledger()
+    assert (
+        ledger.execute("SELECT COUNT(*) FROM zoominfo_credit_spends").fetchone()[0] == 0
+    )
+    ledger.close()
+    conn.close()
+
+
+def test_duplicate_person_ids_are_billed_and_requested_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Repeated copies in a tool payload cannot consume repeated credits."""
+    monkeypatch.setenv("ZOOMINFO_MONTHLY_CREDITS", "50")
+    conn, lead_id = _lead(tmp_path)
+    seen: list[list[str]] = []
+
+    def enrich(ids: list[str]) -> list[zoominfo.ZoomInfoContactDetail]:
+        """Record the normalized set sent to the paid client."""
+        seen.append(ids)
+        return [_detail()]
+
+    monkeypatch.setattr(zoominfo, "enrich_contacts", enrich)
+    applied = zoominfo_enrichment.apply_for_lead(conn, lead_id, ["1", " 1 ", "1"])
+
+    assert seen == [["1"]]
+    assert applied.billed == 1
+    assert zoominfo_credits.remaining(conn) == 49
+    conn.close()

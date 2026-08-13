@@ -19,9 +19,11 @@ produce a refusal that says which one it was, and nothing is sent.
 
 from __future__ import annotations
 
+import base64
 import os
+import re
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, Sequence
 
 import requests
 
@@ -34,6 +36,11 @@ API_URL: Final = "https://api.resend.com/emails"
 FROM_ENV: Final = "RESEND_FROM_EMAIL"
 KEY_ENV: Final = "RESEND_API_KEY"
 TIMEOUT_SECONDS: Final = 20
+# Resend's documented total is 40 MB after Base64 encoding. This raw-content cap
+# leaves room for encoding expansion, JSON, and the message body.
+MAX_RAW_ATTACHMENT_BYTES: Final = 28 * 1024 * 1024
+MAX_ATTACHMENTS: Final = 1
+_SAFE_XLSX_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,126}\.xlsx\Z")
 
 
 class EmailNotConfigured(RuntimeError):
@@ -52,6 +59,40 @@ class EmailOutcome:
     recipient: str
     email_id: str
     detail: str
+
+
+@dataclass(frozen=True)
+class EmailAttachment:
+    """One bounded local attachment ready for Resend's Base64 API field."""
+
+    filename: str
+    content: bytes
+
+
+def _attachment_payloads(
+    attachments: Sequence[EmailAttachment],
+) -> list[dict[str, str]]:
+    """Validate the one generated workbook and encode it for Resend."""
+    if len(attachments) > MAX_ATTACHMENTS:
+        raise ValueError("email may contain only one generated spreadsheet")
+    total_bytes = 0
+    payloads: list[dict[str, str]] = []
+    for attachment in attachments:
+        filename = os.path.basename(attachment.filename)
+        if not _SAFE_XLSX_NAME.fullmatch(filename):
+            raise ValueError("email attachment must have a safe .xlsx filename")
+        if not isinstance(attachment.content, bytes) or not attachment.content:
+            raise ValueError("email attachment must contain generated workbook bytes")
+        total_bytes += len(attachment.content)
+        payloads.append(
+            {
+                "filename": filename,
+                "content": base64.b64encode(attachment.content).decode("ascii"),
+            }
+        )
+    if total_bytes > MAX_RAW_ATTACHMENT_BYTES:
+        raise ValueError("email attachments exceed the safe Resend size limit")
+    return payloads
 
 
 def is_configured() -> bool:
@@ -93,6 +134,7 @@ def send_to_rep(
     text_body: str,
     *,
     html_body: str = "",
+    attachments: Sequence[EmailAttachment] = (),
     dry_run: bool = False,
     session: Any | None = None,
 ) -> EmailOutcome:
@@ -106,6 +148,7 @@ def send_to_rep(
         raise ValueError("an email needs a subject")
     if not text_body.strip():
         raise ValueError("an email needs a body")
+    attachment_payloads = _attachment_payloads(attachments)
     if dry_run:
         return EmailOutcome(
             sent=False,
@@ -127,6 +170,8 @@ def send_to_rep(
     }
     if html_body.strip():
         payload["html"] = html_body
+    if attachment_payloads:
+        payload["attachments"] = attachment_payloads
     http = session or requests
     response = http.post(
         API_URL,

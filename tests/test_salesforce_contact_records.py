@@ -10,16 +10,48 @@ import pytest
 import requests
 
 from grant_watch import db
+from grant_watch.enrich import evidence
 from grant_watch.enrich import salesforce
 from grant_watch.enrich import salesforce_campaign_gateway as gateway_mod
 from grant_watch.enrich import salesforce_campaigns as campaigns
 from grant_watch.enrich import salesforce_contact_records as records
+from grant_watch.enrich.organization_profile import OrgProfile
 from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem
+from tests.contact_support import verified_contact_evidence
 
 LEAD_SF_ID = "00Q000000000777"
 ACCOUNT_ID = "001000000000001"
 USER_ID = "005000000000001"
 CHASE_SLACK_ID = "U01DPJVURHU"
+
+
+def _verified_org_profile(**values: str) -> OrgProfile:
+    """Build a test profile whose every supplied fact has exact page evidence."""
+    source_url = values.pop("source_url", "https://alphausd.org/contact")
+    status = values.pop("status", "found")
+    field_evidence = {
+        field_name: evidence.recorded_match(
+            field_name, value, source_url, f"{field_name}: {value}"
+        )
+        for field_name, value in values.items()
+        if field_name
+        in {
+            "website",
+            "general_email",
+            "phone",
+            "street",
+            "city",
+            "state",
+            "postal_code",
+        }
+        and value
+    }
+    return OrgProfile(
+        **values,
+        source_url=source_url,
+        status=status,
+        field_evidence=field_evidence,
+    )
 
 
 def _link(sobject: str, record_id: str) -> str:
@@ -149,6 +181,13 @@ def _verified_contact(conn: sqlite3.Connection, lead_id: int, **overrides: str) 
         values["source_url"],
         "high",
         official_domain=values["official_domain"],
+        field_evidence=verified_contact_evidence(
+            values["name"],
+            values["email"],
+            values["source_url"],
+            title=values["title"],
+            phone=values["phone"],
+        ),
     )
 
 
@@ -303,6 +342,12 @@ def test_confirm_creates_lead_then_note(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     lead_id = _lead_row(conn, "a5", "Alpha School District")
     _verified_contact(conn, lead_id)
+    conn.execute(
+        """UPDATE leads SET nces_website='https://alphausd.org',
+                  nces_website_status='verified' WHERE id=?""",
+        (lead_id,),
+    )
+    conn.commit()
     gateway = FakeGateway()
     action = _prepare(conn, gateway, lead_id)
     result = _confirm(conn, gateway, action)
@@ -672,13 +717,17 @@ def test_full_field_lead_payload_from_org_profile(tmp_path: Path) -> None:
     """A lead with an org profile + NCES enrollment maps every available field."""
     conn = db.connect(tmp_path / "t.db")
     lead_id = _lead_row(conn, "f1", "Alpha School District")
-    _verified_contact(conn, lead_id, phone="", email="")
-    from grant_watch.enrich.organization_profile import OrgProfile
-
+    db.save_linkedin_contact(
+        conn,
+        lead_id,
+        "Jane Smith",
+        "Technology Director",
+        "https://linkedin.test/in/jane-smith",
+    )
     db.save_org_profile(
         conn,
         lead_id,
-        OrgProfile(
+        _verified_org_profile(
             website="https://alphausd.org",
             general_email="info@alphausd.org",
             phone="555-999-1000",
@@ -690,7 +739,12 @@ def test_full_field_lead_payload_from_org_profile(tmp_path: Path) -> None:
             status="found",
         ),
     )
-    conn.execute("UPDATE leads SET enrollment=4200 WHERE id=?", (lead_id,))
+    conn.execute(
+        """UPDATE leads SET enrollment=4200,
+                  nces_website='https://alphausd.org',
+                  nces_website_status='verified' WHERE id=?""",
+        (lead_id,),
+    )
     conn.commit()
     gateway = FakeGateway()
     action = _prepare(conn, gateway, lead_id)
@@ -731,15 +785,13 @@ def test_note_lands_on_the_new_lead(tmp_path: Path) -> None:
 
 def test_note_body_reads_like_a_lead_briefing(tmp_path: Path) -> None:
     """The Lightning Note leads with why-this-lead-is-here, then the contact facts."""
-    from grant_watch.enrich.organization_profile import OrgProfile
-
     conn = db.connect(tmp_path / "t.db")
     lead_id = _lead_row(conn, "f3", "Alpha School District")
     _verified_contact(conn, lead_id)
     db.save_org_profile(
         conn,
         lead_id,
-        OrgProfile(
+        _verified_org_profile(
             website="https://alphausd.org",
             phone="555-999-1000",
             street="1 Alpha Way",

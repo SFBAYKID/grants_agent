@@ -42,11 +42,25 @@ MAX_ENRICH_ROWS = 100
 # across threads is not safe. WAL plus busy_timeout=10s covers the commit overlap,
 # and the paid ledger is keyed per lead so two workers can never reserve the same
 # spend.
-# NOT A RATE LIMIT — a bounded concurrency. It caps in-flight lookups at 8, but
-# Firecrawl's and Anthropic's actual per-account ceilings are UNVERIFIED, and
-# `finder` has no backoff or 429 handling, where a 429 surfaces as SourceUnreachable.
-# Tunable without a deploy so it can be lowered the moment a real limit is measured.
-ENRICH_WORKERS = max(1, int(os.environ.get("GRANT_ENRICH_WORKERS", "8")))
+MAX_ENRICH_WORKERS = 8
+# This is a higher-level ask ceiling, separate from the account's persisted monthly
+# budget. It prevents a 100-row request from expanding into an unbounded sequence of
+# search + page calls when each organization takes several fallback rungs.
+MAX_FIRECRAWL_CALLS_PER_BATCH = 200
+
+
+def configured_enrich_workers() -> int:
+    """Return a validated worker count without making module import fragile."""
+    raw = os.environ.get("GRANT_ENRICH_WORKERS", "8").strip()
+    try:
+        workers = int(raw)
+    except ValueError as exc:
+        raise ValueError("GRANT_ENRICH_WORKERS must be an integer from 1 to 8") from exc
+    if not 1 <= workers <= MAX_ENRICH_WORKERS:
+        raise ValueError("GRANT_ENRICH_WORKERS must be an integer from 1 to 8")
+    return workers
+
+
 ENRICH_TIME_BUDGET_S = (
     420.0  # stop STARTING new lookups past this wall-clock; disclose the partial.
     # 240 -> 420 when the per-org fallback chain (LinkedIn + org mailbox) landed.
@@ -111,6 +125,7 @@ def _enrich_contacts(
     import time
     from concurrent.futures import ThreadPoolExecutor
 
+    from ..enrich import firecrawl_gateway
     from . import tools  # local import: avoids the tools<->search cycle at module load
 
     say = on_progress or _NOOP
@@ -118,6 +133,8 @@ def _enrich_contacts(
     lock = threading.Lock()
     done = 0
     skipped = 0
+    call_budget_skipped = 0
+    call_budget = firecrawl_gateway.FirecrawlCallBudget(MAX_FIRECRAWL_CALLS_PER_BATCH)
 
     def enrich_one(row: sqlite3.Row) -> list[object]:
         """Look up ONE organization on its own connection; never raise into the pool.
@@ -128,14 +145,15 @@ def _enrich_contacts(
         thread — that raised `ProgrammingError` and the suite caught it. Reopening
         costs a schema-version check against a 30-second network lookup.
         """
-        nonlocal done, skipped
+        nonlocal call_budget_skipped, done, skipped
         if time.monotonic() > deadline:
             with lock:
                 skipped += 1
             return _contact_cell(status="not checked (time budget)")
         conn = db.connect(db_target)
         try:
-            outcome = tools.enrich_lead_contact(conn, int(row["id"]), None)
+            with firecrawl_gateway.use_call_budget(call_budget):
+                outcome = tools.enrich_lead_contact(conn, int(row["id"]), None)
             cell = _contact_cell(
                 name=outcome.name,
                 title=outcome.title,
@@ -144,6 +162,13 @@ def _enrich_contacts(
                 phone=outcome.phone,
                 org_phone=outcome.org_phone,
             )
+        except (
+            firecrawl_gateway.FirecrawlBudgetExhausted,
+            firecrawl_gateway.FirecrawlBudgetNotConfigured,
+        ):
+            with lock:
+                call_budget_skipped += 1
+            cell = _contact_cell(status="not checked (call budget)")
         except Exception:  # noqa: BLE001 — one org's failure must not sink the batch
             cell = _contact_cell(status="error")
         finally:
@@ -158,7 +183,7 @@ def _enrich_contacts(
         say(f"Looking for contacts ({position}/{len(rows)})")
         return cell
 
-    workers = max(1, min(ENRICH_WORKERS, len(rows)))
+    workers = min(configured_enrich_workers(), len(rows))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         # `map` preserves input order, which the caller zips against its rows.
         cells = list(pool.map(enrich_one, rows))
@@ -179,5 +204,10 @@ def _enrich_contacts(
             f"budget and {skipped} were not; ask again and I'll carry on with "
             "those. Ones already checked are cached and cost nothing to repeat; "
             "any whose source was unreachable are retried properly."
+        )
+    if call_budget_skipped:
+        notes.append(
+            f"The fixed {MAX_FIRECRAWL_CALLS_PER_BATCH}-call enrichment budget was "
+            f"reached; {call_budget_skipped} organization(s) were not fully checked."
         )
     return cells, (" (" + " ".join(notes) + ")" if notes else "")

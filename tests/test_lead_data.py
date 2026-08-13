@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from grant_watch import db
+from tests.contact_support import verified_contact_evidence
 
 CHANNEL = "C0TEST"
 REP = "U0REP"
@@ -205,7 +206,13 @@ def test_a_contact_with_no_source_page_does_not_claim_verification(
     )
     conn.commit()
     lead_id = int(conn.execute("SELECT id FROM leads").fetchone()["id"])
-    db.save_contact(conn, lead_id, "Dana", "Director", "d@x.test", "", "", "medium")
+    conn.execute(
+        """INSERT INTO contacts
+             (lead_id,name,title,email,contact_status,provenance)
+           VALUES (?,?,?,?,'unverified',NULL)""",
+        (lead_id, "Dana", "Director", "d@x.test"),
+    )
+    conn.commit()
     contact = conn.execute(
         "SELECT * FROM contacts WHERE lead_id=?", (lead_id,)
     ).fetchone()
@@ -318,6 +325,13 @@ def test_a_verified_title_is_offered(tmp_path: Path) -> None:
         "555-0100",
         "https://district.test/staff",
         "high",
+        field_evidence=verified_contact_evidence(
+            "Dana Reyes",
+            "d@x.test",
+            "https://district.test/staff",
+            title="Director of Technology",
+            phone="555-0100",
+        ),
     )
     conn.commit()
 
@@ -388,19 +402,45 @@ def test_a_failed_org_lookup_never_reaches_salesforce(tmp_path: Path) -> None:
     conn.close()
 
 
-def test_a_found_org_profile_is_still_offered(tmp_path: Path) -> None:
-    """The other direction: gating must not silence a lookup that actually worked."""
+def test_a_found_org_profile_offers_only_an_exact_directory_website(
+    tmp_path: Path,
+) -> None:
+    """Proven address facts remain usable; Website needs exact NCES provenance."""
+    from grant_watch.enrich import evidence
+    from grant_watch.enrich.organization_profile import OrgProfile
     from grant_watch.enrich.salesforce_contact_records import organization_fields
 
     conn = _conn(tmp_path)
     conn.execute(
         "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url,"
-        "lead_grade,org_profile_status,org_website,org_street,org_postal_code,"
-        "org_city) VALUES ('s','1','Montebello Unified','CA','u','gold','found',"
-        "'https://montebello.k12.ca.us','123 Main St','90640','Montebello')"
+        "lead_grade,nces_website,nces_website_status) VALUES "
+        "('s','1','Montebello Unified','CA','u','gold',"
+        "'https://montebello.k12.ca.us','verified')"
     )
     conn.commit()
-    lead = db.get_lead(conn, int(conn.execute("SELECT id FROM leads").fetchone()["id"]))
+    lead_id = int(conn.execute("SELECT id FROM leads").fetchone()["id"])
+    source_url = "https://montebello.k12.ca.us/contact"
+    values = {
+        "street": "123 Main St",
+        "city": "Montebello",
+        "postal_code": "90640",
+    }
+    db.save_org_profile(
+        conn,
+        lead_id,
+        OrgProfile(
+            **values,
+            source_url=source_url,
+            status="found",
+            field_evidence={
+                field_name: evidence.recorded_match(
+                    field_name, value, source_url, f"{field_name}: {value}"
+                )
+                for field_name, value in values.items()
+            },
+        ),
+    )
+    lead = db.get_lead(conn, lead_id)
 
     offered = organization_fields(lead)
     assert offered["Website"] == "https://montebello.k12.ca.us"
@@ -419,6 +459,8 @@ def test_the_org_phone_fallback_also_respects_a_failed_lookup(tmp_path: Path) ->
     as `org_website` held `cde.ca.gov`. This feeds the contact-record payloads rather
     than `fill-leads`, so the first fix did not cover it.
     """
+    from grant_watch.enrich import evidence
+    from grant_watch.enrich.organization_profile import OrgProfile
     from grant_watch.enrich.salesforce_contact_records import choose_phone
 
     conn = _conn(tmp_path)
@@ -440,10 +482,22 @@ def test_the_org_phone_fallback_also_respects_a_failed_lookup(tmp_path: Path) ->
         f"a failed org lookup supplied a phone number: {number!r}"
     )
 
-    conn.execute("UPDATE leads SET org_profile_status='found' WHERE id=?", (lead_id,))
-    conn.commit()
+    source_url = "https://vallelindo.test/contact"
+    phone = "(916) 319-0800"
+    phone_evidence = evidence.phone(f"Main office {phone}", phone, source_url)
+    assert phone_evidence is not None
+    db.save_org_profile(
+        conn,
+        lead_id,
+        OrgProfile(
+            phone=phone,
+            source_url=source_url,
+            status="found",
+            field_evidence={"phone": phone_evidence},
+        ),
+    )
     lead = db.get_lead(conn, lead_id)
-    assert choose_phone(contact, lead) == ("(916) 319-0800", "org_general")
+    assert choose_phone(contact, lead) == (phone, "org_general")
     conn.close()
 
 

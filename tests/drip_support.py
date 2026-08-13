@@ -82,12 +82,12 @@ def mk_rfp(
     title: str = "Video Surveillance Camera Systems RFP",
     url: str = "https://www.kemahtx.gov/bids",
 ) -> int:
-    """Insert one open physical-security RFP lead (source='rfp', RFP_POSTED)."""
+    """Insert one official SAM physical-security RFP lead."""
     db.upsert_lead(
         conn,
         Lead(
             item=RawItem(
-                source="rfp",
+                source="sam.gov",
                 item_id=iid,
                 title=title,
                 entity=entity,

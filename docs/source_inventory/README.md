@@ -45,13 +45,14 @@ human-reviewed step.
   for all 50 states plus DC. Research-status columns distinguish `not_researched`,
   `researched_not_found`, and structurally `not_applicable` layers.
 
-## Scope status as of 2026-07-15
+## Scope status as of 2026-08-12
 
 - `verified`: Firecrawl returned at least one live discovery result for every state and DC during
   the nationwide search pass.
-- `verified`: the canonical catalog validates 270 records: 19 federal, 105 state, 56 county,
+- `verified`: the canonical catalog validates 271 records: 19 federal, 105 state, 56 county,
   59 school-district, 15 city, 3 education-service-agency, 1 regional-government, 1 special-district,
-  1 multi-jurisdiction, and 10 national portal-family sources.
+  1 multi-jurisdiction, and 11 national portal-family sources. The added Starbridge row is a
+  research-only third-party catalog entry, not an enabled poller or verified official RFP source.
 - `verified`: all 50 states plus DC have at least one state-level, grant, and exact school-district
   candidate. This does not imply exhaustive district coverage within any state.
 - `verified`: exact county candidates exist where a county layer was found. Connecticut, DC, and
@@ -59,7 +60,8 @@ human-reviewed step.
   `data/source_catalog/coverage_exceptions.csv`.
 - `verified`: generated access views classify 34 sources as verified public without authentication,
   11 as no-auth candidates, 2 as public APIs requiring keys, 15 as free-account sources, 4 as
-  supplier-account sources, and 204 as unknown-access candidates.
+  supplier-account sources, and 205 as unknown-access candidates. OregonBuys moved into unknown
+  after its published PDF began returning 404; its runtime poller is disabled.
 - `needs-testing`: most candidates still require direct access characterization, robots/terms review,
   pagination/schema checks, a recorded fixture, and a positive physical-security result.
 - `verified`: the official 2025 Census county Gazetteer is pinned by URL and SHA-256. Its 3,144

@@ -22,6 +22,7 @@ from grant_watch.enrich.salesforce_contact_fields import (
 )
 from grant_watch.enrich.salesforce_contact_records import contact_lead_payload
 from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem
+from tests.contact_support import verified_contact_evidence
 
 OWNER = SalesforceRecordRef(
     "User", "005000000000001", "Test Rep", "https://writer.salesforce.test/u"
@@ -65,21 +66,38 @@ def _contact(
     status: str,
 ) -> sqlite3.Row:
     """Insert one contact row with an explicit status the finder gate would set."""
-    conn.execute(
-        """INSERT INTO contacts
-             (lead_id,name,title,email,phone,source_url,confidence,contact_status,
-              provenance)
-           VALUES (?,?,?,?,'','https://evidence.test','high',?,?)""",
-        (
+    source_url = "https://evidence.test"
+    if status == "verified":
+        db.save_contact(
+            conn,
             lead_id,
             name,
             title,
             email,
-            status,
-            "linkedin_claimed" if status == "linkedin_only" else "page_verified",
-        ),
-    )
-    conn.commit()
+            "",
+            source_url,
+            "high",
+            field_evidence=verified_contact_evidence(
+                name, email, source_url, title=title
+            ),
+        )
+    else:
+        conn.execute(
+            """INSERT INTO contacts
+                 (lead_id,name,title,email,phone,source_url,confidence,contact_status,
+                  provenance)
+               VALUES (?,?,?,?,'',?,'high',?,?)""",
+            (
+                lead_id,
+                name,
+                title,
+                email,
+                source_url,
+                status,
+                "linkedin_claimed" if status == "linkedin_only" else None,
+            ),
+        )
+        conn.commit()
     return conn.execute(
         "SELECT * FROM contacts WHERE lead_id=? ORDER BY id DESC LIMIT 1", (lead_id,)
     ).fetchone()

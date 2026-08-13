@@ -105,13 +105,13 @@ def zoominfo_enrich_contacts(
     """
     from ..enrich import zoominfo, zoominfo_credits, zoominfo_enrichment
 
-    if not zoominfo.configured():
-        return "ERROR: ZoomInfo isn't configured on this server."
     if not requester_slack:
         # Money leaving the account must be attributable. The first real production
         # spend recorded an empty requester because this defaulted to "" and nobody
         # noticed; a required argument plus this check makes that unrepeatable.
         return "ERROR: I can't tell who's asking, so I won't spend credits."
+    if not zoominfo.configured():
+        return "ERROR: ZoomInfo isn't configured on this server."
     ids = [str(pid).strip() for pid in person_ids if str(pid).strip()]
     if not ids:
         return (
@@ -168,7 +168,7 @@ def fetch_url(url: str, on_progress: Progress | None = None) -> str:
     and an unreachable one look identical to the model and it will narrate around
     the difference.
     """
-    from ..enrich import finder
+    from ..enrich import finder, firecrawl_gateway
 
     say = on_progress or _NOOP
     target = url.strip()
@@ -179,7 +179,12 @@ def fetch_url(url: str, on_progress: Progress | None = None) -> str:
         )
     say("Reading the page")
     try:
-        markdown = finder._scrape(target, raise_on_failure=True)
+        with firecrawl_gateway.bind_workflow("slack_fetch_url"):
+            markdown = finder._scrape(target, raise_on_failure=True)
+    except firecrawl_gateway.FirecrawlBudgetNotConfigured as exc:
+        return f"ERROR: page-reading budget is not configured ({exc})."
+    except firecrawl_gateway.FirecrawlBudgetExhausted:
+        return "ERROR: the Firecrawl page-reading budget is exhausted."
     except finder.SourceUnreachable:
         return f"ERROR: I couldn't read {target} — the page didn't return anything."
     except Exception as exc:  # noqa: BLE001 — any transport failure is an honest error

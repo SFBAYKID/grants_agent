@@ -9,7 +9,7 @@ from grant_watch.migrations_campaign_batch import migration_27_exact_campaign_ba
 
 # Hand-maintained head version — see tests/test_rich_migrations.py for why this is
 # a literal and not MIGRATIONS[-1].version.
-HEAD_VERSION = 40
+HEAD_VERSION = 46
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -55,7 +55,7 @@ def test_campaign_batch_migration_accepts_legacy_search_count_columns() -> None:
 
 
 def test_sanitized_production_v13_history_upgrades_without_losing_rows() -> None:
-    """A v13-shaped divergent ledger reaches v28 with valid foreign keys."""
+    """A v13-shaped divergent ledger reaches current head with valid foreign keys."""
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     legacy = tuple(item for item in migrations.MIGRATIONS if item.version <= 13)

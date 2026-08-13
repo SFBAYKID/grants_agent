@@ -55,6 +55,26 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _validate_slug(capability: str) -> None:
+    """Reject a capability name that is unsafe to store or interpolate."""
+    if not _SLUG.fullmatch(capability):
+        raise ValueError("capability must be a short slug like 'email_results'")
+
+
+def validate_available_capability(capability: str) -> None:
+    """Prove a capability can safely be declared available to every waiting rep."""
+    _validate_slug(capability)
+    # DECLARING IS A BROADCAST. A missing sentence must fail before any ask becomes
+    # eligible; the generic fallback cannot be unsent after it reaches real people.
+    from .slack.nudge_messages import wording_exists
+
+    if not wording_exists(capability):
+        raise ValueError(
+            f"{capability!r} has no hand-written follow-up wording; add it to "
+            "slack/nudge_messages.py before declaring the capability live"
+        )
+
+
 def record(
     conn: sqlite3.Connection,
     *,
@@ -80,8 +100,7 @@ def record(
     # until someone edited this file — the exact "then we go hard-code that too"
     # trap Chase named. `CAPABILITY_KINDS` still lists the ones with hand-written
     # wording; anything else records fine and falls back to the generic offer.
-    if not _SLUG.fullmatch(capability):
-        raise ValueError("capability must be a short slug like 'email_results'")
+    _validate_slug(capability)
     if not ask_text.strip():
         raise ValueError("an unmet ask needs the human's own words")
     if not slack_user or not audience or not thread_ts or not message_ts:
@@ -124,39 +143,42 @@ def record(
     return int(cur.lastrowid)
 
 
+def mark_available_in_transaction(
+    conn: sqlite3.Connection, capability: str, *, shipped_at: str
+) -> int:
+    """Mark waiting asks eligible without committing the caller's transaction.
+
+    Multi-capability announcements use this primitive so their one-shot reservation
+    and every eligibility update either all commit or all roll back. Callers must
+    supply the exact shared timestamp and own the surrounding transaction.
+    """
+    validate_available_capability(capability)
+    if not shipped_at:
+        raise ValueError("a capability declaration needs its shipped timestamp")
+    cur = conn.execute(
+        "UPDATE capability_asks SET available_since=? "
+        "WHERE capability=? AND state='open' AND available_since IS NULL",
+        (shipped_at, capability),
+    )
+    return int(cur.rowcount)
+
+
 def mark_available(
     conn: sqlite3.Connection, capability: str, *, shipped_at: str | None = None
 ) -> int:
-    """Declare a capability live, making every ask waiting on it eligible.
+    """Declare a capability live and commit every newly eligible waiting ask.
 
     Only rows that are still `open` and still waiting are touched, so re-running this
     after a later deploy cannot resurrect an ask somebody already answered or reopen
     one whose clock has already started.
     """
-    # Same slug rule as `record`: a capability discovered by a thread scan must be
-    # armable without a code change, or discovery just relocates the bottleneck.
-    if not _SLUG.fullmatch(capability):
-        raise ValueError("capability must be a short slug like 'email_results'")
-    # DECLARING IS A BROADCAST, so it refuses a capability with no wording. This call
-    # reopens EVERY ask waiting on the slug at once — production held nine for one of
-    # them — and a slug missing from the wording tables does not degrade quietly: it
-    # sends "Good news — I can do that one now" to all of them. Found because
-    # `add_leads_to_campaign` had been declared live with three asks and no sentence.
-    # Writing the sentence first is one line; unsending the generic one is impossible.
-    from .slack.nudge_messages import wording_exists
-
-    if not wording_exists(capability):
-        raise ValueError(
-            f"{capability!r} has no hand-written follow-up wording; add it to "
-            "slack/nudge_messages.py before declaring the capability live"
-        )
-    cur = conn.execute(
-        "UPDATE capability_asks SET available_since=? "
-        "WHERE capability=? AND state='open' AND available_since IS NULL",
-        (shipped_at or _now(), capability),
+    count = mark_available_in_transaction(
+        conn,
+        capability,
+        shipped_at=shipped_at or _now(),
     )
     conn.commit()
-    return int(cur.rowcount)
+    return count
 
 
 def close(conn: sqlite3.Connection, ask_id: int, *, state: str = "answered") -> bool:

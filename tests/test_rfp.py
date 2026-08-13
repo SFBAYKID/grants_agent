@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from grant_watch import db, scoring
+from grant_watch import db, migrations_safety, scoring
 from grant_watch.models import FundingEventType, LeadGrade, RawItem, VerificationStatus
 from grant_watch.sources import rfp, rfp_parse
 
@@ -321,11 +321,13 @@ def test_scoring_grades_rfp_source() -> None:
 
 # ---------------------------------- drip path separation (RFP vs award vs bulletin)
 def _rfp_silver_lead(conn: sqlite3.Connection) -> None:
-    """Persist one open RFP SILVER lead."""
+    """Persist one reviewed official-source RFP SILVER lead."""
     item = rfp_parse.build_rawitem(OPEN_EXTRACT, OPEN_PAGE, OPEN_URL, BEFORE_DUE)
     assert item is not None
     # keep the item's future window in play regardless of the calendar the test runs on
     db.upsert_lead(conn, scoring.grade(item, today=BEFORE_DUE))
+    conn.execute("UPDATE leads SET source='sam.gov'")
+    conn.commit()
 
 
 def test_rfp_lead_uses_its_own_drip_query_only(tmp_path: Path) -> None:
@@ -337,6 +339,67 @@ def test_rfp_lead_uses_its_own_drip_query_only(tmp_path: Path) -> None:
     assert len(db.rfp_candidates(conn, "C1")) == 1
     assert db.nugget_candidates(conn, "C1") == []
     assert db.bulletin_candidates(conn, "C1") == []
+
+
+@pytest.mark.parametrize("status", ["surfaced", "snoozed", "not_relevant", "dead"])
+def test_rfp_proactive_query_honors_disposition(tmp_path: Path, status: str) -> None:
+    """Only untouched new RFPs may become unsolicited Slack alerts."""
+    conn = db.connect(tmp_path / "rfp-status.db")
+    _rfp_silver_lead(conn)
+    conn.execute("UPDATE leads SET status=?", (status,))
+    conn.commit()
+    assert db.rfp_candidates(conn, "C1") == []
+
+
+def test_direct_official_rfp_source_qualifies_by_verified_semantics(
+    tmp_path: Path,
+) -> None:
+    """Direct official-page evidence remains eligible alongside strict SAM rows."""
+    conn = db.connect(tmp_path / "rfp-source.db")
+    _rfp_silver_lead(conn)
+    conn.execute("UPDATE leads SET source='rfp'")
+    conn.commit()
+    assert len(db.rfp_candidates(conn, "C1")) == 1
+
+
+def test_migration_renames_and_downgrades_legacy_starbridge_rows(
+    tmp_path: Path,
+) -> None:
+    """Old aggregator evidence cannot pass the source-neutral proactive query."""
+    conn = db.connect(tmp_path / "legacy-starbridge.db")
+    item = RawItem(
+        source="rfp",
+        item_id="legacy-starbridge-1",
+        title="Security Camera RFP",
+        entity="Alpha School District",
+        state="CA",
+        program="RFP:security",
+        amount=None,
+        start="",
+        end="2030-12-31",
+        url="https://starbridge.ai/rfp/legacy-starbridge-1",
+        raw={"aggregator": "starbridge"},
+        event_type=FundingEventType.RFP_POSTED,
+        verification_status=VerificationStatus.VERIFIED,
+    )
+    db.upsert_lead(conn, scoring.grade(item, today=BEFORE_DUE))
+    assert len(db.rfp_candidates(conn, "C1")) == 1
+
+    migrations_safety.migration_44_starbridge_provenance(conn)
+    migrations_safety.migration_44_starbridge_provenance(conn)
+    conn.commit()
+
+    lead = conn.execute("SELECT id,source FROM leads").fetchone()
+    assert tuple(lead) == (1, "starbridge")
+    observation = conn.execute(
+        "SELECT source,verification_status FROM source_observations"
+    ).fetchone()
+    assert tuple(observation) == ("starbridge", "needs-testing")
+    event = conn.execute(
+        "SELECT verification_status,suppressed FROM funding_events"
+    ).fetchone()
+    assert tuple(event) == ("needs-testing", 1)
+    assert db.rfp_candidates(conn, "C1") == []
 
 
 # ------------------------------------------- item_id format drift (real 2026-07-20 bug)
@@ -394,7 +457,10 @@ def test_item_id_format_change_adopts_the_existing_lead(tmp_path: Path) -> None:
     assert len(rows) == 1, "a re-keyed solicitation must not become a second lead"
     assert int(rows[0]["id"]) == original_id, "lead id must survive so posts stay valid"
     assert rows[0]["source_item_id"] == current.item_id, "row migrates to the new key"
-    # and it is still exactly one postable candidate, not two
+    # Relabeling the reviewed official record as SAM still yields exactly one
+    # postable candidate, not two; eligibility is semantic rather than source-named.
+    conn.execute("UPDATE leads SET source='sam.gov'")
+    conn.commit()
     assert len(db.rfp_candidates(conn, "C1")) == 1
 
 
