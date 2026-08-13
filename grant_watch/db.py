@@ -675,7 +675,8 @@ def save_org_profile(conn: sqlite3.Connection, lead_id: int, profile: object) ->
             """UPDATE leads SET org_website=?, org_website_candidate=?,
              org_general_email=?, org_phone=?,
              org_street=?, org_city=?, org_state=?, org_postal_code=?,
-            org_profile_status=?, org_profile_source_url=? WHERE id=?""",
+            org_profile_status=?, org_profile_source_url=?,
+            org_profile_checked_at=? WHERE id=?""",
             (
                 values["website"] or None,
                 getattr(profile, "website_candidate", "") or None,
@@ -687,6 +688,10 @@ def save_org_profile(conn: sqlite3.Connection, lead_id: int, profile: object) ->
                 values["postal_code"] or None,
                 status,
                 source_url or None,
+                # Stamped on EVERY outcome, including not_found and unreachable. A
+                # clock that only recorded successes would leave exactly the failures
+                # the cooldown exists to space out looking like they never ran.
+                _now(),
                 lead_id,
             ),
         )

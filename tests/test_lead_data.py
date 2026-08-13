@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -771,4 +772,99 @@ def test_an_unposted_update_can_be_corrected_but_a_posted_one_cannot(
     assert row["body"] == "From here on, I check back in.", (
         "a posted update was rewritten after people had read it"
     )
+    conn.close()
+
+
+def test_candidates_group_one_org_even_when_only_some_rows_carry_a_key(
+    tmp_path: Path,
+) -> None:
+    """A NULL canonical key and its populated twin are ONE organization, not two.
+
+    The neighbouring dedup test passes while the bug is live because it writes a
+    uniform key on every row it inserts. Production does not: `canonical_entity_key`
+    is backfilled, so an organization holds a mix of NULL and populated rows, and the
+    old `COALESCE(NULLIF(key,''), entity_name)` fell back to the RAW name — which can
+    never equal a stored key, since the real key is lower-cased, punctuation-folded
+    and state-suffixed. Modesto and Mt. Morris were scraped twice on 2026-08-13 for
+    exactly this reason, having been cited as fixed.
+
+    Reverting the recomputed GROUP BY makes this return 2.
+    """
+    from grant_watch import org_backfill
+
+    conn = _conn(tmp_path)
+    real_key = db.canonical_entity_key("MODESTO CITY SCHOOLS", "CA")
+    for index, key in enumerate([None, real_key]):
+        conn.execute(
+            "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url,"
+            "lead_grade,canonical_entity_key,amount) "
+            "VALUES ('s',?,'MODESTO CITY SCHOOLS','CA','u','gold',?,100)",
+            (str(index), key),
+        )
+    conn.commit()
+    picked = org_backfill.candidates(conn, grade="gold")
+    assert len(picked) == 1, f"paid for the same organization twice: {picked}"
+    conn.close()
+
+
+def test_candidates_rest_a_failed_lookup_before_paying_for_it_again(
+    tmp_path: Path,
+) -> None:
+    """A lookup that just failed is not re-bought on the next run.
+
+    `not_found` and `unreachable` stay retryable — that is deliberate — but retryable
+    was read as retryable IMMEDIATELY, so 21 not_found plus 2 unreachable gold rows
+    would have consumed ~108 of a following batch's ~352 Firecrawl calls re-fetching
+    pages that had just returned nothing.
+
+    Three cases, because the boundary is the whole point: attempted today (skip),
+    attempted before the window (retry), never attempted at all (retry — a legacy
+    NULL means "not measured", not "just tried").
+    """
+    from grant_watch import org_backfill
+
+    conn = _conn(tmp_path)
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=timezone.utc)
+    rows = {
+        "just-failed": (now - timedelta(hours=2)).isoformat(timespec="seconds"),
+        "long-ago": (now - timedelta(days=30)).isoformat(timespec="seconds"),
+        "never": None,
+    }
+    for index, (name, checked_at) in enumerate(rows.items()):
+        conn.execute(
+            "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url,"
+            "lead_grade,amount,org_profile_status,org_profile_checked_at) "
+            "VALUES ('s',?,?,'CA','u','gold',100,'not_found',?)",
+            (str(index), name, checked_at),
+        )
+    conn.commit()
+    picked = {row["entity_name"] for row in org_backfill.candidates(conn, now=now)}
+    assert picked == {"long-ago", "never"}, picked
+    conn.close()
+
+
+def test_every_org_profile_outcome_stamps_the_attempt_clock(tmp_path: Path) -> None:
+    """not_found stamps the clock too, or the cooldown could never bite.
+
+    A clock that recorded only successes would leave precisely the failures the
+    cooldown exists to space out looking like they had never run.
+    """
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO leads (source,source_item_id,entity_name,state,detail_url,"
+        "lead_grade) VALUES ('s','x','Alpha','CA','u','gold')"
+    )
+    conn.commit()
+    lead_id = int(conn.execute("SELECT id FROM leads").fetchone()["id"])
+
+    class _Miss:
+        """Minimal duck-typed profile standing in for an exhausted lookup."""
+
+        status = "not_found"
+
+    db.save_org_profile(conn, lead_id, _Miss())
+    stamped = conn.execute(
+        "SELECT org_profile_checked_at FROM leads WHERE id=?", (lead_id,)
+    ).fetchone()["org_profile_checked_at"]
+    assert stamped, "a failed lookup left no attempt timestamp"
     conn.close()

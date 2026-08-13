@@ -10,6 +10,10 @@
 - [Edit cards in place](edit-cards-in-place.md) — fix a posted card with chat.update, never post a replacement
 - [Restart means relaunch](restart-means-relaunch.md) — pkill THEN `nohup bash run_bot.sh`; the */5 keepalive is the crash net, not the relaunch
 - [Nudge replies are silently dropped](nudge-replies-are-silently-dropped.md) — a plain reply to ANY nudge dies at `post is None and not general_thread`; @-mention works, plain reply does not. U01DFJWQQJ3 is Anthony, NOT "the manager"
+- [Measure a data migration on a COPY first](migration-46-total-quarantine.md) — "quarantines legacy claims" meant ALL of them; run the migrations against a throwaway copy and diff before the live run
+- [No CLI can write a `verified` contact](contacts-verified-not-writable-by-any-cli.md) — `save_contact` has ONE caller, the interactive Slack tool; `contact_evidence` is a DIFFERENT table from `contacts`, and outreach gates on `contacts`
+- [`pkill -f` kills your own ssh session](pkill-f-self-match-kills-your-session.md) — the pattern appears in your own command line; use `[g]rant_watch`, and exit 255 means the shell died, not that the work failed
+- [Pause the crontab for a long window](pause-crons-for-a-long-deploy-window.md) — 10 jobs, no gap >4 min; the */5 keepalive relaunches the bot and watchdog applies migrations under you
 
 ## Tenant, transport, deploy mechanics
 
@@ -36,7 +40,10 @@
 
 ## Current production state
 
-- [0223c10 — CURRENT PROD, deployed + verified](prod-state-0223c10-verified.md) — 2026-08-12, schema 40 unchanged, PID 108300, 0.116s outage; dropped-reply fix proven live both directions; **a deploy that dies mid-flight must be resumed from a sha classification against BOTH revisions, never from your last report**
+- [Re-research pass 2026-08-13](rerearch-pass-20260813.md) — `nces-bind` restored NOTHING quarantined but made the paid path authoritative+cheaper; 303 Firecrawl / 6 ZoomInfo; enrich-orgs re-scrapes just-failed orgs and double-scrapes 30 split-key orgs; fill-contacts dies on a negative vendor ID
+- [58b3e24 — CURRENT PROD, deployed + verified](prod-state-58b3e24-verified.md) — 2026-08-13, **schema 46**, PID 121468, 139 files byte-identical, ~4min DELIBERATE outage (migrations + ledger cutover, not a restart); `.env` intentionally not byte-identical
+- [Paid-provider authority cutover](paid-provider-authority-cutover.md) — authority id, the 3 private 0600 files, the 7 .env keys; **rotation DECLINED by Chase, so droplet spend totals are a FLOOR, never an account total**
+- [0223c10 (superseded by 58b3e24)](prod-state-0223c10-verified.md) — 2026-08-12, schema 40, PID 108300, 0.116s outage; dropped-reply fix proven live both directions; **a deploy that dies mid-flight must be resumed from a sha classification against BOTH revisions, never from your last report**
 - [Card contact may live ONLY in the snapshot](card-contact-may-live-only-in-snapshot.md) — North Palos names Sean Joyce on the card while `contacts` has ZERO rows for lead 3100; the only verified phone is the district general line
 - [9fb6813 (superseded by 0223c10)](prod-state-9fb6813-verified.md) — 2026-08-11, **schema 40**, PID 86114, 0.55s outage; CRONS apply migrations (watchdog every 10 min), not the restart — deploy in a cron gap; pre-40 item_hash shim proven on a real rep's pending approval
 - [Droplet pytest baseline is 1 FAILED](droplet-pytest-rich-card-flag.md) — `GRANT_RICH_CARD_ENABLED=1` in prod .env breaks one test_cli case; environmental, pre-existing, never roll back over it

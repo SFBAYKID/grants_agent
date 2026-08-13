@@ -26,12 +26,29 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
+from .db import canonical_entity_key
 from .enrich.organization_profile import enrich_org_profile
 
 # One pass is deliberately capped. An unbounded sweep over 10,715 leads is a bill
 # nobody approved, and the tier that matters is 286 rows.
 DEFAULT_LIMIT = 50
+
+# How long a failed organization lookup rests before it is worth paying for again.
+# Two weeks: long enough that a batch cannot re-buy this morning's failures, short
+# enough that a site which was merely down comes back within the same working month.
+RETRY_AFTER_DAYS = 14
+
+
+def _canonical_key_sql(entity: object, state: object) -> str:
+    """SQLite adapter for :func:`db_common.canonical_entity_key`.
+
+    Registered per call rather than imported into SQL text because SQLite has no
+    regex; routing through the real function is what stops the grouping key from
+    drifting away from the stored `canonical_entity_key` column a second time.
+    """
+    return canonical_entity_key(str(entity or ""), str(state or ""))
 
 
 @dataclass(frozen=True)
@@ -52,20 +69,43 @@ class BackfillOutcome:
 
 
 def candidates(
-    conn: sqlite3.Connection, *, grade: str = "gold", limit: int = DEFAULT_LIMIT
+    conn: sqlite3.Connection,
+    *,
+    grade: str = "gold",
+    limit: int = DEFAULT_LIMIT,
+    retry_after_days: int = RETRY_AFTER_DAYS,
+    now: datetime | None = None,
 ) -> list[sqlite3.Row]:
     """Leads with no usable organization profile yet, best-scoring first.
 
     `org_profile_status='found'` short-circuits inside `enrich_org_profile`, so those
-    are excluded here rather than paid for and discarded. An `unreachable` lead IS
-    included: that outcome is explicitly retryable.
+    are excluded here rather than paid for and discarded. An `unreachable` or
+    `not_found` lead IS still included — that outcome is explicitly retryable — but
+    only once `retry_after_days` have passed since the last attempt.
+
+    THE COOLDOWN IS THE FIX FOR A MEASURED WASTE, not a new policy. Retryable was
+    read as retryable IMMEDIATELY, so a lead whose site returned nothing became a
+    candidate again on the very next run: on 2026-08-13 production held 21 `not_found`
+    plus 2 `unreachable` gold rows that would have eaten ~108 of a following batch's
+    ~352 Firecrawl calls re-fetching pages that had just failed. A NULL
+    `org_profile_checked_at` (every pre-migration-47 row) is eligible at once, because
+    "never measured" is not "just tried".
 
     ONE ROW PER ORGANIZATION. The sweep pays per lead, and gold alone holds ~30
-    duplicated entity names — the first production run scraped Modesto City Schools
-    twice and Mt. Morris three times, buying the same page over and over. Grouping on
-    the canonical key means each organization is fetched once; the profile is stored
-    per lead, so the duplicates are picked up on a later pass rather than paid for
-    twice in this one.
+    duplicated entity names. Grouping on the canonical key means each organization is
+    fetched once; the profile is stored per lead, so the duplicates are picked up on a
+    later pass rather than paid for twice in this one.
+
+    THE KEY IS RECOMPUTED, NEVER READ FROM THE COLUMN. The previous
+    `COALESCE(NULLIF(canonical_entity_key,''), entity_name)` fell back to the RAW
+    name, which cannot equal a stored key — the real key is lower-cased, punctuation-
+    folded and state-suffixed. So a NULL-key row (`'MODESTO CITY SCHOOLS'`) and its
+    populated twin (`'modesto city schools|CA'`) landed in DIFFERENT groups and the
+    organization was scraped twice anyway. Modesto and Mt. Morris are the very
+    examples this docstring used to cite as fixed, and both recurred live on
+    2026-08-13. Registering `db.canonical_entity_key` as a SQL function makes the
+    grouping key the same one function everywhere, so it cannot drift again — SQLite
+    has no regex, so no inline SQL expression could have matched it.
 
     ORDERING IS BY AWARD AMOUNT, and the honest caveat is that `amount` is NULL on
     most gold rows, so in practice this degrades to id order. `lead_score` would be
@@ -73,6 +113,11 @@ def candidates(
     a column, and ordering by it in SQL fails outright. Said plainly rather than left
     as a claim the data does not support.
     """
+    moment = now or datetime.now(timezone.utc)
+    cutoff = (moment - timedelta(days=max(0, retry_after_days))).isoformat(
+        timespec="seconds"
+    )
+    conn.create_function("grant_canonical_entity_key", 2, _canonical_key_sql)
     return list(
         conn.execute(
             """SELECT MIN(id) AS id, entity_name, state, amount
@@ -80,10 +125,12 @@ def candidates(
                 WHERE lead_grade = ?
                   AND COALESCE(org_profile_status,'') <> 'found'
                   AND COALESCE(entity_name,'') <> ''
-                GROUP BY COALESCE(NULLIF(canonical_entity_key,''), entity_name)
+                  AND (org_profile_checked_at IS NULL
+                       OR org_profile_checked_at < ?)
+                GROUP BY grant_canonical_entity_key(entity_name, COALESCE(state,''))
                 ORDER BY COALESCE(MAX(amount),0) DESC, MIN(id)
                 LIMIT ?""",
-            (grade, max(1, limit)),
+            (grade, cutoff, max(1, limit)),
         )
     )
 

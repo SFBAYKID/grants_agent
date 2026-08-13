@@ -238,32 +238,58 @@ def fetch_official_website(nces_id: str) -> NCESWebsiteEvidence:
 
 
 def _fetch_all_features(url: str, base_params: dict[str, str]) -> dict[str, object]:
-    """Page an ArcGIS query fully and fail closed if pagination does not advance."""
+    """Page an ArcGIS query fully and fail closed if pagination does not advance.
+
+    PAGES BY KEY RANGE, NOT BY `resultOffset`, because this service silently ignores
+    the offset on a `groupByFieldsForStatistics` aggregate. Measured live against
+    California on 2026-08-13: `resultOffset=0` and `resultOffset=2000` returned the
+    IDENTICAL 2,000 rows — same first LEAID (0600001) and same last (0691046) — with
+    `exceededTransferLimit=True` on both, so real rows existed and were unreachable.
+    The old loop advanced its offset, got the same page, and correctly refused; the
+    guard was right and the mechanism underneath it was wrong. California, the largest
+    state, was the only one whose grouped output exceeds one page, which is why the
+    whole `nces-bind` run for it aborted while every other state passed.
+
+    Advancing on `LEAID > <last seen>` reaches the rest: page 2 began at 0691047 and
+    returned the final 38 rows, 2,038 in total.
+
+    THE CURSOR FIELD MUST BE UNIQUE PER ROW, which is why it is taken from
+    `orderByFields` rather than passed separately — a cursor that is not the sort key
+    would skip rows silently. Both callers group or key on LEAID, where it is unique.
+    """
+    cursor_field = str(base_params.get("orderByFields", "")).strip()
+    if not cursor_field or "," in cursor_field:
+        raise ValueError("NCES paging needs exactly one orderByFields cursor column")
+    base_where = str(base_params.get("where", "")).strip()
     collected: list[dict[str, object]] = []
-    seen_pages: set[str] = set()
-    offset = 0
+    cursor = ""
     for _page in range(MAX_PAGES):
+        where = base_where
+        if cursor:
+            # Values come from the service's own response, never from user input, and
+            # are additionally constrained to be quote-free before interpolation.
+            where = f"{base_where} AND {cursor_field}>'{cursor}'"
         params = {
             **base_params,
-            "resultOffset": str(offset),
+            "where": where,
             "resultRecordCount": str(PAGE_SIZE),
         }
         payload = cast(dict[str, object], polite_get(url, params=params).json())
         attributes = _features(payload)
-        signature = json.dumps(attributes, sort_keys=True, default=str)
-        if attributes and signature in seen_pages:
+        if not attributes:
+            return {"features": [{"attributes": item} for item in collected]}
+        collected.extend(attributes)
+        last = str(attributes[-1].get(cursor_field, "") or "")
+        if not last or "'" in last:
+            raise ValueError(f"NCES returned an unusable {cursor_field} cursor value")
+        if last == cursor:
             raise ValueError("NCES pagination repeated a page without advancing")
-        if attributes:
-            seen_pages.add(signature)
-            collected.extend(attributes)
+        cursor = last
         more = (
             payload.get("exceededTransferLimit") is True or len(attributes) >= PAGE_SIZE
         )
         if not more:
             return {"features": [{"attributes": item} for item in collected]}
-        if not attributes:
-            raise ValueError("NCES reported more rows but returned an empty page")
-        offset += len(attributes)
     raise ValueError(f"NCES pagination exceeded {MAX_PAGES} pages")
 
 
