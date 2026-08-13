@@ -37,7 +37,7 @@ from slack_sdk.errors import SlackApiError
 
 from .. import capability_asks, db, reminders, roster
 from ..presentation import defuse_mentions
-from ..migrations_nudges import NUDGE_SUBJECT_KINDS
+from ..migrations_nudges import NUDGE_STATES, NUDGE_SUBJECT_KINDS
 from . import nudge_silence, nudge_variants
 from .drip import PT as BUSINESS_TZ
 from .drip import in_window
@@ -194,7 +194,7 @@ def suppress_reason(
     """
     if now > candidate.drop_after:
         return "stale"
-    if db.channel_guard(conn, candidate.audience) is not None:
+    if db.channel_guard(conn, candidate.audience, now.isoformat()) is not None:
         return "channel_guard_active"
     if candidate.target_slack and reminders.is_opted_out(
         conn, candidate.target_slack, scope="nudges"
@@ -836,6 +836,8 @@ def _record(
     variant: str = "",
 ) -> str:
     """Persist the reservation (or the suppression) before any Slack call."""
+    if state not in NUDGE_STATES:
+        raise ValueError(f"unknown nudge state {state!r}; add it to NUDGE_STATES")
     nudge_id = uuid.uuid4().hex
     with conn:
         conn.execute(
@@ -874,6 +876,8 @@ def _finish(
     slack_ts: str = "",
 ) -> None:
     """Close out a reserved nudge with what actually happened."""
+    if state not in NUDGE_STATES:
+        raise ValueError(f"unknown nudge state {state!r}; add it to NUDGE_STATES")
     with conn:
         conn.execute(
             """UPDATE followup_nudges

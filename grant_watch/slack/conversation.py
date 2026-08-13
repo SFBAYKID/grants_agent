@@ -692,7 +692,8 @@ def respond(
     # corrected retry of that tool and drained the whole turn budget.
     tool_result_cache: dict[str, str] = {}
     single_execution_cache: dict[str, str] = {}
-    fetched_pages = 0
+    fetched_pages = 0  # any page reached the context (drives the end-of-turn break)
+    paid_fetches = 0  # scrapes actually billed (drives MAX_FETCHES_PER_TURN)
     model = os.environ.get("GRANT_MODEL", DEFAULT_MODEL)
     search_confirmed = _search_plan_confirmed(user_text, thread_context)
 
@@ -789,7 +790,26 @@ def respond(
                     )
                     if contextual_error:
                         text, artifact = contextual_error, None
+                    elif (
+                        block.name == "fetch_url"
+                        and paid_fetches >= tools.MAX_FETCHES_PER_TURN
+                    ):
+                        # THE PAID-SCRAPE BUDGET, enforced here rather than merely
+                        # declared. A turn may emit several fetch_url blocks at once,
+                        # and every distinct URL is a billed Firecrawl scrape; the
+                        # `break` below only stops the NEXT turn, so without this a
+                        # single turn could crawl freely. A cached re-read of a URL
+                        # already fetched costs nothing and never reaches here.
+                        text, artifact = (
+                            "ERROR: I've already read "
+                            f"{tools.MAX_FETCHES_PER_TURN} pages for this message. "
+                            "Tell me which single link matters most and I'll read "
+                            "that one next.",
+                            None,
+                        )
                     else:
+                        if block.name == "fetch_url":
+                            paid_fetches += 1
                         text, artifact = tools.run_tool(
                             block.name,
                             tool_args,

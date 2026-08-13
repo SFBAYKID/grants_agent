@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
 
 from ..presentation import display_entity_name, state_display_name
-from .policy import is_website_ownership_proven
+from .policy import forbidden_amount_label, is_website_ownership_proven
 from .routing import RoutingReason
 from .snapshot import FrozenSnapshot, SnapshotDraft
 
@@ -234,6 +234,15 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
         f"{_event_date_label(draft.event_type)} "
         f"{_award_date(draft.award_date, draft.award_date_precision)}"
     )
+    # FAIL CLOSED on a money line that claims a balance. `drip` catches ValueError from
+    # the renderers and quarantines the lead, so a card that would misdescribe an
+    # obligated figure is set aside for a human (`cli drip-blocked`) instead of posted.
+    mislabelled = forbidden_amount_label(award)
+    if mislabelled:
+        raise ValueError(
+            f"the award amount line labels an obligated figure {mislabelled!r}, "
+            "which claims a balance no source measured"
+        )
     blocks: list[dict[str, Any]] = [
         {
             "type": "header",

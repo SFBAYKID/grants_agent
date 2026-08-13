@@ -35,6 +35,7 @@ from .salesforce_campaign_tools import (
 from .source_status import source_inventory_status
 from .research_tools import (  # re-export: every tools.<name> call site is unchanged
     MAX_FETCH_CHARS,  # noqa: F401 — re-exported for callers and tests
+    MAX_FETCHES_PER_TURN,  # noqa: F401 — the agent loop enforces this budget
     fetch_url,
     record_contact_fact,
     salesforce_campaign_status,

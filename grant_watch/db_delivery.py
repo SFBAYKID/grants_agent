@@ -223,7 +223,9 @@ def set_channel_guard(
         )
 
 
-def channel_guard(conn: sqlite3.Connection, channel: str) -> sqlite3.Row | None:
+def channel_guard(
+    conn: sqlite3.Connection, channel: str, now: str = ""
+) -> sqlite3.Row | None:
     """Return an ACTIVE (unexpired) channel guard, or None. PURE READ — never writes.
 
     An expired guard is filtered out by the QUERY; it is not deleted here. The earlier
@@ -233,8 +235,15 @@ def channel_guard(conn: sqlite3.Connection, channel: str) -> sqlite3.Row | None:
     which CLAUDE.md rule 8 forbids and cli.py's own docstring promises never happens.
     Reads must not mutate. Clearing a stale row belongs on an explicitly writable path
     (`clear_channel_guard`, called after a successful post or by `cli drip-unblock`).
+
+    `now` accepts the CALLER'S clock. The workers take an injected `now` for exactly
+    this reason, and reading expiry off the wall clock instead made the answer disagree
+    with the run that asked: a queue measured at a future clock (as the 2026-08-11
+    ordering work did) read every guard as expired, and a test pinned to a fixed `now`
+    passed or failed depending on the hour it ran. Defaults to the wall clock, which is
+    what production wants.
     """
-    now = _now()
+    now = now or _now()
     # A BLOCK outranks a backoff for REPORTING even when the backoff expires later: a
     # block needs a human and exits non-zero, a backoff is routine and exits 0. Ordering
     # purely by available_at let a 429 picked up during `drip --force` mask an active

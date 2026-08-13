@@ -17,6 +17,7 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 from .. import db
+from ..migrations_campaign_attempts import ATTEMPT_STATES
 from .salesforce_campaign_batch_models import (
     CampaignTargetRequest,
     PreparedCampaignBatch,
@@ -925,6 +926,8 @@ def _close_attempt(
     failure: BaseException | None = None,
 ) -> None:
     """Record how the attempt ended, including WHY when it was refused."""
+    if state not in ATTEMPT_STATES:
+        raise ValueError(f"unknown attempt state {state!r}; add it to ATTEMPT_STATES")
     with conn:
         conn.execute(
             """UPDATE crm_campaign_attempts

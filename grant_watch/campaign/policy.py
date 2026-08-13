@@ -82,6 +82,27 @@ CRM_FRESH_HOURS = 24  # reuse the deployed CRM-snapshot freshness window
 # Amounts an obligated award figure may NEVER be labelled as.
 FORBIDDEN_AMOUNT_WORDS = ("remaining", "available", "left to spend")
 
+
+def forbidden_amount_label(text: str) -> str:
+    """Return the first forbidden word labelling the money line, or "" if clean.
+
+    An obligated figure is what was AWARDED. Calling it "remaining" or "available"
+    claims a balance nobody measured — the district may have spent every dollar — and
+    a rep quoting that number back to a customer is repeating a figure we invented.
+    Only the line carrying the amount is inspected: "available" is perfectly honest
+    elsewhere on a card (an open spend window, a contact being reachable), and a
+    whole-card scan would fail closed on true sentences.
+    """
+    for line in text.splitlines():
+        if "$" not in line:
+            continue
+        lowered = line.lower()
+        for word in FORBIDDEN_AMOUNT_WORDS:
+            if word in lowered:
+                return word
+    return ""
+
+
 # Award event types that can back a rich card. Grade is priority; the EVENT says what
 # happened (record_semantics), so eligibility keys off the event, never the grade.
 AWARD_EVENT_TYPES = ("award_announced", "award_obligated")

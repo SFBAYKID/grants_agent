@@ -313,3 +313,76 @@ def test_tool_budget_exhaustion_forces_final_no_tools_answer(
     assert FakeMessages.finalizer_seen  # the no-tools finalizer actually ran
     assert "what the stats showed" in output["reply"]
     assert "hit my limit" not in output["reply"]
+
+
+def test_one_turn_cannot_exceed_the_paid_page_fetch_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MAX_FETCHES_PER_TURN bounds billed scrapes WITHIN a single turn.
+
+    The end-of-turn `break` only stops the NEXT turn, so a model emitting four
+    fetch_url blocks at once billed four Firecrawl scrapes while the constant that
+    claimed to cap it at two was referenced nowhere. The blocked calls still return a
+    result to the model — an honest error naming the limit, never a silent drop.
+    """
+
+    class FakeMessages:
+        """Emit four distinct page reads in ONE turn, then a final answer."""
+
+        calls = 0
+
+        def create(self, **_kwargs: object) -> object:
+            """Return one multi-block tool turn followed by terminal JSON."""
+            self.calls += 1
+            if self.calls == 1:
+                return SimpleNamespace(
+                    stop_reason="tool_use",
+                    content=[
+                        SimpleNamespace(
+                            type="tool_use",
+                            name="fetch_url",
+                            input={"url": f"https://example.gov/page-{index}"},
+                            id=f"tool-{index}",
+                        )
+                        for index in range(4)
+                    ],
+                )
+            return SimpleNamespace(
+                stop_reason="end_turn",
+                content=[
+                    SimpleNamespace(
+                        type="text",
+                        text='{"intent":"question","reply":"Here is what those pages said."}',
+                    )
+                ],
+            )
+
+    class FakeAnthropic:
+        """Expose the multi-fetch model script."""
+
+        def __init__(self, **_kwargs: object) -> None:
+            """Initialize its messages resource."""
+            self.messages = FakeMessages()
+
+    billed: list[str] = []
+
+    def fake_run_tool(
+        name: str, args: dict[str, object], *_pos: object, **_kw: object
+    ) -> tuple[str, None]:
+        """Record every scrape that actually reached the paid transport."""
+        billed.append(str(args.get("url", "")))
+        return f"Page content from {args.get('url')} (untrusted web text)", None
+
+    monkeypatch.setattr(conversation, "Anthropic", FakeAnthropic)
+    monkeypatch.setattr(tools, "run_tool", fake_run_tool)
+    output = conversation.respond("Read all four of these pages.", None)
+
+    assert len(billed) == tools.MAX_FETCHES_PER_TURN, (
+        f"one turn billed {len(billed)} Firecrawl scrapes against a documented "
+        f"budget of {tools.MAX_FETCHES_PER_TURN}"
+    )
+    assert billed == [
+        "https://example.gov/page-0",
+        "https://example.gov/page-1",
+    ]
+    assert output["reply"]
