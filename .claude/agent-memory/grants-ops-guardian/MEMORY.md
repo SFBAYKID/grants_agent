@@ -36,7 +36,9 @@
 
 ## Current production state
 
-- [9fb6813 — CURRENT PROD, deployed + verified](prod-state-9fb6813-verified.md) — 2026-08-11, **schema 40**, PID 86114, 0.55s outage; CRONS apply migrations (watchdog every 10 min), not the restart — deploy in a cron gap; pre-40 item_hash shim proven on a real rep's pending approval
+- [0223c10 — CURRENT PROD, deployed + verified](prod-state-0223c10-verified.md) — 2026-08-12, schema 40 unchanged, PID 108300, 0.116s outage; dropped-reply fix proven live both directions; **a deploy that dies mid-flight must be resumed from a sha classification against BOTH revisions, never from your last report**
+- [Card contact may live ONLY in the snapshot](card-contact-may-live-only-in-snapshot.md) — North Palos names Sean Joyce on the card while `contacts` has ZERO rows for lead 3100; the only verified phone is the district general line
+- [9fb6813 (superseded by 0223c10)](prod-state-9fb6813-verified.md) — 2026-08-11, **schema 40**, PID 86114, 0.55s outage; CRONS apply migrations (watchdog every 10 min), not the restart — deploy in a cron gap; pre-40 item_hash shim proven on a real rep's pending approval
 - [Droplet pytest baseline is 1 FAILED](droplet-pytest-rich-card-flag.md) — `GRANT_RICH_CARD_ENABLED=1` in prod .env breaks one test_cli case; environmental, pre-existing, never roll back over it
 - [02377ae (superseded by 9fb6813)](prod-state-02377ae-verified.md) — 2026-08-11, schema 39, PID 71882, 0.19s outage; wording guard now bites on the DELIVERY path, proven True→False with a control; the 3 armed asks named
 - [9ef2ad7 (superseded by 02377ae)](prod-state-9ef2ad7-verified.md) — schema 39, PID 71366, 0.18s outage; the branch name is not `main` and that is fine — check `merge-base`, not the name

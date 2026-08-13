@@ -125,6 +125,39 @@ affect Chase's other projects.
 
 ## Current status (2026-08-12, the listener's own blind spot)
 
+- `verified` 2026-08-12 **PRODUCTION IS `0223c10`, AND THE FIX IS LIVE.** PID 86114 →
+  108300, **0.116 s** outage, 34 deployable files (40 delta paths − 6 `.claude/**`),
+  **34/34 byte-identical** to the commit's blobs, second pass empty, no `--delete`,
+  0 new tracebacks (13 → 13). `.env` and crontab byte-identical with **no new copies**,
+  schema **40** unchanged, `followup_nudges` 30 → 30, FK orphans 2 → 2 compared.
+  `is_nudge_thread` proven **True** for Anthony's escalation and for all 6 delivered
+  nudges, **False** for a real non-nudge card in the same channel, a ts off by one
+  digit, the right ts with the wrong audience, and empty inputs — both directions, on
+  a read-only connection. Watch-items clean: zero `unknown nudge state` /
+  `unknown attempt state`, and no new `drip-blocked` quarantine.
+- `verified` 2026-08-12 **THE DEPLOY DIED MID-RUN AND RESUMING FROM ITS OWN REPORT
+  WOULD HAVE BEEN THE MISTAKE.** An API connection dropped the agent just after a clean
+  rsync PREVIEW. The dangerous state was a PARTIAL sync — `grant.py` landed without one
+  of the two new modules — which leaves the RUNNING process healthy (it holds the old
+  code in memory) and kills it on the next restart, including an unattended one. It was
+  measured instead of assumed: every file compared against **both** revisions, which is
+  what distinguishes "stale tree" from "half-written tree". Nothing had synced. **Also
+  proven before the kill, not after: the import actually resolves on the droplet** — a
+  Bolt process can be up and broken, so "the process is running" is a different fact.
+- `verified` 2026-08-12 **I WAS WRONG ABOUT `best_offer`, AND IT IS THE CARD THAT
+  OVER-CLAIMS.** I reported the generic "Want me to find a contact?" as a likely defect
+  because `conn` IS passed at `nudges.py:614`. `best_offer` ran and was **correct**:
+  `contacts` holds **zero rows for lead 3100**, and no `npd117` address exists anywhere
+  in that table (172 rows, so not an empty table). Sean Joyce lives ONLY on the frozen
+  snapshot `1f859819…`, sourced from a district staff page on 2026-08-10. So the card
+  shows a contact the live table has never held, and the follow-up honestly offered to
+  go find one. **The two surfaces disagree, and the follow-up is the honest one.**
+- `needs-testing` 2026-08-12 **A REP PLANNING TO CALL HAS NO NUMBER TO CALL.** Anthony
+  said "I'll call tomorrow". There is **no direct phone for Sean Joyce anywhere**. The
+  only verified number is `org_phone (708) 598-5500`, the district switchboard —
+  org-level, explicitly not his extension. Printing it beside his name would read as
+  his direct line, which is the exact fabrication rule 1 forbids.
+
 - `verified` 2026-08-12 **A REP ANSWERED GRANT AND GRANT COULD NOT HEAR HIM — AND THE
   WORDING INVITED EXACTLY THE REPLY THAT COULD NOT LAND.** Anthony was nudged at 11:45
   about the $500,000 North Palos card, ending "Want me to find a contact?", and
