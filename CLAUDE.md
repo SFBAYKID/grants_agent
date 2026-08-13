@@ -125,26 +125,47 @@ affect Chase's other projects.
 
 ## Current status (2026-08-12, the listener's own blind spot)
 
-- `verified` 2026-08-12 **A REP ANSWERED GRANT AND GRANT NEVER HEARD HIM.** Anthony
-  was nudged at 11:45 about the $500,000 North Palos card and replied at 15:50 —
-  *"Yes get me a lead plz I'll call tomorrow why did Grant not respond?"* — and got
-  nothing. No reply, no error, no receipt row. The drop is UPSTREAM of
-  `_handle_drip_thread`, which always produces a message (it posts "I'm having
-  trouble thinking right now" even when the model raises), so silence means one of
-  the six early `return`s in `on_message`. **Both listeners rejected any message
-  carrying a `subtype`**, and Slack stamps one on `thread_broadcast` (the "also send
-  to channel" tick), `file_share` (a screenshot, or the spreadsheet Grant just asked
-  for) and `me_message`. Fixed by sharing `nudge_silence.NON_HUMAN_SUBTYPES`, so a
-  new Slack subtype now defaults to HUMAN — the safe direction, because treating
-  software as a person costs one wasted turn and treating a person as software costs
-  the reply. Mutation-proven, with a `channel_join` control that still claims no
-  receipt.
-- `verified` 2026-08-12 **THE SAME BUG WAS FIXED ONCE ALREADY, ONE MODULE OVER.**
-  `nudge_silence._is_human` was corrected for exactly this on 2026-08-11 and this
-  file recorded the cause as *"the check inherited the listener's blind spot"* — but
-  nobody went back and fixed the LISTENER. The derived check was repaired while the
-  original defect shipped on. Worth remembering as a class: when a copy is fixed, go
-  and read the thing it was copied from.
+- `verified` 2026-08-12 **A REP ANSWERED GRANT AND GRANT COULD NOT HEAR HIM — AND THE
+  WORDING INVITED EXACTLY THE REPLY THAT COULD NOT LAND.** Anthony was nudged at 11:45
+  about the $500,000 North Palos card, ending "Want me to find a contact?", and
+  answered at 15:50: *"Yes get me a lead plz I'll call tomorrow"*. Nothing happened,
+  and nothing could have. `card_escalated` and `offer_unanswered` (`CHANNEL_POST_KINDS`)
+  post at TOP LEVEL, so the message becomes a new thread root with neither a `posts`
+  row nor a `slack_conversation_threads` row — and `on_message` requires one or the
+  other. The reply was discarded ABOVE `claim_slack_event`, and **every recording
+  mechanism sits downstream of that return**, which is why there was no receipt, no
+  log line and no error to find. @-mentioning Grant worked the whole time, through a
+  different handler; that is why Kerry's "Yes" landed on 2026-08-10 and this one did
+  not. Fixed: a thread Grant itself DELIVERED now counts, and is registered on first
+  reply so every later turn takes the ordinary path — including `_with_pending_offer`,
+  which is what routes a bare "Yes" correctly. Mutation-proven, with a precondition
+  asserting neither old gate can see the thread and a control proving a stranger's
+  thread is still ignored.
+- `verified` 2026-08-12 **MY FIRST DIAGNOSIS WAS WRONG, AND ONLY PRODUCTION SETTLED
+  IT.** I reasoned from the code that the `subtype` gate had eaten the reply — it was
+  the same blind spot `nudge_silence._is_human` had been fixed for on 2026-08-11, the
+  story fit, and it was wrong: the message carries **no subtype at all**. Reading the
+  live thread refuted it in one call. The subtype gate WAS a real latent bug and its
+  fix stands (both handlers now share `NON_HUMAN_SUBTYPES`, so `file_share`,
+  `thread_broadcast` and `me_message` are people talking, and an unknown subtype
+  defaults to human) — but a plausible mechanism that explains the symptom is not the
+  cause, and a fix that makes the story hang together is the easiest way to close a
+  bug while leaving it live.
+- `verified` 2026-08-12 **THE ESCALATION WOULD HAVE KEPT NAMING THE ONE PERSON WHO
+  ANSWERED.** `mark_engagement` matched a reply only against `anchor_ts`, the ts of
+  the work a follow-up is ABOUT. A threaded nudge is posted into that thread, so it
+  matches; a TOP-LEVEL one is not, and a reply carries the nudge's own `slack_ts`.
+  So an answered escalation still read as ignored — and an escalation exists precisely
+  to report that nobody answered. Both are matched now.
+- `verified` 2026-08-12 **A CORRECT RECORD WAS NEARLY "FIXED" INTO A WRONG ONE.** The
+  audit reported that CLAUDE.md was wrong to call `U01DFJWQQJ3` the manager, because
+  `users_info` shows Anthony Dambrosio, a rep. **CLAUDE.md is right**: his row in
+  `config/reps.json` carries `"manager": true`, with Chase's words in the file —
+  *"Since Anthony is the manager"*. He is both. A live API answers who somebody IS;
+  the reviewed config answers what ROLE they hold. The narrower true point survives:
+  for a lead in his OWN territory the manager and the rep are the same person, so an
+  escalation about a rep's silence would be addressed to its own subject. It did not
+  arise here — North Palos was `routing_reason='unassigned'`, nobody was tagged.
 - `verified` 2026-08-12 **FOUR CONSTANTS DECLARED A RULE THAT NOTHING ENFORCED.**
   Found by a dead-code sweep; each was reported as an unused variable, and deleting
   them would have satisfied rule 5 while deleting the intent. Chase's call was to

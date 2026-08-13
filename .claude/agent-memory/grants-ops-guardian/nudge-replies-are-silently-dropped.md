@@ -55,13 +55,25 @@ who *did* answer. That is the most embarrassing failure mode this feature has.
 - **Stuck `processing` receipt**: the only two are 2026-07-18 and 2026-08-10, both in the
   playground channel, unrelated threads.
 
-## Identity correction — several records get this wrong
+## Identity — and a correction to this note's own first version
 
-**`U01DFJWQQJ3` is Anthony Dambrosio** (`users_info`: name `anthony`, tz
-`America/New_York`), a rep. CLAUDE.md and older guardian memories call this id "the
-manager" (e.g. in the `offer_unanswered` and `card_escalated` notes). Any reasoning that
-depends on "the escalation goes to the manager, not the rep" should be re-checked against
-`users_info` rather than the label.
+**`U01DFJWQQJ3` is Anthony Dambrosio, who is BOTH a rep AND the manager.** This note
+first said CLAUDE.md was wrong to call him "the manager". **That was an over-correction
+and CLAUDE.md is right.** `users_info` establishes the person, not their role here, and
+the role lives in `config/reps.json`: his row carries `"manager": true`, with Chase's
+own words in the file's comment — *"Since Anthony is the manager"* (2026-08-09). Exactly
+one row may carry it, and `roster.manager_slack_id()` fails closed if zero or several do.
+
+So "the escalation goes to the manager" is accurate. **The real thing worth knowing is
+narrower and still true:** for a lead in Anthony's own territory, the manager and the
+rep are the SAME person, so an escalation about a rep's silence would be addressed to
+the person it is about. It did not arise here — the North Palos card was
+`routing_reason='unassigned'` with no rep tagged, so there was no rep to name and
+escalating to the manager was correct.
+
+**The lesson is about method, not about Anthony:** a live API answers who somebody IS;
+the repo's reviewed config answers what ROLE they hold. Reading the first and
+contradicting the second is how a correct record gets "fixed" into a wrong one.
 
 ## How to apply
 
