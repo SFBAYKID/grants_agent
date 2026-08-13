@@ -52,3 +52,18 @@ say so in the report rather than letting the gap look like a fault.
 **If the session dies while paused, the crons stay off and Grant stays down.** Keep the
 window tight and restore as soon as the listener is verified up. See
 [[prod-state-58b3e24-verified]].
+
+**`crontab -r` is a fine way to pause, and simpler than the `sed` dance** — provided the
+backup bytes exist in TWO places first. On 2026-08-13 (87d4e00) I captured `crontab -l`
+to the laptop **and** to `~/crontab.backup.pre-87d4e00.<UTC>` before `crontab -r`, then
+restored with `crontab <backup>` and proved it byte-identical with `cmp` against the
+laptop copy, not just a sha recomputed on the droplet. Two independent copies means a
+failed restore is recoverable from the side that did not fail.
+
+**Cost the window against the tick calendar before choosing it — a pause is not
+automatically expensive.** The 87d4e00 window ran 14:04:04 → 14:06:49 PDT and suppressed
+**exactly one tick**: the `*/5` keepalive at 14:05, which was the very job replaced by the
+manual `nohup bash run_bot.sh`. Watchdog (`3-59/10`) next fired 14:13, `nudge`
+(`*/15 8-14`) 14:15, `drip`/`remind` (`*/30`) 14:30 — all after the restore. The gaps
+between `:06` and `:13` past the hour are the cheap ones on a weekday afternoon. Compute
+which ticks fall inside the window and report them by name.

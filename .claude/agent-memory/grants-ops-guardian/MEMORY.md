@@ -40,8 +40,10 @@
 
 ## Current production state
 
+- [87d4e00 — CURRENT PROD, deployed + verified](prod-state-87d4e00-verified.md) — 2026-08-13, **schema 47**, PID 124668, 14 files byte-identical, **116.4s** migration outage, `.env` byte-identical; the cron pause cost exactly ONE tick
+- [Live DB is in the REPO dir](live-db-is-in-the-repo-dir.md) — `~/grants_agent/grant_watch.db`, NOT `~/grant_watch.db` (home holds only backups); wrong path fails as "unable to open database file". Marker is `~/grants_agent/.deployed_revision`
 - [Re-research pass 2026-08-13](rerearch-pass-20260813.md) — `nces-bind` restored NOTHING quarantined but made the paid path authoritative+cheaper; 303 Firecrawl / 6 ZoomInfo; enrich-orgs re-scrapes just-failed orgs and double-scrapes 30 split-key orgs; fill-contacts dies on a negative vendor ID
-- [58b3e24 — CURRENT PROD, deployed + verified](prod-state-58b3e24-verified.md) — 2026-08-13, **schema 46**, PID 121468, 139 files byte-identical, ~4min DELIBERATE outage (migrations + ledger cutover, not a restart); `.env` intentionally not byte-identical
+- [58b3e24 (superseded by 87d4e00)](prod-state-58b3e24-verified.md) — 2026-08-13, schema 46, PID 121468, 139 files byte-identical, ~4min DELIBERATE outage (migrations + ledger cutover, not a restart); `.env` intentionally not byte-identical
 - [Paid-provider authority cutover](paid-provider-authority-cutover.md) — authority id, the 3 private 0600 files, the 7 .env keys; **rotation DECLINED by Chase, so droplet spend totals are a FLOOR, never an account total**
 - [0223c10 (superseded by 58b3e24)](prod-state-0223c10-verified.md) — 2026-08-12, schema 40, PID 108300, 0.116s outage; dropped-reply fix proven live both directions; **a deploy that dies mid-flight must be resumed from a sha classification against BOTH revisions, never from your last report**
 - [Card contact may live ONLY in the snapshot](card-contact-may-live-only-in-snapshot.md) — North Palos names Sean Joyce on the card while `contacts` has ZERO rows for lead 3100; the only verified phone is the district general line
@@ -97,6 +99,7 @@
 
 - [Backups retention proposal](backups-retention.md) — ~870M reclaimable but NOT authorised by Chase; only the 9 env.bak files were removed, under an explicit instruction
 - [.env credential sprawl](env-credential-sprawl.md) — 48 copies existed; 9 exact dupes deleted 2026-08-10, 40 HELD; keeps the removed-variable key list
+- [.env copy count drifted 64 → 63](env-copy-count-drifted-63.md) — unexplained decrease between deploys; police INCREASES, and capture the sorted LIST not just the count
 
 ## Superseded deploy records (kept for rollback fingerprints + one-off lessons)
 
