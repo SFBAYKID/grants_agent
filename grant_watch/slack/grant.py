@@ -14,7 +14,6 @@ rich campaign also registers its explicit draft/feedback buttons here.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import sqlite3
@@ -31,6 +30,7 @@ from slack_sdk import WebClient
 from .. import db
 from ..config import configured_channel_ids
 from ..spreadsheets import GeneratedArtifact
+from .approval_blocks import _crm_action_blocks
 from .nudge_silence import NON_HUMAN_SUBTYPES
 
 
@@ -83,87 +83,6 @@ def _active_human_channel_member(client: WebClient, user_id: str, channel: str) 
                 return False
     except Exception:
         return False
-
-
-def _crm_action_blocks(actions: list[dict[str, str]]) -> list[dict[str, Any]]:
-    """Render exact immutable previews with one-time confirm/cancel buttons."""
-    blocks: list[dict[str, Any]] = []
-    for action in actions:
-        value = json.dumps(
-            {
-                "action_id": action["action_id"],
-                "nonce": action["nonce"],
-            },
-            separators=(",", ":"),
-        )
-        preview_blocks = [
-            {"type": "section", "text": {"type": "mrkdwn", "text": chunk}}
-            for chunk in _split_slack_text(action["preview"])
-        ]
-        blocks.extend(
-            [
-                *preview_blocks,
-                {
-                    "type": "context",
-                    "elements": [
-                        {
-                            "type": "mrkdwn",
-                            "text": f"Approval expires {action['expires_at']}.",
-                        }
-                    ],
-                },
-                {
-                    "type": "actions",
-                    "elements": [
-                        {
-                            "type": "button",
-                            "action_id": "salesforce_confirm",
-                            "text": {
-                                "type": "plain_text",
-                                "text": "Confirm in Salesforce",
-                            },
-                            "style": "primary",
-                            "value": value,
-                            "confirm": {
-                                "title": {
-                                    "type": "plain_text",
-                                    "text": "Confirm Salesforce write",
-                                },
-                                "text": {
-                                    "type": "mrkdwn",
-                                    "text": "Create exactly the records in this preview?",
-                                },
-                                "confirm": {"type": "plain_text", "text": "Confirm"},
-                                "deny": {"type": "plain_text", "text": "Go back"},
-                            },
-                        },
-                        {
-                            "type": "button",
-                            "action_id": "salesforce_cancel",
-                            "text": {"type": "plain_text", "text": "Cancel"},
-                            "value": action["action_id"],
-                        },
-                    ],
-                },
-            ]
-        )
-    return blocks
-
-
-def _split_slack_text(value: str, cap: int = 2_800) -> list[str]:
-    """Split long frozen previews at line boundaries under Slack's section limit."""
-    chunks: list[str] = []
-    current = ""
-    for line in value.splitlines() or [value]:
-        candidate = f"{current}\n{line}".strip() if current else line
-        if current and len(candidate) > cap:
-            chunks.append(current)
-            current = line
-        else:
-            current = candidate
-    if current:
-        chunks.append(current)
-    return chunks or [""]
 
 
 def _interaction_thread_ts(body: dict[str, Any]) -> str:
