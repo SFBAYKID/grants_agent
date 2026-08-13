@@ -30,7 +30,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from . import db
-from .enrich import zoominfo_credits, zoominfo_enrichment
+from .enrich import zoominfo, zoominfo_credits, zoominfo_enrichment
 from .enrich.zoominfo_credits import (
     AlreadySpent,
     BudgetExhausted,
@@ -157,6 +157,26 @@ def fill_contacts(
         if not chosen:
             skipped_none += 1
             continue
+        person_ids = [str(getattr(m, "person_id", "")) for m in chosen]
+        try:
+            # VALIDATE HERE, WHERE NOTHING HAS BEEN RESERVED YET. The vendor really
+            # does return malformed identifiers: on 2026-08-13 a live batch died on
+            # lead 4 of 50 when ZoomInfo answered with the NEGATIVE person id
+            # -883527167. `normalize_person_ids` was right to reject it, but it runs
+            # inside `apply_for_lead`, so the ValueError escaped this loop and threw
+            # away the whole FillOutcome — including the leads already bought and
+            # billed. That is the identical defect the AlreadySpent, BudgetExhausted
+            # and SpendIndeterminate handlers below were each added to close; this was
+            # the fourth door.
+            #
+            # Calling the validator here rather than widening the except block keeps
+            # the failure provably free (validation precedes the credit reservation)
+            # AND keeps a ValueError raised anywhere AFTER the money moves loud,
+            # instead of silently recording a paid pull as "no match".
+            zoominfo.normalize_person_ids(person_ids)
+        except ValueError:
+            skipped_none += 1
+            continue
         cost = len(chosen)
         # THE BUDGET DECIDES BEFORE THE MONEY MOVES. Checking after the call would
         # mean the ceiling is a report rather than a limit.
@@ -171,7 +191,7 @@ def fill_contacts(
             applied = zoominfo_enrichment.apply_for_lead(
                 conn,
                 lead_id,
-                [str(getattr(m, "person_id", "")) for m in chosen],
+                person_ids,
                 requested_by=requested_by,
             )
         except AlreadySpent:

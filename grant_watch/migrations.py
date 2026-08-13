@@ -41,6 +41,7 @@ from .migrations_safety import (
     migration_44_starbridge_provenance,
     migration_45_firecrawl_request_identity,
     migration_46_quarantine_legacy_unbound_evidence,
+    migration_47_org_profile_attempt_clock,
 )
 from .migrations_rich import (
     migration_14_run_confirmation_freshness,
@@ -772,6 +773,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         46,
         "quarantine legacy contact and organization claims without typed evidence",
         migration_46_quarantine_legacy_unbound_evidence,
+    ),
+    Migration(
+        47,
+        "record when an organization profile was last attempted, for retry cooldown",
+        migration_47_org_profile_attempt_clock,
     ),
 )
 

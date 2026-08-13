@@ -464,3 +464,25 @@ def migration_46_quarantine_legacy_unbound_evidence(conn: sqlite3.Connection) ->
                      'rich contact requires exact typed evidence');
                  END"""
         )
+
+
+def migration_47_org_profile_attempt_clock(conn: sqlite3.Connection) -> None:
+    """Record WHEN an organization profile was last attempted, so retries can cool off.
+
+    The sweep deliberately retries ``not_found`` and ``unreachable`` leads — that
+    outcome is genuinely transient. What it lacked was any notion of WHEN, so a lead
+    whose site returned nothing became a candidate again on the very next run and was
+    paid for twice within minutes. Measured on 2026-08-13: 21 ``not_found`` plus 2
+    ``unreachable`` rows would have consumed ~108 of a following batch's ~352 Firecrawl
+    calls re-fetching pages that had just failed.
+
+    Legacy rows stay NULL on purpose. NULL means "never attempted under the clock" and
+    is therefore eligible immediately — back-dating a timestamp nobody measured would
+    be inventing data, and pretending every historical row was just tried would freeze
+    the whole corpus for a cooldown nobody chose.
+    """
+    _add_column(conn, "leads", "org_profile_checked_at TEXT")
+    conn.execute(
+        """CREATE INDEX IF NOT EXISTS ix_leads_org_profile_attempt
+             ON leads(lead_grade, org_profile_checked_at)"""
+    )

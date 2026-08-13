@@ -135,6 +135,8 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
     # 44 renames and downgrades historical Starbridge aggregator evidence;
     # 45 adds exact runtime Firecrawl retry identity.
     # 46 quarantines legacy contact/org claims that have no typed evidence.
+    # 47 stamps when an organization profile was last attempted, so a failed
+    #    lookup rests before the sweep pays to re-fetch the same dead page.
     assert versions == [
         1,
         2,
@@ -179,6 +181,7 @@ def test_versioned_migrations_and_backfill_suppression(tmp_path: Path) -> None:
         44,
         45,
         46,
+        47,
     ]
     crm_tables = {
         row[0]

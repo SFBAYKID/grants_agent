@@ -87,7 +87,15 @@ def _lead(conn: sqlite3.Connection, name: str) -> int:
 def _patch_search(
     monkeypatch: pytest.MonkeyPatch, per_org: int, calls: list[int] | None = None
 ) -> None:
-    """Make the FREE search return a fixed roster, recording each lead it saw."""
+    """Make the FREE search return a fixed roster, recording each lead it saw.
+
+    PERSON IDS MUST LOOK LIKE THE VENDOR'S. These were `f"{lead_id}-{i}"`, which
+    `zoominfo.PERSON_ID_RE` (`[1-9][0-9]{0,18}`) rejects outright — the double was
+    emitting identifiers ZoomInfo could never return, and it went unnoticed because
+    every test here monkeypatches `apply_for_lead`, so the real validator never saw
+    them. Same shape as the Slack stubs that could only emit what the code already
+    looked for. Digits now, still unique per (lead, index).
+    """
     from grant_watch.enrich import zoominfo_enrichment
 
     def fake_preview(_conn: object, lead_id: int, **_kw: object) -> object:
@@ -98,7 +106,7 @@ def _patch_search(
             lead_id=lead_id,
             entity_name="Test District",
             matches=tuple(
-                _Match(f"{lead_id}-{i}", "Chief Technology Officer")
+                _Match(f"{lead_id}00{i}", "Chief Technology Officer")
                 for i in range(per_org)
             ),
             consumed=0,
@@ -677,3 +685,53 @@ def test_pricing_first_then_confirming_is_allowed(
 def _never_called() -> object:
     """Fail loudly if the provider path is reached."""
     raise AssertionError("the paid path must not be reached")
+
+
+def test_a_malformed_vendor_id_skips_that_lead_instead_of_aborting_a_paid_batch(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A negative person id from ZoomInfo must not discard leads already bought.
+
+    Observed in production on 2026-08-13: a live `fill-contacts` batch died on lead 4
+    of 50 when the vendor answered with person id -883527167. `normalize_person_ids`
+    was right to reject it, but it runs inside `apply_for_lead`, so the ValueError
+    escaped the loop and threw away the whole FillOutcome — including the three leads
+    already billed. This is the same defect the AlreadySpent, BudgetExhausted and
+    SpendIndeterminate handlers each closed; the malformed id was the fourth door.
+
+    The validation now runs BEFORE the credit reservation, so the skip is provably
+    free rather than a paid pull recorded as "no match".
+    """
+    from grant_watch.enrich import zoominfo_enrichment
+
+    ids = [_lead(conn, f"D{i}") for i in range(3)]
+    calls: list[int] = []
+    poisoned = ids[1]
+
+    def fake_preview(_conn: object, lead_id: int, **_kw: object) -> object:
+        """The middle lead's roster carries the negative id the vendor really sent."""
+        person_id = "-883527167" if lead_id == poisoned else f"{lead_id}001"
+        return zoominfo_enrichment.ZoomInfoPreview(
+            lead_id=lead_id,
+            entity_name="Test District",
+            matches=(_Match(person_id, "Chief Technology Officer"),),
+            consumed=0,
+            limit=1000,
+        )
+
+    def apply(_conn: object, lead_id: int, people: list, **_kw: object) -> object:
+        """Records which leads reached the paid call at all."""
+        calls.append(lead_id)
+        return zoominfo_enrichment.ZoomInfoApplied(
+            stored=1, billed=1, suppressed_numbers=0
+        )
+
+    monkeypatch.setattr(zoominfo_enrichment, "preview_for_lead", fake_preview)
+    monkeypatch.setattr(zoominfo_enrichment, "apply_for_lead", apply)
+    out = contact_fill.fill_contacts(conn, ids, max_credits=40, dry_run=False)
+
+    assert calls == [ids[0], ids[2]], "the batch aborted instead of skipping one lead"
+    assert out.filled == 2
+    assert out.skipped_no_match == 1
+    assert out.credits_spent == 2, "the skipped lead must cost nothing"
+    conn.close()
