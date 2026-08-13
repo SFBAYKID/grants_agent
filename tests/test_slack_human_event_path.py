@@ -276,6 +276,89 @@ def test_thread_broadcast_reply_still_reaches_grant(
     assert "Ev-bcast-2" in claimed and "Ev-bcast-3" not in claimed
 
 
+def test_a_reply_to_grants_own_escalation_reaches_grant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plain reply under a TOP-LEVEL follow-up must not be discarded.
+
+    `card_escalated` and `offer_unanswered` post at top level, creating a thread root
+    with no `posts` row and no conversation row — so `on_message` dropped the reply
+    above `claim_slack_event`, leaving no receipt and no error. Measured live on
+    2026-08-12: a rep asked "Want me to find a contact?" about a $500,000 award
+    answered "Yes get me a lead plz I'll call tomorrow" and nothing happened.
+    """
+    connection = db.connect(tmp_path / "nudge-thread.db")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANT")
+    monkeypatch.setattr(grant, "App", FakeBoltApp)
+    monkeypatch.setattr(grant.db, "connect", lambda *_args, **_kwargs: connection)
+    grant.create_app()
+    app = FakeBoltApp.latest
+    assert app is not None
+
+    nudge_ts = "1786560303.015219"  # the escalation Grant posted at top level
+    connection.execute(
+        """INSERT INTO followup_nudges
+             (id,subject_kind,subject_id,audience,target_slack,anchor_ts,
+              policy_version,due_at,drop_after,state,observed_json,delivery_key,
+              slack_ts,reserved_at,delivered_at)
+           VALUES ('n1','card_escalated','34','CGRANT','UANTHONY','1786383004.382099',
+                   '1','2026-08-12T18:30:00+00:00','2026-08-24T00:00:00+00:00',
+                   'delivered','{}','k1',?, '2026-08-12T18:45:00+00:00',
+                   '2026-08-12T18:45:03+00:00')""",
+        (nudge_ts,),
+    )
+    connection.commit()
+    # PRECONDITION: neither existing gate can see this thread — otherwise the test
+    # would pass without the fix doing anything.
+    assert db.find_post_by_ts(connection, "CGRANT", nudge_ts) is None
+    assert not db.is_conversation_thread(connection, "TWORK", "CGRANT", nudge_ts)
+
+    reply = "What has Grant actually reviewed in New Hampshire?"
+    _register_human_message(app.client, reply, "1786575047.320819", nudge_ts)
+    app.events["message"](
+        event={
+            "team": "TWORK",
+            "channel": "CGRANT",
+            "user": "UANTHONY",
+            "text": reply,
+            "ts": "1786575047.320819",
+            "thread_ts": nudge_ts,
+            "channel_type": "channel",
+        },
+        body={"event_id": "Ev-nudge-reply", "team_id": "TWORK"},
+        say=lambda **_kwargs: None,
+        client=app.client,
+    )
+    answered = [m for m in app.client.messages if m.get("bot_id")]
+    assert answered, "the rep answered Grant's own question and Grant said nothing"
+    assert answered[-1]["thread_ts"] == nudge_ts
+    receipts = {
+        row[0]
+        for row in connection.execute("SELECT event_id FROM slack_event_receipts")
+    }
+    assert "Ev-nudge-reply" in receipts
+    # CONTROL: an unrelated thread Grant never opened is still ignored, so the gate was
+    # widened to Grant's own threads rather than removed.
+    before = len(app.client.messages)
+    app.events["message"](
+        event={
+            "team": "TWORK",
+            "channel": "CGRANT",
+            "user": "UANTHONY",
+            "text": "unrelated chatter between two colleagues",
+            "ts": "1786575900.111111",
+            "thread_ts": "1700000000.000000",
+            "channel_type": "channel",
+        },
+        body={"event_id": "Ev-stranger", "team_id": "TWORK"},
+        say=lambda **_kwargs: None,
+        client=app.client,
+    )
+    assert len(app.client.messages) == before
+    connection.close()
+
+
 def test_bot_authored_mention_is_ignored_before_any_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

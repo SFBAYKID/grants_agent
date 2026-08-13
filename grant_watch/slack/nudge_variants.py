@@ -99,13 +99,21 @@ def mark_engagement(conn: sqlite3.Connection) -> int:
     exist for events Grant processed, so this UNDERCOUNTS: a reply Grant never woke
     for is invisible. Undercounting is the safe direction, because it can only make a
     wording look worse than it is, never better.
+
+    THE REPLY THREAD IS NOT ALWAYS `anchor_ts`. A threaded follow-up is posted INTO the
+    work's own thread, so a reply carries `anchor_ts`; but the two `CHANNEL_POST_KINDS`
+    are posted at TOP LEVEL and a reply carries the nudge's own `slack_ts` instead.
+    Matching only `anchor_ts` meant an answered escalation still read as ignored — and
+    an escalation exists precisely to report that somebody has not answered, so the one
+    person who DID reply was the one it would keep naming.
     """
     cur = conn.execute(
         """UPDATE followup_nudges
               SET engaged_at = (
                     SELECT MIN(r.received_at) FROM slack_event_receipts r
                      WHERE r.channel = followup_nudges.audience
-                       AND r.thread_ts = followup_nudges.anchor_ts
+                       AND r.thread_ts IN (followup_nudges.anchor_ts,
+                                           followup_nudges.slack_ts)
                        AND r.slack_user IS NOT NULL
                        AND r.received_at > followup_nudges.delivered_at)
             WHERE state='delivered'
@@ -114,7 +122,8 @@ def mark_engagement(conn: sqlite3.Connection) -> int:
               AND EXISTS (
                     SELECT 1 FROM slack_event_receipts r
                      WHERE r.channel = followup_nudges.audience
-                       AND r.thread_ts = followup_nudges.anchor_ts
+                       AND r.thread_ts IN (followup_nudges.anchor_ts,
+                                           followup_nudges.slack_ts)
                        AND r.slack_user IS NOT NULL
                        AND r.received_at > followup_nudges.delivered_at)"""
     )

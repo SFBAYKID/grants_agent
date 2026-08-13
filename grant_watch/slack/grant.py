@@ -30,6 +30,7 @@ from slack_sdk import WebClient
 from .. import db
 from ..config import configured_channel_ids
 from ..spreadsheets import GeneratedArtifact
+from . import nudge_threads
 from .approval_blocks import _crm_action_blocks
 from .nudge_silence import NON_HUMAN_SUBTYPES
 
@@ -251,7 +252,25 @@ def create_app() -> App:
             conn, workspace, str(event["channel"]), str(thread_ts)
         )
         if post is None and not general_thread:
-            return
+            # A THREAD GRANT ITSELF OPENED COUNTS. Top-level follow-ups
+            # (`CHANNEL_POST_KINDS`) create a new root with neither a `posts` row nor a
+            # conversation row, so answering Grant's own "Want me to find a contact?"
+            # was discarded right here — above `claim_slack_event`, which is why it
+            # left no receipt and no error to find. Registering the thread on first
+            # reply means the rest of this handler, and every later turn, treats it
+            # like any other conversation.
+            if not nudge_threads.is_nudge_thread(
+                conn, str(event["channel"]), str(thread_ts)
+            ):
+                return
+            db.register_conversation_thread(
+                conn,
+                workspace,
+                str(event["channel"]),
+                str(thread_ts),
+                str(event["user"]),
+            )
+            general_thread = True
         if not db.claim_slack_event(
             conn,
             event_id,
