@@ -20,7 +20,7 @@ from datetime import date, timedelta
 
 from .models import Lead, LeadGrade, RawItem
 
-# Sources whose items are awards (money granted) vs solicitations (RFPs) vs signals.
+# Sources whose items are awards (money granted) vs solicitations (RFPs).
 AWARD_SOURCES_PREFIX = (
     "usaspending:",
     "usaspending-subaward:",
@@ -28,7 +28,6 @@ AWARD_SOURCES_PREFIX = (
     "seed:",
 )
 RFP_SOURCES = ("webs", "sam.gov", "oregonbuys", "rfp")
-SIGNAL_SOURCES = ("grants.gov",)
 
 FRESH_MONTHS = 12  # Chase: after ~a year, awardees likely have vendors locked in.
 

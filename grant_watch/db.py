@@ -297,27 +297,6 @@ def upsert_lead(conn: sqlite3.Connection, lead: Lead) -> bool:
     return inserted or (event_created and not suppressed)
 
 
-def log_run(conn: sqlite3.Connection, started: str, stats: RunStats) -> None:
-    """Record one source's poll outcome in `runs` (started passed in by the caller
-    so all sources in a run share one start stamp)."""
-    conn.execute(
-        """INSERT INTO runs
-             (started, finished, source, items_seen, items_new, errors, complete, error_code)
-           VALUES (?,?,?,?,?,?,?,?)""",
-        (
-            started,
-            _now(),
-            stats.source,
-            stats.items_seen,
-            stats.items_new,
-            stats.errors,
-            int(stats.complete),
-            stats.error_code,
-        ),
-    )
-    conn.commit()
-
-
 def begin_run(conn: sqlite3.Connection, source: str, started: str) -> int:
     """Open a run row in state 'pending' BEFORE processing and return its id.
 

@@ -370,7 +370,7 @@ def record_contact_fact(
     if lead is None:
         return f"ERROR: I don't have a lead #{lead_id}."
     values = {"name": name, "title": title, "email": email, "phone": phone}
-    stored_id, written = db.save_human_asserted_contact(
+    _stored_id, written = db.save_human_asserted_contact(
         conn,
         int(lead_id),
         name=name,

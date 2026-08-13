@@ -155,8 +155,6 @@ def test_block_and_fallback_lengths_are_bounded() -> None:
     for block in rendered.blocks:
         if "text" in block and isinstance(block["text"], dict):
             assert len(block["text"]["text"]) <= card.MAX_SECTION
-        for field in block.get("fields", []):
-            assert len(field["text"]) <= card.MAX_FIELD
 
 
 def test_salesforce_section_and_link_are_absent_without_evidence() -> None:

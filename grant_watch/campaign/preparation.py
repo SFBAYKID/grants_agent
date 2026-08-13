@@ -515,13 +515,6 @@ def review_candidates(
     )
 
 
-def candidate_lead_ids(
-    conn: sqlite3.Connection, audience: str, limit: int
-) -> tuple[int, ...]:
-    """Expose the bounded quality-ordered queue to the preparation worker."""
-    return tuple(int(row["id"]) for row in _rows(conn, audience, limit))
-
-
 def preparable_lead_ids(
     conn: sqlite3.Connection,
     audience: str,

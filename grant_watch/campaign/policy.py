@@ -77,9 +77,6 @@ PLATINUM_DAYS = 7  # a verified award within a week is the platinum presentation
 # on a weekday-only poll (critic M1).
 OBSERVATION_FRESH_DAYS = 6
 CONTACT_FRESH_DAYS = 30  # a verified public contact re-checked within this window
-ACTIVITY_FRESH_DAYS = (
-    30  # a completed Salesforce call within this window may route/label
-)
 CRM_FRESH_HOURS = 24  # reuse the deployed CRM-snapshot freshness window
 
 # Amounts an obligated award figure may NEVER be labelled as.

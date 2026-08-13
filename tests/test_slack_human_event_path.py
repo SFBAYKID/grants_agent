@@ -192,6 +192,90 @@ def test_human_mention_and_plain_followup_traverse_registered_handlers(
     ]
 
 
+def test_thread_broadcast_reply_still_reaches_grant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reply sent with "also send to channel" ticked is a person talking.
+
+    Slack stamps that reply `subtype='thread_broadcast'`, and the listener used to
+    reject ANY message carrying a subtype — so the rep got silence, with no error and
+    no receipt row to explain it. Cost a real reply on 2026-08-12: a rep answered
+    "Yes get me a lead plz" to Grant's own follow-up and was never answered.
+    `file_share` and `me_message` are dropped by the identical bug.
+    """
+    connection = db.connect(tmp_path / "broadcast-events.db")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANT")
+    monkeypatch.setattr(grant, "App", FakeBoltApp)
+    monkeypatch.setattr(grant.db, "connect", lambda *_args, **_kwargs: connection)
+    grant.create_app()
+    app = FakeBoltApp.latest
+    assert app is not None
+
+    root_ts = "40.001"
+    opener = "<@UGRANT> show school district research coverage in California"
+    _register_human_message(app.client, opener, root_ts)
+    app.events["app_mention"](
+        event={
+            "team": "TWORK",
+            "channel": "CGRANT",
+            "user": "UCHASE",
+            "text": opener,
+            "ts": root_ts,
+            "channel_type": "channel",
+        },
+        body={"event_id": "Ev-bcast-1", "team_id": "TWORK"},
+        say=lambda **_kwargs: None,
+        client=app.client,
+    )
+    answered = sum(1 for message in app.client.messages if message.get("bot_id"))
+
+    followup = "What has Grant actually reviewed in New Hampshire?"
+    _register_human_message(app.client, followup, "40.002", root_ts)
+    app.events["message"](
+        event={
+            "team": "TWORK",
+            "channel": "CGRANT",
+            "user": "UCHASE",
+            "text": followup,
+            "ts": "40.002",
+            "thread_ts": root_ts,
+            "channel_type": "channel",
+            "subtype": "thread_broadcast",
+        },
+        body={"event_id": "Ev-bcast-2", "team_id": "TWORK"},
+        say=lambda **_kwargs: None,
+        client=app.client,
+    )
+    assert sum(1 for m in app.client.messages if m.get("bot_id")) > answered
+    assert "Strafford County current bids" in app.client.messages[-1]["text"]
+
+    # CONTROL: a genuine non-human subtype is still ignored, so the deny list did not
+    # simply open the gate to everything.
+    quiet = len(app.client.messages)
+    app.events["message"](
+        event={
+            "team": "TWORK",
+            "channel": "CGRANT",
+            "user": "UCHASE",
+            "text": "has joined the channel",
+            "ts": "40.003",
+            "thread_ts": root_ts,
+            "channel_type": "channel",
+            "subtype": "channel_join",
+        },
+        body={"event_id": "Ev-bcast-3", "team_id": "TWORK"},
+        say=lambda **_kwargs: None,
+        client=app.client,
+    )
+    assert len(app.client.messages) == quiet
+    claimed = {
+        row[0]
+        for row in connection.execute("SELECT event_id FROM slack_event_receipts")
+    }
+    assert "Ev-bcast-2" in claimed and "Ev-bcast-3" not in claimed
+
+
 def test_bot_authored_mention_is_ignored_before_any_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

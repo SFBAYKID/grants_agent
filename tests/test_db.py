@@ -17,7 +17,6 @@ from grant_watch.models import (
     Lead,
     LeadGrade,
     RawItem,
-    RunStats,
     VerificationStatus,
 )
 
@@ -79,18 +78,6 @@ def test_seed_is_idempotent(tmp_path: Path) -> None:
     assert rows2 == 75 and new2 == 0  # re-seeding inserts nothing
     grades = {g for (g,) in conn.execute("SELECT DISTINCT lead_grade FROM leads")}
     assert grades == {"gold"}
-
-
-def test_run_logging(tmp_path: Path) -> None:
-    """Verify run logging."""
-    conn = db.connect(tmp_path / "t.db")
-    db.log_run(
-        conn,
-        "2026-07-13T00:00:00+00:00",
-        RunStats(source="TestSource", items_seen=5, items_new=2, errors=""),
-    )
-    row = conn.execute("SELECT source, items_seen, items_new FROM runs").fetchone()
-    assert tuple(row) == ("TestSource", 5, 2)  # connect() sets row_factory=Row
 
 
 def test_readonly_connection_cannot_mutate_or_create_database(tmp_path: Path) -> None:

@@ -31,6 +31,7 @@ from slack_sdk import WebClient
 from .. import db
 from ..config import configured_channel_ids
 from ..spreadsheets import GeneratedArtifact
+from .nudge_silence import NON_HUMAN_SUBTYPES
 
 
 class SlackFileClient(Protocol):
@@ -216,7 +217,7 @@ def create_app() -> App:
         if (
             not _in_configured_channel(event)
             or event.get("bot_id")
-            or event.get("subtype")
+            or str(event.get("subtype") or "") in NON_HUMAN_SUBTYPES
             or not str(event.get("user") or "")
         ):
             return
@@ -290,11 +291,21 @@ def create_app() -> App:
         say: Callable[..., object],
         client: WebClient,
     ) -> None:
-        """Handle plain replies only under Grant's configured-channel alerts."""
+        """Handle plain replies only under Grant's configured-channel alerts.
+
+        THE SUBTYPE RULE IS A DENY LIST, NOT "HAS A SUBTYPE". Rejecting every message
+        carrying a subtype silently drops three ordinary human replies — `file_share`
+        (a screenshot, or the spreadsheet Grant asked for), `thread_broadcast` (the
+        "also send to channel" checkbox) and `me_message`. `nudge_silence._is_human`
+        was corrected on 2026-08-11 for exactly this, and CLAUDE.md recorded the cause
+        as "the check inherited the listener's blind spot" — but the LISTENER kept the
+        blind spot, so a rep ticking "also send to channel" got silence from Grant,
+        with no error and no receipt row to explain it.
+        """
         if (
             event.get("bot_id")
             or event.get("app_id")
-            or event.get("subtype")
+            or str(event.get("subtype") or "") in NON_HUMAN_SUBTYPES
             or not str(event.get("user") or "")
         ):
             return

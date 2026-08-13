@@ -82,8 +82,6 @@ _CITY_TITLES = (
     "finance director",
     "mayor",
 )
-# Kept for back-compat; the school set is the SVPP default (most awards are schools).
-TARGET_TITLES = _SCHOOL_TITLES
 
 # entity_type is frequently blank on the lead row (both City of Salmon and City of
 # East Providence had it empty), so the kind is inferred from the name instead.

@@ -171,8 +171,3 @@ def event_type_of(row: sqlite3.Row) -> str:
 def semantics_for(row: sqlite3.Row) -> RecordSemantics:
     """Return what this record IS, derived only from its verified event type."""
     return _BY_EVENT_TYPE.get(event_type_of(row), _UNKNOWN)
-
-
-def semantics_for_event_type(event_type: str) -> RecordSemantics:
-    """Same mapping for callers holding an event type rather than a row."""
-    return _BY_EVENT_TYPE.get(event_type or "", _UNKNOWN)

@@ -20,7 +20,6 @@ from .snapshot import FrozenSnapshot, SnapshotDraft
 
 MAX_FALLBACK = 4000
 MAX_SECTION = 3000
-MAX_FIELD = 2000
 MAX_CONTEXT = 3000
 _SENSITIVE_QUERY_RE = re.compile(
     r"(?:^|[_-])(?:api[_-]?key|access[_-]?key|auth|credential|password|secret|signature|token)(?:$|[_-])",

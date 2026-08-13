@@ -835,10 +835,6 @@ class SalesforceCampaignGateway:
             )
         return CreateResult(True, record_id, error="marked do-not-call")
 
-    def create_note(self, payload: dict[str, object]) -> CreateResult:
-        """Create one legacy Note attached to its ParentId (a Lead)."""
-        return self._create_one("Note", payload)
-
     def create_content_note(
         self, parent_id: str, title: str, body_html: str
     ) -> CreateResult:
