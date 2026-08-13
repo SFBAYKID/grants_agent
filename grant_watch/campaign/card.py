@@ -336,13 +336,9 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
             }
         )
     # Chase 2026-08-06 removed the "Not relevant" button: the card is information, not a
-    # control surface. (It had also never worked — SLACK_WORKSPACE_ID was absent from
-    # production, so `actions._authorized_snapshot` refused every click on its first
-    # gate.) The Persequor draft button survives for a draft-ready card, but no lead can
-    # currently reach that mode because `leads.nces_website` has no writer, so in
-    # practice today every card renders with NO actions block at all. An `actions` block
-    # with an empty `elements` list is invalid Block Kit and Slack rejects the whole
-    # message, so the block is omitted rather than emitted empty.
+    # control surface. The Persequor draft button appears only when every evidence rule
+    # passes, including exact NCES website ownership. An empty `actions` block is invalid
+    # Block Kit, so research-only cards omit the block entirely.
     action_elements: list[dict[str, Any]] = []
     if not research:
         action_elements.append(

@@ -12,12 +12,19 @@ Parser/matching tests are offline; production-wide matching remains needs-testin
 from __future__ import annotations
 
 import json
+import ipaddress
 import re
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import cast
+from urllib.parse import parse_qs, urlsplit, urlunsplit
+
+from bs4 import BeautifulSoup
 
 from ..sources.base import polite_get
+from ..state_codes import normalize_state_code
 
 SCHOOL_QUERY_URL = (
     "https://nces.ed.gov/opengis/rest/services/K12_School_Locations/"
@@ -31,6 +38,7 @@ SOURCE_URL = (
     "https://nces.ed.gov/opengis/rest/services/K12_School_Locations/"
     "EDGE_ADMINDATA_PUBLICSCH_2425/MapServer/1"
 )
+DISTRICT_DETAIL_URL = "https://nces.ed.gov/ccd/districtsearch/district_detail.asp"
 PAGE_SIZE = 2_000
 MAX_PAGES = 100
 _GENERIC = {
@@ -76,6 +84,17 @@ class EnrichmentSummary:
     candidates: int
     matched: int
     ambiguous_or_unmatched: int
+    websites_verified: int = 0
+    website_unavailable: int = 0
+
+
+@dataclass(frozen=True)
+class NCESWebsiteEvidence:
+    """Website claim read from one exact NCES district-id detail record."""
+
+    website: str
+    source_url: str
+    status: str
 
 
 def normalize_name(name: str) -> str:
@@ -137,6 +156,87 @@ def match_district(
     return matches[0] if len(matches) == 1 else None
 
 
+def _safe_published_website(value: str) -> str:
+    """Normalize an NCES-published organization site to a public HTTPS URL."""
+    raw = value.strip()
+    if not raw or raw.upper() in {"N", "N/A", "NOT AVAILABLE"}:
+        return ""
+    if "://" not in raw:
+        raw = f"https://{raw}"
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return ""
+    hostname = (parsed.hostname or "").strip(".").lower()
+    try:
+        ipaddress.ip_address(hostname)
+        is_ip_address = True
+    except ValueError:
+        is_ip_address = False
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not hostname
+        or "." not in hostname
+        or is_ip_address
+        or parsed.username is not None
+        or parsed.password is not None
+        or any(char in raw for char in ("<", ">", "|", "\n", "\r"))
+    ):
+        return ""
+    # Slack's link boundary accepts HTTPS only. NCES still prints many legacy links
+    # as HTTP, but the exact published host remains the identity evidence.
+    netloc = hostname + (f":{parsed.port}" if parsed.port else "")
+    return urlunsplit(("https", netloc, parsed.path, parsed.query, ""))
+
+
+def _exact_detail_source(url: str, nces_id: str) -> bool:
+    """Require the canonical NCES detail endpoint and this exact ID2 query value."""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and (parsed.hostname or "").lower() == "nces.ed.gov"
+        and parsed.path.lower() == "/ccd/districtsearch/district_detail.asp"
+        and parse_qs(parsed.query).get("ID2") == [nces_id]
+    )
+
+
+def parse_official_website(html: str, nces_id: str) -> str:
+    """Extract a website only from a detail page bound to the requested NCES ID."""
+    if not re.fullmatch(r"\d{7}", nces_id):
+        raise ValueError("an NCES district ID must contain exactly seven digits")
+    soup = BeautifulSoup(html, "html.parser")
+    page_text = " ".join(soup.stripped_strings)
+    if not re.search(rf"NCES District ID:\s*{re.escape(nces_id)}\b", page_text):
+        raise ValueError("NCES detail page did not confirm the requested district ID")
+    label = soup.find(string=re.compile(r"^\s*Website:\s*$", re.IGNORECASE))
+    parent = label.parent.parent if label is not None and label.parent else None
+    anchor = parent.find("a", href=True) if parent is not None else None
+    if anchor is None:
+        return ""
+    candidate = anchor.get_text(" ", strip=True)
+    if not candidate:
+        query = parse_qs(urlsplit(str(anchor.get("href") or "")).query)
+        candidate = str((query.get("location") or [""])[0])
+    return _safe_published_website(candidate)
+
+
+def fetch_official_website(nces_id: str) -> NCESWebsiteEvidence:
+    """Read the official site from one exact, public NCES district detail page."""
+    if not re.fullmatch(r"\d{7}", nces_id):
+        raise ValueError("an NCES district ID must contain exactly seven digits")
+    source_url = f"{DISTRICT_DETAIL_URL}?ID2={nces_id}"
+    response = polite_get(DISTRICT_DETAIL_URL, params={"ID2": nces_id})
+    website = parse_official_website(response.text, nces_id)
+    return NCESWebsiteEvidence(
+        website=website,
+        source_url=source_url,
+        status="verified" if website else "not_found",
+    )
+
+
 def _fetch_all_features(url: str, base_params: dict[str, str]) -> dict[str, object]:
     """Page an ArcGIS query fully and fail closed if pagination does not advance."""
     collected: list[dict[str, object]] = []
@@ -169,9 +269,7 @@ def _fetch_all_features(url: str, base_params: dict[str, str]) -> dict[str, obje
 
 def fetch_state(state: str) -> list[NCESDistrict]:
     """Fetch and merge one state's current district membership/location data."""
-    state_code = state.strip().upper()
-    if not re.fullmatch(r"[A-Z]{2}", state_code):
-        raise ValueError("NCES enrichment requires a two-letter state")
+    state_code = normalize_state_code(state)
     enrollment_params = {
         # NCES negative MEMBER values are missing/not-applicable sentinels, not pupils.
         "where": f"LSTATE='{state_code}' AND MEMBER>=0",
@@ -203,15 +301,30 @@ def fetch_state(state: str) -> list[NCESDistrict]:
 
 
 def enrich_state_leads(
-    conn: sqlite3.Connection, state: str, districts: list[NCESDistrict] | None = None
+    conn: sqlite3.Connection,
+    state: str,
+    districts: list[NCESDistrict] | None = None,
+    *,
+    website_fetcher: Callable[[str], NCESWebsiteEvidence] | None = None,
 ) -> EnrichmentSummary:
-    """Attach NCES facts to uniquely matching school-like leads in one state."""
-    state_code = state.strip().upper()
-    reference = districts if districts is not None else fetch_state(state_code)
+    """Attach exact NCES identity, facts, and published website for one state."""
+    state_code = normalize_state_code(state)
+    supplied = districts if districts is not None else fetch_state(state_code)
+    reference = [district for district in supplied if district.state == state_code]
+    by_id = {district.nces_id: district for district in reference}
+    lookup_website = (
+        website_fetcher
+        if website_fetcher is not None
+        else fetch_official_website
+        if districts is None
+        else None
+    )
     rows = list(
         conn.execute(
-            """SELECT id,entity_name FROM leads
-           WHERE UPPER(state)=? AND nces_id IS NULL
+            """SELECT id,entity_name,nces_id,nces_website_status FROM leads
+           WHERE UPPER(state)=?
+             AND ((nces_id IS NULL OR nces_id='')
+                  OR COALESCE(nces_website_status,'') IN ('','unavailable'))
              AND (LOWER(COALESCE(entity_type,'')) IN
                     ('school','district','school_district','nonpublic_school')
                   OR UPPER(entity_name) LIKE '%SCHOOL%'
@@ -221,21 +334,65 @@ def enrich_state_leads(
             (state_code,),
         )
     )
-    matched = 0
+    matched = websites_verified = website_unavailable = 0
+    checked_at = datetime.now(timezone.utc).isoformat()
     with conn:
         for row in rows:
-            district = match_district(str(row["entity_name"]), reference)
+            stored_id = str(row["nces_id"] or "").strip()
+            district = by_id.get(stored_id) if stored_id else None
+            if district is None:
+                district = match_district(str(row["entity_name"]), reference)
             if district is None:
                 continue
+            website = ""
+            website_source = f"{DISTRICT_DETAIL_URL}?ID2={district.nces_id}"
+            website_status = str(row["nces_website_status"] or "")
+            if lookup_website is not None:
+                try:
+                    evidence = lookup_website(district.nces_id)
+                    if not _exact_detail_source(evidence.source_url, district.nces_id):
+                        raise ValueError("NCES website evidence is not exact-ID bound")
+                    if evidence.status not in {"verified", "not_found"}:
+                        raise ValueError("NCES website evidence has an unknown status")
+                    if evidence.status == "verified" and (
+                        not evidence.website
+                        or _safe_published_website(evidence.website) != evidence.website
+                    ):
+                        raise ValueError("NCES website evidence contains an unsafe URL")
+                    if evidence.status == "not_found" and evidence.website:
+                        raise ValueError(
+                            "NCES not-found evidence cannot carry a website"
+                        )
+                    website = evidence.website
+                    website_source = evidence.source_url
+                    website_status = evidence.status
+                    websites_verified += int(evidence.status == "verified")
+                except Exception:  # noqa: BLE001 - identity data remains usable
+                    website_status = "unavailable"
+                    website_unavailable += 1
             conn.execute(
                 """UPDATE leads SET nces_id=?,enrollment=?,location_city=?,
-                          location_confidence='high' WHERE id=?""",
+                          location_confidence='high',
+                          nces_website=CASE WHEN ?!='' THEN ? ELSE nces_website END,
+                          nces_website_source_url=?,nces_website_status=?,
+                          nces_website_checked_at=? WHERE id=?""",
                 (
                     district.nces_id,
                     district.enrollment,
                     district.city or None,
+                    website,
+                    website,
+                    website_source,
+                    website_status or None,
+                    checked_at,
                     int(row["id"]),
                 ),
             )
             matched += 1
-    return EnrichmentSummary(len(rows), matched, len(rows) - matched)
+    return EnrichmentSummary(
+        len(rows),
+        matched,
+        len(rows) - matched,
+        websites_verified,
+        website_unavailable,
+    )

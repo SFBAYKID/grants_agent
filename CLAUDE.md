@@ -123,6 +123,34 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-13, 30-finding remediation — local, not deployed)
+
+- `verified` offline: the 30-finding audit is implemented through schema **46**. Exact bounded
+  contact/org evidence, candidate-versus-official websites, tri-state misses, context-specific lead
+  dispositions, strict SAM parsing, truthful Starbridge/Oregon/WEBS status, one durable operational
+  Firecrawl authority ledger/rate boundary, bounded Anthropic/configuration, generated XLSX email
+  attachments, fenced poll leases, and host-bound ZoomInfo authorization all have happy/failure
+  regressions. Migration 46 quarantines legacy positive/negative contact labels and organization
+  projections that lack exact typed evidence. The final complete suite is **1595 passed, 87
+  skipped**, and every offline health/source/catalog/universe gate passes.
+- `verified` offline: migration 44 identifies old Starbridge rows only by their explicit raw
+  `aggregator=starbridge` marker, renames their source, downgrades evidence to `needs-testing`, and
+  suppresses it. The proactive RFP query can therefore select strict SAM and directly verified
+  official-page events by semantics without trusting third-party history.
+- `verified` read-only production audit: production remains revision `0223c10`, schema 40, one
+  listener; no mutation was made. `SLACK_WORKSPACE_ID` and `ZOOMINFO_CREDIT_LEDGER_PATH` are absent,
+  340 leads have NCES IDs but zero have NCES websites, and no Persequor `outreach-retry` cron exists.
+  The embedded ZoomInfo history is **7 settled spends / 14 consumed of 1,000** for 2026-08; the known
+  laptop history adds 2 spends / 3 credits and must be included in same-account reconciliation.
+- `needs-testing` production: deploy only a reviewed commit through grants-ops-guardian. Stop the
+  listener/all legacy writers, back up every SQLite/WAL/SHM set, revoke/rotate both vendors'
+  credentials off every non-authority machine, merge all Firecrawl and ZoomInfo histories into the
+  private host-bound ledgers, set the exact Slack workspace identity, run the read-only authority
+  preflight, then restart and verify. Follow `docs/paid_provider_cutover.md`; local SQLite alone does
+  not prove cross-machine exclusivity. The existing NCES cron may populate official website evidence
+  after deploy. Installing a retry cron or driving a live rich-card button is a separate
+  outbound-mutation action and still requires explicit authorization.
+
 ## Current status (2026-08-12, the listener's own blind spot)
 
 - `verified` 2026-08-12 **PRODUCTION IS `0223c10`, AND THE FIX IS LIVE.** PID 86114 →

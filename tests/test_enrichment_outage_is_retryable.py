@@ -19,6 +19,7 @@ from grant_watch.campaign import paid_calls
 from grant_watch.enrich import finder
 from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem
 from grant_watch.slack import contact_enrichment
+from tests.contact_support import verified_contact_evidence
 
 
 def _lead(conn: sqlite3.Connection) -> int:
@@ -59,15 +60,22 @@ def test_a_recovered_source_is_read_again(
         attempts.append(entity)
         if len(attempts) == 1:
             raise finder.SourceUnreachable("simulated outage")
+        source_url = "https://outage.k12.ca.us/staff"
+        field_evidence = verified_contact_evidence(
+            "Dana Reyes",
+            "dreyes@outage.k12.ca.us",
+            source_url,
+            title="Director of Technology",
+        )
         return finder.ContactCandidate(
             name="Dana Reyes",
             title="Director of Technology",
             email="dreyes@outage.k12.ca.us",
             phone="",
-            source_url="https://outage.k12.ca.us/staff",
+            source_url=source_url,
             confidence="high",
             official_domain="outage.k12.ca.us",
-            field_evidence={"email": True},
+            field_evidence=field_evidence,
         )
 
     monkeypatch.setattr(finder, "find_contact", flaky)

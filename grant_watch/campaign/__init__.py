@@ -27,3 +27,8 @@ def rich_card_enabled() -> bool:
         "yes",
         "on",
     )
+
+
+def rich_actions_configured() -> bool:
+    """Whether rich-card action callbacks can bind an exact Slack workspace."""
+    return bool(os.environ.get("SLACK_WORKSPACE_ID", "").strip())

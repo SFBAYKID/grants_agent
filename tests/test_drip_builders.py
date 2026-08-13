@@ -149,6 +149,27 @@ def test_bulletin_uses_opportunity_title(tmp_path: Path) -> None:
     assert style == "bulletin-open"
 
 
+@pytest.mark.parametrize("status", ["surfaced", "snoozed", "not_relevant", "dead"])
+def test_bulletin_proactive_query_honors_disposition(
+    tmp_path: Path, status: str
+) -> None:
+    """A human-dispositioned opportunity cannot reappear as a proactive bulletin."""
+    conn = db.connect(tmp_path / "bulletin-status.db")
+    lead_id = mk_lead(
+        conn,
+        iid="OPP-STATUS",
+        entity="DOJ COPS Office",
+        grade=LeadGrade.WATCH,
+        source="grants.gov",
+        amount=None,
+        start="2026-07-01",
+        end="2030-08-04",
+        title="FY26 School Violence Prevention Program",
+    )
+    db.set_lead_status(conn, lead_id, status)
+    assert db.bulletin_candidates(conn, "C1") == []
+
+
 def test_pick_prefers_top_scored_nugget(tmp_path: Path) -> None:
     """Verify pick prefers top scored nugget."""
     conn = db.connect(tmp_path / "t.db")

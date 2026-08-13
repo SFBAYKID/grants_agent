@@ -34,6 +34,14 @@ from .migrations_zoominfo import (
     migration_29_vendor_contacts_and_credits,
     migration_37_mobile_phone,
 )
+from .migrations_safety import (
+    migration_41_field_evidence_and_nces_site,
+    migration_42_firecrawl_runtime_gateway,
+    migration_43_fenced_poll_lease,
+    migration_44_starbridge_provenance,
+    migration_45_firecrawl_request_identity,
+    migration_46_quarantine_legacy_unbound_evidence,
+)
 from .migrations_rich import (
     migration_14_run_confirmation_freshness,
     migration_15_rich_post_kind_and_snapshot_links,
@@ -734,6 +742,36 @@ MIGRATIONS: tuple[Migration, ...] = (
         40,
         "whether the human's choices include this organization, stored once",
         migration_40_batch_item_inclusion,
+    ),
+    Migration(
+        41,
+        "field-specific organization evidence and exact NCES website provenance",
+        migration_41_field_evidence_and_nces_site,
+    ),
+    Migration(
+        42,
+        "durable budget and backoff for every runtime Firecrawl call",
+        migration_42_firecrawl_runtime_gateway,
+    ),
+    Migration(
+        43,
+        "renewable polling lease with a monotonically fenced owner token",
+        migration_43_fenced_poll_lease,
+    ),
+    Migration(
+        44,
+        "truthful provenance for historical third-party Starbridge rows",
+        migration_44_starbridge_provenance,
+    ),
+    Migration(
+        45,
+        "exact request identity and bounded retry state for Firecrawl",
+        migration_45_firecrawl_request_identity,
+    ),
+    Migration(
+        46,
+        "quarantine legacy contact and organization claims without typed evidence",
+        migration_46_quarantine_legacy_unbound_evidence,
     ),
 )
 

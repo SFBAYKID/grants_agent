@@ -14,7 +14,9 @@ import sqlite3
 import uuid
 from pathlib import Path
 
+from . import poll_lease
 from .db_contacts import (  # re-export: every db.<name> call site is unchanged
+    contact_is_page_verified,  # noqa: F401
     mark_contact_not_found,  # noqa: F401
     save_contact,  # noqa: F401
     save_human_asserted_contact,  # noqa: F401
@@ -38,7 +40,19 @@ from .models import (
 
 # Default DB lives next to the repo root; git-ignored (*.db).
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "grant_watch.db"
+# Interactive search may show every lead except an explicitly dead one so a rep can
+# inspect historical/snoozed context. Mutating Campaign actions are narrower: a human
+# disposition of snoozed or not_relevant is an instruction, not just display metadata.
 SEARCHABLE_LEAD_PREDICATE = "COALESCE(status, 'new') != 'dead'"
+CAMPAIGN_ELIGIBLE_STATUSES: frozenset[str] = frozenset({"new", "surfaced", "contacted"})
+CAMPAIGN_ELIGIBLE_LEAD_PREDICATE = (
+    "COALESCE(status, 'new') IN ('new','surfaced','contacted')"
+)
+
+
+def campaign_status_eligible(status: object) -> bool:
+    """Return whether one lead disposition permits a Campaign mutation."""
+    return str(status or "new") in CAMPAIGN_ELIGIBLE_STATUSES
 
 
 def connect(db_path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
@@ -126,8 +140,8 @@ def _adopt_drifted_lead(
     return conn.execute("SELECT * FROM leads WHERE id=?", (int(row["id"]),)).fetchone()
 
 
-def upsert_lead(conn: sqlite3.Connection, lead: Lead) -> bool:
-    """Project one source item and append evidence when its facts changed.
+def _upsert_lead(conn: sqlite3.Connection, lead: Lead) -> bool:
+    """Project one source item inside the caller's write transaction.
 
     Returns true for a new lead or a substantive, non-backfill event. Re-fetching an
     unchanged source item only refreshes ``last_seen`` and cannot create another alert.
@@ -292,12 +306,33 @@ def upsert_lead(conn: sqlite3.Connection, lead: Lead) -> bool:
         )
     if inserted:
         conn.execute("UPDATE leads SET last_seen=? WHERE id=?", (now, lead_id))
-    conn.commit()
     # Projection-only metadata changes deliberately do not drive notifications.
     return inserted or (event_created and not suppressed)
 
 
-def begin_run(conn: sqlite3.Connection, source: str, started: str) -> int:
+def upsert_lead(
+    conn: sqlite3.Connection,
+    lead: Lead,
+    *,
+    lease: poll_lease.PollLease | None = None,
+) -> bool:
+    """Project one source item, optionally fenced to a current polling lease.
+
+    The lease check and every projection/event write share one ``BEGIN IMMEDIATE``
+    transaction. A paused worker whose token was replaced therefore cannot resume
+    and commit stale source data after its successor starts.
+    """
+    with poll_lease.fenced_transaction(conn, lease):
+        return _upsert_lead(conn, lead)
+
+
+def begin_run(
+    conn: sqlite3.Connection,
+    source: str,
+    started: str,
+    *,
+    lease: poll_lease.PollLease | None = None,
+) -> int:
     """Open a run row in state 'pending' BEFORE processing and return its id.
 
     The rich-card freshness rule (Chase A1) advances a lead's confirmation only after
@@ -305,13 +340,14 @@ def begin_run(conn: sqlite3.Connection, source: str, started: str) -> int:
     the run to have an identity DURING processing, so it is created up front here and
     resolved by `complete_run`/`fail_run`. A failed/partial/interrupted/dry run never
     reaches `complete_run`, so it can never advance freshness."""
-    cur = conn.execute(
-        """INSERT INTO runs
-             (started, source, state, items_seen, items_new, errors, complete, error_code)
-           VALUES (?,?, 'pending', 0, 0, '', 0, '')""",
-        (started, source),
-    )
-    conn.commit()
+    with poll_lease.fenced_transaction(conn, lease):
+        cur = conn.execute(
+            """INSERT INTO runs
+                 (started, source, state, items_seen, items_new, errors, complete,
+                  error_code)
+               VALUES (?,?, 'pending', 0, 0, '', 0, '')""",
+            (started, source),
+        )
     return int(cur.lastrowid)
 
 
@@ -320,6 +356,8 @@ def complete_run(
     run_id: int,
     stats: RunStats,
     confirmed_keys: list[tuple[str, str]],
+    *,
+    lease: poll_lease.PollLease | None = None,
 ) -> None:
     """Mark a run complete AND advance confirmation freshness for exactly the leads it
     re-confirmed — in ONE transaction. Call ONLY when `stats.complete` is true.
@@ -329,7 +367,7 @@ def complete_run(
     precisely what "still fresh" means. `last_confirmed_at` is the completion time, never
     `observed_at` (first-sighting) or `last_seen`."""
     now = _now()
-    with conn:
+    with poll_lease.fenced_transaction(conn, lease):
         conn.execute(
             """UPDATE runs SET finished=?, state='complete', items_seen=?, items_new=?,
                      errors=?, complete=1, error_code=? WHERE id=?""",
@@ -350,9 +388,15 @@ def complete_run(
             )
 
 
-def fail_run(conn: sqlite3.Connection, run_id: int, stats: RunStats) -> None:
+def fail_run(
+    conn: sqlite3.Connection,
+    run_id: int,
+    stats: RunStats,
+    *,
+    lease: poll_lease.PollLease | None = None,
+) -> None:
     """Mark a run failed/partial. NEVER advances confirmation freshness (Chase A1)."""
-    with conn:
+    with poll_lease.fenced_transaction(conn, lease):
         conn.execute(
             """UPDATE runs SET finished=?, state='failed', items_seen=?, items_new=?,
                      errors=?, complete=0, error_code=? WHERE id=?""",
@@ -365,28 +409,6 @@ def fail_run(conn: sqlite3.Connection, run_id: int, stats: RunStats) -> None:
                 run_id,
             ),
         )
-
-
-def acquire_poll_lock(
-    conn: sqlite3.Connection, name: str, owner: str, stale_hours: int = 2
-) -> bool:
-    """Acquire a named poll lock, clearing only locks older than ``stale_hours``."""
-    with conn:
-        conn.execute(
-            "DELETE FROM poll_locks WHERE name=? AND acquired_at < datetime('now', ?)",
-            (name, f"-{stale_hours} hours"),
-        )
-        cur = conn.execute(
-            "INSERT OR IGNORE INTO poll_locks(name,owner,acquired_at) VALUES (?,?,?)",
-            (name, owner, _now()),
-        )
-    return cur.rowcount == 1
-
-
-def release_poll_lock(conn: sqlite3.Connection, name: str, owner: str) -> None:
-    """Release only the caller's lock so one process cannot unlock another."""
-    with conn:
-        conn.execute("DELETE FROM poll_locks WHERE name=? AND owner=?", (name, owner))
 
 
 def seed_from_csv(conn: sqlite3.Connection, csv_path: Path) -> tuple[int, int]:
@@ -536,7 +558,9 @@ def finish_export_job(
         )
 
 
-def reconcile_seed_duplicates(conn: sqlite3.Connection) -> int:
+def reconcile_seed_duplicates(
+    conn: sqlite3.Connection, *, lease: poll_lease.PollLease | None = None
+) -> int:
     """Retire seed-CSV rows that a live poller row has superseded.
 
     Why: the 2026-07-13 live output showed the same award twice — once from
@@ -546,16 +570,17 @@ def reconcile_seed_duplicates(conn: sqlite3.Connection) -> int:
     deep link); the seed row goes to status='dead' with an explanatory note, preserving
     history. Returns how many seed rows were retired. Idempotent.
     """
-    cur = conn.execute("""
-        UPDATE leads SET status = 'dead',
-               status_note = 'superseded by live award row (same entity/amount/window)'
-        WHERE source = 'seed:svpp_csv' AND status != 'dead' AND EXISTS (
-            SELECT 1 FROM leads l
-            WHERE l.source LIKE 'usaspending:%'
-              AND UPPER(TRIM(l.entity_name)) = UPPER(TRIM(leads.entity_name))
-              AND l.amount = leads.amount
-              AND l.funds_end = leads.funds_end)""")
-    conn.commit()
+    with poll_lease.fenced_transaction(conn, lease):
+        cur = conn.execute("""
+            UPDATE leads SET status = 'dead',
+                   status_note =
+                     'superseded by live award row (same entity/amount/window)'
+            WHERE source = 'seed:svpp_csv' AND status != 'dead' AND EXISTS (
+                SELECT 1 FROM leads l
+                WHERE l.source LIKE 'usaspending:%'
+                  AND UPPER(TRIM(l.entity_name)) = UPPER(TRIM(leads.entity_name))
+                  AND l.amount = leads.amount
+                  AND l.funds_end = leads.funds_end)""")
     return cur.rowcount
 
 
@@ -593,29 +618,101 @@ def mark_surfaced(conn: sqlite3.Connection, lead_ids: list[int]) -> None:
     conn.commit()
 
 
+_ORG_EVIDENCE_FIELDS = frozenset(
+    {"website", "general_email", "phone", "street", "city", "state", "postal_code"}
+)
+
+
+def _accepted_org_evidence(profile: object) -> dict[str, object]:
+    """Return only internally complete evidence that exactly binds a projection."""
+    accepted: dict[str, object] = {}
+    supplied = dict(getattr(profile, "field_evidence", {}) or {})
+    for field_name in _ORG_EVIDENCE_FIELDS:
+        value = str(getattr(profile, field_name, "") or "")
+        match = supplied.get(field_name)
+        if not value or match is None:
+            continue
+        if (
+            str(getattr(match, "field", "")) == field_name
+            and str(getattr(match, "value", "")) == value
+            and str(getattr(match, "source_url", ""))
+            and str(getattr(match, "excerpt", ""))
+            and str(getattr(match, "evidence_hash", ""))
+            and str(getattr(match, "verifier_version", ""))
+        ):
+            accepted[field_name] = match
+    return accepted
+
+
 def save_org_profile(conn: sqlite3.Connection, lead_id: int, profile: object) -> None:
     """Persist verbatim-verified organization details onto the lead.
 
-    ``profile`` is an OrgProfile (duck-typed to avoid an enrich import here). Only
-    values that already passed on-page verification reach this function."""
-    conn.execute(
-        """UPDATE leads SET org_website=?, org_general_email=?, org_phone=?,
-             org_street=?, org_city=?, org_state=?, org_postal_code=?,
-             org_profile_status=?, org_profile_source_url=? WHERE id=?""",
-        (
-            getattr(profile, "website", "") or None,
-            getattr(profile, "general_email", "") or None,
-            getattr(profile, "phone", "") or None,
-            getattr(profile, "street", "") or None,
-            getattr(profile, "city", "") or None,
-            getattr(profile, "state", "") or None,
-            getattr(profile, "postal_code", "") or None,
-            getattr(profile, "status", "not_found"),
-            getattr(profile, "source_url", "") or None,
-            lead_id,
-        ),
+    ``profile`` is an OrgProfile (duck-typed to avoid an enrich import here). A
+    projection is accepted only with exact field evidence; a caller cannot bypass
+    the verifier by constructing an unchecked profile object.
+    """
+    field_evidence = _accepted_org_evidence(profile)
+    values = {
+        field_name: str(getattr(profile, field_name, "") or "")
+        if field_name in field_evidence
+        else ""
+        for field_name in _ORG_EVIDENCE_FIELDS
+    }
+    source_urls = {
+        str(getattr(match, "source_url", "")) for match in field_evidence.values()
+    }
+    requested_source = str(getattr(profile, "source_url", "") or "")
+    source_url = (
+        requested_source
+        if requested_source in source_urls
+        else next(iter(sorted(source_urls)), "")
     )
-    conn.commit()
+    status = str(getattr(profile, "status", "not_found") or "not_found")
+    if status == "found" and not field_evidence:
+        status = "not_found"
+    with conn:
+        conn.execute(
+            """UPDATE leads SET org_website=?, org_website_candidate=?,
+             org_general_email=?, org_phone=?,
+             org_street=?, org_city=?, org_state=?, org_postal_code=?,
+            org_profile_status=?, org_profile_source_url=? WHERE id=?""",
+            (
+                values["website"] or None,
+                getattr(profile, "website_candidate", "") or None,
+                values["general_email"] or None,
+                values["phone"] or None,
+                values["street"] or None,
+                values["city"] or None,
+                values["state"] or None,
+                values["postal_code"] or None,
+                status,
+                source_url or None,
+                lead_id,
+            ),
+        )
+        conn.execute(
+            """UPDATE organization_field_evidence SET status='superseded'
+               WHERE lead_id=? AND status='current'""",
+            (lead_id,),
+        )
+        for field_name, match in field_evidence.items():
+            conn.execute(
+                """INSERT INTO organization_field_evidence
+                     (id,lead_id,field_name,field_value,source_url,excerpt,
+                      evidence_hash,verifier_version,status,verified_at)
+                   VALUES (?,?,?,?,?,?,?,?,'current',?)""",
+                (
+                    uuid.uuid4().hex,
+                    lead_id,
+                    field_name,
+                    str(getattr(match, "value", "")),
+                    str(getattr(match, "source_url", "")),
+                    str(getattr(match, "excerpt", ""))[:500],
+                    str(getattr(match, "evidence_hash", "")),
+                    str(getattr(match, "verifier_version", "")),
+                    _now(),
+                ),
+            )
 
 
 def contacts_for_lead(conn: sqlite3.Connection, lead_id: int) -> list[sqlite3.Row]:

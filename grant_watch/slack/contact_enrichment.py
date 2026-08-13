@@ -6,7 +6,8 @@ finder's verbatim gate, then a LinkedIn decision-maker, then the org's verified
 general mailbox — and only when all three miss is a lead honestly not_found.
 Every outcome is a typed ContactOutcome the batch search and single-lead tool
 both consume; fallbacks persist what they found so Salesforce steps can build
-on it.
+on it. Organization enrichment is coordinated here exactly once per request so
+rendering a result can never trigger a second paid lookup.
 """
 
 from __future__ import annotations
@@ -14,8 +15,12 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from .. import db
+
+if TYPE_CHECKING:
+    from ..enrich.organization_profile import OrgProfile
 
 # Progress callback: enrichment narrates slow steps into the Slack spinner.
 Progress = Callable[[str], None]
@@ -49,10 +54,18 @@ class ContactOutcome:
     # district switchboard next to a person's name and read as their direct number —
     # a rule-1 fabrication built out of two true facts.
     org_phone: str = ""
+    # Pure, pre-rendered organization detail from the SAME enrichment pass. Keeping
+    # it on the outcome prevents the Slack string wrapper from issuing a second
+    # organization lookup merely to render an address or switchboard.
+    org_summary: str = ""
 
 
 def enrich_lead_contact(
-    conn: sqlite3.Connection, lead_id: int, on_progress: Progress | None = None
+    conn: sqlite3.Connection,
+    lead_id: int,
+    on_progress: Progress | None = None,
+    *,
+    include_org_profile: bool = False,
 ) -> ContactOutcome:
     """Find + persist ONE lead's best contact through finder's verbatim gate, reusing a
     caller-supplied connection so a batch enriches on a single handle. Idempotent: an
@@ -64,12 +77,18 @@ def enrich_lead_contact(
     if lead is None:
         raise ValueError(f"unknown Grant lead id {lead_id}")
     existing = [
-        c
-        for c in db.contacts_for_lead(conn, lead_id)
-        if c["contact_status"] == "verified"
+        c for c in db.contacts_for_lead(conn, lead_id) if db.contact_is_page_verified(c)
     ]
     if existing:
         c = existing[0]
+        org_summary = (
+            _enrich_org_summary(conn, lead_id, on_progress)
+            if include_org_profile
+            else _stored_org_summary(conn, lead, lead_id)
+        )
+        if include_org_profile:
+            lead = db.get_lead(conn, lead_id) or lead
+        profile = _stored_org_profile(conn, lead, lead_id)
         return ContactOutcome(
             "verified",
             c["name"] or "",
@@ -77,7 +96,8 @@ def enrich_lead_contact(
             c["email"] or "",
             c["phone"] or "",
             c["source_url"] or "",
-            str(lead["org_phone"] or ""),
+            profile.phone,
+            org_summary,
         )
     if any(
         c["contact_status"] == "not_found" for c in db.contacts_for_lead(conn, lead_id)
@@ -87,7 +107,7 @@ def enrich_lead_contact(
     if recalled is not None:
         return recalled
 
-    def discover() -> ContactOutcome:
+    def discover_bound() -> ContactOutcome:
         """Run every paid fallback only after the outer durable reservation."""
         candidate = finder.find_contact(
             str(lead["entity_name"]),
@@ -108,6 +128,15 @@ def enrich_lead_contact(
             candidate.official_domain,
             candidate.field_evidence,
         )
+        org_summary = (
+            _enrich_org_summary(conn, lead_id, on_progress)
+            if include_org_profile
+            else _stored_org_summary(conn, lead, lead_id)
+        )
+        refreshed_lead = (
+            db.get_lead(conn, lead_id) or lead if include_org_profile else lead
+        )
+        profile = _stored_org_profile(conn, refreshed_lead, lead_id)
         return ContactOutcome(
             "verified",
             candidate.name,
@@ -115,10 +144,19 @@ def enrich_lead_contact(
             candidate.email,
             candidate.phone,
             candidate.source_url,
-            str(lead["org_phone"] or ""),
+            profile.phone,
+            org_summary,
         )
 
+    def discover() -> ContactOutcome:
+        """Bind every nested Firecrawl call to this lead's durable connection."""
+        from ..enrich import firecrawl_gateway
+
+        with firecrawl_gateway.bind_connection(conn, "contact_enrichment"):
+            return discover_bound()
+
     from ..campaign import paid_calls
+    from ..enrich import firecrawl_gateway
 
     try:
         return paid_calls.execute(
@@ -132,7 +170,11 @@ def enrich_lead_contact(
             # or timeout retired the lead permanently: `enrich_lead_contact` would
             # raise `IndeterminatePaidCall` on every later pass and the rep would
             # see `error` for a lead whose website came back minutes later.
-            provably_unspent=(finder.SourceUnreachable,),
+            provably_unspent=(
+                finder.SourceUnreachable,
+                firecrawl_gateway.FirecrawlBudgetExhausted,
+                firecrawl_gateway.FirecrawlBudgetNotConfigured,
+            ),
         )
     except finder.SourceUnreachable:
         return ContactOutcome("unreachable")
@@ -144,7 +186,11 @@ def enrich_lead_contact(
         # Belt-and-braces behind _recall_prior_outcome: the ledger says this lead's
         # paid pass already ran, so re-spending is forbidden. Report whatever that
         # pass stored rather than an "error" cell that misreports a real success.
-        return _recall_prior_outcome(conn, lead, lead_id) or ContactOutcome("not_found")
+        # No durable evidenced outcome means only that the legacy row was incomplete
+        # or quarantined. It cannot establish an exhaustive miss.
+        return _recall_prior_outcome(conn, lead, lead_id) or ContactOutcome(
+            "needs_operator_retry"
+        )
 
 
 def _best_linkedin_contact(rows: list[sqlite3.Row]) -> sqlite3.Row | None:
@@ -195,9 +241,11 @@ def _recall_prior_outcome(
     exists, so a genuine first pass is never short-circuited.
     """
     linkedin = _best_linkedin_contact(db.contacts_for_lead(conn, lead_id))
-    general_email = str(lead["org_general_email"] or "")
-    profile_source = str(lead["org_profile_source_url"] or "")
-    org_phone = str(lead["org_phone"] or "")
+    profile = _stored_org_profile(conn, lead, lead_id)
+    general_email = profile.general_email
+    profile_source = profile.source_url
+    org_phone = profile.phone
+    org_summary = _stored_org_summary(conn, lead, lead_id)
     if linkedin is not None and general_email:
         return ContactOutcome(
             "linkedin_org_email",
@@ -207,6 +255,7 @@ def _recall_prior_outcome(
             "",
             str(linkedin["source_url"] or ""),
             org_phone,
+            org_summary,
         )
     if linkedin is not None:
         return ContactOutcome(
@@ -217,12 +266,61 @@ def _recall_prior_outcome(
             "",
             str(linkedin["source_url"] or ""),
             org_phone,
+            org_summary,
         )
     if general_email:
         return ContactOutcome(
-            "org_email", "", "", general_email, "", profile_source, org_phone
+            "org_email",
+            "",
+            "",
+            general_email,
+            "",
+            profile_source,
+            org_phone,
+            org_summary,
         )
     return None
+
+
+def _stored_org_summary(
+    conn: sqlite3.Connection, lead: sqlite3.Row, lead_id: int
+) -> str:
+    """Render stored facts without relabeling a legacy website as authoritative."""
+    from ..enrich.organization_profile import summarize_org_profile
+
+    profile = _stored_org_profile(conn, lead, lead_id)
+    return summarize_org_profile(profile)
+
+
+def _stored_org_profile(
+    conn: sqlite3.Connection, lead: sqlite3.Row, lead_id: int
+) -> OrgProfile:
+    """Return the evidence-filtered org profile for this exact lead row."""
+    from ..enrich.organization_profile import evidenced_profile
+
+    if int(lead["id"]) != lead_id:
+        raise ValueError("organization profile lead mismatch")
+    return evidenced_profile(conn, lead)
+
+
+def _enrich_org_summary(
+    conn: sqlite3.Connection,
+    lead_id: int,
+    on_progress: Progress | None,
+) -> str:
+    """Run organization enrichment once and return a pure summary.
+
+    An unavailable organization site does not erase an independently verified
+    person. Unexpected failures remain loud and flow to the paid-attempt ledger.
+    """
+    from ..enrich.finder import SourceUnreachable
+    from ..enrich.organization_profile import enrich_org_profile, summarize_org_profile
+
+    try:
+        profile = enrich_org_profile(conn, lead_id, on_progress)
+    except SourceUnreachable:
+        return ""
+    return summarize_org_profile(profile)
 
 
 def _fallback_contact(
@@ -234,18 +332,20 @@ def _fallback_contact(
     """Escalate when no on-site person verifies: LinkedIn person, then org mailbox.
 
     Both steps persist what they honestly found (a linkedin_only contact row /
-    the org profile columns) so later Salesforce steps can build on them. Every
-    failure degrades silently to the next step — fallbacks never raise."""
+    the org profile columns) so later Salesforce steps can build on them. A clean
+    negative and an unavailable source are distinct: only two clean negatives may
+    become permanent ``not_found``."""
     from ..enrich import finder
-    from ..enrich.organization_profile import enrich_org_profile
+    from ..enrich.organization_profile import enrich_org_profile, summarize_org_profile
 
     entity = str(lead["entity_name"] or "")
     state = str(lead["state"] or "")
     person: dict[str, str] | None = None
+    person_unavailable = False
     try:
         person = finder.linkedin_person(entity, state, on_progress=on_progress)
-    except Exception:  # noqa: BLE001 — a fallback miss is a miss, not a crash
-        person = None
+    except finder.SourceUnreachable:
+        person_unavailable = True
     if person is not None:
         title = str(person.get("title") or "")
         if (
@@ -259,13 +359,16 @@ def _fallback_contact(
     general_email = ""
     profile_source = ""
     org_phone = ""
+    org_summary = ""
+    profile_unavailable = False
     try:
         profile = enrich_org_profile(conn, lead_id, on_progress)
         general_email = profile.general_email
         profile_source = profile.source_url
         org_phone = profile.phone
-    except Exception:  # noqa: BLE001 — org-profile misses degrade honestly too
-        general_email = ""
+        org_summary = summarize_org_profile(profile)
+    except finder.SourceUnreachable:
+        profile_unavailable = True
     # org_phone rides in its OWN field on every branch below. A LinkedIn-sourced
     # person has no phone of their own, so putting the switchboard in `phone` would
     # invent a direct line for exactly the people whose identity is least verified.
@@ -278,6 +381,7 @@ def _fallback_contact(
             "",
             str(person["url"]),
             org_phone,
+            org_summary,
         )
     if person is not None:
         return ContactOutcome(
@@ -288,10 +392,25 @@ def _fallback_contact(
             "",
             str(person["url"]),
             org_phone,
+            org_summary,
         )
     if general_email:
         return ContactOutcome(
-            "org_email", "", "", general_email, "", profile_source, org_phone
+            "org_email",
+            "",
+            "",
+            general_email,
+            "",
+            profile_source,
+            org_phone,
+            org_summary,
         )
+    if person_unavailable or profile_unavailable:
+        unavailable = []
+        if person_unavailable:
+            unavailable.append("LinkedIn search")
+        if profile_unavailable:
+            unavailable.append("organization website")
+        raise finder.SourceUnreachable(" and ".join(unavailable) + " unavailable")
     db.mark_contact_not_found(conn, lead_id)
-    return ContactOutcome("not_found")
+    return ContactOutcome("not_found", org_summary=org_summary)

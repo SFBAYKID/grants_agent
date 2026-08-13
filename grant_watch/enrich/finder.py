@@ -17,15 +17,18 @@ until a human or a better source supplies more.
 from __future__ import annotations
 
 import json
-import os
 import re
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any  # Firecrawl search response JSON is runtime-shaped.
 from urllib.parse import urlparse
 
-import requests
 from anthropic import Anthropic
+
+from ..llm import anthropic_client_options
+from ..state_codes import normalize_state_code, state_name
+from . import evidence, firecrawl_gateway
 
 Progress = Callable[[str], None]
 
@@ -36,8 +39,6 @@ def _noop(_message: str) -> None:
 
 _NOOP: Progress = _noop
 
-FIRECRAWL_SEARCH = "https://api.firecrawl.dev/v1/search"
-FIRECRAWL_SCRAPE = "https://api.firecrawl.dev/v1/scrape"
 MODEL = "claude-sonnet-5"
 
 
@@ -189,7 +190,7 @@ def _titles_for(entity: str) -> tuple[str, ...]:
     return _CITY_TITLES if _org_kind(entity) == "city" else _SCHOOL_TITLES
 
 
-_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_EMAIL_RE = evidence.EMAIL_RE
 
 
 @dataclass
@@ -203,17 +204,25 @@ class ContactCandidate:
     source_url: str
     confidence: str  # high | medium | low
     official_domain: str = ""
-    field_evidence: dict[str, bool] | None = None
+    field_evidence: dict[str, evidence.EvidenceMatch] | None = None
 
 
 def verify_on_page(page_text: str, email: str, name: str) -> bool:
-    """THE anti-hallucination gate (pure, unit-tested): the email must appear
-    VERBATIM in the fetched page, and the first two name tokens must appear too.
-    A model claim that fails this is discarded — no exceptions, no overrides."""
-    low = page_text.lower()
-    if not email or not _EMAIL_RE.fullmatch(email) or email.lower() not in low:
-        return False
-    return bool(name) and all(tok.lower() in low for tok in name.split()[:2])
+    """Require an exact email token and an ordered name in its local page block."""
+    return bool(_contact_identity_evidence(page_text, email, name, ""))
+
+
+def _contact_identity_evidence(
+    page_text: str, email: str, name: str, source_url: str
+) -> dict[str, evidence.EvidenceMatch]:
+    """Return exact local email/name evidence, or an empty mapping on mismatch."""
+    email_match = evidence.exact_email(page_text, email, source_url)
+    if email_match is None:
+        return {}
+    name_match = evidence.person_name_near_email(page_text, name, email_match)
+    if name_match is None:
+        return {}
+    return {"email": email_match, "name": name_match}
 
 
 def reverify_general_mailbox(
@@ -224,29 +233,36 @@ def reverify_general_mailbox(
     This may call paid Firecrawl and is invoked only inside the rich preparation
     worker's durable pre-HTTP marker.
     """
+    return general_mailbox_evidence(email, evidence_url, official_domain) is not None
+
+
+def general_mailbox_evidence(
+    email: str, evidence_url: str, official_domain: str
+) -> evidence.EvidenceMatch | None:
+    """Return exact typed proof for an organization mailbox, if still published.
+
+    The richer return value is needed by the rich-card evidence store. Keeping the
+    boolean wrapper above preserves the simple verifier API used by older callers.
+    """
     if not email or not _EMAIL_RE.fullmatch(email):
-        return False
+        return None
     page_host = _host(evidence_url)
     if not _same_site(page_host, official_domain.lower().removeprefix("www.")):
-        return False
+        return None
     page = _scrape(evidence_url, raise_on_failure=True)
-    return bool(page) and email.lower() in page.lower()
+    if not page:
+        return None
+    return evidence.exact_email(page, email, evidence_url)
 
 
 def _text_field_on_page(page_text: str, value: str) -> bool:
-    """Verify a non-email field through normalized contiguous page text."""
-    if not value.strip():
-        return False
-    normalized_value = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
-    normalized_page = re.sub(r"[^a-z0-9]+", " ", page_text.lower()).strip()
-    return normalized_value in normalized_page
+    """Verify a non-email field as a contiguous whole-token phrase."""
+    return evidence.phrase(page_text, value, "", field="text") is not None
 
 
 def _phone_on_page(page_text: str, phone: str) -> bool:
-    """Verify phone digits without depending on source formatting punctuation."""
-    wanted = re.sub(r"\D", "", phone)
-    page_digits = re.sub(r"\D", "", page_text)
-    return len(wanted) >= 7 and wanted in page_digits
+    """Verify one phone-like page span without joining unrelated page digits."""
+    return evidence.phone(page_text, phone, "") is not None
 
 
 _GENERIC_ENTITY_WORDS = {
@@ -300,12 +316,38 @@ def _looks_official(entity: str, state: str, result: dict[str, Any]) -> bool:
         host == blocked or host.endswith(f".{blocked}") for blocked in _BLOCKED_HOSTS
     ):
         return False
-    haystack = " ".join(
+    raw_haystack = " ".join(
         str(result.get(key) or "") for key in ("title", "description", "url")
-    ).lower()
+    )
+    haystack = raw_haystack.lower()
     normalized_entity = re.sub(r"[^a-z0-9]+", " ", entity.lower()).strip()
     normalized_haystack = re.sub(r"[^a-z0-9]+", " ", haystack).strip()
-    if normalized_entity and normalized_entity in normalized_haystack:
+    state_code = ""
+    if state.strip():
+        try:
+            state_code = normalize_state_code(state)
+        except ValueError:
+            return False
+        full_name = state_name(state_code)
+        # USPS codes that are also ordinary words (OR, IN, ME) must retain their
+        # uppercase form. A case-folded word check would accept "district in town"
+        # as evidence for Indiana or "schools or cities" as evidence for Oregon.
+        state_code_seen = (
+            re.search(
+                rf"(?<![A-Za-z]){re.escape(state_code)}(?![A-Za-z])", raw_haystack
+            )
+            is not None
+        )
+        state_seen = state_code_seen or (
+            evidence.phrase(haystack, full_name, url, field="state") is not None
+        )
+        if not state_seen:
+            return False
+    if (
+        normalized_entity
+        and evidence.phrase(haystack, normalized_entity, url, field="entity")
+        is not None
+    ):
         return True
     tokens = {
         token
@@ -321,32 +363,29 @@ def _looks_official(entity: str, state: str, result: dict[str, Any]) -> bool:
         org_word = any(
             word in normalized_haystack for word in ("school", "district", "city")
         )
-        state_seen = not state or state.lower() in normalized_haystack
-        return token in host and org_word and state_seen
+        return token in host and org_word
     return False
 
 
-def _fc_headers() -> dict[str, str]:
-    """Build Firecrawl authorization headers or fail before making a request."""
-    key = os.environ.get("FIRECRAWL_API_KEY", "")
-    if not key:
-        raise RuntimeError("FIRECRAWL_API_KEY not configured")
-    return {"Authorization": f"Bearer {key}"}
+def _search(
+    query: str,
+    limit: int = 5,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    """Search through the durable runtime Firecrawl gateway."""
+    try:
+        return firecrawl_gateway.search(query, limit, conn=conn)
+    except firecrawl_gateway.FirecrawlUnavailable as exc:
+        raise SourceUnreachable("Firecrawl search could not be completed") from exc
 
 
-def _search(query: str, limit: int = 5) -> list[dict[str, Any]]:
-    """Search Firecrawl and return its result records for bounded contact discovery."""
-    resp = requests.post(
-        FIRECRAWL_SEARCH,
-        headers=_fc_headers(),
-        json={"query": query, "limit": limit},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json().get("data", [])
-
-
-def _scrape(url: str, *, raise_on_failure: bool = False) -> str:
+def _scrape(
+    url: str,
+    *,
+    raise_on_failure: bool = False,
+    conn: sqlite3.Connection | None = None,
+) -> str:
     """Return one page's markdown while optionally preserving unavailable separately.
 
     onlyMainContent=false so the page FOOTER is kept: an org's street address,
@@ -355,20 +394,13 @@ def _scrape(url: str, *, raise_on_failure: bool = False) -> str:
     the City of Melrose address was dropped this way, leaving the Lead with no
     street)."""
     try:
-        resp = requests.post(
-            FIRECRAWL_SCRAPE,
-            headers=_fc_headers(),
-            json={"url": url, "formats": ["markdown"], "onlyMainContent": False},
-            timeout=60,
-        )
-        resp.raise_for_status()
-        markdown = (resp.json().get("data") or {}).get("markdown") or ""
+        markdown = firecrawl_gateway.scrape(url, conn=conn)
         if raise_on_failure and not markdown.strip():
             raise SourceUnreachable(
                 "official evidence page returned no readable content"
             )
         return markdown
-    except requests.RequestException as exc:
+    except firecrawl_gateway.FirecrawlUnavailable as exc:
         if raise_on_failure:
             raise SourceUnreachable("official evidence page could not be read") from exc
         return ""
@@ -382,7 +414,7 @@ def _extract(page_text: str, entity: str, source_url: str) -> ContactCandidate |
     # working enrichment past the watchdog's STUCK_AFTER so the rep was told
     # "Nothing was saved" while contacts were still landing. The chat client
     # already uses exactly these values.
-    client = Anthropic(timeout=60.0, max_retries=2)
+    client = Anthropic(**anthropic_client_options())
     titles = _titles_for(entity)
     prompt = (
         f'Below is a page from the website of (or about) "{entity}". Find the best '
@@ -407,12 +439,19 @@ def _extract(page_text: str, entity: str, source_url: str) -> ContactCandidate |
 
     email = str(data.get("email") or "").strip()
     name = str(data.get("name") or "").strip()
-    if not verify_on_page(page_text, email, name):
+    field_evidence = _contact_identity_evidence(page_text, email, name, source_url)
+    if not field_evidence:
         return None  # THE GATE said no — model claim not backed by the page
     proposed_title = str(data.get("title") or "").strip()
     proposed_phone = str(data.get("phone") or "").strip()
-    title = proposed_title if _text_field_on_page(page_text, proposed_title) else ""
-    phone = proposed_phone if _phone_on_page(page_text, proposed_phone) else ""
+    title_match = evidence.phrase(page_text, proposed_title, source_url, field="title")
+    phone_match = evidence.phone(page_text, proposed_phone, source_url)
+    title = proposed_title if title_match is not None else ""
+    phone = proposed_phone if phone_match is not None else ""
+    if title_match is not None:
+        field_evidence["title"] = title_match
+    if phone_match is not None:
+        field_evidence["phone"] = phone_match
     confidence = (
         "high" if title and any(t in title.lower() for t in titles) else "medium"
     )
@@ -424,12 +463,7 @@ def _extract(page_text: str, entity: str, source_url: str) -> ContactCandidate |
         source_url=source_url,
         confidence=confidence,
         official_domain=_host(source_url),
-        field_evidence={
-            "name": True,
-            "email": True,
-            "title": bool(title),
-            "phone": bool(phone),
-        },
+        field_evidence=field_evidence,
     )
 
 
@@ -482,7 +516,7 @@ def find_contact(
         query = angle.format(entity=entity, state=state)
         try:
             results = _search(query, limit=4)
-        except (requests.RequestException, RuntimeError):
+        except SourceUnreachable:
             continue
         reached_search = True
         for r in results:
@@ -582,8 +616,8 @@ def linkedin_person(
     is_city = _org_kind(entity) == "city"
     try:
         results = _search(query, limit=5)
-    except (requests.RequestException, RuntimeError):
-        return None
+    except SourceUnreachable as exc:
+        raise SourceUnreachable("LinkedIn search could not be completed") from exc
     for r in results:
         url = r.get("url") or ""
         if "linkedin.com/in/" not in url:

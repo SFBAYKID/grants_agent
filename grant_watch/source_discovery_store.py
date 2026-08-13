@@ -53,6 +53,8 @@ TRANSPORT_OUTCOMES = frozenset(
         "malformed_response",
         "in_flight",
         "indeterminate",
+        "account_unavailable",
+        "gateway_failure",
     }
 )
 UTC_TIMESTAMP_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
@@ -418,7 +420,11 @@ def validate_checkpoint(checkpoint: DiscoveryCheckpoint) -> None:
                     attempt.http_status
                     or not attempt.retryable
                     or attempt.systemic
-                    or attempt.error_code != "process_interrupted_after_attempt_start"
+                    or attempt.error_code
+                    not in {
+                        "process_interrupted_after_attempt_start",
+                        "account_request_indeterminate",
+                    }
                     or attempt.sanitized_error != attempt.error_code
                 ):
                     raise ValueError(
@@ -433,7 +439,9 @@ def validate_checkpoint(checkpoint: DiscoveryCheckpoint) -> None:
             ):
                 raise ValueError("timeout outcome flags are invalid")
             elif attempt.outcome == "rate_limited" and (
-                attempt.http_status != 429 or not attempt.retryable or attempt.systemic
+                attempt.http_status not in {0, 429}
+                or not attempt.retryable
+                or attempt.systemic
             ):
                 raise ValueError("rate-limit outcome flags are invalid")
             elif attempt.outcome in {"oversized_response", "malformed_response"} and (

@@ -12,7 +12,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from ..enrich import organization_profile, salesforce_activity, salesforce_sync
+from ..enrich import (
+    firecrawl_gateway,
+    organization_profile,
+    salesforce_activity,
+    salesforce_sync,
+)
 from . import contact_evidence, paid_calls, policy, preparation
 
 ActivityLookup = Callable[[str, frozenset[str]], salesforce_activity.ActivityEvidence]
@@ -56,9 +61,16 @@ def _needs_website(conn: sqlite3.Connection, lead_id: int) -> bool:
     policy is a separate, deliberate decision, not an accident of scheduling.
     """
     row = conn.execute(
-        "SELECT org_profile_status FROM leads WHERE id=?", (lead_id,)
+        """SELECT org_profile_status,nces_website_status,
+                  EXISTS(SELECT 1 FROM organization_field_evidence e
+                         WHERE e.lead_id=leads.id AND e.status='current') AS has_evidence
+           FROM leads WHERE id=?""",
+        (lead_id,),
     ).fetchone()
-    return row is not None and not str(row["org_profile_status"] or "")
+    if row is None or str(row["nces_website_status"] or "") == "verified":
+        return False
+    status = str(row["org_profile_status"] or "")
+    return not status or (status == "found" and not bool(row["has_evidence"]))
 
 
 @dataclass(frozen=True)
@@ -134,7 +146,8 @@ def run(
         # what would be a paid Firecrawl SEARCH into a direct scrape of a known host.
         if _needs_website(conn, lead_id):
             try:
-                website_finder(conn, lead_id)
+                with firecrawl_gateway.allow_indeterminate_retry(retry_indeterminate):
+                    website_finder(conn, lead_id)
                 counts["website_checked"] += 1
                 counts["writes"] += 1
             except Exception:  # noqa: BLE001 - a dead site cannot abort the batch

@@ -301,7 +301,7 @@ def choose_email(contact: sqlite3.Row, lead: sqlite3.Row) -> tuple[str, str]:
     if contact["email"]:
         email = str(contact["email"])
         return email, "general" if email_is_general(email) else "direct"
-    general = _lead_value(lead, "org_general_email")
+    general = _lead_value(lead, "evidenced_org_general_email")
     if general:
         return general, "general"
     return "", ""
@@ -326,9 +326,7 @@ def choose_phone(contact: sqlite3.Row, lead: sqlite3.Row) -> tuple[str, str]:
     # the state education department into five Salesforce Leads. This is a different
     # surface (the contact-record payloads) with identical shape, found by the
     # guardian while checking the first fix.
-    if _lead_value(lead, "org_profile_status") != "found":
-        return "", ""
-    org_phone = _lead_value(lead, "org_phone")
+    org_phone = _lead_value(lead, "evidenced_org_phone")
     if org_phone:
         return org_phone, "org_general"
     return "", ""
@@ -360,7 +358,7 @@ def organization_fields(lead: sqlite3.Row) -> dict[str, object]:
     stays absent rather than becoming an empty string that looks filled in.
     """
     payload: dict[str, object] = {}
-    state = str(lead["state"] or "") or _lead_value(lead, "org_state")
+    state = str(lead["state"] or "") or _lead_value(lead, "evidenced_org_state")
     if state:
         payload["State"] = state
 
@@ -376,18 +374,18 @@ def organization_fields(lead: sqlite3.Row) -> dict[str, object]:
     # closed to the tool forever and a later run after a fix skips it. The tool that
     # makes the error can never correct it — only a person can. So the profile's own
     # verdict gates every value derived from it.
-    profile_found = _lead_value(lead, "org_profile_status") == "found"
-    org_city = _lead_value(lead, "org_city") if profile_found else ""
+    org_city = _lead_value(lead, "evidenced_org_city")
     city = org_city or str(lead["location_city"] or "")
     if city:
         payload["City"] = city
-    if profile_found:
-        if _lead_value(lead, "org_street"):
-            payload["Street"] = _lead_value(lead, "org_street")
-        if _lead_value(lead, "org_postal_code"):
-            payload["PostalCode"] = _lead_value(lead, "org_postal_code")
-        if _lead_value(lead, "org_website"):
-            payload["Website"] = _lead_value(lead, "org_website")
+    if _lead_value(lead, "evidenced_org_street"):
+        payload["Street"] = _lead_value(lead, "evidenced_org_street")
+    if _lead_value(lead, "evidenced_org_postal_code"):
+        payload["PostalCode"] = _lead_value(lead, "evidenced_org_postal_code")
+    if _lead_value(lead, "org_profile_status") == "found":
+        nces_website = _lead_value(lead, "nces_website")
+        if nces_website and _lead_value(lead, "nces_website_status") == "verified":
+            payload["Website"] = nces_website
     enrollment = lead["enrollment"]
     if enrollment not in (None, "", 0):
         payload["Number_of_Students__c"] = int(enrollment)

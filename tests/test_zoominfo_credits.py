@@ -19,12 +19,13 @@ import pytest
 
 from grant_watch import db
 from grant_watch.enrich import zoominfo_credits as credits
+from tests.paid_provider_support import configure_zoominfo_runtime
 
 
 @pytest.fixture()
 def conn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Connection:
     """A migrated database with a 10-credit monthly ceiling configured."""
-    monkeypatch.setenv("ZOOMINFO_MONTHLY_CREDITS", "10")
+    configure_zoominfo_runtime(tmp_path, monkeypatch, limit=10)
     return db.connect(tmp_path / "credits.db")
 
 
@@ -34,6 +35,15 @@ def test_no_spend_is_authorized_without_a_configured_limit(
     """An unset budget refuses outright rather than defaulting to "unlimited"."""
     monkeypatch.delenv("ZOOMINFO_MONTHLY_CREDITS", raising=False)
     with pytest.raises(credits.BudgetNotConfigured):
+        credits.reserve(conn, request_key="k", credits=1)
+
+
+def test_no_spend_is_authorized_without_a_shared_ledger_path(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A local app DB must not silently become an account-wide credit ledger."""
+    monkeypatch.delenv("ZOOMINFO_CREDIT_LEDGER_PATH", raising=False)
+    with pytest.raises(credits.BudgetNotConfigured, match="LEDGER_PATH"):
         credits.reserve(conn, request_key="k", credits=1)
 
 
@@ -70,7 +80,7 @@ def test_two_concurrent_connections_cannot_both_win_the_last_credits(
     Exactly one may succeed — the conditional UPDATE, not the read, is what grants
     permission.
     """
-    monkeypatch.setenv("ZOOMINFO_MONTHLY_CREDITS", "10")
+    configure_zoominfo_runtime(tmp_path, monkeypatch, limit=10)
     path = tmp_path / "race.db"
     first = db.connect(path)
     second = db.connect(path)
@@ -97,11 +107,46 @@ def test_settling_refunds_only_what_the_vendor_proved_was_free(
     assert credits.remaining(conn) == 1
     credits.settle(conn, spend_id, billed=5)
     assert credits.remaining(conn) == 5
-    row = conn.execute(
+    ledger = credits.connect_ledger()
+    row = ledger.execute(
         "SELECT state,billed_credits FROM zoominfo_credit_spends WHERE id=?",
         (spend_id,),
     ).fetchone()
     assert (row["state"], row["billed_credits"]) == ("settled", 5)
+    ledger.close()
+
+
+def test_repeated_settlement_is_idempotent_and_cannot_manufacture_credits(
+    conn: sqlite3.Connection,
+) -> None:
+    """Replaying reconciliation never applies the same refund twice."""
+    spend_id = credits.reserve(conn, request_key="pull-idempotent", credits=9)
+    credits.settle(conn, spend_id, billed=5)
+    credits.settle(conn, spend_id, billed=5)
+    assert credits.usage(conn) == (5, 10)
+    with pytest.raises(ValueError, match="cannot be reconciled twice"):
+        credits.settle(conn, spend_id, billed=4)
+    assert credits.usage(conn) == (5, 10)
+
+
+def test_settlement_cannot_bill_beyond_the_approved_set(
+    conn: sqlite3.Connection,
+) -> None:
+    """A malformed vendor count stays reserved instead of exceeding consent."""
+    spend_id = credits.reserve(conn, request_key="pull-overbilled", credits=2)
+    with pytest.raises(ValueError, match="approved reservation"):
+        credits.settle(conn, spend_id, billed=3)
+    assert credits.usage(conn) == (2, 10)
+    ledger = credits.connect_ledger()
+    try:
+        assert (
+            ledger.execute(
+                "SELECT state FROM zoominfo_credit_spends WHERE id=?", (spend_id,)
+            ).fetchone()["state"]
+            == "reserved"
+        )
+    finally:
+        ledger.close()
 
 
 def test_an_indeterminate_attempt_stays_counted_against_the_budget(
@@ -115,12 +160,14 @@ def test_an_indeterminate_attempt_stays_counted_against_the_budget(
     spend_id = credits.reserve(conn, request_key="pull-1", credits=6)
     credits.mark_indeterminate(conn, spend_id, "ReadTimeout")
     assert credits.remaining(conn) == 4
+    ledger = credits.connect_ledger()
     assert (
-        conn.execute(
+        ledger.execute(
             "SELECT state FROM zoominfo_credit_spends WHERE id=?", (spend_id,)
         ).fetchone()["state"]
         == "indeterminate"
     )
+    ledger.close()
 
 
 def test_a_completed_pull_cannot_be_repeated(conn: sqlite3.Connection) -> None:
@@ -149,6 +196,23 @@ def test_release_returns_credits_only_for_a_call_that_never_happened(
     # Releasing twice must not manufacture credits.
     credits.release(conn, spend_id, "again")
     assert credits.remaining(conn) == 10
+
+
+def test_two_application_databases_share_one_vendor_account_pool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The authorization boundary is the vendor account, not an app DB file."""
+    configure_zoominfo_runtime(tmp_path, monkeypatch, limit=10)
+    first = db.connect(tmp_path / "app-a.db")
+    second = db.connect(tmp_path / "app-b.db")
+
+    credits.reserve(first, request_key="app-a", credits=8)
+    assert credits.remaining(second) == 2
+    with pytest.raises(credits.BudgetExhausted):
+        credits.reserve(second, request_key="app-b", credits=3)
+
+    first.close()
+    second.close()
 
 
 def test_spend_wrapper_settles_on_success_and_holds_on_failure(
@@ -182,7 +246,15 @@ def test_migration_backfills_provenance_from_existing_status(
     backfill only makes that machine-checkable. Rows carrying no contact fact stay
     NULL rather than being assigned a provenance they never had.
     """
-    conn = db.connect(tmp_path / "p.db")
+    from grant_watch import migrations
+
+    conn = sqlite3.connect(tmp_path / "p.db")
+    conn.row_factory = sqlite3.Row
+    migrations._run_migrations(
+        conn,
+        migrations.MIGRATIONS[:28],
+        lambda: "2026-08-01T00:00:00+00:00",
+    )
     conn.execute(
         "INSERT INTO leads (source,source_item_id,entity_name,detail_url) "
         "VALUES ('s','1','X','u')"
@@ -194,7 +266,7 @@ def test_migration_backfills_provenance_from_existing_status(
             (lead_id, f"p-{status}", status),
         )
     conn.commit()
-    # Re-run the migration body directly: it is idempotent and only fills NULLs.
+    # Apply the historical migration at its real boundary, before v46 quarantine.
     from grant_watch.migrations_zoominfo import migration_29_vendor_contacts_and_credits
 
     migration_29_vendor_contacts_and_credits(conn)

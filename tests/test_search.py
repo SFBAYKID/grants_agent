@@ -20,6 +20,7 @@ from grant_watch.models import (
 from grant_watch.slack import tools
 from grant_watch.slack.contact_enrichment import ContactOutcome
 from grant_watch.slack.search import MAX_ENRICH_ROWS, MAX_EXPORT_ROWS, search_leads
+from tests.contact_support import verified_contact_evidence
 
 
 def _insert(
@@ -897,12 +898,25 @@ def test_lead_stats_can_count_leads_by_whether_they_have_a_contact(
     path = _bulk_db(tmp_path, 4)
     conn = db.connect(path)
     ids = [int(r[0]) for r in conn.execute("SELECT id FROM leads ORDER BY id")]
+    source_url = "https://e.test/directory"
+    db.save_contact(
+        conn,
+        ids[0],
+        "Alpha Person",
+        "",
+        "alpha.person@e.test",
+        "",
+        source_url,
+        "high",
+        field_evidence=verified_contact_evidence(
+            "Alpha Person", "alpha.person@e.test", source_url
+        ),
+    )
     conn.executemany(
         """INSERT INTO contacts (lead_id,name,title,email,phone,source_url,
                                  confidence,contact_status,provenance)
            VALUES (?,?,'','','','https://e.test','high',?,'page_verified')""",
         [
-            (ids[0], "A", "verified"),
             (ids[0], "B", "linkedin_only"),  # best-of wins, not row order
             (ids[1], "C", "linkedin_only"),
             (ids[2], "D", "not_found"),

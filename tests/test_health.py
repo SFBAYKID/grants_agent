@@ -57,3 +57,38 @@ def test_size_and_nested_tree_audits_detect_repository_debris(tmp_path: Path) ->
 def test_current_repository_passes_project_specific_health_gate() -> None:
     """The checked-in working tree satisfies documentation and debris rules."""
     assert health.health_issues() == []
+
+
+def test_enabled_rich_actions_require_an_exact_workspace_identity() -> None:
+    """Health fails before an enabled card can publish an unusable draft button."""
+    assert health.runtime_configuration_issues(
+        {"GRANT_RICH_CARD_ENABLED": "1", "SLACK_WORKSPACE_ID": ""}
+    )
+    assert (
+        health.runtime_configuration_issues(
+            {"GRANT_RICH_CARD_ENABLED": "1", "SLACK_WORKSPACE_ID": "T123"}
+        )
+        == []
+    )
+
+
+def test_positive_zoominfo_budget_requires_an_absolute_shared_ledger() -> None:
+    """Health exposes an unsafe paid cutover before runtime reaches a pull."""
+    assert health.runtime_configuration_issues(
+        {"ZOOMINFO_MONTHLY_CREDITS": "1000", "ZOOMINFO_CREDIT_LEDGER_PATH": ""}
+    )
+    assert health.runtime_configuration_issues(
+        {
+            "ZOOMINFO_MONTHLY_CREDITS": "1000",
+            "ZOOMINFO_CREDIT_LEDGER_PATH": "relative.db",
+        }
+    )
+    assert (
+        health.runtime_configuration_issues(
+            {
+                "ZOOMINFO_MONTHLY_CREDITS": "1000",
+                "ZOOMINFO_CREDIT_LEDGER_PATH": "/private/ledger.db",
+            }
+        )
+        == []
+    )

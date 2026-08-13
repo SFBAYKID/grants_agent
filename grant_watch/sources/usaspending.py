@@ -22,6 +22,7 @@ from ..models import (
     RawItem,
     VerificationStatus,
 )
+from ..state_codes import US_STATE_NAMES
 from .base import polite_post
 
 API_URL = "https://api.usaspending.gov/api/v2/search/spending_by_award/"
@@ -33,60 +34,9 @@ SVPP_CFDAS = ("16.071", "16.710")
 _SVPP_RE = re.compile(r"school violence|SVPP", re.IGNORECASE)
 
 # Nationwide by default; GRANT_WATCH_STATES can narrow a local/test run without code
-# changes (for example "CA,OR,WA"). DC is included; territories can be configured.
-ALL_STATES = (
-    "AL",
-    "AK",
-    "AZ",
-    "AR",
-    "CA",
-    "CO",
-    "CT",
-    "DE",
-    "FL",
-    "GA",
-    "HI",
-    "ID",
-    "IL",
-    "IN",
-    "IA",
-    "KS",
-    "KY",
-    "LA",
-    "ME",
-    "MD",
-    "MA",
-    "MI",
-    "MN",
-    "MS",
-    "MO",
-    "MT",
-    "NE",
-    "NV",
-    "NH",
-    "NJ",
-    "NM",
-    "NY",
-    "NC",
-    "ND",
-    "OH",
-    "OK",
-    "OR",
-    "PA",
-    "RI",
-    "SC",
-    "SD",
-    "TN",
-    "TX",
-    "UT",
-    "VT",
-    "VA",
-    "WA",
-    "WV",
-    "WI",
-    "WY",
-    "DC",
-)
+# changes (for example "CA,OR,WA"). The reviewed vocabulary is 50 states plus DC;
+# territories require a separate policy change instead of shape-only acceptance.
+ALL_STATES = tuple(US_STATE_NAMES)
 NSGP_CFDA = "97.008"
 
 TIME_FLOOR = "2018-10-01"  # keep queries bounded; freshness scoring discards old anyway
@@ -102,7 +52,7 @@ def watch_states() -> tuple[str, ...]:
     states = tuple(
         dict.fromkeys(part.strip().upper() for part in raw.split(",") if part.strip())
     )
-    invalid = [state for state in states if not re.fullmatch(r"[A-Z]{2}", state)]
+    invalid = [state for state in states if state not in US_STATE_NAMES]
     if invalid:
         raise ValueError(f"invalid GRANT_WATCH_STATES codes: {', '.join(invalid)}")
     return states

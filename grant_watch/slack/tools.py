@@ -60,21 +60,24 @@ TOOL_SCHEMAS: list[dict[str, Any]] = _TOOL_SCHEMAS
 
 def web_search(query: str, on_progress: Progress | None = None) -> str:
     """Firecrawl search -> compact 'title — url — snippet' lines (max 5)."""
+    from ..enrich import firecrawl_gateway
+
     (on_progress or _NOOP)("Searching the web")
     key = os.environ.get("FIRECRAWL_API_KEY", "")
     if not key:
         return "ERROR: no search key configured — say you can't search right now."
+    conn = db.connect()
     try:
-        resp = requests.post(
-            "https://api.firecrawl.dev/v1/search",
-            headers={"Authorization": f"Bearer {key}"},
-            json={"query": query, "limit": 5},
-            timeout=25,
-        )
-        resp.raise_for_status()
-        results = resp.json().get("data", [])
+        with firecrawl_gateway.bind_connection(conn, "slack_web_search"):
+            results = firecrawl_gateway.search(query, 5, conn=conn)
+    except firecrawl_gateway.FirecrawlBudgetNotConfigured as exc:
+        return f"ERROR: search budget is not configured ({exc})."
+    except firecrawl_gateway.FirecrawlBudgetExhausted:
+        return "ERROR: the Firecrawl search budget is exhausted."
     except Exception as exc:
         return f"ERROR: search failed ({type(exc).__name__}) — say so honestly."
+    finally:
+        conn.close()
     if not results:
         return "No results found."
     lines = []
@@ -170,15 +173,20 @@ def resolve_lead_by_name(
         )
     )
     if state:
-        narrowed = [r for r in rows if str(r["state"] or "").upper() == state.upper()]
-        rows = narrowed or rows
+        requested_state = state.strip().upper()
+        rows = [
+            row
+            for row in rows
+            if str(row["state"] or "").strip().upper() == requested_state
+        ]
     ids = {int(r["id"]) for r in rows}
     if len(ids) == 1:
         return ids.pop()
     if not rows:
         return (
-            f"ERROR: no Grant lead is named {entity!r} — run a search first so the "
-            "lead exists, then ask again."
+            f"ERROR: no Grant lead is named {entity!r}"
+            + (f" in {state.strip().upper()}" if state.strip() else "")
+            + " — run a search first so the lead exists, then ask again."
         )
     listing = ", ".join(
         f"#{r['id']} {r['entity_name']} ({r['state']})" for r in rows[:5]
@@ -203,9 +211,22 @@ def find_contact(
         if isinstance(resolved, str):
             return resolved
         lead_id = resolved
-    from ..enrich.organization_profile import org_enrichment_summary
+    from ..enrich import firecrawl_gateway
 
-    outcome = enrich_lead_contact(conn, lead_id, on_progress)
+    try:
+        outcome = enrich_lead_contact(
+            conn, lead_id, on_progress, include_org_profile=True
+        )
+    except firecrawl_gateway.FirecrawlBudgetNotConfigured:
+        return (
+            "I didn't check this lead because the paid Firecrawl runtime budget "
+            "is not configured; nothing was recorded."
+        )
+    except firecrawl_gateway.FirecrawlBudgetExhausted:
+        return (
+            "I stopped before another paid lookup because the Firecrawl call budget "
+            "was reached; this is not a no-contact result."
+        )
     if outcome.status == "unreachable":
         return (
             "I couldn't reach their website or search to verify a contact right now — "
@@ -215,7 +236,7 @@ def find_contact(
     # contact, so surface it in EVERY reachable outcome — not just the verified one.
     # Live bug 2026-07-18: a LinkedIn-only city result said "no mailing address" even
     # though the address (e.g. 200 Main Street, Salmon) was already stored.
-    org_line = org_enrichment_summary(conn, lead_id, on_progress)
+    org_line = outcome.org_summary
     if outcome.status == "verified":
         phone = f" / {outcome.phone}" if outcome.phone else ""
         source = f" (found on {outcome.source_url})" if outcome.source_url else ""

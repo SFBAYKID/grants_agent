@@ -91,19 +91,10 @@ def test_an_ambiguous_send_does_not_bury_the_lower_tiers(tmp_path: Path) -> None
     assert choice[0] == "rfp"
 
 
-def test_inferred_state_never_tags_a_rep(tmp_path: Path) -> None:
-    """C2 — `rfp_aggregator._row_state` derives state by searching the row's prose for
-    five state NAMES, so 'Oregon City Schools, Ohio' reads as OR and '1600 Pennsylvania
-    Avenue NW' as PA. Before territory tagging that was a wrong two-letter label; now it
-    would send a rep's phone a notification asserting they own someone else's deal."""
-    conn = db.connect(tmp_path / "t.db")
-    mk_rfp(conn, iid="OHIO", entity="Oregon City Schools", end="2031-12-31")
-    conn.execute("UPDATE leads SET state='OR' WHERE source_item_id='OHIO'")
-    conn.commit()
-    client = SlackClient()
-    assert drip.run_drip(client, "C1", conn, force=True).startswith("posted")
-    text = str(client.last_kwargs["text"])
-    assert "<@" not in text, f"an inferred state tagged a rep: {text}"
+def test_inferred_state_never_tags_a_rep() -> None:
+    """Starbridge prose-derived state labels never become territory evidence."""
+    assert not territory.state_is_verified("starbridge")
+    assert territory.mention_line("OR", "starbridge") == ""
 
 
 def test_state_provenance_gate_still_allows_verified_sources() -> None:
@@ -385,12 +376,11 @@ def test_dry_run_does_not_claim_a_quarantine_happened(tmp_path: Path) -> None:
     assert conn.execute("SELECT COUNT(*) FROM notification_outbox").fetchone()[0] == 0
 
 
-def test_assumed_provenance_sources_fail_closed() -> None:
-    """`usaspending-subaward:` and `sam.gov` state semantics are ASSUMED, not evidenced,
-    so they must post untagged until someone proves them."""
+def test_state_provenance_sources_fail_closed_until_the_parser_proves_them() -> None:
+    """Subaward state remains assumed; SAM now requires exact response evidence."""
     assert not territory.state_is_verified("usaspending-subaward:97.008")
-    assert not territory.state_is_verified("sam.gov")
-    assert territory.mention_line("WA", "sam.gov") == ""
+    assert territory.state_is_verified("sam.gov")
+    assert "<@U01E908206M>" in territory.mention_line("WA", "sam.gov")
     # ca-grants-portal DOES reach production via bulletin_candidates and stays verified.
     assert territory.state_is_verified("ca-grants-portal")
 

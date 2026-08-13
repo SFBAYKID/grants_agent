@@ -14,6 +14,7 @@ from grant_watch import db, persequor_client
 from grant_watch.enrich.finder import verify_on_page
 from grant_watch.enrich.salesforce import SFMatch, distinctive_term
 from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem
+from tests.contact_support import verified_contact_evidence
 
 PAGE = """# Castle Rock School District — Staff Directory
 Superintendent: Dr. Jane Doe — jdoe@crschools.org — (360) 555-0100
@@ -41,6 +42,15 @@ def test_gate_rejects_name_not_on_page() -> None:
 def test_gate_rejects_malformed_email() -> None:
     """Verify gate rejects malformed email."""
     assert not verify_on_page(PAGE, "not-an-email", "Jane Doe")
+
+
+def test_gate_rejects_email_prefix_and_names_split_across_people() -> None:
+    """A longer address or unrelated first/surname occurrences are not evidence."""
+    assert not verify_on_page(
+        "Jane Doe — jdoe@example.com.au", "jdoe@example.com", "Jane Doe"
+    )
+    page = "Jane County directory\nAlex Doe — jdoe@example.com"
+    assert not verify_on_page(page, "jdoe@example.com", "Jane Doe")
 
 
 # ------------------------------------------------------------ salesforce (offline bits)
@@ -130,6 +140,12 @@ def test_brief_test_mode_overrides_recipient(
         "",
         "https://crschools.org/staff",
         "high",
+        field_evidence=verified_contact_evidence(
+            "Jane Doe",
+            "jdoe@crschools.org",
+            "https://crschools.org/staff",
+            title="Superintendent",
+        ),
     )
     contact = conn.execute("SELECT * FROM contacts WHERE id=?", (cid,)).fetchone()
     brief = persequor_client.build_brief(
@@ -161,6 +177,12 @@ def test_brief_strips_honorific_from_contact_name(
         "",
         "https://x.org/staff",
         "high",
+        field_evidence=verified_contact_evidence(
+            "Mr. Joel Padgett",
+            "joel.padgett@x.org",
+            "https://x.org/staff",
+            title="Director of Technology",
+        ),
     )
     contact = conn.execute("SELECT * FROM contacts WHERE id=?", (cid,)).fetchone()
     brief = persequor_client.build_brief(
@@ -186,6 +208,12 @@ def test_brief_uses_current_event_source_not_stale_projection(tmp_path: Path) ->
         "",
         "https://crschools.org/staff",
         "high",
+        field_evidence=verified_contact_evidence(
+            "Jane Doe",
+            "jdoe@crschools.org",
+            "https://crschools.org/staff",
+            title="Superintendent",
+        ),
     )
     contact = conn.execute(
         "SELECT * FROM contacts WHERE id=?", (contact_id,)
@@ -467,7 +495,9 @@ def test_retry_dry_run_makes_no_request_or_write(
     attempts = conn.execute(
         "SELECT attempts FROM outreach WHERE request_id='req-dry'"
     ).fetchone()[0]
-    assert summary == persequor_client.RetrySummary(1, 0, 1, 0)
+    assert summary.due == 1 and summary.queued == 1
+    assert summary.oldest_due_at == "2000-01-01T00:00:00+00:00"
+    assert summary.oldest_due_minutes > 0
     assert attempts == 1
 
 

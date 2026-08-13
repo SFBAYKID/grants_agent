@@ -166,37 +166,6 @@ class RawItem:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-@dataclass(frozen=True)
-class SourceObservation:
-    """Immutable normalized snapshot of one source item version."""
-
-    source: str
-    source_item_id: str
-    payload_hash: str
-    raw_json: str
-    source_url: str
-    source_locator: str
-    verification_status: VerificationStatus
-
-
-@dataclass(frozen=True)
-class FundingEvent:
-    """One source-supported funding event safe for ranking and wording."""
-
-    event_type: FundingEventType
-    occurred_on: str
-    date_precision: DatePrecision
-    amount: float | None
-    funded_scope: str
-    eligible_scope: str
-    application_portal: str
-    evidence_excerpt: str
-    source_url: str
-    source_locator: str
-    verification_status: VerificationStatus
-    backfill: bool = False
-
-
 @dataclass
 class Lead:
     """A graded RawItem, ready for persistence. Mirrors the `leads` table (db.py)."""

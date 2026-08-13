@@ -28,11 +28,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from .. import db
 from ..presentation import strip_leading_honorifics
-
-# Contact rows Grant may name in an offer to draft outreach. EXACTLY what
-# `grant._request_outreach` will accept — see the module docstring.
-DRAFTABLE_STATUS = "verified"
 
 
 @dataclass(frozen=True)
@@ -62,7 +59,7 @@ def best_offer(conn: sqlite3.Connection, lead_id: int) -> Offer:
     try:
         rows = list(
             conn.execute(
-                "SELECT name,title,email,contact_status FROM contacts "
+                "SELECT * FROM contacts "
                 "WHERE lead_id=? ORDER BY "
                 "CASE contact_status WHEN 'verified' THEN 0 ELSE 1 END, id",
                 (lead_id,),
@@ -78,7 +75,7 @@ def best_offer(conn: sqlite3.Connection, lead_id: int) -> Offer:
         if (
             name
             and str(row["email"] or "").strip()
-            and str(row["contact_status"] or "") == DRAFTABLE_STATUS
+            and db.contact_is_page_verified(row)
         ):
             return Offer(
                 "draft_intro",

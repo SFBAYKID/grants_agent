@@ -162,3 +162,16 @@ def test_startup_requires_configured_channel(
     monkeypatch.delenv("SLACK_CHANNEL_ID", raising=False)
     with pytest.raises(RuntimeError, match="must name at least one channel"):
         grant.main()
+
+
+def test_startup_rejects_enabled_but_unreachable_rich_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The listener cannot publish a button whose workspace identity is unknown."""
+    monkeypatch.setattr(grant, "load_dotenv", lambda: None)
+    monkeypatch.setenv("SLACK_CHANNEL_ID", "C123")
+    monkeypatch.setenv("GRANT_RICH_CARD_ENABLED", "1")
+    monkeypatch.delenv("SLACK_WORKSPACE_ID", raising=False)
+    monkeypatch.setenv("ZOOMINFO_MONTHLY_CREDITS", "0")
+    with pytest.raises(RuntimeError, match="SLACK_WORKSPACE_ID"):
+        grant.main()

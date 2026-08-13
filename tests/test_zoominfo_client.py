@@ -7,17 +7,20 @@ honesty and cost invariants, not vendor round-trips — an outage must never rea
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 import requests
 
 from grant_watch.enrich import zoominfo
+from tests.paid_provider_support import configure_zoominfo_runtime
 
 
 @pytest.fixture(autouse=True)
-def _reset_token_cache() -> None:
-    """Clear the process-local token cache so tests cannot leak state into each other."""
+def _reset_token_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear cached auth and install one test-local host/account authority."""
+    configure_zoominfo_runtime(tmp_path, monkeypatch, limit=50)
     zoominfo._TOKEN_CACHE.access_token = ""
     zoominfo._TOKEN_CACHE.expires_at = 0.0
     zoominfo._TOKEN_CACHE.credential_scope = ""
@@ -276,7 +279,21 @@ def test_quote_counts_exactly_what_a_pull_would_cost() -> None:
 def test_enrich_refuses_more_than_the_vendor_batch_ceiling() -> None:
     """Over-sized batches are a 400 upstream; refuse locally before spending anything."""
     with pytest.raises(ValueError, match="at most 25"):
-        zoominfo.enrich_contacts([str(n) for n in range(26)])
+        zoominfo.enrich_contacts([str(n) for n in range(1, 27)])
+
+
+def test_enrich_rejects_non_vendor_ids_before_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only positive decimal IDs accepted by the vendor may reach HTTP."""
+
+    def explode(*args: Any, **kwargs: Any) -> None:
+        """Fail if malformed input reaches authentication or transport."""
+        raise AssertionError("invalid ID reached HTTP")
+
+    monkeypatch.setattr(zoominfo.requests, "post", explode)
+    with pytest.raises(ValueError, match="invalid ZoomInfo person ID"):
+        zoominfo.enrich_contacts(["abc"])
 
 
 def test_enrich_of_nothing_makes_no_request_at_all(
@@ -290,6 +307,29 @@ def test_enrich_of_nothing_makes_no_request_at_all(
 
     monkeypatch.setattr(zoominfo.requests, "post", explode)
     assert zoominfo.enrich_contacts([]) == []
+
+
+@pytest.mark.parametrize("returned_ids", [["2"], ["1", "1"]])
+def test_enrich_refuses_foreign_or_duplicate_vendor_response_ids(
+    returned_ids: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreconcilable paid response cannot be stored or treated as a refund."""
+    monkeypatch.setattr(
+        zoominfo,
+        "_post",
+        lambda *_args, **_kwargs: {
+            "data": [
+                {
+                    "id": person_id,
+                    "attributes": {},
+                    "meta": {"matchStatus": "FULL_MATCH"},
+                }
+                for person_id in returned_ids
+            ]
+        },
+    )
+    with pytest.raises(zoominfo.ZoomInfoUnavailable, match="reconciled"):
+        zoominfo.enrich_contacts(["1"])
 
 
 def test_billable_records_counts_only_full_matches() -> None:

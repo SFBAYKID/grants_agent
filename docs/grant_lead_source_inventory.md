@@ -1,13 +1,14 @@
 # Integrated and High-Value Grant-Lead Sources — Monarch Connected
 
-Compiled through 2026-07-15. This narrative covers integrated sources and high-value follow-ups.
+Updated through 2026-08-12. This narrative covers integrated sources and high-value follow-ups;
+historical live-check dates remain attached to the exact behavior that was exercised.
 The canonical nationwide candidate catalog and separate access lists live in
 `docs/source_inventory/`; discovery rows there are not automatically live integrations.
 Lead definitions: **GOLD** = entity just received security funding. **SILVER** = entity is applying / has an open RFP.
 
 ---
 
-## TIER 1 — VERIFIED LIVE (live data pulled in recorded sessions)
+## TIER 1 — INTEGRATED / HISTORICALLY VERIFIED LIVE
 
 ### 1. USASpending API — prime awards
 - Endpoint: POST https://api.usaspending.gov/api/v2/search/spending_by_award/ — no key
@@ -46,6 +47,8 @@ Lead definitions: **GOLD** = entity just received security funding. **SILVER** =
 - Caveats: only state agencies REQUIRED to post; districts/cities optional. Keyword scan of
   visible text found 0 security hits today (collapsed rows not checked — parse raw HTML).
   Better long-term: register as vendor w/ commodity codes → parse notification emails via Gmail.
+- Current label: parser-tested. Historical access/zero-match evidence does not prove the rewritten
+  parser against a real positive physical-security row; that remains `needs-testing`.
 
 ### 6. California Grants Portal / data.ca.gov
 - Official CKAN metadata plus daily opportunity and fiscal-year award CSVs; no key
@@ -56,18 +59,22 @@ Lead definitions: **GOLD** = entity just received security funding. **SILVER** =
 - Caveat: portal publication/update dates are provenance, not award-action dates; undated awards are
   backfill-suppressed and cannot be described as "just awarded"
 
-### 7. OregonBuys recent-bids PDF
-- Official Oregon DAS seven-day selected-bids publication; no key
+### 7. OregonBuys recent-bids PDF — disabled
+- The official Oregon DAS seven-day selected-bids publication was historically public with no key.
 - Lead type: SILVER physical-security solicitations
 - Verified 2026-07-14: PDF fetch, text/table extraction, and a truthful zero-match live dry run
-- Needs-testing: entity parsing on a live physical-security row. The broader search requires a
-  supplier session and is intentionally not automated around that boundary.
+- Current 2026-08-12 state: the published PDF URL returns 404. The poller is absent from the runtime
+  registry and the catalog records the moved/disabled state. Re-enabling requires human review of an
+  official replacement, a new fixture/failure suite, and a gated live check. The broader portal still
+  requires a supplier session and is not automated around that boundary.
 
 ### 8. NCES EDGE 2024–25 (enrichment, not a lead source)
 - Official school membership aggregation and district office city; no key
 - Verified 2026-07-14: Tustin Unified uniquely matched NCES id `0640150`, enrollment 21,220
 - Conservative behavior: exact normalized district match within one state; ambiguous names remain
-  unmatched. Statewide production coverage remains needs-testing.
+  unmatched. Local code now accepts a district website only from the exact same-state, ID-bound NCES
+  detail record and stores its provenance. Production had 340 NCES IDs and zero websites at the
+  2026-08-12 read-only audit, so population/live card reachability remain `needs-testing`.
 
 ---
 
@@ -95,7 +102,11 @@ Lead definitions: **GOLD** = entity just received security funding. **SILVER** =
 ### 12. SAM.gov Opportunities API
 - Lead type: SILVER (federal-side RFPs; some school/city solicitations w/ federal nexus)
 - Verified: keyless requests are rejected and Chase's configured key completed a live poll.
-- Verified offline: parser and pagination behavior are covered by recorded fixtures and tests.
+- Verified offline: parser/pagination now require an exact requested place state, reviewed
+  solicitation type, explicit active state, future deadline, physical-security title, and a
+  notice-ID-bound HTTPS `sam.gov` UI link. Wrong-state, closed, cyber, guard-service, malformed, and
+  foreign-link fixtures fail closed.
+- Needs-testing: one current positive live record through these stricter gates.
 - Needs-testing: Assistance Listings is cataloged but has no runtime poller; operational rate-limit
   behavior should be monitored rather than assumed from documentation.
 
@@ -122,6 +133,9 @@ Lead definitions: **GOLD** = entity just received security funding. **SILVER** =
 - PA Bonfire: Allegheny County's official page was verified live and requires supplier registration.
 - National: OpenGov Procurement, Public Purchase, DemandStar, and Bonfire still require per-agency
   access characterization; one verified agency page does not prove nationwide portal access.
+- Starbridge is cataloged separately as a public third-party RFP aggregator. Its fixture parser is
+  research-only and emits `needs-testing`; it is not in the runtime poller registry. Migration 44
+  renames/downgrades historical Starbridge rows that once shared the verified `rfp` namespace.
 
 ### 16. County procurement coverage queue (discovery, not runtime pollers)
 - Verified 2026-07-15: the pinned Census Gazetteer tracks all 3,144 county-equivalents in the 50 states

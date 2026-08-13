@@ -24,6 +24,7 @@ import re
 import sys
 
 from .presentation import state_display_name
+from .state_codes import US_STATE_CODES
 
 # Slack ids are `U`/`W` followed by uppercase alphanumerics. Validated rather than
 # trusted so a typo in .env can never emit `<@garbage>` — or anything injectable —
@@ -55,7 +56,7 @@ def _parse_override(raw: str) -> dict[str, str]:
             continue
         state, sep, user = pair.partition("=")
         state, user = state.strip().upper(), user.strip()
-        if not sep or not re.fullmatch(r"[A-Z]{2}", state):
+        if not sep or state not in US_STATE_CODES:
             print(
                 f"[territory] ignoring malformed entry {pair!r} "
                 "(expected STATE=SLACK_USER_ID)",
@@ -94,7 +95,7 @@ def territory_owners() -> dict[str, str]:
 def owner_for_state(state: object) -> str | None:
     """Return the Slack user id owning `state`, or None when nobody is mapped."""
     code = str(state or "").strip().upper()
-    if not re.fullmatch(r"[A-Z]{2}", code):
+    if code not in US_STATE_CODES:
         return None
     return territory_owners().get(code)
 
@@ -105,7 +106,8 @@ def owner_for_state(state: object) -> str | None:
 # CA portal=CA). Anything not listed here — including anything merely ASSUMED — is
 # treated as inferred and posts untagged.
 #
-# The excluded case is real and live: `rfp_aggregator._row_state` derives a state by
+# The excluded case was observed in the historical aggregator path:
+# `rfp_aggregator._row_state` derives a state by
 # searching the row's prose for five state NAMES, so "Oregon City Schools, Ohio" reads
 # as OR, "City of California, Missouri" as CA, and "1600 Pennsylvania Avenue NW" as PA.
 # Before territory tagging that produced a wrong two-letter label on a card; now it
@@ -124,9 +126,6 @@ VERIFIED_STATE_SOURCE_PREFIXES: tuple[str, ...] = (
 #       SUB-recipient (rather than the prime) when `subawards=true` is not established
 #       in our code and no doc is cited. NSGP subrecipients being in-state is a program
 #       expectation, not evidence.
-#   `sam.gov` — sam_gov.py's comment claims its hardcoded "WA" means place-of-
-#       performance, but the code just sends `"state": "WA"` with nothing citing SAM's
-#       semantics.
 # An ASSUMED provenance must fail closed: those sources post untagged until proven.
 # Constant-state sources: the whole source name is fixed, so these must match EXACTLY.
 # Prefix-matching them would trust a future `webs-national` or `sam.gov-scraped` purely
@@ -134,6 +133,7 @@ VERIFIED_STATE_SOURCE_PREFIXES: tuple[str, ...] = (
 VERIFIED_STATE_SOURCE_NAMES: frozenset[str] = frozenset(
     {
         "ca-grants-portal",  # hardcodes "CA"
+        "sam.gov",  # requires exact matching place-of-performance response state
         "webs",  # hardcodes "WA"
         "oregonbuys",  # hardcodes "OR"
     }
@@ -146,9 +146,10 @@ def state_is_verified(source: object) -> bool:
     `ca-grants-portal` DOES reach production today — `bulletin_candidates` selects it
     by name, so a California bulletin can and does carry a tag. (An earlier version of
     this docstring claimed no constant-state source could post; that was wrong.)
-    `webs` and `oregonbuys` cannot currently produce a card, because `rfp_candidates`
-    hardcodes `source='rfp'` and `nugget_candidates` requires an award event; they are
-    classified anyway so the mapping stays complete as those queries change.
+    `webs` and `oregonbuys` cannot currently produce a card because their executable
+    pollers are absent/disabled and current rows do not satisfy the verified proactive
+    event gates; they are classified anyway so the mapping stays complete if reviewed
+    integrations return later.
     """
     name = str(source or "")
     return name in VERIFIED_STATE_SOURCE_NAMES or name.startswith(

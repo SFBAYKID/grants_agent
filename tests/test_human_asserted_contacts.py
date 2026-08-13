@@ -22,6 +22,7 @@ import pytest
 
 from grant_watch import db
 from grant_watch.slack import tools
+from tests.contact_support import verified_contact_evidence
 
 REP = "U0REP"
 
@@ -65,12 +66,9 @@ def test_a_supplied_phone_is_stored_and_attributed(tmp_path: Path) -> None:
 def test_a_supplied_fact_can_never_reach_the_outreach_brief(tmp_path: Path) -> None:
     """THE exploit: a rep-typed email emailed to a school as Grant's own finding.
 
-    A staff directory listing a name, title and phone but no email is common, so
-    finder stores a `verified` contact with an empty email and the rep completes it
-    from memory. When that filled the existing row in place, the row stayed
-    `verified` and grant.py's brief selection — `contact_status == "verified"` —
-    picked it straight up. The supplied fact must land somewhere that query cannot
-    see.
+    A rep may supply a different email from memory. When that filled an existing row
+    in place, the row stayed `verified` and grant.py's brief selection picked it up.
+    The supplied fact must land somewhere that query cannot see or alter.
     """
     conn, lead_id = _lead(tmp_path)
     db.save_contact(
@@ -78,10 +76,17 @@ def test_a_supplied_fact_can_never_reach_the_outreach_brief(tmp_path: Path) -> N
         lead_id,
         "Dana Reyes",
         "IT Director",
-        "",  # the real page had no email
+        "office@district.test",
         "308-555-0100",
         "https://district.test/staff",
         "high",
+        field_evidence=verified_contact_evidence(
+            "Dana Reyes",
+            "office@district.test",
+            "https://district.test/staff",
+            title="IT Director",
+            phone="308-555-0100",
+        ),
     )
     db.save_human_asserted_contact(
         conn, lead_id, email="dana@district.test", asserted_by=REP
@@ -94,7 +99,7 @@ def test_a_supplied_fact_can_never_reach_the_outreach_brief(tmp_path: Path) -> N
         if row["contact_status"] == "verified"
     ]
     assert len(brief_contacts) == 1
-    assert (brief_contacts[0]["email"] or "") == "", (
+    assert brief_contacts[0]["email"] == "office@district.test", (
         "a rep-typed email reached the outreach brief as a verified contact"
     )
     conn.close()
@@ -112,6 +117,13 @@ def test_page_verified_evidence_is_never_altered(tmp_path: Path) -> None:
         "308-555-0100",
         "https://district.test/staff",
         "high",
+        field_evidence=verified_contact_evidence(
+            "Dana Reyes",
+            "dana@district.test",
+            "https://district.test/staff",
+            title="IT Director",
+            phone="308-555-0100",
+        ),
     )
     db.save_human_asserted_contact(
         conn, lead_id, email="wrong@district.test", phone="999", asserted_by=REP
@@ -135,7 +147,23 @@ def test_every_writer_records_a_provenance(tmp_path: Path) -> None:
     overwritten real evidence on anything the daily enrichment produced.
     """
     conn, lead_id = _lead(tmp_path)
-    db.save_contact(conn, lead_id, "A", "t", "a@b.test", "1", "u", "high")
+    db.save_contact(
+        conn,
+        lead_id,
+        "Alice Able",
+        "Director",
+        "alice@b.test",
+        "308-555-0100",
+        "https://b.test/staff",
+        "high",
+        field_evidence=verified_contact_evidence(
+            "Alice Able",
+            "alice@b.test",
+            "https://b.test/staff",
+            title="Director",
+            phone="308-555-0100",
+        ),
+    )
     db.save_vendor_contact(
         conn, lead_id, "B", "t", "b@c.test", "2", "v1", do_not_call=False
     )

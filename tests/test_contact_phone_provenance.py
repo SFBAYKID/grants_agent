@@ -88,14 +88,15 @@ def test_choose_phone_labels_a_direct_line_and_an_org_fallback() -> None:
     """The Salesforce payload must know which kind of number it is writing."""
     person = {"phone": "503-555-0100", "name": "Dana Reyes"}
     org_only = {"phone": "", "name": "Dana Reyes"}
-    # `org_profile_status` belongs in this fixture because a lead cannot hold an
-    # `org_phone` without a lookup having run — and a FAILED lookup leaves the column
-    # populated with whatever it landed on, which is now refused. The old fixture
-    # described a state production never produces.
-    lead = {"org_phone": "503-555-0000", "org_profile_status": "found"}
+    # The alias exists only when a current typed evidence row proves the projection.
+    lead = {
+        "org_phone": "503-555-0000",
+        "evidenced_org_phone": "503-555-0000",
+        "org_profile_status": "found",
+    }
     assert choose_phone(person, lead) == ("503-555-0100", "direct")
     assert choose_phone(org_only, lead) == ("503-555-0000", "org_general")
-    assert choose_phone(org_only, {"org_phone": "", "org_profile_status": "found"}) == (
-        "",
-        "",
-    )
+    assert choose_phone(
+        org_only,
+        {"org_phone": "503-555-9999", "org_profile_status": "found"},
+    ) == ("", "")

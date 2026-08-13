@@ -36,6 +36,19 @@ def test_ambiguous_one_word_district_is_not_matched() -> None:
     assert nces.match_district("Orange School District", _districts()) is None
 
 
+def test_exact_nces_detail_parses_the_published_official_website() -> None:
+    """The website writer is bound to the requested seven-digit NCES record."""
+    html = (
+        Path(__file__).parent / "fixtures" / "nces_district_detail.html"
+    ).read_text()
+    assert (
+        nces.parse_official_website(html, "0640150") == "https://www.tustin.k12.ca.us"
+    )
+    with pytest.raises(ValueError, match="did not confirm"):
+        nces.parse_official_website(html, "0640151")
+    assert nces._safe_published_website("http://127.0.0.1/admin") == ""
+
+
 def test_enrich_state_leads_updates_only_unique_matches(tmp_path: Path) -> None:
     """NCES facts attach to Tustin while ambiguous Orange remains unknown."""
     conn = db.connect(tmp_path / "nces.db")
@@ -71,6 +84,130 @@ def test_enrich_state_leads_updates_only_unique_matches(tmp_path: Path) -> None:
     assert summary == nces.EnrichmentSummary(2, 1, 1)
     assert tustin["nces_id"] == "0640150" and tustin["enrollment"] == 21_220
     assert orange["nces_id"] is None and orange["enrollment"] is None
+
+
+def test_enrichment_never_binds_a_same_name_district_from_another_state(
+    tmp_path: Path,
+) -> None:
+    """A requested CA lead cannot inherit an otherwise exact TX district match."""
+    conn = db.connect(tmp_path / "wrong-state.db")
+    db.upsert_lead(
+        conn,
+        Lead(
+            RawItem(
+                "test",
+                "1",
+                "award",
+                "Tustin USD",
+                "CA",
+                "SVPP",
+                1.0,
+                "2026-01-01",
+                "2027-01-01",
+                "",
+                {},
+                event_type=FundingEventType.RECORD_OBSERVED,
+            ),
+            LeadGrade.GOLD,
+            entity_type="school_district",
+        ),
+    )
+    wrong_state = [
+        nces.NCESDistrict("0640150", "Tustin Unified", "TX", "Tustin", 21_220)
+    ]
+
+    summary = nces.enrich_state_leads(conn, "CA", wrong_state)
+
+    assert summary.matched == 0
+    assert conn.execute("SELECT nces_id FROM leads").fetchone()[0] is None
+
+
+def test_enrichment_persists_exact_website_provenance_for_rich_actions(
+    tmp_path: Path,
+) -> None:
+    """A bound district gains the exact NCES website evidence the policy consumes."""
+    conn = db.connect(tmp_path / "nces-site.db")
+    db.upsert_lead(
+        conn,
+        Lead(
+            RawItem(
+                "test",
+                "1",
+                "award",
+                "Tustin USD",
+                "CA",
+                "SVPP",
+                1.0,
+                "2026-01-01",
+                "2027-01-01",
+                "",
+                {},
+                event_type=FundingEventType.RECORD_OBSERVED,
+            ),
+            LeadGrade.GOLD,
+            entity_type="school_district",
+        ),
+    )
+
+    def website(_nces_id: str) -> nces.NCESWebsiteEvidence:
+        """Return the exact-record claim represented by the recorded fixture."""
+        return nces.NCESWebsiteEvidence(
+            "https://www.tustin.k12.ca.us",
+            f"{nces.DISTRICT_DETAIL_URL}?ID2=0640150",
+            "verified",
+        )
+
+    summary = nces.enrich_state_leads(conn, "CA", _districts(), website_fetcher=website)
+    row = conn.execute("SELECT * FROM leads").fetchone()
+    assert summary.websites_verified == 1
+    assert row["nces_website"] == "https://www.tustin.k12.ca.us"
+    assert row["nces_website_status"] == "verified"
+    assert row["nces_website_source_url"].endswith("?ID2=0640150")
+    assert row["nces_website_checked_at"]
+    conn.close()
+
+
+def test_website_writer_rejects_a_foreign_or_wrong_id_evidence_url(
+    tmp_path: Path,
+) -> None:
+    """A callback cannot relabel a non-NCES page as exact directory evidence."""
+    conn = db.connect(tmp_path / "wrong-source.db")
+    db.upsert_lead(
+        conn,
+        Lead(
+            RawItem(
+                "test",
+                "1",
+                "award",
+                "Tustin USD",
+                "CA",
+                "SVPP",
+                1.0,
+                "2026-01-01",
+                "2027-01-01",
+                "",
+                {},
+                event_type=FundingEventType.RECORD_OBSERVED,
+            ),
+            LeadGrade.GOLD,
+            entity_type="school_district",
+        ),
+    )
+
+    def wrong_source(_nces_id: str) -> nces.NCESWebsiteEvidence:
+        """Claim a valid-looking site from the wrong exact district record."""
+        return nces.NCESWebsiteEvidence(
+            "https://www.tustin.k12.ca.us",
+            f"{nces.DISTRICT_DETAIL_URL}?ID2=0640151",
+            "verified",
+        )
+
+    summary = nces.enrich_state_leads(
+        conn, "CA", _districts(), website_fetcher=wrong_source
+    )
+    row = conn.execute("SELECT nces_website,nces_website_status FROM leads").fetchone()
+    assert summary.website_unavailable == 1
+    assert tuple(row) == (None, "unavailable")
 
 
 class _Response:

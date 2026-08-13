@@ -246,13 +246,26 @@ def email_results(
     # search_leads directly, so it mailed a rep the model-facing coaching verbatim
     # and dead-ended on a no-match — the exact defect that had just been fixed in
     # the sibling caller. Sharing the renderer is what stops that recurring.
-    body = lead_digest.render(spec) or "I couldn't find anything matching that."
+    artifact = None
     try:
+        body, artifact = lead_digest.render_with_spreadsheet(spec)
+        body = body or "I couldn't find anything matching that."
+        attachments = (
+            [
+                resend_client.EmailAttachment(
+                    filename=artifact.path.name,
+                    content=artifact.path.read_bytes(),
+                )
+            ]
+            if artifact is not None
+            else []
+        )
         outcome = resend_client.send_to_rep(
             requester_slack,
             subject,
             f"{body}\n\nWant these on a Salesforce campaign, or contacts for the "
             "best few? Just reply in Slack.\n\n— Grant, Monarch Connected",
+            attachments=attachments,
         )
     except resend_client.RecipientNotAllowed:
         return (
@@ -261,4 +274,7 @@ def email_results(
         )
     except Exception as exc:  # noqa: BLE001 — reported honestly, never retried blind
         return f"ERROR: the send failed ({type(exc).__name__}). Nothing was sent."
+    finally:
+        if artifact is not None:
+            artifact.cleanup()
     return f"Sent it to {outcome.recipient}."

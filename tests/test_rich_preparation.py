@@ -7,10 +7,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from grant_watch import db
-from grant_watch.campaign import report
+from grant_watch.campaign import contact_evidence, report
 from grant_watch.campaign.policy import Reason
 from grant_watch.campaign.preparation import _fresh_activity, review_candidates
 from grant_watch.campaign.routing import RoutingReason
+from tests.contact_support import verified_contact_evidence
 
 NOW = datetime(2026, 7, 22, 18, 0, tzinfo=timezone.utc)
 
@@ -67,14 +68,17 @@ def _eligible_conn(path: Path) -> sqlite3.Connection:
              (id,source,source_item_id,lead_grade,entity_name,entity_type,state,program,
               amount,funds_start,funds_end,detail_url,status,canonical_entity_key,
               nces_id,org_website,org_profile_status,last_confirmed_run_id,
-              last_confirmed_at,current_event_id,org_profile_source_url,nces_website)
+              last_confirmed_at,current_event_id,org_profile_source_url,nces_website,
+              nces_website_source_url,nces_website_status)
            VALUES (1,'usaspending:16.071','award-123','gold','Montebello USD','district',
                    'CA','SVPP',500000,'2025-10-10','2028-09-30',
                    'https://www.usaspending.gov/award/award-123','new',
                    'montebello usd|CA','0625260','https://montebello.k12.ca.us','found',
                    4,'2026-07-22T17:05:00+00:00',2,
                    'https://montebello.k12.ca.us/about',
-                   'https://montebello.k12.ca.us')"""
+                   'https://montebello.k12.ca.us',
+                   'https://nces.ed.gov/ccd/districtsearch/district_detail.asp?ID2=0625260',
+                   'verified')"""
     )
     conn.execute(
         """INSERT INTO source_observations
@@ -85,6 +89,15 @@ def _eligible_conn(path: Path) -> sqlite3.Connection:
                    'verified')"""
     )
     conn.execute(
+        """INSERT INTO organization_field_evidence
+             (id,lead_id,field_name,field_value,source_url,excerpt,evidence_hash,
+              verifier_version,status,verified_at)
+           VALUES ('org-site-1',1,'website','https://montebello.k12.ca.us',
+                   'https://montebello.k12.ca.us/about','Montebello USD contact page',
+                   'org-site-hash','field-evidence-v2','current',
+                   '2026-07-22T17:00:00+00:00')"""
+    )
+    conn.execute(
         """INSERT INTO funding_events
              (id,lead_id,observation_id,event_type,occurred_on,date_precision,amount,
               source_url,verification_status,backfill,suppressed,created_at)
@@ -92,16 +105,35 @@ def _eligible_conn(path: Path) -> sqlite3.Connection:
                    'https://www.usaspending.gov/award/award-123','verified',0,0,
                    '2026-07-22T17:00:00+00:00')"""
     )
+    contact_url = "https://montebello.k12.ca.us/staff"
+    contact_fact = contact_evidence.ContactFact(
+        "named_direct",
+        "Jon Smith",
+        "IT Director",
+        "jon@montebello.k12.ca.us",
+        contact_url,
+        "montebello.k12.ca.us",
+        verified_contact_evidence(
+            "Jon Smith",
+            "jon@montebello.k12.ca.us",
+            contact_url,
+            title="IT Director",
+        ),
+    )
     conn.execute(
         """INSERT INTO contact_evidence
              (id,lead_id,status,contact_type,name,title,email,official_evidence_url,
               official_domain,evidence_hash,first_verified_at,last_checked_at,
-              last_verified_at,expires_at)
+              last_verified_at,expires_at,field_evidence_json)
            VALUES ('contact-1',1,'verified','named_direct','Jon Smith','IT Director',
                    'jon@montebello.k12.ca.us','https://montebello.k12.ca.us/staff',
-                   'montebello.k12.ca.us','contact-hash','2026-07-20T00:00:00+00:00',
+                   'montebello.k12.ca.us',?,'2026-07-20T00:00:00+00:00',
                    '2026-07-22T17:00:00+00:00','2026-07-22T17:00:00+00:00',
-                   '2026-08-21T17:00:00+00:00')"""
+                   '2026-08-21T17:00:00+00:00',?)""",
+        (
+            contact_evidence.fact_hash(contact_fact),
+            contact_evidence.serialize_fact_evidence(contact_fact),
+        ),
     )
     conn.execute(
         """INSERT INTO salesforce_lookup_state(lead_id,status,checked_at)
@@ -185,7 +217,9 @@ def test_heuristic_website_caps_exact_crm_at_research_but_keeps_owner_routing(
     round-2 non-blocking observation, locked in here)."""
     conn = _eligible_conn(tmp_path / "exact-heuristic.db")
     # Heuristic website: remove the exact NCES site so provenance is verified_org_page.
-    conn.execute("UPDATE leads SET nces_website=NULL WHERE id=1")
+    conn.execute(
+        "UPDATE leads SET nces_website=NULL,nces_website_status=NULL WHERE id=1"
+    )
     # One EXACT Salesforce Account owned by a channel-member rep (Brett).
     conn.execute("UPDATE salesforce_lookup_state SET status='found'")
     conn.execute(
@@ -214,6 +248,45 @@ def test_heuristic_website_caps_exact_crm_at_research_but_keeps_owner_routing(
     )  # NOT dropped (only the ambiguous path drops)
     assert draft.sf_open_link  # the account link is preserved
     assert draft.sf_display_text == "Exact Account match."
+
+
+def test_legacy_unbound_org_projection_cannot_enable_a_draft_action(
+    tmp_path: Path,
+) -> None:
+    """Pre-migration website columns remain visible data, not verification evidence."""
+    conn = _eligible_conn(tmp_path / "legacy-unbound.db")
+    conn.execute(
+        "UPDATE leads SET nces_website=NULL,nces_website_status=NULL WHERE id=1"
+    )
+    conn.execute("DELETE FROM organization_field_evidence WHERE lead_id=1")
+    conn.commit()
+
+    review = review_candidates(conn, "CGRANTS", frozenset(), now=NOW)[0]
+
+    assert review.draft is None
+    assert review.reason is Reason.NO_WEBSITE
+
+
+def test_verified_nces_site_supplies_the_official_website_without_org_scrape(
+    tmp_path: Path,
+) -> None:
+    """The exact district record makes the draft action reachable in real assembly."""
+    conn = _eligible_conn(tmp_path / "nces-website.db")
+    conn.execute(
+        "UPDATE leads SET org_website='',org_profile_status='',org_profile_source_url=''"
+    )
+    conn.commit()
+
+    review = review_candidates(conn, "CGRANTS", frozenset(), now=NOW)[0]
+
+    assert review.draft is not None
+    assert review.draft.official_website == "https://montebello.k12.ca.us"
+    assert review.draft.official_website_provenance == "nces"
+    assert review.draft.card_mode == "draft_ready"
+    assert "nces.ed.gov/ccd/districtsearch" in (
+        review.draft.official_website_evidence_url
+    )
+    conn.close()
 
 
 def test_card_amount_and_event_meaning_come_from_exact_event(tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ to change, while the commands left behind in `cli.py` are the data pipeline.
 from __future__ import annotations
 
 from . import db
+from .llm import anthropic_client_options
 
 
 def cmd_fill_contacts(
@@ -139,7 +140,7 @@ def cmd_scan_threads(channel: str, dry_run: bool) -> int:
     if not token:
         print("scan-threads: SLACK_BOT_TOKEN is not set")
         return 1
-    client = Anthropic()
+    client = Anthropic(**anthropic_client_options())
 
     def ask_model(prompt: str) -> str:
         """One cheap classification pass over a single thread."""

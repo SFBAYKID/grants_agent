@@ -17,7 +17,51 @@ LEAD_EVENT_SELECT = """l.*, e.event_type AS current_event_type,
     e.source_url AS current_event_source_url,
     e.source_locator AS current_event_source_locator,
     e.backfill AS current_event_backfill,
-    e.suppressed AS current_event_suppressed"""
+    e.suppressed AS current_event_suppressed,
+    (SELECT oe.field_value FROM organization_field_evidence oe
+      WHERE oe.lead_id=l.id AND oe.field_name='website'
+        AND oe.status='current' AND oe.field_value=l.org_website
+      ORDER BY oe.verified_at DESC LIMIT 1) AS evidenced_org_website,
+    (SELECT oe.field_value FROM organization_field_evidence oe
+      WHERE oe.lead_id=l.id AND oe.field_name='general_email'
+        AND oe.status='current' AND oe.field_value=l.org_general_email
+      ORDER BY oe.verified_at DESC LIMIT 1) AS evidenced_org_general_email,
+    (SELECT oe.field_value FROM organization_field_evidence oe
+      WHERE oe.lead_id=l.id AND oe.field_name='phone'
+        AND oe.status='current' AND oe.field_value=l.org_phone
+      ORDER BY oe.verified_at DESC LIMIT 1) AS evidenced_org_phone,
+    (SELECT oe.field_value FROM organization_field_evidence oe
+      WHERE oe.lead_id=l.id AND oe.field_name='street'
+        AND oe.status='current' AND oe.field_value=l.org_street
+        AND 1 >= (SELECT COUNT(DISTINCT oa.source_url)
+                    FROM organization_field_evidence oa
+                   WHERE oa.lead_id=l.id AND oa.status='current'
+                     AND oa.field_name IN ('street','city','state','postal_code'))
+      ORDER BY oe.verified_at DESC LIMIT 1) AS evidenced_org_street,
+    (SELECT oe.field_value FROM organization_field_evidence oe
+      WHERE oe.lead_id=l.id AND oe.field_name='city'
+        AND oe.status='current' AND oe.field_value=l.org_city
+        AND 1 >= (SELECT COUNT(DISTINCT oa.source_url)
+                    FROM organization_field_evidence oa
+                   WHERE oa.lead_id=l.id AND oa.status='current'
+                     AND oa.field_name IN ('street','city','state','postal_code'))
+      ORDER BY oe.verified_at DESC LIMIT 1) AS evidenced_org_city,
+    (SELECT oe.field_value FROM organization_field_evidence oe
+      WHERE oe.lead_id=l.id AND oe.field_name='state'
+        AND oe.status='current' AND oe.field_value=l.org_state
+        AND 1 >= (SELECT COUNT(DISTINCT oa.source_url)
+                    FROM organization_field_evidence oa
+                   WHERE oa.lead_id=l.id AND oa.status='current'
+                     AND oa.field_name IN ('street','city','state','postal_code'))
+      ORDER BY oe.verified_at DESC LIMIT 1) AS evidenced_org_state,
+    (SELECT oe.field_value FROM organization_field_evidence oe
+      WHERE oe.lead_id=l.id AND oe.field_name='postal_code'
+        AND oe.status='current' AND oe.field_value=l.org_postal_code
+        AND 1 >= (SELECT COUNT(DISTINCT oa.source_url)
+                    FROM organization_field_evidence oa
+                   WHERE oa.lead_id=l.id AND oa.status='current'
+                     AND oa.field_name IN ('street','city','state','postal_code'))
+      ORDER BY oe.verified_at DESC LIMIT 1) AS evidenced_org_postal_code"""
 CRM_CONTEXT_SELECT = """
     (SELECT s.status FROM salesforce_lookup_state s
      WHERE s.lead_id=l.id) AS salesforce_status,

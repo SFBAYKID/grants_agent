@@ -133,8 +133,15 @@ lookup freshness. Preparation reports bounded per-candidate outcomes rather than
 persisting a second mutable state machine. Any possibly-paid
 call (Firecrawl/LinkedIn) writes an `in_flight` row **before** the HTTP request; a
 restart finding `in_flight` does NOT silently retry the indeterminate paid request — it
-requires an explicit `--retry-indeterminate`, mirroring `source_discovery_models`. Dry-
-run: no network/db. `rich-shadow` reads persisted evidence only and writes nothing;
+requires an explicit `--retry-indeterminate`, mirroring `source_discovery_models`. The
+Firecrawl boundary separately binds the exact canonical request hash and attempt number,
+so reopening only the outer preparation record cannot bypass that rule. Its private
+host-bound standalone ledger also enforces the fixed account-month ceiling, proactive
+cross-process request spacing before HTTP, and persisted provider backoff; the app DB is
+not Firecrawl spend authority. A bounded rate-queue refusal is recorded as definite
+no-HTTP rather than abandoned `in_flight`. The vendor credential must exist only on the
+sole authority host after the cutover in `docs/paid_provider_cutover.md`. Dry-run: no
+network/db. `rich-shadow` reads persisted evidence only and writes nothing;
 `rich-prepare --execute` may refresh and persist local evidence but never posts or writes
 Salesforce/Persequor.
 
@@ -405,15 +412,15 @@ Valle Lindo / Golden Eagle (email on the org site, verified via `cde.ca.gov`).
 **Change 2 — typed website provenance** (`policy.website_provenance`, frozen as
 `official_website_provenance` + its evidence locator). A reviewed-directory host is NEVER
 an org's own site (the Fairfax safety). Accepted kinds: `nces` (exact NCES-published
-site — modelled but inert until that source is wired), `verified_org_page` (an org-profile
+site — modelled but inert at the time; now implemented in §18), `verified_org_page` (an org-profile
 scrape on the org's own domain, OR a verbatim-verified contact whose evidence page is on
 that domain — the Bartlett fix), and `authoritative_directory` (directory-published site;
 also not yet sourced). **Honesty scope (critic H2, 2026-07-23):** the POLICY layer never
 re-guesses from a name, but the tie between the website value and the specific awardee
 still rests on the enrichment anchor (`finder._looks_official`, a name-token match) that
 set `leads.org_website`; `verified_org_page`-via-contact rests on that SAME anchor, not a
-stronger one. A true independent org-identity check would require the not-yet-wired exact
-NCES-published site. This is non-heuristic *at the policy layer given that anchor*, not
+stronger one. At the time, a true independent org-identity check required the still-unwired
+exact NCES-published site; §18 records its later implementation. This is non-heuristic *at the policy layer given that anchor*, not
 end-to-end. **Change 1's `authoritative_directory` binding matches the NCES id as a whole
 query value or path segment — never a substring** (critic H1: `in` would let `062271`
 bind another district's `?ID=0622710`), and `_same_site` requires a dotted label on both
@@ -446,9 +453,11 @@ name-token heuristic — so an auto-drafted email could reach the wrong organiza
 — exact authoritative records). A `verified_org_page` provenance (the `_looks_official`
 anchor) is NOT proven ownership and caps the card at `research_needed` (no auto-draft),
 even with a clean CRM. Migration 26 adds `leads.nces_website` as the home for the exact
-NCES-published site; **no runtime source populates it yet**, so every current lead is
-research-only (0 draft-ready) — the safe intended state until an authorized authoritative
-fetch is wired. `card._research_note` states the honest reason(s) — ambiguous Salesforce
+NCES-published site. **Superseded 2026-08-12:** the local NCES binder now populates it
+only from an exact same-state, ID-bound official district detail record and persists the
+source/status/check time. Production still had 0 populated websites at the read-only
+audit, so its cards remain research-only until the new binder runs. `card._research_note`
+states the honest reason(s) — ambiguous Salesforce
 and/or "the organization website is inferred from a name match, not an exact record".
 
 **Registrable-domain (eTLD+1) validation** replaces the ad-hoc suffix test in
@@ -461,3 +470,20 @@ residual: a PRIVATE shared-hosting domain not in the PSL (`txed.net`) collapses 
 subdomains to one registrable domain; within a single lead the email/website hosts are
 compared and are typically identical, and such a lead can never be draft-ready (its
 website provenance is heuristic), so no auto-draft rests on it.
+
+## 18. Action reachability and field evidence (2026-08-12)
+
+Draft-ready is now protected at both preparation and runtime configuration boundaries:
+
+- `organization_field_evidence` is append-only per field. Every accepted value carries
+  its own page URL, bounded excerpt, hash, and verifier version; a compatibility
+  `org_profile_source_url` can no longer launder one page into proof for other fields.
+- Search/contact-derived sites populate only `org_website_candidate`. Only exact NCES
+  evidence promotes `org_website`/website provenance. Legacy unbound values remain
+  readable but cannot pass the strict action gate.
+- `rich_actions_configured()` requires `SLACK_WORKSPACE_ID`. Delivery refuses a
+  draft-ready card without it, and the Socket Mode listener fails startup when rich
+  actions are enabled but that identity is missing.
+- A real button smoke is still an external Slack/Persequor action. Offline tests prove
+  authorization and reachability logic; only a separately authorized human click can
+  mark production execution verified.

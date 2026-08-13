@@ -9,7 +9,11 @@ those rules executable without becoming a one-time diagnostic script.
 from __future__ import annotations
 
 import ast
+import os
 from pathlib import Path
+from collections.abc import Mapping
+
+from .paid_provider_authority import configuration_issues as authority_issues
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -117,8 +121,97 @@ def nested_test_tree_issues(root: Path = ROOT) -> list[str]:
     return issues
 
 
+def runtime_configuration_issues(
+    environ: Mapping[str, str] | None = None,
+) -> list[str]:
+    """Report enabled runtime features whose required identity gates are absent."""
+    values = environ if environ is not None else os.environ
+    rich_enabled = str(values.get("GRANT_RICH_CARD_ENABLED", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    issues: list[str] = []
+    issues.extend(authority_issues(values))
+    if rich_enabled and not str(values.get("SLACK_WORKSPACE_ID", "")).strip():
+        issues.append(
+            "GRANT_RICH_CARD_ENABLED is on but SLACK_WORKSPACE_ID is missing; "
+            "draft actions would be unreachable"
+        )
+    try:
+        zoominfo_limit = int(str(values.get("ZOOMINFO_MONTHLY_CREDITS", "0")).strip())
+    except ValueError:
+        zoominfo_limit = 0
+    ledger_path = str(values.get("ZOOMINFO_CREDIT_LEDGER_PATH", "")).strip()
+    if zoominfo_limit > 0 and not ledger_path:
+        issues.append(
+            "ZOOMINFO_MONTHLY_CREDITS is positive but ZOOMINFO_CREDIT_LEDGER_PATH "
+            "is missing; paid pulls would have no account-wide authority"
+        )
+    elif ledger_path and not Path(ledger_path).expanduser().is_absolute():
+        issues.append("ZOOMINFO_CREDIT_LEDGER_PATH must be absolute")
+    firecrawl_key = str(values.get("FIRECRAWL_API_KEY", "")).strip()
+    firecrawl_ledger = str(values.get("FIRECRAWL_RUNTIME_LEDGER_PATH", "")).strip()
+    try:
+        firecrawl_limit = int(
+            str(values.get("FIRECRAWL_RUNTIME_MONTHLY_CALL_LIMIT", "0")).strip()
+        )
+    except ValueError:
+        firecrawl_limit = 0
+    if firecrawl_key and firecrawl_limit <= 0:
+        issues.append(
+            "FIRECRAWL_API_KEY is configured but the runtime monthly limit is not positive"
+        )
+    try:
+        firecrawl_rate = int(
+            str(values.get("FIRECRAWL_RUNTIME_REQUESTS_PER_MINUTE", "0")).strip()
+        )
+    except ValueError:
+        firecrawl_rate = 0
+    if firecrawl_key and not 1 <= firecrawl_rate <= 600:
+        issues.append(
+            "FIRECRAWL_API_KEY is configured but the runtime requests-per-minute "
+            "limit is not between 1 and 600"
+        )
+    if firecrawl_key and not firecrawl_ledger:
+        issues.append(
+            "FIRECRAWL_API_KEY is configured but FIRECRAWL_RUNTIME_LEDGER_PATH is missing"
+        )
+    elif firecrawl_ledger and not Path(firecrawl_ledger).expanduser().is_absolute():
+        issues.append("FIRECRAWL_RUNTIME_LEDGER_PATH must be absolute")
+    if environ is None and not issues:
+        # The Socket Mode startup path calls this after loading .env. Deep-open both
+        # enabled ledgers so malformed files and authority/account mismatches stop the
+        # listener, not merely the first Slack request.
+        if firecrawl_key:
+            try:
+                from .enrich import firecrawl_gateway
+
+                firecrawl_gateway.connect_ledger().close()
+            except RuntimeError as exc:
+                issues.append(f"Firecrawl runtime authority is invalid: {exc}")
+        zoominfo_credentials = bool(
+            str(values.get("ZOOMINFO_CLIENT_ID", "")).strip()
+            or str(values.get("ZOOMINFO_CLIENT_SECRET", "")).strip()
+        )
+        if zoominfo_credentials:
+            try:
+                from .enrich import zoominfo_credits
+
+                zoominfo_credits.connect_ledger().close()
+            except RuntimeError as exc:
+                issues.append(f"ZoomInfo runtime authority is invalid: {exc}")
+    return issues
+
+
 def health_issues(root: Path = ROOT) -> list[str]:
-    """Return every project-specific health violation in deterministic order."""
+    """Return every repository health violation in deterministic order.
+
+    Deployment configuration is intentionally checked by the listener after it
+    loads ``.env``.  Keeping that check out of this offline repository gate makes
+    the result independent of unrelated variables inherited by a developer shell.
+    """
     return [
         *documentation_issues(root),
         *oversized_text_issues(root),

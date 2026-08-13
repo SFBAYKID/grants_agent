@@ -568,7 +568,7 @@ def _request_outreach(
     contacts = [
         c
         for c in db.contacts_for_lead(conn, int(row["id"]))
-        if c["contact_status"] == "verified"
+        if db.contact_is_page_verified(c)
     ]
     contact = contacts[0] if contacts else None
     if contact is None:
@@ -578,7 +578,7 @@ def _request_outreach(
         contacts = [
             c
             for c in db.contacts_for_lead(conn, int(row["id"]))
-            if c["contact_status"] == "verified"
+            if db.contact_is_page_verified(c)
         ]
         contact = contacts[0] if contacts else None
 
@@ -798,8 +798,9 @@ def _remember_from(
         from anthropic import Anthropic
 
         from .. import user_memory
+        from ..llm import anthropic_client_options
 
-        client = Anthropic()
+        client = Anthropic(**anthropic_client_options())
 
         def ask_model(prompt: str) -> str:
             """One cheap pass over a single message."""
@@ -911,6 +912,11 @@ def main() -> None:
             "SLACK_CHANNEL_ID must name at least one channel "
             "(comma-separated to serve several, e.g. production plus playground)"
         )
+    from ..health import runtime_configuration_issues
+
+    configuration_issues = runtime_configuration_issues()
+    if configuration_issues:
+        raise RuntimeError("; ".join(configuration_issues))
     app = create_app()
     # NO WATCHDOG PASS HERE, deliberately. Running it at boot cost two properties
     # that are worth more than the ~10 minutes it saved, and the guardian caught both

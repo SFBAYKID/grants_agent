@@ -142,8 +142,9 @@ CONTACT_TYPES = ("named_direct", "official_general")
 class WebsiteProvenance(str, Enum):
     """Typed, non-heuristic reason an official website was trusted (frozen on the card).
 
-    A name match NEVER qualifies. ``authoritative_directory`` (a directory-published
-    official-site field) is modelled but not yet sourced at runtime, so it is inert."""
+    A name match NEVER qualifies for draft-ready ownership. ``nces`` is populated by
+    the exact-ID district-detail binder; the generic ``authoritative_directory``
+    variant remains reserved for a future reviewed directory writer."""
 
     NCES = "nces"
     AUTHORITATIVE_DIRECTORY = "authoritative_directory"
@@ -174,8 +175,8 @@ class CardMode(str, Enum):
 # authoritative record — the only kinds that may back a DRAFT-READY card (Chase,
 # 2026-07-23). VERIFIED_ORG_PAGE rests on ``finder._looks_official`` (a name-token
 # anchor), so it is NOT proven ownership and caps a card at research-needed (no
-# auto-draft). Neither exact kind is fed by a runtime source yet, so no current lead is
-# draft-ready — the safe intended state until an exact org->website source is wired.
+# auto-draft). The NCES binder now feeds the NCES kind from an exact district-id page;
+# the general authoritative-directory kind has no writer yet.
 EXACT_WEBSITE_PROVENANCE = frozenset(
     {WebsiteProvenance.NCES, WebsiteProvenance.AUTHORITATIVE_DIRECTORY}
 )
@@ -280,7 +281,7 @@ class CandidateEvidence:
     # Raw inputs for the TYPED website-provenance decision (never a name heuristic):
     org_profile_found: bool  # a verbatim org-site scrape succeeded
     org_profile_evidence_url: str  # the page that scrape verified
-    nces_website: str  # NCES-published official site; '' until that source is wired
+    nces_website: str  # exact-ID NCES-published official site; '' until bound
     contact_status: str  # 'verified' | ... ; only 'verified' qualifies
     contact_type: str
     contact_email: str
@@ -319,16 +320,15 @@ def website_provenance(
 ) -> WebsiteProvenance:
     """Typed reason to trust an official website. The POLICY layer never re-guesses from a
     name — but honesty note (critic H2, 2026-07-23): the tie between ``website`` and the
-    specific awardee still rests on the enrichment anchor (``finder._looks_official``, a
-    name-token match) that produced ``leads.org_website``; this function only validates the
-    website GIVEN that anchor. It is not an independent org identity check — that would
-    need the (not-yet-wired) exact NCES-published site (``WebsiteProvenance.NCES``).
+    specific awardee still rests on the enrichment anchor for
+    ``WebsiteProvenance.VERIFIED_ORG_PAGE``. That weaker candidate can support a
+    research card but never a draft-ready action. ``WebsiteProvenance.NCES`` is the
+    independent exact-ID path and is populated only by the official NCES binder.
 
     A reviewed-directory host is NEVER an organization's own site. Accept only: the exact
-    NCES-published site (inert until that source is wired), or a page verified on the org's
-    OWN domain — an org-profile scrape, or a verbatim-verified contact evidence page on
-    that same domain (the latter covers a good contact whose separate org-profile scrape
-    happened to fail; it rests on the SAME name anchor, not a stronger one)."""
+    NCES-published site, or a page verified on the org's OWN domain — an org-profile
+    scrape, or a verbatim-verified contact evidence page on that same domain (the
+    latter rests on the SAME name anchor, not a stronger one)."""
     site = _host(website)
     if not site or site in REVIEWED_DIRECTORY_HOSTS:
         return WebsiteProvenance.NONE

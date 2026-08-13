@@ -107,6 +107,15 @@ def test_watch_states_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     assert usaspending.watch_states() == ("CA", "OR")
 
 
+def test_watch_states_rejects_fictional_two_letter_codes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shape-valid ``ZZ`` cannot trigger paid or rate-limited source queries."""
+    monkeypatch.setenv("GRANT_WATCH_STATES", "CA,ZZ")
+    with pytest.raises(ValueError, match="ZZ"):
+        usaspending.watch_states()
+
+
 def test_usaspending_poll_follows_pages_and_fails_at_guard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -277,13 +286,83 @@ def test_grants_gov_poll_paginates_and_deduplicates(
 
 # ------------------------------------------------------------------ sam.gov
 def test_sam_gov_parses_opportunities(sam_gov_payload: dict[str, Any]) -> None:
-    """Verify sam gov parses opportunities."""
-    items = sam_gov.parse_opportunities(sam_gov_payload)
-    assert len(items) == 4
+    """Only active, current, in-state physical solicitations become verified."""
+    items = sam_gov.parse_opportunities(sam_gov_payload, "WA", today=date(2026, 7, 13))
+    assert len(items) == 1  # only one fixture row explicitly performs in WA
+    source_by_id = {
+        str(item["noticeId"]): str(item["uiLink"])
+        for item in sam_gov_payload["opportunitiesData"]
+    }
     for it in items:
         assert it.source == "sam.gov"
         assert it.program == "RFP:sam.gov"
+        assert it.state == "WA"
         assert it.item_id  # noticeId present on every record in the fixture
+        assert it.url == source_by_id[it.item_id]
+
+
+def _sam_opportunity(**overrides: object) -> dict[str, object]:
+    """Build one minimally promotable SAM result for rejection tests."""
+    item: dict[str, object] = {
+        "noticeId": "NOTICE-1",
+        "title": "Access Control and Security Cameras",
+        "fullParentPathName": "GENERAL SERVICES ADMINISTRATION",
+        "postedDate": "2026-07-01",
+        "responseDeadLine": "2026-08-01T17:00:00-04:00",
+        "type": "Solicitation",
+        "active": "Yes",
+        "placeOfPerformance": {"state": {"code": "WA", "name": "Washington"}},
+        "uiLink": "https://sam.gov/workspace/contract/opp/NOTICE-1/view",
+    }
+    item.update(overrides)
+    return item
+
+
+@pytest.mark.parametrize(
+    ("overrides", "reason"),
+    [
+        ({"type": "Award Notice"}, "notice type"),
+        ({"active": "No"}, "inactive"),
+        ({"responseDeadLine": "2026-06-01"}, "expired"),
+        ({"title": "Enterprise cybersecurity services"}, "cyber-only"),
+        ({"title": "Security guard services"}, "guard-service false positive"),
+        (
+            {"title": "Physical Security Guard Services"},
+            "guard service containing a physical-security phrase",
+        ),
+        (
+            {"placeOfPerformance": {"state": {"code": "CA"}}},
+            "wrong state",
+        ),
+        ({"responseDeadLine": "not-a-date"}, "bad deadline"),
+        ({"placeOfPerformance": {"state": {}}}, "missing state"),
+        ({"uiLink": "https://example.com/opp/NOTICE-1/view"}, "foreign link"),
+        ({"uiLink": "https://sam.gov/opp/NOTICE-10/view"}, "wrong notice link"),
+        ({"uiLink": ""}, "missing link"),
+    ],
+)
+def test_sam_parser_rejects_unproven_or_ineligible_notices(
+    overrides: dict[str, object], reason: str
+) -> None:
+    """Every trust-bearing SAM gate fails closed independently."""
+    payload = {"opportunitiesData": [_sam_opportunity(**overrides)]}
+    assert sam_gov.parse_opportunities(payload, "WA", today=date(2026, 7, 1)) == [], (
+        reason
+    )
+
+
+def test_sam_parser_accepts_only_supported_solicitation_types() -> None:
+    """Both SAM labels and the two requested solicitation codes are explicit."""
+    accepted = {
+        value
+        for value in ("Solicitation", "Combined Synopsis/Solicitation", "o", "k")
+        if sam_gov.parse_opportunities(
+            {"opportunitiesData": [_sam_opportunity(type=value)]},
+            "WA",
+            today=date(2026, 7, 1),
+        )
+    }
+    assert accepted == {"Solicitation", "Combined Synopsis/Solicitation", "o", "k"}
 
 
 def test_sam_poll_uses_total_records_and_page_offsets(
@@ -300,17 +379,27 @@ def test_sam_poll_uses_total_records_and_page_offsets(
             self.offset = offset
 
         def json(self) -> dict[str, object]:
-            """Return one distinct notice on each of two pages."""
+            """Return a filtered first record and valid second record."""
             return {
                 "totalRecords": 2,
                 "opportunitiesData": [
                     {
                         "noticeId": f"N{self.offset}",
-                        "title": "Security cameras",
+                        "title": (
+                            "Cybersecurity services"
+                            if self.offset == 0
+                            else "Security cameras"
+                        ),
                         "fullParentPathName": "Agency",
                         "postedDate": "2026-07-01",
                         "responseDeadLine": "2026-08-01",
-                        "uiLink": "https://sam.gov/opp",
+                        "type": "Solicitation",
+                        "active": "Yes",
+                        "placeOfPerformance": {"state": {"code": "WA"}},
+                        "uiLink": (
+                            "https://sam.gov/workspace/contract/opp/"
+                            f"N{self.offset}/view"
+                        ),
                     }
                 ],
             }
@@ -322,9 +411,9 @@ def test_sam_poll_uses_total_records_and_page_offsets(
         return Response(offset)
 
     monkeypatch.setattr(sam_gov, "polite_get", get)
-    items = sam_gov.poll("test-key")
+    items = sam_gov.poll("test-key", states=("WA",), today=date(2026, 7, 1))
     assert seen == [0, 1]
-    assert [item.item_id for item in items] == ["N0", "N1"]
+    assert [item.item_id for item in items] == ["N1"]
 
 
 # ------------------------------------------------------------------ webs

@@ -30,6 +30,8 @@ from pathlib import Path
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
+from . import capability_asks
+
 
 @dataclass(frozen=True)
 class Announcement:
@@ -42,9 +44,62 @@ class Announcement:
     capabilities: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class AuthoredAnnouncement:
+    """One fully validated announcement parsed from a reviewed input document."""
+
+    slug: str
+    audience: str
+    body: str
+    capabilities: tuple[str, ...]
+
+
 def _now() -> str:
     """UTC timestamp in the repo's standard stored form."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _validated_capabilities(raw: object) -> tuple[str, ...]:
+    """Validate and stable-deduplicate one authored capability list."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError("announcement capabilities must be a JSON list")
+    capabilities: list[str] = []
+    seen: set[str] = set()
+    for value in raw:
+        capability = str(value or "").strip()
+        capability_asks.validate_available_capability(capability)
+        if capability not in seen:
+            capabilities.append(capability)
+            seen.add(capability)
+    return tuple(capabilities)
+
+
+def _parse_document(body: object) -> tuple[AuthoredAnnouncement, ...]:
+    """Parse and validate a whole authored document before any database mutation."""
+    if not isinstance(body, dict):
+        raise ValueError("an announcement document must be a JSON object")
+    raw_items = body.get("announcements", [])
+    if not isinstance(raw_items, list):
+        raise ValueError("announcements must be a JSON list")
+    parsed: list[AuthoredAnnouncement] = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            raise ValueError("every announcement must be a JSON object")
+        text = str(raw_item.get("body") or "").strip()
+        slug = str(raw_item.get("slug") or "").strip()
+        if not text or not slug:
+            raise ValueError("an announcement needs a slug and a body")
+        parsed.append(
+            AuthoredAnnouncement(
+                slug=slug,
+                audience=str(raw_item.get("audience") or ""),
+                body=text,
+                capabilities=_validated_capabilities(raw_item.get("capabilities")),
+            )
+        )
+    return tuple(parsed)
 
 
 def load(conn: sqlite3.Connection, path: Path) -> int:
@@ -52,44 +107,46 @@ def load(conn: sqlite3.Connection, path: Path) -> int:
 
     Idempotent on `slug`, so re-running a seed cannot post the same update twice.
     """
-    body = json.loads(path.read_text())
+    authored = _parse_document(json.loads(path.read_text()))
+    if conn.in_transaction:
+        raise RuntimeError("announcement loading requires a clean database transaction")
     added = 0
-    for item in body.get("announcements", []):
-        text = str(item.get("body") or "").strip()
-        slug = str(item.get("slug") or "").strip()
-        if not text or not slug:
-            raise ValueError("an announcement needs a slug and a body")
-        try:
-            conn.execute(
-                """INSERT INTO announcements
-                     (slug,audience,body,capabilities,created_at)
-                   VALUES (?,?,?,?,?)""",
-                (
-                    slug,
-                    str(item.get("audience") or ""),
-                    text,
-                    ",".join(str(c) for c in item.get("capabilities", [])),
-                    _now(),
-                ),
-            )
-            added += 1
-        except sqlite3.IntegrityError:
-            # Already on file. Revise it while it is still UNPOSTED — these words are
-            # authored and get corrected, and an overpromise found in review has to
-            # be fixable without minting a new slug and leaving the wrong text queued
-            # ahead of it. Once posted the row is frozen: people have read it, and
-            # editing history is its own kind of dishonesty.
-            conn.execute(
-                """UPDATE announcements SET body=?, capabilities=?, audience=?
-                    WHERE slug=? AND posted_at IS NULL""",
-                (
-                    text,
-                    ",".join(str(c) for c in item.get("capabilities", [])),
-                    str(item.get("audience") or ""),
-                    slug,
-                ),
-            )
-            continue
+    created_at = _now()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        for item in authored:
+            capabilities = ",".join(item.capabilities)
+            try:
+                conn.execute(
+                    """INSERT INTO announcements
+                         (slug,audience,body,capabilities,created_at)
+                       VALUES (?,?,?,?,?)""",
+                    (
+                        item.slug,
+                        item.audience,
+                        item.body,
+                        capabilities,
+                        created_at,
+                    ),
+                )
+                added += 1
+            except sqlite3.IntegrityError:
+                # Already on file. Revise it while it is still UNPOSTED — these words
+                # are authored and get corrected. Once posted the row is frozen:
+                # people have read it, and editing history is dishonest.
+                conn.execute(
+                    """UPDATE announcements SET body=?, capabilities=?, audience=?
+                        WHERE slug=? AND posted_at IS NULL""",
+                    (
+                        item.body,
+                        capabilities,
+                        item.audience,
+                        item.slug,
+                    ),
+                )
+    except Exception:
+        conn.rollback()
+        raise
     conn.commit()
     return added
 
@@ -107,7 +164,7 @@ def pending(conn: sqlite3.Connection) -> Announcement | None:
         slug=str(row["slug"]),
         audience=str(row["audience"]),
         body=str(row["body"]),
-        capabilities=tuple(part for part in raw.split(",") if part),
+        capabilities=tuple(part.strip() for part in raw.split(",") if part.strip()),
     )
 
 
@@ -127,6 +184,7 @@ def run(
     item = pending(conn)
     if item is None:
         return "skip: nothing to announce"
+    capabilities = _validated_capabilities(item.capabilities)
     if not item.audience:
         return f"skip: {item.slug} has no audience"
     if dry_run:
@@ -134,10 +192,27 @@ def run(
     if client is None:
         return "skip: no Slack client configured"
 
-    conn.execute(
-        "UPDATE announcements SET posted_at=? WHERE id=? AND posted_at IS NULL",
-        (_now(), item.announcement_id),
-    )
+    if conn.in_transaction:
+        raise RuntimeError(
+            "announcement execution requires a clean database transaction"
+        )
+    posted_at = _now()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        reserved = conn.execute(
+            "UPDATE announcements SET posted_at=? WHERE id=? AND posted_at IS NULL",
+            (posted_at, item.announcement_id),
+        )
+        if reserved.rowcount != 1:
+            conn.rollback()
+            return f"skip: {item.slug} was already reserved"
+        for capability in capabilities:
+            capability_asks.mark_available_in_transaction(
+                conn, capability, shipped_at=posted_at
+            )
+    except Exception:
+        conn.rollback()
+        raise
     conn.commit()
     try:
         response = client.chat_postMessage(channel=item.audience, text=item.body)

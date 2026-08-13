@@ -13,7 +13,7 @@ import pytest
 
 from grant_watch import scoring
 from grant_watch.enrich.finder import SourceUnreachable
-from grant_watch.models import LeadGrade
+from grant_watch.models import LeadGrade, VerificationStatus
 from grant_watch.sources import rfp_aggregator
 
 _FIXTURE = (
@@ -41,15 +41,16 @@ def test_real_starbridge_fixture_yields_target_state_open_rfps() -> None:
     items = rfp_aggregator.parse_starbridge(_FIXTURE, TODAY)
     states = {i.state for i in items}
     assert states == {"PA", "CA"}  # only target states; NJ/IL/NY rows excluded
-    assert all(i.source == "rfp" and i.program == "RFP:security" for i in items)
+    assert all(i.source == "starbridge" and i.program == "RFP:security" for i in items)
+    assert all(i.verification_status is VerificationStatus.NEEDS_TESTING for i in items)
     assert all(i.amount is None for i in items)  # solicitation, no fabricated dollars
     assert len({i.item_id for i in items}) == len(items)  # every id distinct
     pa = [i for i in items if i.state == "PA"]
     assert len(pa) == 2  # both SCI Pine Grove packages survive; neither is dropped
     assert len({i.item_id for i in pa}) == 2  # ...with distinct ids (C2)
     ca = next(i for i in items if i.state == "CA")
-    # RFPs are SILVER at best — never gold, even freshly posted (Chase 2026-07-19).
-    assert scoring.grade(ca, today=TODAY).grade is LeadGrade.SILVER
+    # A third-party parser fixture does not establish a live official solicitation.
+    assert scoring.grade(ca, today=TODAY).grade is LeadGrade.WATCH
 
 
 # ------------------------------------------------------------------ state cherry-pick
@@ -101,9 +102,8 @@ def test_past_due_row_is_dropped() -> None:
     assert rfp_aggregator.parse_starbridge(row, TODAY) == []
 
 
-def test_open_rfp_is_silver_regardless_of_posting_age() -> None:
-    """An open RFP is SILVER whether posted recently or long ago — RFPs are never gold
-    (Chase 2026-07-19: winning one is a lot of work with a low hit rate)."""
+def test_unreviewed_aggregator_rows_stay_watch_regardless_of_age() -> None:
+    """A fresh-looking third-party row cannot inherit an official source's SILVER."""
     fresh = _row(
         "Camera RFP",
         "California DGS",
@@ -120,8 +120,8 @@ def test_open_rfp_is_silver_regardless_of_posting_age() -> None:
     )
     g = rfp_aggregator.parse_starbridge(fresh, TODAY)[0]
     s = rfp_aggregator.parse_starbridge(stale, TODAY)[0]
-    assert scoring.grade(g, today=TODAY).grade is LeadGrade.SILVER
-    assert scoring.grade(s, today=TODAY).grade is LeadGrade.SILVER
+    assert scoring.grade(g, today=TODAY).grade is LeadGrade.WATCH
+    assert scoring.grade(s, today=TODAY).grade is LeadGrade.WATCH
 
 
 def test_unavailable_status_row_is_dropped() -> None:

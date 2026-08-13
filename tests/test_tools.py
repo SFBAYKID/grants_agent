@@ -150,6 +150,15 @@ def test_resolve_lead_by_name_state_disambiguates(tmp_path: Path) -> None:
     assert tools.resolve_lead_by_name(conn, "Lincoln Elementary", "IL") == il_id
 
 
+def test_resolve_lead_by_name_never_discards_explicit_state(tmp_path: Path) -> None:
+    """A requested CA lead cannot silently resolve to the only Illinois namesake."""
+    conn = db.connect(tmp_path / "r.db")
+    _seed(conn, "r4", "Lincoln Elementary", "IL")
+    result = tools.resolve_lead_by_name(conn, "Lincoln Elementary", "CA")
+    assert isinstance(result, str)
+    assert "in CA" in result
+
+
 def test_resolve_lead_by_name_unknown_is_honest(tmp_path: Path) -> None:
     """A name with no lead returns an honest error, never a guess."""
     conn = db.connect(tmp_path / "r.db")

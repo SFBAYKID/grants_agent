@@ -28,6 +28,7 @@ from typing import TypedDict
 
 import requests
 
+from . import db
 from .presentation import display_entity_name, strip_leading_honorifics
 from .record_semantics import semantics_for
 
@@ -70,6 +71,8 @@ class RetrySummary:
     submitted: int
     queued: int
     rejected: int
+    oldest_due_at: str = ""
+    oldest_due_minutes: int = 0
 
 
 def _now() -> str:
@@ -133,6 +136,8 @@ def build_brief(
     AND no test override (Persequor would just bounce needs_contact — we gate here,
     per the design)."""
     test_email = os.environ.get("OUTREACH_TEST_EMAIL", "").strip()
+    if contact is not None and not db.contact_is_page_verified(contact):
+        contact = None
     real_email = contact["email"] if contact is not None else None
     # Strip an honorific so Persequor's greeting reads "Hi Joel," not "Hi Mr.,".
     real_name = (
@@ -386,6 +391,8 @@ def retry_pending(
     conn: sqlite3.Connection, dry_run: bool = False, limit: int = 20
 ) -> RetrySummary:
     """Retry due approved handoffs once each; dry-run performs no writes or requests."""
+    now = datetime.now(timezone.utc)
+    now_text = now.isoformat(timespec="seconds")
     rows = list(
         conn.execute(
             """SELECT * FROM outreach
@@ -393,11 +400,23 @@ def retry_pending(
              AND attempts < ?
              AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
            ORDER BY COALESCE(next_attempt_at, created_at), id LIMIT ?""",
-            (DEFAULT_MAX_ATTEMPTS, _now(), max(1, min(limit, 100))),
+            (DEFAULT_MAX_ATTEMPTS, now_text, max(1, min(limit, 100))),
         )
     )
+    oldest_due_at = (
+        str(rows[0]["next_attempt_at"] or rows[0]["created_at"] or "") if rows else ""
+    )
+    try:
+        oldest = datetime.fromisoformat(oldest_due_at.replace("Z", "+00:00"))
+        if oldest.tzinfo is None:
+            oldest = oldest.replace(tzinfo=timezone.utc)
+        oldest_due_minutes = max(0, int((now - oldest).total_seconds() // 60))
+    except ValueError:
+        oldest_due_minutes = 0
     if dry_run:
-        return RetrySummary(len(rows), 0, len(rows), 0)
+        return RetrySummary(
+            len(rows), 0, len(rows), 0, oldest_due_at, oldest_due_minutes
+        )
     submitted = queued = rejected = 0
     for row in rows:
         try:
@@ -427,4 +446,11 @@ def retry_pending(
         submitted += int(state == "submitted")
         queued += int(state == "unreachable")
         rejected += int(state == "rejected")
-    return RetrySummary(len(rows), submitted, queued, rejected)
+    return RetrySummary(
+        len(rows),
+        submitted,
+        queued,
+        rejected,
+        oldest_due_at,
+        oldest_due_minutes,
+    )

@@ -291,17 +291,21 @@ def nugget_candidates(conn: sqlite3.Connection, channel: str) -> list[sqlite3.Ro
 
 
 def rfp_candidates(conn: sqlite3.Connection, channel: str) -> list[sqlite3.Row]:
-    """Open, unsurfaced physical-security RFP leads for a proactive alert.
+    """Open, unsurfaced verified physical-security RFPs for a proactive alert.
 
     An open RFP (verified future deadline) for cameras/access control is an active
     buyer, so these are surfaced individually and promptly (Chase, 2026-07-18) — the
-    soonest deadline first. Already-posted leads are excluded so nothing repeats.
+    soonest deadline first. Selection is semantic, so strict SAM records and direct
+    official-page records both qualify. Starbridge is excluded by its downgraded
+    evidence status, not a brittle source-name special case. Human-dispositioned and
+    already-posted leads are excluded so nothing repeats.
     """
     return list(
         conn.execute(
             f"""SELECT {LEAD_EVENT_SELECT} FROM leads l
             JOIN funding_events e ON e.id=l.current_event_id
-            WHERE l.source='rfp' AND l.lead_grade='silver'
+            WHERE l.lead_grade='silver'
+              AND COALESCE(l.status,'new')='new'
               AND e.suppressed=0 AND e.verification_status='verified'
               AND e.event_type='rfp_posted'
               AND l.id NOT IN (SELECT lead_id FROM posts
@@ -328,6 +332,7 @@ def bulletin_candidates(
             f"""SELECT {LEAD_EVENT_SELECT} FROM leads l
             JOIN funding_events e ON e.id=l.current_event_id
             WHERE l.source IN ('grants.gov','ca-grants-portal')
+              AND COALESCE(l.status,'new')='new'
               AND l.first_seen >= datetime('now', ?)
               AND e.suppressed=0 AND e.verification_status='verified'
               AND e.event_type='application_window_opened'

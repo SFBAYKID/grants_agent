@@ -15,7 +15,7 @@ from typing import Any, Protocol
 from slack_sdk.errors import SlackApiError
 
 from .. import db
-from . import card, pacing
+from . import card, contact_evidence, pacing, rich_actions_configured
 from .preparation import CandidateReview, review_candidates
 from .snapshot import award_dedup_key, freeze
 
@@ -96,7 +96,7 @@ def _delivery_veto(
         "SELECT status,current_event_id FROM leads WHERE id=?", (lead_id,)
     ).fetchone()
     contact = conn.execute(
-        "SELECT status,expires_at FROM contact_evidence WHERE id=?",
+        "SELECT * FROM contact_evidence WHERE id=?",
         (contact_evidence_id,),
     ).fetchone()
     if row is None or contact is None:
@@ -107,7 +107,7 @@ def _delivery_veto(
     ):
         return False
     return (
-        str(contact["status"]) == "verified"
+        contact_evidence.contact_fact_is_verified(contact)
         and str(contact["expires_at"] or "") > now.isoformat()
     )
 
@@ -179,6 +179,11 @@ def run(
     choice = _pick(reviews, db.recent_post_states(conn, channel, 1))
     if choice is None or choice.draft is None:
         return _SKIP_NO_ELIGIBLE_CARD
+    if choice.draft.card_mode == "draft_ready" and not rich_actions_configured():
+        return (
+            "blocked: draft-ready rich card requires SLACK_WORKSPACE_ID; "
+            "no post attempted"
+        )
     if dry_run:
         preview = replace(choice.draft, fallback_text=card.fallback_text(choice.draft))
         return f"[dry-run] would post rich_award for lead #{choice.lead_id}: {preview.fallback_text}"

@@ -16,6 +16,30 @@ file's own history as much as to lead data.
 
 <!-- Moved from CLAUDE.md 2026-08-12 at the ~800-line split threshold. -->
 
+## Current status (2026-08-13, 30-finding remediation — not deployed)
+
+- `verified` offline: schema 46 and the 30-item remediation are implemented; the final
+  full run is 1595 passed / 87 skipped, and every offline health/source/catalog/universe
+  gate passes. Field-specific evidence, migration-46 legacy
+  quarantine, host-bound Firecrawl/ZoomInfo ledgers, a cross-process proactive Firecrawl
+  rate gate, strict source semantics, fenced polling, generated email workbooks, and
+  retry observability all have failure-path tests.
+- `verified` read-only production audit: revision `0223c102639466f4261c82f330dccdb7aebf85db`,
+  one listener, SQLite integrity `ok`, 340 NCES IDs / 0 NCES websites, five rich
+  snapshots / zero rich actions, and no active outreach-retry cron. `SLACK_WORKSPACE_ID`
+  and `ZOOMINFO_CREDIT_LEDGER_PATH` are absent. No production mutation was made.
+- `verified` production spend state: the embedded 2026-08 ZoomInfo ledger has a
+  1,000-credit limit, 14 consumed, and seven settled two-credit rows. The known laptop
+  history adds three credits / two rows. A fresh empty standalone file would reset
+  visible usage and is forbidden; the multi-source migration expects nine rows / 17
+  credits unless vendor reconciliation identifies a clone or newer spend.
+- `needs-testing` production: guarded deploy; stop every old writer; revoke/rotate both
+  vendors' credentials off every non-authority machine; merge all Firecrawl/ZoomInfo
+  histories; bind the private authority/ledgers; validate workspace identity; populate
+  NCES evidence; and run a separately authorized rich-button smoke. The full protocol
+  is `docs/paid_provider_cutover.md`. Persequor retry cron installation separately needs
+  authorization for future outbound POSTs and database writes.
+
 ## Current status (2026-08-10, armed)
 
 - `verified` 2026-08-10 **PRODUCTION IS `65f05c7`, SCHEMA 37, AND THE FOLLOW-UP SYSTEM

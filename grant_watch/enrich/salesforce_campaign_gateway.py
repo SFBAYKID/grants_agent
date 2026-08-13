@@ -1,7 +1,9 @@
 """Least-privilege Salesforce HTTP gateway for Campaign create operations.
 
 This module owns the separate writer credentials and exposes GET plus an explicit
-create allowlist. It intentionally contains no update or delete request primitive.
+create allowlist. Its only update primitives fill blank Lead fields or prepend one
+fixed compliance marker, both guarded against concurrent human edits. It exposes no
+general update or delete primitive.
 """
 
 from __future__ import annotations
@@ -10,6 +12,8 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import format_datetime
 from typing import Any  # Salesforce REST response JSON is runtime-shaped.
 from urllib.parse import urlparse
 
@@ -737,7 +741,7 @@ class SalesforceCampaignGateway:
             return CreateResult(True, record_id, error="nothing to fill")
         current = requests.get(
             base,
-            params={"fields": ",".join(sorted(wanted))},
+            params={"fields": ",".join(sorted({*wanted, "LastModifiedDate"}))},
             headers=headers,
             timeout=20,
         )
@@ -754,6 +758,13 @@ class SalesforceCampaignGateway:
                 False, error=f"HTTP {current.status_code}: {current.text[:200]}"
             )
         existing: dict[str, Any] = current.json()
+        conditional_headers = _conditional_headers(headers, existing)
+        if conditional_headers is None:
+            return CreateResult(
+                False,
+                record_id,
+                error="Salesforce omitted a valid LastModifiedDate; refusing unguarded fill",
+            )
         blanks = {
             field: value
             for field, value in wanted.items()
@@ -763,7 +774,15 @@ class SalesforceCampaignGateway:
             return CreateResult(
                 True, record_id, error="every field already had a value"
             )
-        response = requests.patch(base, json=blanks, headers=headers, timeout=20)
+        response = requests.patch(
+            base, json=blanks, headers=conditional_headers, timeout=20
+        )
+        if response.status_code == 412:
+            return CreateResult(
+                False,
+                record_id,
+                error="record changed during fill; retry from current Salesforce data",
+            )
         if response.status_code not in (200, 204):
             return CreateResult(
                 False, error=f"HTTP {response.status_code}: {response.text[:200]}"
@@ -796,12 +815,16 @@ class SalesforceCampaignGateway:
         because the records naming a do-not-call person are live now.
         """
         record_id = validate_record_id(record_id, "Lead")
+        self.verify_write_scope()
         token, host = self._auth()
         headers = {"Authorization": f"Bearer {token}"}
         base = f"{host}/services/data/{API_VERSION}/sobjects/Lead/{record_id}"
 
         current = requests.get(
-            base, params={"fields": "Description"}, headers=headers, timeout=20
+            base,
+            params={"fields": "Description,LastModifiedDate"},
+            headers=headers,
+            timeout=20,
         )
         if current.status_code == 404:
             return CreateResult(False, record_id, error="not in this org")
@@ -809,9 +832,20 @@ class SalesforceCampaignGateway:
             return CreateResult(
                 False, error=f"HTTP {current.status_code}: {current.text[:200]}"
             )
-        existing = str(current.json().get("Description") or "")
+        current_body: dict[str, Any] = current.json()
+        existing = str(current_body.get("Description") or "")
         if DO_NOT_CALL_MARKER in existing:
             return CreateResult(True, record_id, error="already marked")
+        conditional_headers = _conditional_headers(headers, current_body)
+        if conditional_headers is None:
+            return CreateResult(
+                False,
+                record_id,
+                error=(
+                    "Salesforce omitted a valid LastModifiedDate; "
+                    "refusing unguarded do-not-call update"
+                ),
+            )
 
         updated = (
             f"{DO_NOT_CALL_MARKER} {existing}".strip()
@@ -827,8 +861,20 @@ class SalesforceCampaignGateway:
             )
 
         response = requests.patch(
-            base, json={"Description": updated}, headers=headers, timeout=20
+            base,
+            json={"Description": updated},
+            headers=conditional_headers,
+            timeout=20,
         )
+        if response.status_code == 412:
+            return CreateResult(
+                False,
+                record_id,
+                error=(
+                    "record changed before do-not-call marker; "
+                    "refusing to overwrite current Description"
+                ),
+            )
         if response.status_code not in (200, 204):
             return CreateResult(
                 False, error=f"HTTP {response.status_code}: {response.text[:200]}"
@@ -891,3 +937,28 @@ class SalesforceCampaignGateway:
             record_id = ""
         _RECORD_TYPE_CACHE[developer_name] = record_id
         return record_id
+
+
+def _conditional_headers(
+    authorization_headers: dict[str, str], current: dict[str, Any]
+) -> dict[str, str] | None:
+    """Build Salesforce's optimistic-update header from the exact retrieved version.
+
+    Salesforce documents ``If-Unmodified-Since`` for sObject-row PATCH requests and
+    returns 412 when another actor changes the record after the supplied
+    ``LastModifiedDate``. Refusing a missing or malformed date is safer than silently
+    falling back to an unconditional write over a colleague's live CRM edit.
+    """
+    raw = str(current.get("LastModifiedDate") or "").strip()
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return {
+        **authorization_headers,
+        "If-Unmodified-Since": format_datetime(
+            parsed.astimezone(timezone.utc), usegmt=True
+        ),
+    }

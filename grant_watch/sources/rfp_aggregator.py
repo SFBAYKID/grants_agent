@@ -8,11 +8,11 @@ hunting dead `.gov` pages (see sources/rfp.py, which finds ~0 open), read the ag
 listing directly. Cherry-picked to WA/OR/CA/PA/TX for now (backfill by widening states);
 all rows land as normal RFP leads so everything stays queryable/exportable.
 
-Honesty: fields are copied verbatim from the scraped listing, and the drip alert links
-to the Starbridge detail page so the rep confirms the actual RFP. The state cherry-pick
-only accepts a row whose text explicitly names a target state — a row with no clear
-state is skipped rather than mis-filed (no guessed state). All trust-bearing parsing is
-pure (parse_starbridge) and fixture-tested; poll() is the only live I/O.
+Honesty: fields are copied verbatim from the scraped listing, but a third-party listing
+is not official solicitation evidence. Rows therefore retain ``starbridge`` provenance
+and ``needs-testing`` verification, and this module is not in the runtime poller
+registry. All parsing is pure and fixture-tested; poll() is available only for reviewed
+research.
 """
 
 from __future__ import annotations
@@ -129,7 +129,7 @@ def parse_starbridge(
         seen_ids.add(item_id)
         out.append(
             RawItem(
-                source="rfp",
+                source="starbridge",
                 item_id=item_id,
                 title=title[:200],
                 entity=entity,
@@ -156,7 +156,7 @@ def parse_starbridge(
                     f"{title} — closes {due_iso} — via Starbridge listing "
                     f"({entity}, {state})"
                 )[:300],
-                verification_status=VerificationStatus.VERIFIED,
+                verification_status=VerificationStatus.NEEDS_TESTING,
             )
         )
     return out

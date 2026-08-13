@@ -14,7 +14,7 @@ from datetime import datetime, time, timedelta, timezone
 
 from .. import scoring, territory, reminders
 from ..enrich.salesforce_activity import RECENT_ACTIVITY_DAYS
-from . import card, policy
+from . import card, contact_evidence, policy
 from .routing import OwnerEvidence, resolve
 from .snapshot import SnapshotDraft
 
@@ -87,7 +87,14 @@ def _rows(conn: sqlite3.Connection, audience: str, limit: int) -> list[sqlite3.R
                       o.source AS observation_source,
                       o.source_locator AS observation_source_locator,
                       o.payload_hash AS observation_payload_hash,
-                      r.state AS confirmed_run_state
+                      r.state AS confirmed_run_state,
+                      (SELECT oe.field_value
+                         FROM organization_field_evidence oe
+                        WHERE oe.lead_id=l.id AND oe.field_name='website'
+                          AND oe.status='current'
+                          AND oe.field_value=l.org_website
+                        ORDER BY oe.verified_at DESC LIMIT 1
+                      ) AS evidenced_org_website
                FROM leads l
                LEFT JOIN funding_events e ON e.id=l.current_event_id
                LEFT JOIN source_observations o ON o.id=e.observation_id
@@ -260,8 +267,23 @@ def _candidate(
     account_id = str(account["record_id"] or "") if account else ""
     activity = _fresh_activity(conn, lead_id, account_id, people, now)
     award_url = str(row["event_source_url"] or row["detail_url"] or "")
-    website = card.safe_url(row["org_website"] or "")
-    website_evidence_url = card.safe_url(row["org_profile_source_url"] or "")
+    nces_website = (
+        card.safe_url(row["nces_website"] or "")
+        if str(row["nces_website_status"] or "") == "verified"
+        else ""
+    )
+    org_site_evidence = conn.execute(
+        """SELECT source_url FROM organization_field_evidence
+           WHERE lead_id=? AND field_name='website' AND status='current'
+             AND field_value=?""",
+        (lead_id, str(row["evidenced_org_website"] or "")),
+    ).fetchone()
+    website = nces_website or card.safe_url(row["evidenced_org_website"] or "")
+    website_evidence_url = (
+        card.safe_url(row["nces_website_source_url"] or "")
+        if nces_website
+        else card.safe_url(org_site_evidence["source_url"] if org_site_evidence else "")
+    )
     contact_url = card.safe_url(contact["official_evidence_url"] if contact else "")
     event_locator = str(
         row["event_source_locator"] or row["observation_source_locator"] or ""
@@ -271,6 +293,9 @@ def _candidate(
     )
     source_name = str(row["observation_source"] or row["source"] or "")
     award_identity = card.award_record_identity(source_name, award_url, event_locator)
+    contact_verified = bool(
+        contact is not None and contact_evidence.contact_fact_is_verified(contact)
+    )
     evidence = policy.CandidateEvidence(
         lead_id=lead_id,
         lead_grade=str(row["lead_grade"] or ""),
@@ -292,12 +317,14 @@ def _candidate(
         state_verified=territory.state_is_verified(row["source"]),
         award_url_safe=bool(award_identity),
         official_website=website,
-        org_profile_found=str(row["org_profile_status"] or "") == "found",
+        org_profile_found=(
+            str(row["org_profile_status"] or "") == "found"
+            and bool(row["evidenced_org_website"])
+            and org_site_evidence is not None
+        ),
         org_profile_evidence_url=website_evidence_url,
-        # Exact NCES-published site (migration 26). NULL for every current lead (no runtime
-        # source populates it yet), so real leads stay research-only until one is wired.
-        nces_website=str(row["nces_website"] or ""),
-        contact_status=str(contact["status"] if contact else ""),
+        nces_website=nces_website,
+        contact_status="verified" if contact_verified else "",
         contact_type=str(contact["contact_type"] if contact else ""),
         contact_email=str(contact["email"] if contact else ""),
         contact_evidence_url=contact_url,
