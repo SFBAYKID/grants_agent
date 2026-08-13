@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -230,9 +231,15 @@ def test_fetch_state_pages_both_queries_and_excludes_member_sentinels(
     monkeypatch.setattr(nces, "PAGE_SIZE", 1)
 
     def fake_get(url: str, *, params: dict[str, str]) -> _Response:
-        """Return two one-row pages followed by an empty terminal page."""
+        """Serve one row per page by KEY RANGE, the way the live service does.
+
+        The double used to read `resultOffset`, which the real endpoint ignores on an
+        aggregate query — so it could only ever confirm the mechanism the code already
+        used. It now honours `LEAID>'<cursor>'` in the where clause instead.
+        """
         calls.append((url, dict(params)))
-        offset = int(params["resultOffset"])
+        match = re.search(r"LEAID>'([^']*)'", params["where"])
+        cursor = match.group(1) if match else ""
         if url == nces.SCHOOL_QUERY_URL:
             rows = [
                 {
@@ -253,7 +260,8 @@ def test_fetch_state_pages_both_queries_and_excludes_member_sentinels(
                 {"LEAID": "1", "CITY": "Alpha"},
                 {"LEAID": "2", "CITY": "Beta"},
             ]
-        features = [{"attributes": rows[offset]}] if offset < len(rows) else []
+        remaining = [r for r in rows if str(r["LEAID"]) > cursor]
+        features = [{"attributes": remaining[0]}] if remaining else []
         return _Response({"features": features})
 
     monkeypatch.setattr(nces, "polite_get", fake_get)
@@ -263,17 +271,26 @@ def test_fetch_state_pages_both_queries_and_excludes_member_sentinels(
         ("2", 200),
     ]
     school_calls = [params for url, params in calls if url == nces.SCHOOL_QUERY_URL]
-    assert [params["resultOffset"] for params in school_calls] == ["0", "1", "2"]
+    assert [params["where"] for params in school_calls] == [
+        "LSTATE='CA' AND MEMBER>=0",
+        "LSTATE='CA' AND MEMBER>=0 AND LEAID>'1'",
+        "LSTATE='CA' AND MEMBER>=0 AND LEAID>'2'",
+    ]
     assert all("MEMBER>=0" in params["where"] for params in school_calls)
 
 
 def test_nces_repeated_page_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A service that ignores resultOffset cannot silently truncate district data."""
+    """A service that never advances cannot silently truncate district data.
+
+    This is not hypothetical. Measured live on 2026-08-13, the real endpoint returned
+    the identical 2,000 California rows for `resultOffset=0` and `resultOffset=2000`
+    with `exceededTransferLimit=True` both times. The guard is what turned that into a
+    loud failure instead of a silently short district list.
+    """
     monkeypatch.setattr(nces, "PAGE_SIZE", 1)
 
     def repeating(_url: str, *, params: dict[str, str]) -> _Response:
-        """Return the identical full page for every requested offset."""
-        assert "resultOffset" in params
+        """Return the identical page no matter how the caller tries to advance."""
         return _Response(
             {
                 "features": [
