@@ -162,10 +162,14 @@ affect Chase's other projects.
 - `needs-testing` 2026-08-17 **NO DM HAS ACTUALLY BEEN SENT END TO END.** The gate logic
   and all four DM scopes are proven, but `message.im` subscription state is not readable
   via the bot token, and the guardian sends no Slack messages without authorization. This
-  needs a human on the roster to type at Grant. **Chase reported the "Sending messages to
-  this app has been turned off" banner still showing after the checkbox was set** —
-  re-verified checked on a fresh page load, so the leading suspect is Slack client cache
-  (quit and reopen), NOT the setting. Unresolved as of this entry.
+  needs a human on the roster to type at Grant.
+- `verified` 2026-08-17 **THE BANNER PERSISTED AFTER THE SETTING WAS SAVED, AND IT WAS
+  CLIENT CACHE.** Chase reported "Sending messages to this app has been turned off" still
+  showing; the checkbox re-verified as checked on a fresh page load in a new tab, so the
+  setting was never the problem. Reloading Slack cleared it — Chase, 2026-08-17: *"It works
+  now"*. **Do not chase a Slack app-config change in the config UI when the config already
+  reads correct: reload the client first.** The wrong move here would have been editing the
+  manifest's missing `features.app_home` block to fix something that was not broken.
 - `verified` 2026-08-17 **AN ACCESSIBILITY-TREE READING SAID THE CHECKBOX WAS UNCHECKED AND
   THE PIXELS SAID CHECKED.** The `find` tool inferred "no checked attribute listed" and was
   wrong; a zoomed screenshot settled it. I would have reported the opposite of the truth
