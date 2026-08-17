@@ -129,16 +129,24 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
   `channels:read`, `groups:history`, `groups:read`, `im:history`, `reactions:read`,
   `reactions:write`, `users:read`, `users:read.email`, and `files:write`. Command scopes are
   unnecessary.
-- **DMs, added 2026-08-17 (Chase's call).** The app's Messages tab was off, so the DM printed
-  *"Sending messages to this app has been turned off"* — and the code refused DMs independently, so
-  flipping only the checkbox would have let reps type into a void. Both halves are needed: the
-  Slack-side pair (**App Home → Messages Tab → "Allow users to send Slash commands and messages
-  from the messages tab"**, plus `im:history` + `message.im`) and `grant_watch/slack/venues.py`.
-  **A DM is authorized by the PERSON, not the room** — `SLACK_CHANNEL_ID` cannot bound a `D…` id
-  that is minted per person — so only reviewed `config/reps.json` identities are answered, and
-  anyone else gets one fixed line and no model turn. Adding a scope requires a reinstall; confirm
-  the `xoxb` token afterwards, because a changed token means production's `.env` is stale and Grant
-  dies at the next restart, not at the reinstall.
+- **DMs, added 2026-08-17 (Chase's call).** The DM printed *"Sending messages to this app has been
+  turned off"*, and the code refused DMs independently, so flipping only the Slack switch would
+  have let reps type into a void.
+  - `verified` 2026-08-17, by reading the live App Manifest: **`im:history`, `im:read`, `im:write`,
+    `mpim:history` and the `message.im` bot event were ALREADY configured.** I had predicted three
+    changes — checkbox, scope, event subscription, then a reinstall — and **two of the three were
+    already in place**. The ONLY Slack-side change was **App Home → Messages Tab → "Allow users to
+    send Slash commands and messages from the messages tab"**, which was unchecked. It auto-saves;
+    confirmed still checked after a full page reload. **No scope was added, so NO REINSTALL
+    happened and the `xoxb` token was never at risk** — the rotation warning was real for the
+    change I expected, and moot for the one that was actually needed. `token_rotation_enabled` is
+    `false`.
+  - Code side is `grant_watch/slack/venues.py`. **A DM is authorized by the PERSON, not the room** —
+    `SLACK_CHANNEL_ID` cannot bound a `D…` id that is minted per person — so only reviewed
+    `config/reps.json` identities are answered, and anyone else gets one fixed line and no model
+    turn.
+  - The manifest also still carries the `/grant` slash command with `commands` and
+    `chat:write.public`, confirming those removals remain outstanding (see Status below).
 - **Verified live** (2026-07-13): `auth.test` ok (team Monarch, user grant); `apps.connections.open`
   returned a `wss://` URL. If scopes change later, edit via the app's App Manifest page and reinstall.
 

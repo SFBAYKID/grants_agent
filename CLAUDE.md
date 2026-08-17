@@ -123,6 +123,58 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-17, Grant can be DMed — Slack side live, code NOT deployed)
+
+- `verified` 2026-08-17 **THE BANNER WAS ONE UNCHECKED BOX, AND TWO OF THE THREE CHANGES
+  I PREDICTED WERE ALREADY DONE.** Chase asked why his DM said *"Sending messages to this
+  app has been turned off"*. I told him it would take three Slack changes — the Messages
+  tab checkbox, the `im:history` scope, the `message.im` subscription — plus a reinstall,
+  and warned that a reinstall might rotate the `xoxb` token and strand production's
+  `.env`. **Reading the live App Manifest refuted two thirds of that**: `im:history`,
+  `im:read`, `im:write`, `mpim:history` and `message.im` were ALL already configured. The
+  only change needed was **App Home → Messages Tab → "Allow users to send Slash commands
+  and messages from the messages tab"**, which is now checked and confirmed persistent
+  through a full reload. **No scope changed, so no reinstall, so the token was never
+  touched.** The warning was correct for the change I imagined and irrelevant to the one
+  that existed — I should have read the manifest before predicting the work.
+- `verified` 2026-08-17 **FLIPPING THAT BOX ALONE WOULD HAVE MADE THINGS WORSE, NOT
+  BETTER.** `grant.py` refused DMs independently of Slack (`channel_type != "im"`, and a
+  `D…` id can never appear in `SLACK_CHANNEL_ID`), so the checkbox on its own removes the
+  honest banner and replaces it with a text box that silently eats every message. Both
+  halves were always required.
+- `verified` 2026-08-17 **THE CHANNEL GATE WAS THE WHOLE AUTHORIZATION STORY, so allowing
+  DMs moved the boundary from the ROOM to the PERSON** and that boundary had to be BUILT
+  rather than inherited by deleting a condition. Any workspace member can DM an installed
+  app, an app DM is invisible to everyone else, and one turn can spend real money. Only
+  reviewed `config/reps.json` identities are answered; anyone else gets one fixed line —
+  no model call, no tool, no spend, no row — because silence in a DM reads as broken
+  rather than declined. `in_configured_channel` still refuses every DM on its own, and a
+  test asserts exactly that as the control.
+- `verified` 2026-08-17 **THREE RULES IN THE LISTENER ARE RULES ABOUT A ROOM AND ARE FALSE
+  IN A DM**: "top-level chatter isn't Grant's business", "an @mention means somebody else
+  was addressed", and "only speak under a post Grant made". Each would have accepted the
+  message, produced no answer and left no error — the same silent drop `on_message` was
+  already fixed for on 2026-08-12. A fourth: `conversations.replies` on a top-level DM
+  returns that ONE message, so every DM would have arrived with **no memory** and a bare
+  "yes" would lose its antecedent — the Kerry bug, in the one venue where people type
+  consecutive sentences. DMs read their own history, REVERSED, because
+  `conversations.history` is newest-first while `replies` is oldest-first; reading it raw
+  hands the model the conversation backwards and nothing raises.
+- `verified` 2026-08-17 Adding the venue pushed `grant.py` to **1041 lines, past the rule-4
+  cap**, so the venue concern is now `venues.py` (201 lines): gates, membership, history —
+  no app state, so a change there cannot alter what a confirmation writes. `grant.py` is
+  back to **942**, exactly where it started, with the old private names kept as aliases
+  because `salesforce_actions`, `proactive_actions` and the tests import them.
+  11 new tests; **all 7 guards mutation-proven**, each with a control proving the channel
+  rules did not move. Suite **1610 passed, 87 skipped**; `ruff check` and
+  `ruff format --check` both clean.
+- `needs-testing` 2026-08-17 **NOTHING IS DEPLOYED, AND THE VOID IS OPEN RIGHT NOW.**
+  Commit `a031ad7` is local, on `fix/enrich-orgs-defects-20260813`, not merged to `main`.
+  The last recorded production revision is `87d4e00` (2026-08-13, unverified since), which
+  still refuses DMs — so with the Slack box now checked, **a rep can type into Grant's DM
+  and be silently ignored**. Either deploy through the guardian or uncheck the box until
+  then; leaving it as-is is the one state that looks working and is not.
+
 ## Current status (2026-08-13, second deploy — four defects that cost money)
 
 - `verified` 2026-08-13 **PRODUCTION IS `87d4e00`, SCHEMA 47.** PID 121468 → **124668**,
