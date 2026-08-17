@@ -123,6 +123,111 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-17, Grant can be DMed — Slack side live, code NOT deployed)
+
+- `verified` 2026-08-17 **THE BANNER WAS ONE UNCHECKED BOX, AND TWO OF THE THREE CHANGES
+  I PREDICTED WERE ALREADY DONE.** Chase asked why his DM said *"Sending messages to this
+  app has been turned off"*. I told him it would take three Slack changes — the Messages
+  tab checkbox, the `im:history` scope, the `message.im` subscription — plus a reinstall,
+  and warned that a reinstall might rotate the `xoxb` token and strand production's
+  `.env`. **Reading the live App Manifest refuted two thirds of that**: `im:history`,
+  `im:read`, `im:write`, `mpim:history` and `message.im` were ALL already configured. The
+  only change needed was **App Home → Messages Tab → "Allow users to send Slash commands
+  and messages from the messages tab"**, which is now checked and confirmed persistent
+  through a full reload. **No scope changed, so no reinstall, so the token was never
+  touched.** The warning was correct for the change I imagined and irrelevant to the one
+  that existed — I should have read the manifest before predicting the work.
+- `verified` 2026-08-17 **FLIPPING THAT BOX ALONE WOULD HAVE MADE THINGS WORSE, NOT
+  BETTER.** `grant.py` refused DMs independently of Slack (`channel_type != "im"`, and a
+  `D…` id can never appear in `SLACK_CHANNEL_ID`), so the checkbox on its own removes the
+  honest banner and replaces it with a text box that silently eats every message. Both
+  halves were always required.
+- `verified` 2026-08-17 **THE CHANNEL GATE WAS THE WHOLE AUTHORIZATION STORY, so allowing
+  DMs moved the boundary from the ROOM to the PERSON** and that boundary had to be BUILT
+  rather than inherited by deleting a condition. Any workspace member can DM an installed
+  app, an app DM is invisible to everyone else, and one turn can spend real money. Only
+  reviewed `config/reps.json` identities are answered; anyone else gets one fixed line —
+  no model call, no tool, no spend, no row — because silence in a DM reads as broken
+  rather than declined. `in_configured_channel` still refuses every DM on its own, and a
+  test asserts exactly that as the control.
+- `verified` 2026-08-17 **THREE RULES IN THE LISTENER ARE RULES ABOUT A ROOM AND ARE FALSE
+  IN A DM**: "top-level chatter isn't Grant's business", "an @mention means somebody else
+  was addressed", and "only speak under a post Grant made". Each would have accepted the
+  message, produced no answer and left no error — the same silent drop `on_message` was
+  already fixed for on 2026-08-12. A fourth: `conversations.replies` on a top-level DM
+  returns that ONE message, so every DM would have arrived with **no memory** and a bare
+  "yes" would lose its antecedent — the Kerry bug, in the one venue where people type
+  consecutive sentences. DMs read their own history, REVERSED, because
+  `conversations.history` is newest-first while `replies` is oldest-first; reading it raw
+  hands the model the conversation backwards and nothing raises.
+- `verified` 2026-08-17 Adding the venue pushed `grant.py` to **1041 lines, past the rule-4
+  cap**, so the venue concern is now `venues.py` (201 lines): gates, membership, history —
+  no app state, so a change there cannot alter what a confirmation writes. `grant.py` is
+  back to **942**, exactly where it started, with the old private names kept as aliases
+  because `salesforce_actions`, `proactive_actions` and the tests import them.
+  11 new tests; **all 7 guards mutation-proven**, each with a control proving the channel
+  rules did not move. Suite **1610 passed, 87 skipped**; `ruff check` and
+  `ruff format --check` both clean.
+- `needs-testing` 2026-08-17 **NOTHING IS DEPLOYED, AND THE VOID IS OPEN RIGHT NOW.**
+  Commit `a031ad7` is local, on `fix/enrich-orgs-defects-20260813`, not merged to `main`.
+  The last recorded production revision is `87d4e00` (2026-08-13, unverified since), which
+  still refuses DMs — so with the Slack box now checked, **a rep can type into Grant's DM
+  and be silently ignored**. Either deploy through the guardian or uncheck the box until
+  then; leaving it as-is is the one state that looks working and is not.
+
+## Current status (2026-08-13, second deploy — four defects that cost money)
+
+- `verified` 2026-08-13 **PRODUCTION IS `87d4e00`, SCHEMA 47.** PID 121468 → **124668**,
+  one listener, 14 deployable files (22 delta − 8 `.claude/agent-memory/**`), all
+  modifications, **14/14 byte-identical**, second rsync pass empty, no `--delete`.
+  All 14 confirmed sitting at `58b3e24` first, so no parallel writer had touched them.
+  **Outage 116.4 s, measured** — a migration window, not a restart. `.env` sha and
+  crontab **byte-identical** (crontab proven by `cmp` against a captured copy, not a
+  recomputed sha), `leads` 10761 → 10761, tracebacks 13 → 13, FK orphans 2 → 2.
+  Migration 47 added exactly one nullable column and one index, all rows NULL.
+  All three cron kinds then ticked on the new code, and today's nudge slot survived.
+- `verified` 2026-08-13 **FOUR DEFECTS FIXED, EACH MUTATION-PROVEN**, all found by the
+  re-research pass rather than by reading code: `enrich-orgs` re-bought its own
+  failures (migration 47 adds `org_profile_checked_at`, stamped on EVERY outcome —
+  a clock recording only successes would miss exactly the failures a cooldown is for);
+  the dedup **split one organization in two** because the GROUP BY fell back to the RAW
+  entity name, which can never equal a stored canonical key, so Modesto and Mt. Morris
+  recurred after being cited as fixed; `fill-contacts` lost a whole paid batch to
+  ZoomInfo person id `-883527167`, the fourth door into the same defect that
+  `AlreadySpent`, `BudgetExhausted` and `SpendIndeterminate` each closed; and
+  **California could never finish** `nces-bind`.
+- `verified` 2026-08-13 **THE CALIFORNIA GUARD WAS RIGHT AND THE MECHANISM UNDER IT WAS
+  WRONG** — and only a live call settled it. I first blamed a non-unique sort key;
+  `orderByFields` was already set. Measured instead: `resultOffset=0` and
+  `resultOffset=2000` return the **IDENTICAL 2,000 rows** (same first LEAID `0600001`,
+  same last `0691046`) with `exceededTransferLimit=True` on both. ArcGIS silently
+  ignores `resultOffset` on a `groupByFieldsForStatistics` aggregate, so real rows
+  existed and were unreachable. CA is the only state whose grouped output exceeds one
+  page. Now pages by key range; `fetch_state("CA")` returns **2,038 districts, 1,977
+  with enrollment**, where it used to raise. A plausible mechanism is not a cause.
+- `verified` 2026-08-13 **THREE FIXTURES COULD ONLY EMIT WHAT THE CODE ALREADY LOOKED
+  FOR**, which is why three of these four defects had green tests the whole time: a
+  uniform canonical key production never has, person ids like `"1-0"` that
+  `PERSON_ID_RE` rejects outright, and an NCES double **asserting `resultOffset` was
+  present**. Same class as the Slack stubs already recorded here. All three now model
+  the real contract.
+- `verified` 2026-08-13 **THE `.env` COPY BASELINE IS 63, NOT 64, AND THE DRIFT WAS A
+  SELF-MATCH.** `find ~ -name ".env*"` matches anything BEGINNING with `.env`; the
+  guardian created a tracking file named `.envlist…`, watched the count jump 63 → 64,
+  and renaming it restored 63 — so a prior session's `.env`-prefixed scratch file
+  explains the old number with no credential involved. Same self-match class as
+  `pkill -f` killing its own SSH session. A path-only inventory (mode 600, no values)
+  now lives at `~/.dotenv-inventory.87d4e00.20260813`: **diff a list, not an integer.**
+- `verified` 2026-08-13 **THE LIVE DATABASE IS `~/grants_agent/grant_watch.db`**, not
+  `~/grant_watch.db` — home holds only backups, and the wrong path fails as a
+  misleading "unable to open database file". I had it wrong in a deploy instruction.
+- `needs-testing` 2026-08-13 **NOTHING WAS SPENT ON THIS DEPLOY** — no `enrich-orgs`,
+  `fill-contacts` or `nces-bind` execution, so the four fixes are proven by 91 droplet
+  tests and by reading the deployed bytes, NOT by a live paid run. The
+  `enrich-orgs --dry-run` preview was blocked by the permission classifier and the
+  guardian correctly declined to route around it. **The batch page-verify path is
+  still unbuilt**, so `contact_status='verified'` remains 0 and outreach stays blocked.
+
 ## Current status (2026-08-13, deployed — the env was the deploy)
 
 - `verified` 2026-08-13 **PRODUCTION IS `58b3e24`, SCHEMA 46.** Pinned to the `origin/main`

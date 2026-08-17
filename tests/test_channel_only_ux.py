@@ -1,4 +1,11 @@
-"""Regression tests for Grant's channel-only, natural-language-first interface."""
+"""Regression tests for Grant's gated, natural-language-first interface.
+
+The channel gate below is still exactly as strict as it was — including on DMs, which
+it refuses on its own. Since 2026-08-17 a DM is a second, independent venue with its
+own authorization (the reviewed roster); `tests/test_direct_messages.py` owns that
+half, and `test_channel_gate_still_refuses_every_dm` there is the control proving this
+file's rule was not loosened to make it work.
+"""
 
 from __future__ import annotations
 
