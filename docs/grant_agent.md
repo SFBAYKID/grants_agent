@@ -123,11 +123,22 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 - **Icon:** the owl logo (`assets/grant_logo_512.png`). Background color `#0b3d5c`.
 - **Socket Mode:** ON (app-level token `grant-socket-mode`, scope `connections:write`).
 - **Desired configuration (`needs-testing` externally):** interactivity remains ON for explicit
-  Salesforce safety confirmations; events are `app_mention`, `message.channels`, and
-  `reaction_added`; no slash command or DM subscription remains.
+  Salesforce safety confirmations; events are `app_mention`, `message.channels`, `message.groups`,
+  `message.im`, and `reaction_added`; no slash command remains.
 - **Required bot scopes after reinstall:** `app_mentions:read`, `chat:write`, `channels:history`,
-  `channels:read`, `groups:history`, `groups:read`, `reactions:read`, `reactions:write`, `users:read`,
-  `users:read.email`, and `files:write`. DM and command scopes are unnecessary.
+  `channels:read`, `groups:history`, `groups:read`, `im:history`, `reactions:read`,
+  `reactions:write`, `users:read`, `users:read.email`, and `files:write`. Command scopes are
+  unnecessary.
+- **DMs, added 2026-08-17 (Chase's call).** The app's Messages tab was off, so the DM printed
+  *"Sending messages to this app has been turned off"* — and the code refused DMs independently, so
+  flipping only the checkbox would have let reps type into a void. Both halves are needed: the
+  Slack-side pair (**App Home → Messages Tab → "Allow users to send Slash commands and messages
+  from the messages tab"**, plus `im:history` + `message.im`) and `grant_watch/slack/venues.py`.
+  **A DM is authorized by the PERSON, not the room** — `SLACK_CHANNEL_ID` cannot bound a `D…` id
+  that is minted per person — so only reviewed `config/reps.json` identities are answered, and
+  anyone else gets one fixed line and no model turn. Adding a scope requires a reinstall; confirm
+  the `xoxb` token afterwards, because a changed token means production's `.env` is stale and Grant
+  dies at the next restart, not at the reinstall.
 - **Verified live** (2026-07-13): `auth.test` ok (team Monarch, user grant); `apps.connections.open`
   returned a `wss://` URL. If scopes change later, edit via the app's App Manifest page and reinstall.
 
@@ -140,8 +151,10 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
   only; production activation of those fixes remains `needs-testing` through the guardian.
 
 - Slack app and core bot: `verified` live (provisioned, installed, Socket Mode connected).
-- Removal of the live `/grant` command, DM subscription/scopes, and `chat:write.public` is
-  `needs-testing`; code already has no handler and fails closed outside the configured channel.
+- Removal of the live `/grant` command and `chat:write.public` is `needs-testing`; code has no
+  command handler and still fails closed outside the configured channel or a roster DM. The DM
+  subscription/scopes were deliberately RE-ADDED on 2026-08-17 (see "DMs" above) — that line
+  previously called for their removal and is retracted rather than deleted.
 - On-demand search and complete Excel fallback: `verified` offline with pytest on 2026-07-14;
   production configured-channel @mention upload is `needs-testing` through grants-ops-guardian.
 - Google Sheets export (Grant-owned service account + "Grant Exports" shared drive

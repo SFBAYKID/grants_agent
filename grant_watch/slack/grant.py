@@ -30,7 +30,7 @@ from slack_sdk import WebClient
 from .. import db
 from ..config import configured_channel_ids
 from ..spreadsheets import GeneratedArtifact
-from . import nudge_threads
+from . import nudge_threads, venues
 from .approval_blocks import _crm_action_blocks
 from .nudge_silence import NON_HUMAN_SUBTYPES
 
@@ -64,28 +64,6 @@ def _workspace_id(body: dict[str, Any], event: dict[str, Any] | None = None) -> 
     return str(body.get("team_id") or team.get("id") or (event or {}).get("team") or "")
 
 
-def _active_human_channel_member(client: WebClient, user_id: str, channel: str) -> bool:
-    """Recheck active human identity and configured-channel membership at commit."""
-    try:
-        user = client.users_info(user=user_id).get("user") or {}
-        if user.get("deleted") or user.get("is_bot") or user.get("is_app_user"):
-            return False
-        cursor = ""
-        while True:
-            response = client.conversations_members(
-                channel=channel, limit=200, cursor=cursor or None
-            )
-            if user_id in response.get("members", []):
-                return True
-            cursor = str(
-                (response.get("response_metadata") or {}).get("next_cursor") or ""
-            )
-            if not cursor:
-                return False
-    except Exception:
-        return False
-
-
 def _interaction_thread_ts(body: dict[str, Any]) -> str:
     """Return the immutable Slack thread root for an interactive button payload."""
     message = body.get("message") or {}
@@ -98,15 +76,14 @@ def _interaction_thread_ts(body: dict[str, Any]) -> str:
     )
 
 
-def _in_configured_channel(event: dict[str, Any]) -> bool:
-    """Allow conversations only in Grant's explicitly configured channel(s).
-
-    `SLACK_CHANNEL_ID` may list several channels (e.g. production plus the dev
-    playground); a mention in ANY of them is honored, but never a DM."""
-    allowed = set(configured_channel_ids())
-    item = event.get("item") or {}
-    channel = event.get("channel") or item.get("channel")
-    return bool(allowed and channel in allowed and event.get("channel_type") != "im")
+# Venue gating lives in `venues.py` (split out 2026-08-17 for the 1000-line cap).
+# These names stay because `salesforce_actions`, `proactive_actions` and the tests
+# import them from here; the behaviour is unchanged and defined in one place.
+_in_configured_channel = venues.in_configured_channel
+_active_human_channel_member = venues.active_human_channel_member
+_may_converse = venues.may_converse
+_decline_unknown_dm = venues.decline_unknown_dm
+_thread_history = venues.thread_history
 
 
 def create_app() -> App:
@@ -133,17 +110,30 @@ def create_app() -> App:
         say: Callable[..., object],
         client: WebClient,
     ) -> None:
-        """Handle @Grant only in the configured channel; ignore every other venue."""
+        """Handle @Grant in the configured channel or a roster DM; ignore all else."""
         if (
-            not _in_configured_channel(event)
-            or event.get("bot_id")
+            event.get("bot_id")
             or str(event.get("subtype") or "") in NON_HUMAN_SUBTYPES
             or not str(event.get("user") or "")
         ):
             return
+        if not _may_converse(event):
+            _decline_unknown_dm(event, client)
+            return
+        direct = venues.is_direct_message(event)
         text = re.sub(r"<@[^>]+>", "", event.get("text") or "").strip()
         thread_ts = event.get("thread_ts")
-        thread_key = f"{event['channel']}:{thread_ts or event['ts']}"
+        # In a DM Grant answers at TOP LEVEL, because that is where the person is
+        # typing. Threading each turn under its own message would give every follow-up
+        # a fresh, empty thread — the DM equivalent of not listening.
+        reply_ts = thread_ts if direct else (thread_ts or event["ts"])
+        thread_key = (
+            # One lock per DM, not per message: without a thread to serialize on, two
+            # quick messages would otherwise run two model turns over each other.
+            f"{event['channel']}:dm"
+            if direct
+            else f"{event['channel']}:{thread_ts or event['ts']}"
+        )
         event_id = str(body.get("event_id", ""))
         workspace = _workspace_id(body, event)
         conn = db.connect()
@@ -176,7 +166,7 @@ def create_app() -> App:
                         text,
                         client,
                         event["channel"],
-                        event.get("thread_ts") or event["ts"],
+                        reply_ts,
                         user=event.get("user", ""),
                         workspace=workspace,
                         request_token=str(
@@ -211,7 +201,15 @@ def create_app() -> App:
         say: Callable[..., object],
         client: WebClient,
     ) -> None:
-        """Handle plain replies only under Grant's configured-channel alerts.
+        """Handle plain replies under Grant's alerts, and every message in a roster DM.
+
+        A DM IS NOT A THREAD AND MUST NOT BE JUDGED LIKE ONE. Three rules below are
+        rules about a ROOM — "top-level chatter isn't Grant's business", "an @mention
+        means somebody else was addressed", and "only speak under a post you made" —
+        and all three are false in a conversation whose only two participants are the
+        person and Grant. Applying them to a DM would accept the message, produce no
+        answer, and leave no error: the exact silent drop this handler was already
+        fixed for once.
 
         THE SUBTYPE RULE IS A DENY LIST, NOT "HAS A SUBTYPE". Rejecting every message
         carrying a subtype silently drops three ordinary human replies — `file_share`
@@ -229,29 +227,39 @@ def create_app() -> App:
             or not str(event.get("user") or "")
         ):
             return
-        if not _in_configured_channel(event):
+        if not _may_converse(event):
+            _decline_unknown_dm(event, client)
             return
+        direct = venues.is_direct_message(event)
         text = event.get("text") or ""
         if f"<@{bot_user_id}>" in text:
             return  # the app_mention handler owns this one — no double replies
-        if re.search(r"<@[^>]+>", text):
+        if not direct and re.search(r"<@[^>]+>", text):
             # Any OTHER @mention — a different agent like @Persequor, or a teammate —
             # means this message is addressed to someone else, so Grant stays out of it
             # (Chase's rule). Grant's own mention already returned just above, so a plain
             # follow-up (no @mention) is the only thing Grant continues a thread on.
+            # In a DM there IS nobody else, so "look up <@U…>'s leads" is a request TO
+            # Grant that this rule would have thrown away.
             return
         thread_ts = event.get("thread_ts")
-        if not thread_ts or not text.strip():
+        if not text.strip() or (not thread_ts and not direct):
             return  # top-level channel chatter isn't Grant's business
-        thread_key = f"{event['channel']}:{thread_ts or event['ts']}"
+        thread_key = (
+            # One lock per DM: with no thread to serialize on, two quick messages would
+            # otherwise run two model turns over each other.
+            f"{event['channel']}:dm"
+            if direct
+            else f"{event['channel']}:{thread_ts or event['ts']}"
+        )
         event_id = str(body.get("event_id", ""))
         workspace = _workspace_id(body, event)
         conn = db.connect()
-        post = db.find_post_by_ts(conn, event["channel"], thread_ts)
+        post = db.find_post_by_ts(conn, event["channel"], thread_ts or "")
         general_thread = db.is_conversation_thread(
             conn, workspace, str(event["channel"]), str(thread_ts)
         )
-        if post is None and not general_thread:
+        if post is None and not general_thread and not direct:
             # A THREAD GRANT ITSELF OPENED COUNTS. Top-level follow-ups
             # (`CHANNEL_POST_KINDS`) create a new root with neither a `posts` row nor a
             # conversation row, so answering Grant's own "Want me to find a contact?"
@@ -288,14 +296,17 @@ def create_app() -> App:
                         conn, post, event, say, client, workspace=workspace
                     )
                 else:
-                    db.touch_conversation_thread(
-                        conn, workspace, str(event["channel"]), str(thread_ts)
-                    )
+                    if thread_ts:
+                        # A top-level DM has no thread row to touch, and `str(None)`
+                        # would have written the literal "None" as its timestamp.
+                        db.touch_conversation_thread(
+                            conn, workspace, str(event["channel"]), str(thread_ts)
+                        )
                     delivered = _converse_general(
                         text.strip(),
                         client,
                         str(event["channel"]),
-                        str(thread_ts),
+                        str(thread_ts) if thread_ts else None,
                         user=str(event["user"]),
                         workspace=workspace,
                         request_token=str(
@@ -617,23 +628,6 @@ def _request_outreach(
     )
 
 
-def _thread_history(client: WebClient, channel: str, thread_ts: str) -> list[str]:
-    """Recent thread turns as 'Grant: ...' / 'rep: ...' lines, so the offer→confirm
-    flow works (Grant remembers it just offered Persequor). Failure -> no context,
-    never a crash."""
-    try:
-        resp = client.conversations_replies(channel=channel, ts=thread_ts, limit=12)
-    except Exception:
-        return []
-    lines: list[str] = []
-    for m in resp.get("messages", []):
-        who = "Grant" if m.get("bot_id") or m.get("app_id") else "rep"
-        txt = re.sub(r"<@[^>]+>", "", m.get("text") or "").strip()
-        if txt:
-            lines.append(f"{who}: {txt}")
-    return lines[-10:]
-
-
 def _single_lead_id(text: str, context: list[str]) -> int | None:
     """Resolve one explicit or recently displayed lead without guessing among many."""
     explicit = [int(value) for value in re.findall(r"\blead\s*#\s*(\d+)\b", text, re.I)]
@@ -683,7 +677,13 @@ def _converse_general(
     status = _Status(client, channel, thread_ts)
     status.start()
     try:
-        context = _thread_history(client, channel, thread_ts) if thread_ts else []
+        # A DM with no thread still HAS history — its own — so the one venue where
+        # people type consecutive sentences is not the one venue Grant forgets.
+        context = (
+            _thread_history(client, channel, thread_ts)
+            if thread_ts or venues.is_dm_channel(channel)
+            else []
+        )
         # WHAT GRANT OFFERED, STATED AS A FACT, BEFORE THE MODEL CLASSIFIES ANYTHING.
         #
         # Grant's first proactive follow-up asked Kerry "I can now — want me to send
@@ -751,7 +751,7 @@ def _converse_general(
 
 
 def _with_pending_offer(
-    context: list[str] | None, channel: str, thread_ts: str
+    context: list[str] | None, channel: str, thread_ts: str | None
 ) -> list[str]:
     """Prepend what Grant offered in this thread, when it is still awaiting an answer.
 
