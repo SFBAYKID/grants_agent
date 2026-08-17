@@ -123,7 +123,63 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
-## Current status (2026-08-17, Grant can be DMed — Slack side live, code NOT deployed)
+## Current status (2026-08-17, Grant can be DMed — deployed, but unproven end to end)
+
+- `verified` 2026-08-17 **PRODUCTION IS `900af52`, SCHEMA 47 UNCHANGED.** Pre-deploy
+  revision READ from `~/grants_agent/.deployed_revision` (`87d4e00`), not assumed; PID
+  124668 had been up since Aug 13 14:06:29, so no out-of-band restart had happened, and
+  all 4 pre-existing target files were byte-identical to the `87d4e00` blobs with both new
+  files genuinely absent — no parallel writer, no half-written tree. PID 124668 →
+  **198537**, **0.211 s outage measured**, one listener, clean Bolt boot, tracebacks
+  **13 → 13 compared**. 6/6 deployable files byte-identical, second rsync pass empty,
+  `--delete` omitted after a preview showed zero deletions. `.env` sha identical pre/post
+  and unmoved since Aug 13; crontab proven by `cmp` against a captured copy. `leads`
+  10781 → 10781, `followup_nudges` 35 → 35, FK orphans 2 → 2 compared. Backup taken first
+  with `integrity_check` run against the COPY; Chase's `pre46` rollback confirmed
+  untouched. **Synced from a `git archive` export of the pinned commit, not the working
+  tree**, because HEAD sat on the feature branch.
+- `verified` 2026-08-17 **THE DM GATE ANSWERS CORRECTLY ON THE DEPLOYED BYTES, BOTH
+  DIRECTIONS** — roster DM True, stranger DM False, `in_configured_channel` still refusing
+  every DM, and a payload claiming `im` while naming a `C…` room denied the DM path. The
+  startup gate returned **0 issues in production's own environment**, `venues.py` was
+  proven present and its import proven to resolve BEFORE the kill, `config/reps.json`
+  readable with 6 roster rows, and 22 droplet tests passed.
+- `verified` 2026-08-17 **TWO OF THE GUARDIAN'S OWN PRE-RESTART ASSERTIONS WERE WRONG ON A
+  BYTE-PERFECT DEPLOY, AND ONE OF THEM ABORTED THE CONFIG CHECK.** It asserted three
+  functions were removed from `grant.py` — they were removed as `def`s and KEPT AS ALIASES,
+  and its grep read only the `-` side of the diff. It then called
+  `runtime_configuration_issues` on `grant`, where it does not live (`grant_watch/health.py`,
+  imported inside `main()`). The file shas already proved the bytes, so it fixed the checks
+  rather than the deploy — but the first failure aborted the script **before the config
+  gate, the one check that decides whether the process can boot**, and that had to be
+  re-run separately. A test of a deploy can fail for reasons that have nothing to do with
+  the deploy, and the dangerous case is the one that skips a later check.
+- `verified` 2026-08-17 **THE CRONTAB WAS NOT PAUSED, REVERSING THE PREVIOUS DEPLOY'S
+  POSTURE, DELIBERATELY.** The pause exists because a LONG window lets the `*/5` keepalive
+  relaunch onto a half-synced tree; with no migration and the sync byte-verified before any
+  kill, there was nothing to protect against. Confirmed after the fact: watchdog, nudge,
+  remind, drip and keepalive have all ticked clean on the new code.
+- `needs-testing` 2026-08-17 **NO DM HAS ACTUALLY BEEN SENT END TO END.** The gate logic
+  and all four DM scopes are proven, but `message.im` subscription state is not readable
+  via the bot token, and the guardian sends no Slack messages without authorization. This
+  needs a human on the roster to type at Grant. **Chase reported the "Sending messages to
+  this app has been turned off" banner still showing after the checkbox was set** —
+  re-verified checked on a fresh page load, so the leading suspect is Slack client cache
+  (quit and reopen), NOT the setting. Unresolved as of this entry.
+- `verified` 2026-08-17 **AN ACCESSIBILITY-TREE READING SAID THE CHECKBOX WAS UNCHECKED AND
+  THE PIXELS SAID CHECKED.** The `find` tool inferred "no checked attribute listed" and was
+  wrong; a zoomed screenshot settled it. I would have reported the opposite of the truth
+  had I trusted the structured reading. Same class as every other map-versus-ground entry
+  in this file: when a derived reading and the ground disagree, go and look.
+- `verified` 2026-08-17 **THE DEPLOY WAS AUTHORIZED BY A BUTTON, NOT A SENTENCE.** Chase
+  selected "Merge to main and deploy" from an `AskUserQuestion` whose option text named the
+  listener restart and the shared droplet. That is genuine input, and it is deploy-specific
+  rather than consent carried forward — but an automated security review could not see it
+  as a user message and flagged the deploy as unauthorized. **A click is real consent and a
+  poor audit trail.** Worth deciding, Chase: if a click should not authorize a production
+  restart, say so and future deploys will require a typed instruction.
+
+## Superseded: the pre-deploy state of this work
 
 - `verified` 2026-08-17 **THE BANNER WAS ONE UNCHECKED BOX, AND TWO OF THE THREE CHANGES
   I PREDICTED WERE ALREADY DONE.** Chase asked why his DM said *"Sending messages to this
@@ -168,12 +224,13 @@ affect Chase's other projects.
   11 new tests; **all 7 guards mutation-proven**, each with a control proving the channel
   rules did not move. Suite **1610 passed, 87 skipped**; `ruff check` and
   `ruff format --check` both clean.
-- `needs-testing` 2026-08-17 **NOTHING IS DEPLOYED, AND THE VOID IS OPEN RIGHT NOW.**
-  Commit `a031ad7` is local, on `fix/enrich-orgs-defects-20260813`, not merged to `main`.
-  The last recorded production revision is `87d4e00` (2026-08-13, unverified since), which
-  still refuses DMs — so with the Slack box now checked, **a rep can type into Grant's DM
-  and be silently ignored**. Either deploy through the guardian or uncheck the box until
-  then; leaving it as-is is the one state that looks working and is not.
+- *(Superseded the same day: this said "nothing is deployed" and was true when written.
+  `a031ad7` merged to `main` as `900af52` and shipped — see the block above. Kept rather
+  than edited away.)* Commit `a031ad7` is local, not merged to `main`. The last recorded
+  production revision is `87d4e00`, which still refuses DMs — so with the Slack box now
+  checked, **a rep can type into Grant's DM and be silently ignored**. Either deploy
+  through the guardian or uncheck the box until then; leaving it as-is is the one state
+  that looks working and is not.
 
 ## Current status (2026-08-13, second deploy — four defects that cost money)
 

@@ -13,7 +13,8 @@
 - [Measure a data migration on a COPY first](migration-46-total-quarantine.md) — "quarantines legacy claims" meant ALL of them; run the migrations against a throwaway copy and diff before the live run
 - [No CLI can write a `verified` contact](contacts-verified-not-writable-by-any-cli.md) — `save_contact` has ONE caller, the interactive Slack tool; `contact_evidence` is a DIFFERENT table from `contacts`, and outreach gates on `contacts`
 - [`pkill -f` kills your own ssh session](pkill-f-self-match-kills-your-session.md) — the pattern appears in your own command line; use `[g]rant_watch`, and exit 255 means the shell died, not that the work failed
-- [Pause the crontab for a long window](pause-crons-for-a-long-deploy-window.md) — 10 jobs, no gap >4 min; the */5 keepalive relaunches the bot and watchdog applies migrations under you
+- [Pause the crontab for a long window](pause-crons-for-a-long-deploy-window.md) — 10 jobs, no gap >4 min; the */5 keepalive relaunches the bot and watchdog applies migrations under you — but do NOT pause for a plain restart
+- [A failing smoke assertion may be the CHECK](import-smoke-assertions-can-be-wrong.md) — a removed `def` kept as an alias, and a gate imported inside `main()`; assert identity not absence, and run the boot-critical gate FIRST
 
 ## Tenant, transport, deploy mechanics
 
@@ -40,7 +41,8 @@
 
 ## Current production state
 
-- [87d4e00 — CURRENT PROD, deployed + verified](prod-state-87d4e00-verified.md) — 2026-08-13, **schema 47**, PID 124668, 14 files byte-identical, **116.4s** migration outage, `.env` byte-identical; the cron pause cost exactly ONE tick
+- [900af52 — CURRENT PROD, deployed + verified](prod-state-900af52-verified.md) — 2026-08-17, **schema 47 UNCHANGED**, PID 198537, 6 files (2 NEW), **0.211s** outage, **no cron pause** (correct for a restart); DM venue live, roster-gated, both directions proven
+- [87d4e00 (superseded by 900af52)](prod-state-87d4e00-verified.md) — 2026-08-13, **schema 47**, PID 124668, 14 files byte-identical, **116.4s** migration outage, `.env` byte-identical; the cron pause cost exactly ONE tick
 - [Live DB is in the REPO dir](live-db-is-in-the-repo-dir.md) — `~/grants_agent/grant_watch.db`, NOT `~/grant_watch.db` (home holds only backups); wrong path fails as "unable to open database file". Marker is `~/grants_agent/.deployed_revision`
 - [Re-research pass 2026-08-13](rerearch-pass-20260813.md) — `nces-bind` restored NOTHING quarantined but made the paid path authoritative+cheaper; 303 Firecrawl / 6 ZoomInfo; enrich-orgs re-scrapes just-failed orgs and double-scrapes 30 split-key orgs; fill-contacts dies on a negative vendor ID
 - [58b3e24 (superseded by 87d4e00)](prod-state-58b3e24-verified.md) — 2026-08-13, schema 46, PID 121468, 139 files byte-identical, ~4min DELIBERATE outage (migrations + ledger cutover, not a restart); `.env` intentionally not byte-identical
