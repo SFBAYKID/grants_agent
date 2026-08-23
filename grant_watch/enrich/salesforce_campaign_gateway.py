@@ -12,14 +12,17 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from email.utils import format_datetime
 from typing import Any  # Salesforce REST response JSON is runtime-shaped.
 from urllib.parse import urlparse
 
 import requests
 
 from . import salesforce_privileges
+from .salesforce_gateway_identity import (
+    _conditional_headers,
+    parse_identity_url,
+    validate_record_id,
+)
 
 from .. import db
 
@@ -73,17 +76,6 @@ DO_NOT_CALL_MARKER = (
     "not be dialled, including the main line below."
 )
 
-_ID_PREFIXES = {
-    "Campaign": "701",
-    "Lead": "00Q",
-    "Contact": "003",
-    "Account": "001",
-    "Opportunity": "006",
-    "User": "005",
-    "Organization": "00D",
-    "Note": "002",
-}
-
 
 @dataclass(frozen=True)
 class SalesforceRecordRef:
@@ -126,6 +118,10 @@ class _TokenCache:
     instance_url: str = ""
     expires_at: float = 0.0
     credential_scope: str = ""
+    #: Salesforce's own identity URL from the token response, e.g.
+    #: https://login.salesforce.com/id/<ORG_ID>/<USER_ID>. It carries the org
+    #: identity and the sandbox flag without needing any object permission.
+    identity_url: str = ""
 
 
 _TOKEN_CACHE = _TokenCache()
@@ -193,21 +189,6 @@ def _configured_hosts() -> frozenset[str]:
     return frozenset(hosts)
 
 
-def validate_record_id(record_id: str, expected_sobject: str) -> str:
-    """Validate a 15/18-character Salesforce ID and its object prefix."""
-    clean = record_id.strip()
-    expected_prefix = _ID_PREFIXES.get(expected_sobject)
-    if expected_prefix is None:
-        raise ValueError(f"unsupported Salesforce object '{expected_sobject}'")
-    if (
-        len(clean) not in (15, 18)
-        or not clean.isalnum()
-        or not clean.startswith(expected_prefix)
-    ):
-        raise ValueError(f"not a valid {expected_sobject} Salesforce ID")
-    return clean
-
-
 def parse_record_link(link: str, allowed_sobjects: set[str]) -> tuple[str, str]:
     """Validate hostname, Lightning object path, and Salesforce record prefix."""
     parsed = urlparse(link.strip())
@@ -258,6 +239,7 @@ class SalesforceCampaignGateway:
         )  # Salesforce OAuth JSON is runtime-shaped
         _TOKEN_CACHE.token = str(body["access_token"])
         _TOKEN_CACHE.instance_url = str(body.get("instance_url") or domain).rstrip("/")
+        _TOKEN_CACHE.identity_url = str(body.get("id") or "")
         _TOKEN_CACHE.expires_at = now + 25 * 60
         _TOKEN_CACHE.credential_scope = credential_scope
         return _TOKEN_CACHE.token, _TOKEN_CACHE.instance_url
@@ -265,6 +247,18 @@ class SalesforceCampaignGateway:
     #: Optional username for the refusal message. Set by the preflight CLI, which
     #: can afford an extra call; the write path must not make one.
     identity_hint: str = ""
+
+    def _identity_url(self) -> str:
+        """Return Salesforce's identity URL for the CURRENT writer token.
+
+        An explicit seam rather than a module-global read inside the write gate: the
+        cache is populated by `_auth`, so anything that replaces `_auth` (a test
+        double, a future alternate flow) would otherwise silently hand the gate an
+        empty string. `parse_identity_url` fails closed on empty, so the failure mode
+        is a refused write rather than an unchecked one -- but a gate whose input can
+        vanish when its neighbour is swapped is a gate worth naming.
+        """
+        return _TOKEN_CACHE.identity_url
 
     def verify_write_scope(self) -> SalesforceOrganizationIdentity:
         """Require exact configured org identity and sandbox status before a write."""
@@ -290,21 +284,14 @@ class SalesforceCampaignGateway:
                 "SALESFORCE_WRITE_EXPECT_SANDBOX must be explicitly 0 or 1"
             )
         expected_sandbox = expected_flag == "1"
-        response = requests.get(
-            f"{instance}/services/data/{API_VERSION}/query",
-            params={
-                "q": "SELECT Id,Name,IsSandbox,InstanceName FROM Organization LIMIT 2"
-            },
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=20,
-        )
-        response.raise_for_status()
-        records = response.json().get("records") or []
-        if len(records) != 1:
-            raise PermissionError("Salesforce Organization identity was not unique")
-        record = records[0]
-        actual_org_id = str(record.get("Id") or "")
-        actual_sandbox = bool(record.get("IsSandbox"))
+        # Identity comes from Salesforce's OWN token assertion, not from a query.
+        # `SELECT ... FROM Organization` needs a read permission that a correctly
+        # hardened integration user does not have, so the old check failed closed on
+        # exactly the least-privilege account we want to run as. The identity URL
+        # arrives with the token over the same TLS connection and cannot be withheld
+        # by an object permission -- so every assertion below is unchanged, only its
+        # SOURCE is.
+        actual_org_id, actual_sandbox = parse_identity_url(self._identity_url())
         record_profile = (
             ""  # Profile is read separately; unknown is never treated as safe.
         )
@@ -328,11 +315,27 @@ class SalesforceCampaignGateway:
             )
         )
 
+        # Name and instance are COSMETIC -- they label a report, they gate nothing.
+        # Reading them must never be able to fail the write, so a blocked query here
+        # leaves them blank rather than raising.
+        display_name, instance_name = "", ""
+        try:
+            record = (
+                self._get(
+                    "query", {"q": "SELECT Name,InstanceName FROM Organization LIMIT 1"}
+                ).get("records")
+                or [{}]
+            )[0]
+            display_name = str(record.get("Name") or "")
+            instance_name = str(record.get("InstanceName") or "")
+        except requests.RequestException:
+            pass
+
         return SalesforceOrganizationIdentity(
             organization_id=actual_org_id,
-            name=str(record.get("Name") or ""),
+            name=display_name,
             is_sandbox=actual_sandbox,
-            instance_name=str(record.get("InstanceName") or ""),
+            instance_name=instance_name,
             instance_url=instance,
         )
 
@@ -958,28 +961,3 @@ class SalesforceCampaignGateway:
             record_id = ""
         _RECORD_TYPE_CACHE[developer_name] = record_id
         return record_id
-
-
-def _conditional_headers(
-    authorization_headers: dict[str, str], current: dict[str, Any]
-) -> dict[str, str] | None:
-    """Build Salesforce's optimistic-update header from the exact retrieved version.
-
-    Salesforce documents ``If-Unmodified-Since`` for sObject-row PATCH requests and
-    returns 412 when another actor changes the record after the supplied
-    ``LastModifiedDate``. Refusing a missing or malformed date is safer than silently
-    falling back to an unconditional write over a colleague's live CRM edit.
-    """
-    raw = str(current.get("LastModifiedDate") or "").strip()
-    try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return None
-    return {
-        **authorization_headers,
-        "If-Unmodified-Since": format_datetime(
-            parsed.astimezone(timezone.utc), usegmt=True
-        ),
-    }
