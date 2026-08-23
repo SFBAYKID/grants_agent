@@ -23,6 +23,7 @@ bot answering questions.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -231,6 +232,30 @@ def reset_cache() -> None:
     _CACHE.clear()
 
 
+def writer_credentials() -> tuple[str, str, str]:
+    """Return (my_domain, client_id, client_secret) for the writer, reader as fallback.
+
+    The three `SALESFORCE_WRITE_*` keys are OPTIONAL, exactly as
+    `SalesforceCampaignGateway` treats them: production sets NONE of them, because one
+    connected app serves both roles there, and duplicating the credentials was
+    deliberately rejected. Subscripting them directly made the preflight die with a
+    KeyError on the only machine that matters while working perfectly on a laptop that
+    happens to set them -- and this module's own docstring tells you to run it "after
+    any change to the integration user", which is precisely when production is the
+    machine you are standing on.
+    """
+    return (
+        (
+            os.environ.get("SALESFORCE_WRITE_MY_DOMAIN_URL")
+            or os.environ["SALESFORCE_MY_DOMAIN_URL"]
+        ).rstrip("/"),
+        os.environ.get("SALESFORCE_WRITE_CLIENT_ID")
+        or os.environ["SALESFORCE_CLIENT_ID"],
+        os.environ.get("SALESFORCE_WRITE_CLIENT_SECRET")
+        or os.environ["SALESFORCE_CLIENT_SECRET"],
+    )
+
+
 def report() -> int:
     """Print the account's destructive reach; exit non-zero while it is unsafe.
 
@@ -250,13 +275,13 @@ def report() -> int:
     # configuration error as though the account were unreachable.
     load_dotenv()
 
-    domain = os.environ["SALESFORCE_WRITE_MY_DOMAIN_URL"].rstrip("/")
+    domain, client_id, client_secret = writer_credentials()
     granted = requests.post(
         f"{domain}/services/oauth2/token",
         data={
             "grant_type": "client_credentials",
-            "client_id": os.environ["SALESFORCE_WRITE_CLIENT_ID"],
-            "client_secret": os.environ["SALESFORCE_WRITE_CLIENT_SECRET"],
+            "client_id": client_id,
+            "client_secret": client_secret,
         },
         timeout=30,
     )

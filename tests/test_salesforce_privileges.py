@@ -147,3 +147,54 @@ def test_no_delete_verb_can_enter_the_codebase() -> None:
         "Grant must never be able to delete a Salesforce record. Found: "
         + "; ".join(offenders)
     )
+
+
+def test_the_preflight_falls_back_to_the_reader_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PRODUCTION sets none of the SALESFORCE_WRITE_* keys, and that is correct.
+
+    One connected app serves both roles there; the gateway has always fallen back to
+    the reader. Subscripting the writer keys directly made the preflight KeyError on
+    the droplet while passing on a laptop that happens to set them -- and the droplet
+    is exactly where you run it after changing the integration user.
+    """
+    for key in (
+        "SALESFORCE_WRITE_MY_DOMAIN_URL",
+        "SALESFORCE_WRITE_CLIENT_ID",
+        "SALESFORCE_WRITE_CLIENT_SECRET",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("SALESFORCE_MY_DOMAIN_URL", "https://reader.my.salesforce.com/")
+    monkeypatch.setenv("SALESFORCE_CLIENT_ID", "reader-id")
+    monkeypatch.setenv("SALESFORCE_CLIENT_SECRET", "reader-secret")
+
+    assert priv.writer_credentials() == (
+        "https://reader.my.salesforce.com",
+        "reader-id",
+        "reader-secret",
+    )
+
+
+def test_an_explicit_writer_credential_still_wins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The control: a separately-credentialed writer must NOT be overridden.
+
+    Without this the fallback could 'pass' by ignoring the writer entirely, which on
+    a machine with a sandbox writer would silently audit the wrong org.
+    """
+    monkeypatch.setenv("SALESFORCE_MY_DOMAIN_URL", "https://reader.my.salesforce.com")
+    monkeypatch.setenv("SALESFORCE_CLIENT_ID", "reader-id")
+    monkeypatch.setenv("SALESFORCE_CLIENT_SECRET", "reader-secret")
+    monkeypatch.setenv(
+        "SALESFORCE_WRITE_MY_DOMAIN_URL", "https://writer.sandbox.my.salesforce.com"
+    )
+    monkeypatch.setenv("SALESFORCE_WRITE_CLIENT_ID", "writer-id")
+    monkeypatch.setenv("SALESFORCE_WRITE_CLIENT_SECRET", "writer-secret")
+
+    assert priv.writer_credentials() == (
+        "https://writer.sandbox.my.salesforce.com",
+        "writer-id",
+        "writer-secret",
+    )
