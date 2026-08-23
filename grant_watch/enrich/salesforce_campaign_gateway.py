@@ -19,6 +19,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from . import salesforce_privileges
+
 from .. import db
 
 API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
@@ -260,6 +262,10 @@ class SalesforceCampaignGateway:
         _TOKEN_CACHE.credential_scope = credential_scope
         return _TOKEN_CACHE.token, _TOKEN_CACHE.instance_url
 
+    #: Optional username for the refusal message. Set by the preflight CLI, which
+    #: can afford an extra call; the write path must not make one.
+    identity_hint: str = ""
+
     def verify_write_scope(self) -> SalesforceOrganizationIdentity:
         """Require exact configured org identity and sandbox status before a write."""
         token, instance = self._auth()
@@ -299,6 +305,9 @@ class SalesforceCampaignGateway:
         record = records[0]
         actual_org_id = str(record.get("Id") or "")
         actual_sandbox = bool(record.get("IsSandbox"))
+        record_profile = (
+            ""  # Profile is read separately; unknown is never treated as safe.
+        )
         if actual_org_id != expected_org_id:
             raise PermissionError(
                 "Salesforce Organization ID does not match the configured allowlist"
@@ -307,6 +316,18 @@ class SalesforceCampaignGateway:
             raise PermissionError(
                 "Salesforce sandbox status does not match the configured expectation"
             )
+        # THE ACCOUNT ITSELF MUST BE INCAPABLE OF DESTROYING ANYTHING. Every other
+        # guard in this module is code asking code to behave -- an allowlist, a
+        # read-before-write, a fixed marker. All of them are one careless commit from
+        # being bypassed. This one asks SALESFORCE what the authenticated user may do
+        # and refuses the write when the answer is "anything it likes", which is the
+        # only guarantee that still holds after we write a bug.
+        salesforce_privileges.assert_write_safe(
+            salesforce_privileges.cached_audit(
+                self._get, instance, self.identity_hint, record_profile
+            )
+        )
+
         return SalesforceOrganizationIdentity(
             organization_id=actual_org_id,
             name=str(record.get("Name") or ""),
