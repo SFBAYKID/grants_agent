@@ -76,6 +76,7 @@ class ObjectPrivileges:
     createable: bool
     updateable: bool
     deletable: bool
+    accessible: bool = True
 
 
 @dataclass(frozen=True)
@@ -126,7 +127,15 @@ def _describe(get_json: JsonGetter, sobject: str) -> ObjectPrivileges:
     live account rather than reading a profile we hope is still assigned. It writes
     nothing and touches no records.
     """
-    body = get_json(f"sobjects/{sobject}/describe", None)
+    try:
+        body = get_json(f"sobjects/{sobject}/describe", None)
+    except Exception:  # noqa: BLE001 - 403/404 both mean "this user cannot see it".
+        # A least-privilege account cannot even DESCRIBE an object it has no rights
+        # to, and Salesforce answers 404 rather than an empty permission set. That is
+        # the SAFEST possible state -- nothing can be deleted through a door that is
+        # not there -- so it must not crash the audit, and must never be mistaken for
+        # a permission this account actually holds.
+        return ObjectPrivileges(sobject, False, False, False, accessible=False)
     return ObjectPrivileges(
         sobject=sobject,
         createable=bool(body.get("createable")),
@@ -278,6 +287,9 @@ def report() -> int:
     print(f"account  : {who or '(identity unavailable)'}")
     print(f"{'object':<24}{'create':>8}{'update':>8}{'DELETE':>8}")
     for item in audit.objects:
+        if not item.accessible:
+            print(f"{item.sobject:<24}{'— no access at all —':>26}")
+            continue
         mark = "  <-- CAN DELETE" if item.deletable else ""
         print(
             f"{item.sobject:<24}{str(item.createable):>8}"
