@@ -122,7 +122,7 @@ def test_draft_persists_before_one_submit_and_uses_exact_wire_contract(
         return "submitted", "Persequor accepted the draft request."
 
     result = actions.request_draft(
-        conn, str(post["snapshot_id"]), submitter=submit, **_kwargs(post)
+        conn, str(post["snapshot_id"]), submitter=submit, now=READY, **_kwargs(post)
     )
     assert result.state == "accepted"
     assert len(captured) == 1
@@ -146,11 +146,11 @@ def test_double_click_and_slack_replay_submit_once(tmp_path: Path) -> None:
         return "submitted", "accepted"
 
     first = actions.request_draft(
-        conn, str(post["snapshot_id"]), submitter=submit, **_kwargs(post)
+        conn, str(post["snapshot_id"]), submitter=submit, now=READY, **_kwargs(post)
     )
     replay = {**_kwargs(post), "nonce": "action-event-2"}
     second = actions.request_draft(
-        conn, str(post["snapshot_id"]), submitter=submit, **replay
+        conn, str(post["snapshot_id"]), submitter=submit, now=READY, **replay
     )
     assert first.state == "accepted" and second.state == "accepted"
     assert calls == 1
@@ -231,6 +231,7 @@ def test_requested_action_resumes_idempotent_submit_after_crash(tmp_path: Path) 
         conn,
         str(post["snapshot_id"]),
         submitter=submit,
+        now=READY,
         **{**_kwargs(post), "nonce": "retry-event"},
     )
     assert result.state == "accepted" and calls == 1
@@ -249,7 +250,9 @@ def test_queued_retry_reconciles_snapshot_action_and_outcome(
         raise requests.ConnectionError("offline")
 
     monkeypatch.setattr(persequor_client.requests, "post", offline)
-    first = actions.request_draft(conn, str(post["snapshot_id"]), **_kwargs(post))
+    first = actions.request_draft(
+        conn, str(post["snapshot_id"]), now=READY, **_kwargs(post)
+    )
     assert first.state == "requested"
     conn.execute("UPDATE outreach SET next_attempt_at='2000-01-01T00:00:00+00:00'")
     conn.commit()
@@ -263,7 +266,7 @@ def test_queued_retry_reconciles_snapshot_action_and_outcome(
     monkeypatch.setattr(
         persequor_client.requests, "post", lambda *_args, **_kwargs: Accepted()
     )
-    summary = persequor_client.retry_pending(conn)
+    summary = persequor_client.retry_pending(conn, now=READY)
     assert summary.submitted == 1
     assert (
         conn.execute("SELECT state FROM rich_card_actions").fetchone()[0] == "accepted"

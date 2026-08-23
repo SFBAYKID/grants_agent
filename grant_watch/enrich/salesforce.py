@@ -178,13 +178,34 @@ def _auth(force: bool = False) -> tuple[str, str]:
 def _readonly_get(
     path: str, params: dict[str, str], token: str, instance_url: str
 ) -> dict[str, Any]:
-    """Issue one GET-only CRM request and return its runtime-shaped JSON body."""
-    response = requests.get(
-        f"{instance_url}/services/data/{API_VERSION}/{path}",
-        params=params,
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=20,
-    )
+    """Issue one GET-only CRM request, retrying ONCE on a rejected session.
+
+    WHY THE RETRY IS NOT OPTIONAL. Salesforce reports no token lifetime for the
+    client_credentials flow -- the token response carries `issued_at` but no
+    `expires_in` -- so `_auth` can only GUESS one, and it guesses 25 minutes. The
+    real session length lives in the connected app's policy, where an admin can
+    shorten it without anything here noticing. When the true lifetime is shorter
+    than the guess, EVERY read fails from the moment the token actually dies until
+    the guessed clock rolls over, and the caller sees only an exception class name.
+
+    Recovering from the rejection is the only correct design when the server will
+    not tell you the expiry. One retry, then an honest failure -- never a loop.
+    """
+
+    def fetch(bearer: str, host: str) -> requests.Response:
+        """Perform the GET itself, so the retry cannot drift from the first call."""
+        return requests.get(
+            f"{host}/services/data/{API_VERSION}/{path}",
+            params=params,
+            headers={"Authorization": f"Bearer {bearer}"},
+            timeout=20,
+        )
+
+    response = fetch(token, instance_url)
+    if response.status_code == 401:
+        # The guessed expiry was wrong. Re-authenticate and try exactly once more.
+        token, instance_url = _auth(force=True)
+        response = fetch(token, instance_url)
     response.raise_for_status()
     return response.json()  # type: ignore[no-any-return]  # requests JSON is untyped
 

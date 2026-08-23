@@ -388,10 +388,20 @@ def _reconcile_rich_action(
 
 
 def retry_pending(
-    conn: sqlite3.Connection, dry_run: bool = False, limit: int = 20
+    conn: sqlite3.Connection,
+    dry_run: bool = False,
+    limit: int = 20,
+    now: datetime | None = None,
 ) -> RetrySummary:
-    """Retry due approved handoffs once each; dry-run performs no writes or requests."""
-    now = datetime.now(timezone.utc)
+    """Retry due approved handoffs once each; dry-run performs no writes or requests.
+
+    `now` is injectable because this makes the SAME freshness judgement as
+    `request_draft`, which already takes a clock. Reading the wall clock here while
+    the sibling path takes an injected one is the defect recorded on 2026-08-12 for
+    `channel_guard`: the behaviour cannot be tested at a controlled moment, so the
+    test silently rots and starts failing on a date nobody changed anything on.
+    """
+    now = now or datetime.now(timezone.utc)
     now_text = now.isoformat(timespec="seconds")
     rows = list(
         conn.execute(
@@ -430,7 +440,7 @@ def retry_pending(
                 )
             rejected += 1
             continue
-        if _brief_expired(brief, datetime.now(timezone.utc)):
+        if _brief_expired(brief, now):
             message = "Frozen outreach evidence expired before retry; nothing was sent."
             with conn:
                 conn.execute(

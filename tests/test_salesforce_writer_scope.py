@@ -102,6 +102,13 @@ def test_writer_scope_verifies_exact_sandbox_org(
     gateway = gateway_mod.SalesforceCampaignGateway()
     monkeypatch.setattr(gateway, "_auth", lambda: ("token", host))
     monkeypatch.setattr(gateway_mod.requests, "get", lambda *_a, **_k: Response())
+    # Org identity is read from the token's own identity URL, which needs no
+    # object permission -- see parse_identity_url.
+    monkeypatch.setattr(
+        gateway,
+        "_identity_url",
+        lambda: "https://test.salesforce.com/id/00D000000000001AAA/005000000000001AAA",
+    )
     monkeypatch.setenv("SALESFORCE_WRITE_MY_DOMAIN_URL", host)
     monkeypatch.setenv("SALESFORCE_WRITE_ORG_ID", "00D000000000001AAA")
     monkeypatch.setenv("SALESFORCE_WRITE_EXPECT_SANDBOX", "1")
@@ -151,6 +158,17 @@ def test_writer_scope_fails_closed_on_identity_mismatch(
     gateway = gateway_mod.SalesforceCampaignGateway()
     monkeypatch.setattr(gateway, "_auth", lambda: ("token", host))
     monkeypatch.setattr(gateway_mod.requests, "get", lambda *_a, **_k: Response())
+    # Org identity is read from the token's own identity URL, which needs no
+    # object permission -- see parse_identity_url.
+    identity_host = "test" if actual_sandbox else "login"
+    monkeypatch.setattr(
+        gateway,
+        "_identity_url",
+        lambda: (
+            f"https://{identity_host}.salesforce.com"
+            "/id/00D000000000001AAA/005000000000001AAA"
+        ),
+    )
     monkeypatch.setenv("SALESFORCE_WRITE_MY_DOMAIN_URL", host)
     monkeypatch.setenv("SALESFORCE_WRITE_ORG_ID", org_id)
     monkeypatch.setenv("SALESFORCE_WRITE_EXPECT_SANDBOX", expect_sandbox)
@@ -299,3 +317,47 @@ def test_filling_a_lead_never_clears_anything(
     )
     assert transport.patched is None, "a blank was written into Salesforce"
     assert result.success and "nothing to fill" in (result.error or "")
+
+
+@pytest.mark.parametrize(
+    ("identity_url", "org_id", "sandbox"),
+    (
+        (
+            "https://login.salesforce.com/id/00D41000002jIQ8EAM/005iL000001OsUvQAK",
+            "00D41000002jIQ8EAM",
+            False,
+        ),
+        (
+            "https://test.salesforce.com/id/00DVC00000A6xPR2AZ/00541000001dACEAA2",
+            "00DVC00000A6xPR2AZ",
+            True,
+        ),
+    ),
+)
+def test_identity_url_carries_org_and_sandbox(
+    identity_url: str, org_id: str, sandbox: bool
+) -> None:
+    """Both real shapes, copied from live production and sandbox token responses."""
+    assert gateway_mod.parse_identity_url(identity_url) == (org_id, sandbox)
+
+
+@pytest.mark.parametrize(
+    "identity_url",
+    (
+        "",
+        "https://example.com/id/00D41000002jIQ8EAM/005iL000001OsUvQAK",
+        "http://login.salesforce.com/id/00D41000002jIQ8EAM/005iL000001OsUvQAK",
+        "https://login.salesforce.com/00D41000002jIQ8EAM",
+    ),
+)
+def test_an_unrecognised_identity_url_refuses_rather_than_guesses(
+    identity_url: str,
+) -> None:
+    """Guessing here means writing to the WRONG ORG, so every doubt is a refusal.
+
+    An unknown host is the dangerous one: `login`/`test` is the ONLY thing that
+    distinguishes production from a sandbox in the token response, so a My Domain
+    host we do not recognise must never be assumed to be either.
+    """
+    with pytest.raises(PermissionError):
+        gateway_mod.parse_identity_url(identity_url)
