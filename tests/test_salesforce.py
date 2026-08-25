@@ -379,3 +379,65 @@ def test_four_duplicate_crm_records_refuse_rather_than_pick_one() -> None:
     assert scored.count("high") == 4
     # Every remaining row is still surfaced to a human rather than discarded.
     assert None not in scored
+
+
+def test_a_one_word_district_still_matches_on_its_record_number() -> None:
+    """The regression that stripping "#" introduced, caught in review before shipping.
+
+    "Baboquivari Unified School District #40" has ONE distinctive word once the
+    generic organization words are removed. The deployed code cleared the two-token
+    threshold only by accident -- `'#40'.isdigit()` is False, so `#40` counted as a
+    name word. Normalizing the "#" away therefore took the name UNDER the threshold
+    and no candidate could ever be confident again: a silent refusal, which reads
+    exactly like correct caution. Measured 2026-08-25, that would have hit 14 of the
+    34 production leads carrying a "#".
+
+    The CRM record also carries a stray internal code, which is why numbers are
+    matched by INTERSECTION and not by equality.
+    """
+    entity = "Baboquivari Unified School District #40"
+    for candidate in (
+        "BABOQUIVARI UNIFIED SCHOOL DISTRICT #40 (4412)",
+        "Baboquivari Unified School District 40",
+    ):
+        assert (
+            salesforce._confidence(entity, candidate, "AZ", "AZ", "", "", "", "")
+            == "high"
+        ), candidate
+    # Control: the number is the only thing distinguishing these, so a DIFFERENT
+    # number must not be promoted however well the words agree.
+    assert (
+        salesforce._confidence(
+            entity,
+            "Baboquivari Unified School District #55",
+            "AZ",
+            "AZ",
+            "",
+            "",
+            "",
+            "",
+        )
+        != "high"
+    )
+
+
+def test_the_record_number_can_carry_an_identity_the_name_cannot() -> None:
+    """ "#492" IS the identity -- the words alone name thousands of districts.
+
+    The deployed code scores this only "possible", because the entity keeps `#492`
+    while the CRM record drops `492`, so the sets differ. Treating the number as its
+    own dimension fixes a case that was already wrong before today.
+    """
+    entity = "INDEPENDENT SCHOOL DISTRICT #492"
+    assert (
+        salesforce._confidence(
+            entity, "Independent School District 492", "MN", "MN", "", "", "", ""
+        )
+        == "high"
+    )
+    assert (
+        salesforce._confidence(
+            entity, "INDEPENDENT SCHOOL DISTRICT #625", "MN", "MN", "", "", "", ""
+        )
+        != "high"
+    )
