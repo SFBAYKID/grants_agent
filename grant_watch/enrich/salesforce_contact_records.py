@@ -148,12 +148,36 @@ def contact_lead_payload(
     return payload
 
 
+# A LinkedIn headline arrives truncated by LinkedIn itself, e.g.
+# "IT and Educational Technology Director at ...". Matches a trailing ellipsis with
+# or without the dangling connector in front of it.
+_TRUNCATION_TAIL_RE = re.compile(
+    r"(?:\s+\bat\b)?\s*(?:\.{2,}|\u2026)\s*$", re.IGNORECASE
+)
+
+
+def _clean_title(title: str) -> str:
+    """Drop a headline's truncation tail so the note reads as a sentence.
+
+    `_contact_title_phrase` appends " at {entity}", so a stored title of
+    "IT and Educational Technology Director at ..." produced
+    "... Director at ... at Shalhevet High School" in a real production Note on
+    2026-08-25. Notes are CREATE-ONLY and Grant never edits one, so every such note
+    is a permanent defect a human has to correct by hand in Salesforce.
+
+    Only a trailing truncation marker is removed. Nothing is invented and no word is
+    replaced -- if cleaning empties the title, the caller falls back to its own
+    unverified-title wording rather than guessing a role.
+    """
+    return _TRUNCATION_TAIL_RE.sub("", title).strip()
+
+
 def _contact_title_phrase(lead: sqlite3.Row, contact: sqlite3.Row) -> str:
     """'Director of Technology at DeKalb CUSD #428' — omit an unverified title."""
     from .. import db
 
     entity = str(lead["entity_name"] or "")
-    title = str(contact["title"] or "")
+    title = _clean_title(str(contact["title"] or ""))
     if title and (
         db.canonical_entity_key(title).partition("|")[0]
         != db.canonical_entity_key(entity).partition("|")[0]
