@@ -19,6 +19,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from .. import state_codes
+
 API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
 Progress = Callable[[str], None]
 
@@ -303,10 +305,19 @@ def _confidence(
     candidate_phone: str,
 ) -> str | None:
     """Classify a candidate without allowing one-word overlaps to be high confidence."""
+    # Compare states by CODE, not by raw text. Salesforce holds the same state as
+    # "IL" on one record and "Illinois" on another, and the raw comparison called
+    # that a conflict -- which forces `_confidence` down the exact-token-equality
+    # path and drops a genuine match. Unrecognized values fall back to the raw
+    # upper-cased text, so a value neither side can parse still fails safe.
+    requested_code = (
+        state_codes.state_code_or_blank(requested_state) or requested_state.upper()
+    )
+    candidate_code = (
+        state_codes.state_code_or_blank(candidate_state) or candidate_state.upper()
+    )
     state_conflict = bool(
-        requested_state
-        and candidate_state
-        and requested_state.upper() != candidate_state.upper()
+        requested_code and candidate_code and requested_code != candidate_code
     )
     wanted = _tokens(entity)
     found = _tokens(candidate)
