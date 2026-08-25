@@ -33,6 +33,10 @@ API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
 # asked to read and approve should be a size they can actually review, and a smaller
 # slice also bounds what one rejected write can take down with it.
 MAX_ACTION_ORGANIZATIONS = 100
+# Bounded, but high enough that a refusal can state the TRUE number of candidates.
+# The old LIMIT 2 meant a rep with three colliding users was told "multiple" and the
+# code could not have said three even if asked.
+MAX_OWNER_CANDIDATES = 5
 MEMBER_STATUS = "Identified by Grant"
 # Grant never creates Salesforce activity Tasks (Chase, 2026-07-18: "we don't use
 # tasks — log it as a note"). Task is deliberately absent from the allowlist so a
@@ -442,15 +446,43 @@ class SalesforceCampaignGateway:
         return values["Type"], values["Status"]
 
     def find_active_user_by_email(self, email: str) -> list[SalesforceRecordRef]:
-        """Resolve an owner only by exact active-user email; never guess by name."""
-        if not email.strip():
+        """Resolve an owner by active user, preferring the exact Username match.
+
+        Salesforce enforces a unique Username but NOT a unique Email. The
+        least-privilege cutover on 2026-08-22 provisioned integration users carrying
+        a human's address in their Email field, so filtering on Email alone returned
+        THREE active users for one rep -- the human plus two integration accounts,
+        all `UserType='Standard'`, so type is not a discriminator either. The caller
+        then refused, and that rep could not create any Salesforce record at all.
+        Measured in production 2026-08-25.
+
+        Username is the identity Salesforce actually guarantees to be unique, so an
+        exact Username match settles it. Anything else returns every candidate
+        unchanged, so an ambiguous case still refuses rather than guessing -- this
+        narrows WHICH cases are ambiguous, it does not make a guess.
+
+        The old `LIMIT 2` also meant the code could never see more than two and the
+        refusal could not state the true number; the cap is now high enough to
+        report honestly and still bounded.
+        """
+        clean = email.strip().lower()
+        if not clean:
             return []
-        literal = _soql_literal(email.strip().lower())
+        literal = _soql_literal(clean)
         soql = (
-            "SELECT Id,Name,Email FROM User "
-            f"WHERE IsActive=true AND Email='{literal}' LIMIT 2"
+            "SELECT Id,Name,Email,Username FROM User "
+            f"WHERE IsActive=true AND (Email='{literal}' OR Username='{literal}') "
+            f"LIMIT {MAX_OWNER_CANDIDATES}"
         )
         records = self._get("query", {"q": soql}).get("records") or []
+        # Exactly one row whose Username IS the address is that person, definitively.
+        by_username = [
+            record
+            for record in records
+            if str(record.get("Username") or "").strip().lower() == clean
+        ]
+        if len(by_username) == 1:
+            records = by_username
         return [
             SalesforceRecordRef(
                 "User",
