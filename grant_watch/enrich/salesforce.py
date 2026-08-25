@@ -232,19 +232,45 @@ def readonly_soql(query: str) -> tuple[list[dict[str, Any]], str]:
     return records, instance_url
 
 
+def _identity(value: str) -> tuple[frozenset[str], frozenset[str]]:
+    """Split an organization name into its WORDS and its RECORD NUMBERS.
+
+    These are two different kinds of evidence and collapsing them into one token set
+    got both halves wrong. `"428".isdigit()` is True but `"#428".isdigit()` is False,
+    so the same district written "District #428" and "District 428" produced token
+    sets that could never be equal -- and `_confidence` only reaches "high" on
+    equality. But simply STRIPPING the number is worse: for "Baboquivari Unified
+    School District #40" the distinctive words are just {"baboquivari"}, so dropping
+    the number takes the name under the two-token threshold and NO name can ever be
+    confident again. That failure is a quiet refusal, indistinguishable from correct
+    caution. Measured 2026-08-25: it would have hit 14 of the 34 "#" leads.
+
+    For "INDEPENDENT SCHOOL DISTRICT #492" the number IS the identity -- it is the
+    only thing separating that district from every other one with the same name.
+    So numbers are kept, compared separately, and matched by INTERSECTION rather
+    than equality: a real CRM record may carry an extra code (production holds
+    "BABOQUIVARI ... #40 (4412)") and one side having a number the other lacks must
+    not break an otherwise exact match.
+    """
+    words: set[str] = set()
+    numbers: set[str] = set()
+    for raw in distinctive_term(value).split():
+        bare = re.sub(r"\W+", "", raw.lower())
+        if not bare:
+            continue
+        if bare.isdigit():
+            numbers.add(bare.lstrip("0") or "0")
+        else:
+            words.add(bare)
+    return frozenset(words), frozenset(numbers)
+
+
 def _is_record_number(word: str) -> bool:
     """True when a word is a bare record number, however it is punctuated.
 
-    `"428".isdigit()` is True but `"#428".isdigit()` is False. That one gap had two
-    effects, both silent. `_tokens` kept `#428` as a REQUIRED identity token, so a
-    district written "... District #428" and the same district written "... District
-    428" produced token sets that could never be equal -- and `_confidence` only
-    returns "high" on equality, so such a record could only ever be "possible", which
-    `_resolve_existing_record` refuses to act on. Second, `search_terms` used the same
-    test to build its most TOLERANT variant, so for every "#NNN" organization that
-    fallback search was never generated and never run.
-
-    School district names carry "#NNN" constantly, so this was not an edge case.
+    `search_terms` uses this to build its most TOLERANT variant. `"#428".isdigit()`
+    is False, so for a "#NNN" name that variant came out identical to the previous
+    one, was de-duplicated away, and the broad search-by-name-alone was never issued.
     """
     return re.sub(r"\W+", "", word).isdigit()
 
@@ -272,13 +298,10 @@ def search_terms(entity: str) -> tuple[str, ...]:
     )
 
 
-def _tokens(value: str) -> set[str]:
-    """Return normalized distinctive identity tokens."""
-    return {
-        word.lower()
-        for word in distinctive_term(value).split()
-        if word and not _is_record_number(word)
-    }
+def _tokens(value: str) -> frozenset[str]:
+    """Every normalized identity token, words and record numbers together."""
+    words, numbers = _identity(value)
+    return words | numbers
 
 
 def _domain(value: str) -> str:
@@ -319,14 +342,22 @@ def _confidence(
     state_conflict = bool(
         requested_code and candidate_code and requested_code != candidate_code
     )
-    wanted = _tokens(entity)
-    found = _tokens(candidate)
-    if not wanted or not found:
+    wanted_words, wanted_numbers = _identity(entity)
+    found_words, found_numbers = _identity(candidate)
+    if not (wanted_words or wanted_numbers) or not (found_words or found_numbers):
         return None
+    # A record number is IDENTITY, not a name word -- "#492" is the only thing
+    # separating one "Independent School District" from another -- so one distinctive
+    # word plus an AGREEING number is as strong as two matching words. Numbers are
+    # compared by intersection so an extra code on the CRM side cannot break an
+    # otherwise exact match.
+    numbers_agree = bool(wanted_numbers & found_numbers)
+    names_agree = bool(wanted_words) and wanted_words == found_words
+    confident_name = names_agree and (len(wanted_words) >= 2 or numbers_agree)
     if state_conflict:
         # An exact name with conflicting geography is useful for a human to resolve,
         # but it can never be promoted to a confirmed organization match.
-        return "possible" if wanted == found and len(wanted) >= 2 else None
+        return "possible" if confident_name else None
     req_domain = _domain(requested_domain)
     cand_domain = _domain(candidate_domain)
     if req_domain and cand_domain and req_domain == cand_domain:
@@ -339,10 +370,9 @@ def _confidence(
         and req_phone[-7:] == cand_phone[-7:]
     ):
         return "high"
-    if wanted == found and len(wanted) >= 2:
+    if confident_name:
         return "high"
-    overlap = wanted & found
-    if overlap:
+    if (wanted_words & found_words) or numbers_agree:
         return "possible"
     return None
 
