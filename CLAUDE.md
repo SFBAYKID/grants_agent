@@ -125,8 +125,9 @@ affect Chase's other projects.
 
 ## Current status (2026-08-25, the false negative was the MATCHER — deployed, first write proven)
 
-- `verified` 2026-08-25 **PRODUCTION IS `266f912`, SCHEMA 47.** Four deploys today,
-  `900af52` → `2dd6e91` → `1ce9b8f` → `266f912`, outages **0.084 / 0.084 / 0.081 s**,
+- `verified` 2026-08-25 **PRODUCTION IS `266f912`, SCHEMA 47.** THREE deploys today, from a
+  starting point of `900af52`: `2dd6e91` → `1ce9b8f` → `266f912`, outages
+  **0.084 / 0.084 / 0.081 s**,
   every file byte-verified against the pinned commit's blobs, second rsync pass empty
   each time, `--delete` omitted after a zero-deletion preview, `.env` and crontab
   byte-identical (crontab by `cmp` against a captured copy). No migration; no crontab
