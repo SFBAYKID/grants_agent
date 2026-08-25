@@ -198,3 +198,78 @@ def test_an_explicit_writer_credential_still_wins(
         "writer-id",
         "writer-secret",
     )
+
+
+def _per_object_getter(deletable: set[str]) -> priv.JsonGetter:
+    """A double whose `deletable` answer VARIES per object, as the real API's does.
+
+    The existing `_getter` returns one boolean for every object, so it can only model
+    "all deletable" or "none deletable" -- neither of which is the shape production
+    actually reports. This is the same test-double failure this project has recorded
+    before: a fixture that can only emit what the code already looked for.
+    """
+
+    def get_json(path: str, params: dict[str, Any] | None) -> dict[str, Any]:
+        """Answer describe per-object and Profile the way the live REST API does."""
+        if path.endswith("/describe"):
+            sobject = path.split("/")[1]
+            return {
+                "createable": True,
+                "updateable": True,
+                "deletable": sobject in deletable,
+            }
+        if path == "query":
+            return {"records": [{}]}
+        raise AssertionError(f"unexpected path {path}")
+
+    return get_json
+
+
+# Measured in production 2026-08-23: these five report deletable=true purely because
+# their delete is DERIVED from Campaign edit / note ownership, not granted.
+_DERIVED_DELETABLE = {
+    "CampaignMember",
+    "CampaignMemberStatus",
+    "ContentNote",
+    "ContentDocumentLink",
+    "Note",
+}
+
+
+def test_derived_self_scoped_deletes_do_not_refuse_a_write() -> None:
+    """Production's REAL shape must be allowed to write, and still be reported.
+
+    Before this, `violations` fired on ANY deletable object, so the correctly
+    hardened production account -- which cannot delete a single catastrophic
+    object -- was refused 100% of its writes while protecting nothing extra.
+    """
+    report = priv.audit_privileges(
+        _per_object_getter(_DERIVED_DELETABLE),
+        "https://d41000002jiq8eam.my.salesforce.com",
+        "agent.integration.chase@monarchconnected.com",
+        "Minimum Access - API Only Integrations",
+    )
+    # Visibility is never reduced: all five are still reported in full...
+    assert set(report.deletable_objects) == _DERIVED_DELETABLE
+    # ...but none of them is catastrophic, so none of them blocks the product.
+    assert report.catastrophic_deletables == ()
+    assert report.is_safe
+    priv.assert_write_safe(report)  # must not raise
+
+
+def test_one_catastrophic_delete_still_refuses_the_whole_write() -> None:
+    """The control. Without it, the narrowing above could pass by refusing nothing.
+
+    Identical to the case above plus Lead delete -- the single difference that must
+    flip the decision, and the one that names the record Grant cannot recreate.
+    """
+    report = priv.audit_privileges(
+        _per_object_getter(_DERIVED_DELETABLE | {"Lead"}),
+        "https://d41000002jiq8eam.my.salesforce.com",
+        "agent.integration.chase@monarchconnected.com",
+        "Minimum Access - API Only Integrations",
+    )
+    assert report.catastrophic_deletables == ("Lead",)
+    assert not report.is_safe
+    with pytest.raises(PermissionError, match="cannot be recreated: Lead"):
+        priv.assert_write_safe(report)

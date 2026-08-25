@@ -19,6 +19,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from .. import state_codes
+
 API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v60.0")
 Progress = Callable[[str], None]
 
@@ -230,6 +232,23 @@ def readonly_soql(query: str) -> tuple[list[dict[str, Any]], str]:
     return records, instance_url
 
 
+def _is_record_number(word: str) -> bool:
+    """True when a word is a bare record number, however it is punctuated.
+
+    `"428".isdigit()` is True but `"#428".isdigit()` is False. That one gap had two
+    effects, both silent. `_tokens` kept `#428` as a REQUIRED identity token, so a
+    district written "... District #428" and the same district written "... District
+    428" produced token sets that could never be equal -- and `_confidence` only
+    returns "high" on equality, so such a record could only ever be "possible", which
+    `_resolve_existing_record` refuses to act on. Second, `search_terms` used the same
+    test to build its most TOLERANT variant, so for every "#NNN" organization that
+    fallback search was never generated and never run.
+
+    School district names carry "#NNN" constantly, so this was not an edge case.
+    """
+    return re.sub(r"\W+", "", word).isdigit()
+
+
 def distinctive_term(entity: str) -> str:
     """Remove SOSL punctuation and generic organization words from an entity."""
     cleaned = _SOSL_RESERVED_RE.sub(" ", entity)
@@ -246,7 +265,7 @@ def search_terms(entity: str) -> tuple[str, ...]:
     cleaned = " ".join(_SOSL_RESERVED_RE.sub(" ", entity).split())
     distinctive = distinctive_term(entity)
     without_number = " ".join(
-        word for word in distinctive.split() if not word.isdigit()
+        word for word in distinctive.split() if not _is_record_number(word)
     )
     return tuple(
         dict.fromkeys(term for term in (cleaned, distinctive, without_number) if term)
@@ -258,7 +277,7 @@ def _tokens(value: str) -> set[str]:
     return {
         word.lower()
         for word in distinctive_term(value).split()
-        if word and not word.isdigit()
+        if word and not _is_record_number(word)
     }
 
 
@@ -286,10 +305,19 @@ def _confidence(
     candidate_phone: str,
 ) -> str | None:
     """Classify a candidate without allowing one-word overlaps to be high confidence."""
+    # Compare states by CODE, not by raw text. Salesforce holds the same state as
+    # "IL" on one record and "Illinois" on another, and the raw comparison called
+    # that a conflict -- which forces `_confidence` down the exact-token-equality
+    # path and drops a genuine match. Unrecognized values fall back to the raw
+    # upper-cased text, so a value neither side can parse still fails safe.
+    requested_code = (
+        state_codes.state_code_or_blank(requested_state) or requested_state.upper()
+    )
+    candidate_code = (
+        state_codes.state_code_or_blank(candidate_state) or candidate_state.upper()
+    )
     state_conflict = bool(
-        requested_state
-        and candidate_state
-        and requested_state.upper() != candidate_state.upper()
+        requested_code and candidate_code and requested_code != candidate_code
     )
     wanted = _tokens(entity)
     found = _tokens(candidate)

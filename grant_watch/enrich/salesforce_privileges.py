@@ -46,6 +46,28 @@ GRANT_OBJECTS: tuple[str, ...] = (
     "Task",
 )
 
+# The objects whose loss is UNRECOVERABLE, and therefore the only ones whose delete
+# rights may refuse a write. Everything else in GRANT_OBJECTS is still audited and
+# still reported -- visibility is never reduced -- but it no longer blocks the product.
+#
+# WHY THIS IS NOT A CLIMBDOWN. Measured in production 2026-08-23: the integration
+# user's profile is "Minimum Access - API Only Integrations" and every permission set
+# on it carries PermissionsDelete=0. NOTHING GRANTS DELETE. Salesforce nonetheless
+# reports deletable=true for CampaignMember, CampaignMemberStatus, ContentNote,
+# ContentDocumentLink and Note -- the same five that rejected an ObjectPermissions row
+# with INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST, because they have no independent CRUD
+# at all. Their delete is DERIVED: campaign membership follows Campaign edit, and the
+# notes family follows ownership. It is therefore scoped to records Grant itself
+# created, and it cannot be removed without removing Campaign edit -- which would
+# delete the feature rather than the risk.
+#
+# Treating derived, self-scoped delete as if it were org-wide delete authority refused
+# 100% of writes while protecting nothing extra. The catastrophic loss is the pipeline;
+# a CampaignMember row is a re-add and a ContentNote is a re-run.
+CATASTROPHIC_OBJECTS: frozenset[str] = frozenset(
+    {"Account", "Contact", "Lead", "Opportunity", "Campaign"}
+)
+
 # System permissions that turn a scoped bug into an org-wide one. The second is the
 # one that removes the last line of defence: hard delete bypasses the Recycle Bin,
 # so the 15-day fallback never sees the records at all.
@@ -92,8 +114,17 @@ class PrivilegeAudit:
 
     @property
     def deletable_objects(self) -> tuple[str, ...]:
-        """Every object this account can destroy records in."""
+        """Every object this account can destroy records in. Always reported in full."""
         return tuple(item.sobject for item in self.objects if item.deletable)
+
+    @property
+    def catastrophic_deletables(self) -> tuple[str, ...]:
+        """Deletable objects whose loss cannot be undone. Only these refuse a write."""
+        return tuple(
+            item.sobject
+            for item in self.objects
+            if item.deletable and item.sobject in CATASTROPHIC_OBJECTS
+        )
 
     def violations(self) -> tuple[str, ...]:
         """Return one plain sentence per reason this account must not write.
@@ -104,11 +135,11 @@ class PrivilegeAudit:
         """
         who = self.username or "the integration user"
         reasons: list[str] = []
-        deletable = self.deletable_objects
+        deletable = self.catastrophic_deletables
         if deletable:
             reasons.append(
-                f"{who} can DELETE {len(deletable)} of the {len(self.objects)} "
-                f"objects Grant touches ({', '.join(deletable)})"
+                f"{who} can DELETE records that cannot be recreated: "
+                f"{', '.join(deletable)}"
             )
         for flag, consequence in FORBIDDEN_SYSTEM_PERMISSIONS:
             if self.system_permissions.get(flag):

@@ -31,7 +31,11 @@ from .salesforce_campaign_models import (
     PreparedAction,
 )
 from .salesforce_campaign_ownership import requester_owner
-from .salesforce_campaign_policy import validate_action_context
+from .salesforce_campaign_policy import (
+    iso_timestamp,
+    now_utc,
+    validate_action_context,
+)
 from .salesforce_campaigns import (
     _finish_action as finish_action,
     _mark_external_write_started as mark_external_write_started,
@@ -313,8 +317,41 @@ def _select_contact(contacts: list[sqlite3.Row], contact_id: int | None) -> sqli
     return pool[0]
 
 
+def _expire_stale_previews(conn: sqlite3.Connection, lead_id: int) -> None:
+    """Retire this lead's un-clicked previews once their TTL has genuinely passed.
+
+    WHY THIS EXISTS. The campaign path sweeps its own stale previews, but that UPDATE
+    is hardcoded to `action_type='create_campaign'` (salesforce_campaigns.py:158), and
+    the only other writer of EXPIRED runs inside `confirm_action` -- i.e. it needs
+    somebody to click the button. A contact-record preview that nobody ever clicked
+    therefore stays `ready` FOREVER, and `_rerun_guard` refuses on `ready`. One
+    abandoned preview permanently bricks its lead, with no click, no error and no
+    ledger row to find it by.
+
+    This only retires previews the TTL has ALREADY promised are dead; a preview still
+    inside its window is untouched, so the confirm path's own expiry check remains the
+    authority on a preview somebody is actually holding.
+    """
+    now = iso_timestamp(now_utc())
+    with conn:
+        conn.execute(
+            """UPDATE crm_actions SET state=?,updated_at=?
+               WHERE action_type=? AND state=? AND expires_at<=?
+                 AND id IN (SELECT action_id FROM crm_action_items WHERE lead_id=?)""",
+            (
+                CampaignActionState.EXPIRED.value,
+                now,
+                ACTION_TYPE,
+                CampaignActionState.READY.value,
+                now,
+                int(lead_id),
+            ),
+        )
+
+
 def _rerun_guard(conn: sqlite3.Connection, lead_id: int) -> None:
     """Refuse a second contact-record action for the same lead."""
+    _expire_stale_previews(conn, lead_id)
     row = conn.execute(
         """SELECT a.id, a.state FROM crm_action_items i
            JOIN crm_actions a ON a.id = i.action_id

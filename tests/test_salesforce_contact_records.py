@@ -854,3 +854,77 @@ def test_writer_credentials_fall_back_to_reader(
     assert (
         gateway_mod._write_client_secret() == "reader-secret"
     )  # unset -> still reader
+
+
+def test_an_abandoned_preview_stops_blocking_its_lead_once_it_expires(
+    tmp_path: Path,
+) -> None:
+    """A preview nobody ever clicked must not brick its lead forever.
+
+    Only `confirm_action` ever wrote EXPIRED for this action type, and that needs a
+    button click -- so an abandoned `ready` preview stayed `ready` indefinitely and
+    `_rerun_guard` refused every later attempt. Nobody had to do anything wrong: ask
+    Grant for a Salesforce record, never click confirm, and that lead can never have
+    one again.
+    """
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _lead_row(conn, "a15", "Alpha School District")
+    _verified_contact(conn, lead_id)
+    gateway = FakeGateway()
+    action = _prepare(conn, gateway, lead_id)
+
+    # Still inside its TTL: the guard must hold, or this test could pass by
+    # expiring previews somebody is actively holding.
+    with pytest.raises(ValueError, match="already exists or is pending"):
+        _prepare(conn, gateway, lead_id)
+
+    with conn:
+        conn.execute(
+            "UPDATE crm_actions SET expires_at='2020-01-01T00:00:00+00:00' WHERE id=?",
+            (action.action_id,),
+        )
+
+    # Past its TTL: the lead is usable again, and the dead preview is recorded as
+    # expired rather than silently left ready.
+    revived = _prepare(conn, gateway, lead_id)
+    assert revived.action_id != action.action_id
+    state = conn.execute(
+        "SELECT state FROM crm_actions WHERE id=?", (action.action_id,)
+    ).fetchone()["state"]
+    assert state == campaigns.CampaignActionState.EXPIRED.value
+
+
+def test_expiry_never_revives_a_committed_or_indeterminate_action(
+    tmp_path: Path,
+) -> None:
+    """The control: only `ready` expires. An in-flight write still blocks.
+
+    `committing`, `partial` and `unknown` mean a write may have reached Salesforce.
+    Ageing must never turn "we do not know what happened" into permission to create a
+    second record -- that is the duplicate this whole guard exists to prevent.
+    """
+    conn = db.connect(tmp_path / "t.db")
+    gateway = FakeGateway()
+    for index, blocking in enumerate(
+        (
+            campaigns.CampaignActionState.COMMITTING,
+            campaigns.CampaignActionState.PARTIAL,
+            campaigns.CampaignActionState.UNKNOWN,
+            campaigns.CampaignActionState.COMPLETE,
+        )
+    ):
+        lead_id = _lead_row(conn, f"b{index}", f"Beta District {index}")
+        _verified_contact(conn, lead_id)
+        action = _prepare(conn, gateway, lead_id)
+        with conn:
+            conn.execute(
+                """UPDATE crm_actions
+                   SET state=?, expires_at='2020-01-01T00:00:00+00:00' WHERE id=?""",
+                (blocking.value, action.action_id),
+            )
+        with pytest.raises(ValueError, match="already exists or is pending"):
+            _prepare(conn, gateway, lead_id)
+        still = conn.execute(
+            "SELECT state FROM crm_actions WHERE id=?", (action.action_id,)
+        ).fetchone()["state"]
+        assert still == blocking.value

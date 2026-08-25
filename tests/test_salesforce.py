@@ -259,3 +259,123 @@ def test_reader_token_cache_is_scoped_to_configured_org(
             cache.expires_at,
             cache.credential_scope,
         ) = original
+
+
+def test_a_hash_numbered_district_matches_the_same_district_without_the_hash() -> None:
+    """ "#428" and "428" name ONE district, and the matcher must agree they do.
+
+    `"#428".isdigit()` is False while `"428".isdigit()` is True, so the entity kept
+    `#428` as a required identity token and the Salesforce record dropped `428`. The
+    sets could never be equal, and `_confidence` only reaches "high" on equality --
+    so the correctly-named record could only ever be "possible", which
+    `_resolve_existing_record` refuses to act on. School district names carry "#NNN"
+    constantly; both leads that failed in production (DeKalb #428, Baboquivari #40)
+    are of exactly this shape.
+    """
+    hashed = "Dekalb Community Unit School District #428"
+    plain = "Dekalb Community Unit School District 428"
+    assert salesforce._tokens(hashed) == salesforce._tokens(plain)
+    assert salesforce._confidence(hashed, plain, "IL", "IL", "", "", "", "") == "high"
+    # Control: a DIFFERENT district must not be promoted by the same change.
+    assert (
+        salesforce._confidence(
+            hashed,
+            "Sycamore Community Unit School District 427",
+            "IL",
+            "IL",
+            "",
+            "",
+            "",
+            "",
+        )
+        != "high"
+    )
+
+
+def test_the_tolerant_search_variant_is_generated_for_a_hash_numbered_district() -> (
+    None
+):
+    """The most tolerant SOSL fallback was silently never built for "#NNN" names.
+
+    `search_terms` dropped bare digits to build its widest variant, but `#428` is not
+    a bare digit -- so that variant came out identical to the previous one, was
+    de-duplicated away, and the broad search that would find the organization by name
+    alone was never run. A lookup can then return nothing while the record exists.
+    """
+    terms = salesforce.search_terms("Dekalb Community Unit School District #428")
+    assert "Dekalb Community Unit" in terms
+    assert len(terms) == 3, terms
+    # Control: a name with no record number still yields its own bounded variants
+    # rather than being padded out to three.
+    plain = salesforce.search_terms("Baboquivari Unified School District")
+    assert all(term for term in plain)
+    assert len(plain) == len(set(plain))
+
+
+def test_the_same_state_written_two_ways_is_not_a_conflict() -> None:
+    """ "IL" and "Illinois" are one state, and a hand-maintained CRM holds both.
+
+    Measured in production 2026-08-25: six Leads for ONE district, carrying `IL` on
+    the 2019 record and `Illinois` on the 2023/2024 ones. `_confidence` compared the
+    raw strings, called that a state conflict, and a conflict leaves exact token
+    equality as the only route to "high" -- which the `#428` defect independently
+    guaranteed would fail. Both had to be fixed; either alone yields only "possible",
+    which `_resolve_existing_record` refuses to act on.
+    """
+    entity = "Dekalb Community Unit School District #428"
+    assert (
+        salesforce._confidence(
+            entity,
+            "Dekalb Community Unit School District 428",
+            "IL",
+            "Illinois",
+            "",
+            "",
+            "",
+            "",
+        )
+        == "high"
+    )
+
+
+def test_a_genuine_state_conflict_is_still_never_promoted() -> None:
+    """The control. Normalizing must not erase real geography.
+
+    An identically-named organization in another state stays un-promoted, and so
+    does a state string neither side can parse -- an unrecognized value must fail
+    safe rather than be treated as "no state on file" and silently waved through.
+    """
+    entity = "Dekalb Community Unit School District #428"
+    same_name = "Dekalb Community Unit School District 428"
+    for candidate_state in ("Texas", "TX", "Ontario"):
+        assert (
+            salesforce._confidence(
+                entity, same_name, "IL", candidate_state, "", "", "", ""
+            )
+            != "high"
+        ), candidate_state
+
+
+def test_four_duplicate_crm_records_refuse_rather_than_pick_one() -> None:
+    """The real DeKalb shape: fixing the matcher must not license a guess.
+
+    Production holds FOUR identical Leads for this district. Surfacing them is the
+    fix working; choosing among them is not Grant's call, and creating a fifth is
+    the outcome the rep was already complaining about.
+    """
+    entity = "Dekalb Community Unit School District #428"
+    production_rows = [
+        ("DeKalb CUSD 428", "IL"),
+        ("Dekalb Community Unit School District 428", "Illinois"),
+        ("Dekalb Community Unit School District 428", "Illinois"),
+        ("Dekalb Community Unit School District 428", "Illinois"),
+        ("Dekalb Community Unit School District 428", "Illinois"),
+        ("DeKalb School District 428", "Illinois"),
+    ]
+    scored = [
+        salesforce._confidence(entity, company, "IL", state, "", "", "", "")
+        for company, state in production_rows
+    ]
+    assert scored.count("high") == 4
+    # Every remaining row is still surfaced to a human rather than discarded.
+    assert None not in scored
