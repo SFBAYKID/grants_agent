@@ -361,3 +361,88 @@ def test_an_unrecognised_identity_url_refuses_rather_than_guesses(
     """
     with pytest.raises(PermissionError):
         gateway_mod.parse_identity_url(identity_url)
+
+
+def test_an_integration_user_sharing_a_human_email_no_longer_blocks_the_owner() -> None:
+    """The least-privilege cutover made a rep unable to write anything.
+
+    Salesforce enforces a unique Username but NOT a unique Email. Provisioning the
+    integration users on 2026-08-22 put a human's address in their Email field, so
+    `IsActive=true AND Email='...'` returned THREE active users for one rep -- all
+    `UserType='Standard'`, so type is no discriminator -- and `requester_owner`
+    refused, blocking every Salesforce record that person could create. Measured in
+    production 2026-08-25; the other five reps were unaffected.
+
+    Username is the identity Salesforce guarantees unique, so exactly one row whose
+    Username IS the address settles it.
+    """
+    from grant_watch.enrich import salesforce_campaign_gateway as gw
+
+    captured: dict[str, str] = {}
+    # The three real active rows, verbatim from the production measurement.
+    rows = [
+        {
+            "Id": "00541000001dACEAA2",
+            "Name": "Chase Gonzales",
+            "Email": "chase@monarchconnected.com",
+            "Username": "chase@monarchconnected.com",
+        },
+        {
+            "Id": "005iL000001OsUvQAK",
+            "Name": "Agent Leads Only\\Read\\Write",
+            "Email": "chase@monarchconnected.com",
+            "Username": "agent.integration.chase@monarchconnected.com",
+        },
+        {
+            "Id": "005iL000001Ox1ZQAS",
+            "Name": "Agent Opportunities and Accounts",
+            "Email": "chase@monarchconnected.com",
+            "Username": "agent.opportunities.accounts.chase@monarchconnected.com",
+        },
+    ]
+
+    gateway = gw.SalesforceCampaignGateway.__new__(gw.SalesforceCampaignGateway)
+    gateway._get = lambda path, params=None: (  # type: ignore[method-assign]
+        captured.update({"q": str((params or {}).get("q", ""))}) or {"records": rows}
+    )
+    gateway.lightning_link = lambda sobject, record_id: (  # type: ignore[method-assign]
+        f"https://x/lightning/r/{sobject}/{record_id}/view"
+    )
+
+    owners = gateway.find_active_user_by_email("chase@monarchconnected.com")
+    assert [o.record_id for o in owners] == ["00541000001dACEAA2"], owners
+    # The query must still be scoped to ACTIVE users, and must be able to SEE more
+    # than two -- the old LIMIT 2 meant a refusal could not state the true number.
+    assert "IsActive=true" in captured["q"]
+    assert "LIMIT 2" not in captured["q"]
+
+
+def test_two_genuine_human_users_still_refuse_rather_than_guess() -> None:
+    """The control. Narrowing which cases are ambiguous must not invent a winner.
+
+    When no row's Username is the address, every candidate is returned unchanged and
+    `requester_owner` refuses -- attributing a Lead to the wrong colleague is exactly
+    what failing closed here prevents.
+    """
+    from grant_watch.enrich import salesforce_campaign_gateway as gw
+
+    rows = [
+        {
+            "Id": "00541000001dACEAA2",
+            "Name": "Chase Gonzales",
+            "Email": "shared@monarchconnected.com",
+            "Username": "chase@monarchconnected.com",
+        },
+        {
+            "Id": "005iL000001Ox1ZQAS",
+            "Name": "Someone Else",
+            "Email": "shared@monarchconnected.com",
+            "Username": "someone.else@monarchconnected.com",
+        },
+    ]
+    gateway = gw.SalesforceCampaignGateway.__new__(gw.SalesforceCampaignGateway)
+    gateway._get = lambda path, params=None: {"records": rows}  # type: ignore[method-assign]
+    gateway.lightning_link = lambda sobject, record_id: ""  # type: ignore[method-assign]
+
+    owners = gateway.find_active_user_by_email("shared@monarchconnected.com")
+    assert len(owners) == 2, "an ambiguous email must stay ambiguous"
