@@ -928,3 +928,41 @@ def test_expiry_never_revives_a_committed_or_indeterminate_action(
             "SELECT state FROM crm_actions WHERE id=?", (action.action_id,)
         ).fetchone()["state"]
         assert still == blocking.value
+
+
+def test_a_truncated_linkedin_headline_does_not_produce_a_double_at() -> None:
+    """A real production Note reads "... Director at ... at Shalhevet High School".
+
+    LinkedIn truncates its own headlines, so `contacts.title` can end in " at ...".
+    `_contact_title_phrase` then appends " at {entity}" on top. Measured on the live
+    Note created 2026-08-25 (`069iL000003IV3dQAG`) — and because notes are
+    CREATE-ONLY and Grant never edits one, that text is permanent in the CRM until a
+    human fixes it by hand. This is the cheap half of that fix: stop making new ones.
+    """
+    assert (
+        records._clean_title("IT and Educational Technology Director at ...")
+        == "IT and Educational Technology Director"
+    )
+    assert records._clean_title("Chief Technology Officer at ..") == (
+        "Chief Technology Officer"
+    )
+    assert records._clean_title("Superintendent…") == "Superintendent"
+
+
+def test_cleaning_a_title_never_invents_or_truncates_a_real_one() -> None:
+    """The control. Only a truncation marker goes; a genuine title is untouched.
+
+    Notably a title that legitimately ends in the organization's name must survive
+    intact — the caller has its own check for that case, and eating the words here
+    would silently change what a permanent CRM record claims about a person.
+    """
+    for intact in (
+        "Director of Technology",
+        "Head of School at Shalhevet High School",
+        "Superintendent of Livingston ISD",
+        "",
+    ):
+        assert records._clean_title(intact) == intact
+    # A title that is ONLY a truncation marker empties, so the caller falls back to
+    # its unverified-title wording rather than asserting a role nobody verified.
+    assert records._clean_title("...") == ""
