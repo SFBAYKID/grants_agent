@@ -230,6 +230,23 @@ def readonly_soql(query: str) -> tuple[list[dict[str, Any]], str]:
     return records, instance_url
 
 
+def _is_record_number(word: str) -> bool:
+    """True when a word is a bare record number, however it is punctuated.
+
+    `"428".isdigit()` is True but `"#428".isdigit()` is False. That one gap had two
+    effects, both silent. `_tokens` kept `#428` as a REQUIRED identity token, so a
+    district written "... District #428" and the same district written "... District
+    428" produced token sets that could never be equal -- and `_confidence` only
+    returns "high" on equality, so such a record could only ever be "possible", which
+    `_resolve_existing_record` refuses to act on. Second, `search_terms` used the same
+    test to build its most TOLERANT variant, so for every "#NNN" organization that
+    fallback search was never generated and never run.
+
+    School district names carry "#NNN" constantly, so this was not an edge case.
+    """
+    return re.sub(r"\W+", "", word).isdigit()
+
+
 def distinctive_term(entity: str) -> str:
     """Remove SOSL punctuation and generic organization words from an entity."""
     cleaned = _SOSL_RESERVED_RE.sub(" ", entity)
@@ -246,7 +263,7 @@ def search_terms(entity: str) -> tuple[str, ...]:
     cleaned = " ".join(_SOSL_RESERVED_RE.sub(" ", entity).split())
     distinctive = distinctive_term(entity)
     without_number = " ".join(
-        word for word in distinctive.split() if not word.isdigit()
+        word for word in distinctive.split() if not _is_record_number(word)
     )
     return tuple(
         dict.fromkeys(term for term in (cleaned, distinctive, without_number) if term)
@@ -258,7 +275,7 @@ def _tokens(value: str) -> set[str]:
     return {
         word.lower()
         for word in distinctive_term(value).split()
-        if word and not word.isdigit()
+        if word and not _is_record_number(word)
     }
 
 

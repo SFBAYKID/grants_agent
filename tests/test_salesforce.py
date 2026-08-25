@@ -259,3 +259,54 @@ def test_reader_token_cache_is_scoped_to_configured_org(
             cache.expires_at,
             cache.credential_scope,
         ) = original
+
+
+def test_a_hash_numbered_district_matches_the_same_district_without_the_hash() -> None:
+    """ "#428" and "428" name ONE district, and the matcher must agree they do.
+
+    `"#428".isdigit()` is False while `"428".isdigit()` is True, so the entity kept
+    `#428` as a required identity token and the Salesforce record dropped `428`. The
+    sets could never be equal, and `_confidence` only reaches "high" on equality --
+    so the correctly-named record could only ever be "possible", which
+    `_resolve_existing_record` refuses to act on. School district names carry "#NNN"
+    constantly; both leads that failed in production (DeKalb #428, Baboquivari #40)
+    are of exactly this shape.
+    """
+    hashed = "Dekalb Community Unit School District #428"
+    plain = "Dekalb Community Unit School District 428"
+    assert salesforce._tokens(hashed) == salesforce._tokens(plain)
+    assert salesforce._confidence(hashed, plain, "IL", "IL", "", "", "", "") == "high"
+    # Control: a DIFFERENT district must not be promoted by the same change.
+    assert (
+        salesforce._confidence(
+            hashed,
+            "Sycamore Community Unit School District 427",
+            "IL",
+            "IL",
+            "",
+            "",
+            "",
+            "",
+        )
+        != "high"
+    )
+
+
+def test_the_tolerant_search_variant_is_generated_for_a_hash_numbered_district() -> (
+    None
+):
+    """The most tolerant SOSL fallback was silently never built for "#NNN" names.
+
+    `search_terms` dropped bare digits to build its widest variant, but `#428` is not
+    a bare digit -- so that variant came out identical to the previous one, was
+    de-duplicated away, and the broad search that would find the organization by name
+    alone was never run. A lookup can then return nothing while the record exists.
+    """
+    terms = salesforce.search_terms("Dekalb Community Unit School District #428")
+    assert "Dekalb Community Unit" in terms
+    assert len(terms) == 3, terms
+    # Control: a name with no record number still yields its own bounded variants
+    # rather than being padded out to three.
+    plain = salesforce.search_terms("Baboquivari Unified School District")
+    assert all(term for term in plain)
+    assert len(plain) == len(set(plain))
