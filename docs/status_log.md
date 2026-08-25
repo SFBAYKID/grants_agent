@@ -9,6 +9,176 @@ a decision and the evidence behind it, and several correct an earlier claim that
 turned out to be false. Those corrections are the point: rule 1 applies to this
 file's own history as much as to lead data.
 
+<!-- Moved from CLAUDE.md 2026-08-25 at the ~800-line split threshold
+     (Constitution rule 4). Nothing retired, only relocated. -->
+
+## Current status (2026-08-10, following up on silence)
+
+- `verified` 2026-08-10 **AN OFFER NOBODY ANSWERED WAS INDISTINGUISHABLE FROM A
+  FINISHED ONE.** Grant told Jocelyn at 14:15 "I can build that campaign now — want
+  me to?", quoting her 23 July words. She never replied and **nothing was ever going
+  to notice**: `capability_now_available` calls `capability_asks.close()` the moment
+  it posts, and the one-shot key retires the subject forever, so DELIVERY WAS BEING
+  TREATED AS COMPLETION. New kind `offer_unanswered` reads the delivered-offer ledger
+  and after 26h tells the manager in the channel. No migration needed —
+  `NUDGE_SUBJECT_KINDS` is validated in Python precisely so a new kind is a failing
+  test rather than an IntegrityError on the droplet.
+- `verified` 2026-08-10 **SILENCE IS NOW ASKED OF SLACK, AND MAY ANSWER "I DON'T
+  KNOW".** The existing engagement signal reads `slack_event_receipts`, which its own
+  docstring says UNDERCOUNTS — safe for an A/B reply rate, catastrophic for "she has
+  not responded to me", because a reply Grant never woke for reads as being ignored.
+  `nudge_silence.replied_since` returns True/False/**None**, and every caller treats
+  None exactly like "they replied". An outage cannot produce an accusation, and
+  cannot burn the subject either: the suppression is transient, so the true claim
+  survives until Slack is readable. **The live run proved this is load-bearing** —
+  with no client the escalations suppress `could not verify silence`; against real
+  Slack they posted, so `conversations_replies` genuinely ran and genuinely returned
+  silence.
+- `verified` 2026-08-10 **ESCALATIONS MOVED TO THE CHANNEL AND NOW COVER UNTAGGED
+  CARDS.** Chase's call, reversing the earlier DM design: "the system messages in the
+  main Monarch Cloud Team channel." The old rule also required a tagged rep, on the
+  reasoning that "nobody replied" is not actionable — **North Palos disproved it**:
+  `rich_award` gold, $500,000 SVPP, `routing_reason='unassigned'`, `slack_user_id`
+  None, no button (`card_mode='research_needed'`), 0 engagements. Timings are now
+  rep at 24h, offer at 26h, manager at 30h, and the ordering is STRUCTURAL rather
+  than a constant: the manager cannot hear about a card before the rep's own
+  follow-up row exists, because caps or an outage can delay a nudge past any grace.
+- `verified` 2026-08-10 **THE PROMISE IS COMPUTED FROM THE DATA, NOT WRITTEN ONCE.**
+  `nudge_promises.best_offer` uses EXACTLY the predicate `grant._request_outreach`
+  uses (`contact_status='verified'`), so an offer naming Sean Joyce cannot be
+  answered by the branch that says no contact could be verified. It offers a DRAFT
+  FOR APPROVAL and never a send — **`outreach.sent_at` has no writer anywhere in the
+  codebase**, so the database structurally cannot know whether an email was ever
+  delivered, and "I emailed them" would be unprovable as well as untrue.
+- `verified` 2026-08-10 THE PERSEQUOR PATH HAS WORKED: **7 briefs accepted 15-18
+  July**, `status='submitted'` written only on a real 2xx, `last_error` NULL on all
+  seven. Nothing since. Also `verified`: **somebody once clicked "Ask Persequor to
+  draft" and got NOTHING** — Bolt had no listener, leaving one `Unhandled request`
+  line in `bot.log` and no database row at all. So `rich_card_actions = 0` must never
+  be read as "nobody ever tried".
+- `verified` 2026-08-10 **A BARE "YES" TO THE CAMPAIGN OFFER ROUTES CORRECTLY** —
+  the Kerry bug does not recur for this capability. Driven against the real model
+  with the same `_with_pending_offer` hint: intent `question` (NOT `draft_email`),
+  and the reply says "I'll pull gold and silver into one preview per state for you to
+  approve". Silver is genuinely buildable: `_ALLOWED_GRADES` is {gold, silver, watch}.
+  No rows changed.
+- `verified` 2026-08-10 AN OPT-OUT NOW PROTECTS THE PERSON BEING TALKED ABOUT, not
+  just the addressee. `target_slack` on an escalation is the MANAGER, so the old
+  check asked whether the manager wanted quiet — and would have announced a silence
+  in public about the one person who had asked Grant to leave her alone.
+- `verified` 2026-08-10 **AN OFFER MADE IN A DM IS NEVER ESCALATED.** Found by
+  reading production, not by a test: `capability_asks` holds a row whose audience is
+  `D0BGW7EP3K5`. The escalation is delivered where the offer was made, so that one
+  would have posted into a private conversation — addressed to a manager who is not
+  in it, therefore invisible — while repeating what somebody said in private back
+  into that private thread.
+- `verified` 2026-08-10 DRIVEN LIVE AS GRANT IN `C0B02721MNK` ONLY, then removed. All
+  three follow-ups delivered and were read back from Slack; every mention rendered
+  "at Anthony" (`--plain-mentions`), so nobody was notified — the `@` goes too,
+  because Slack also notifies on HIGHLIGHT WORDS and plenty of people keep their own
+  first name in that list. All 12 messages deleted; the local database was never
+  touched (each scenario ran in its own temp file). Five guards mutation-proven.
+- `verified` 2026-08-11 **THE CRON IS `*/15 8-14 * * 1-5`, AND BOTH WRITTEN RECORDS OF
+  IT WERE WRONG.** Read off the droplet by the guardian rather than from memory. Last
+  tick 14:45 PT against a band ending 14:30, so there is **no silent-never window** —
+  checked empirically over 1,432 drawn slots, latest 14:30, **0 unreachable**. The
+  code comment claimed `*/30 8-15` (safe, but not the ground) and CLAUDE.md claimed
+  `15 9,14`, whose 14:15 last tick would strand **252 of 1,432 slots (17.6%)** and
+  cost the second slot entirely on any day drawing a late first one. **The dangerous
+  value was the one in the project's own docs.** Both corrected; if you change the
+  band, go and read the crontab.
+- `verified` 2026-08-11 **THE GUARDIAN REFUSED A DEPLOY I HAD ALREADY AUTHORISED, AND
+  WAS RIGHT.** It was told to ship `c2a4e47`; mid-preflight the repo moved to
+  `1b1af6b`, which fixes the exact command it had been told to run as its own
+  verification step. Shipping the older hash would have made its report to me the
+  false all-clear the fix exists to prevent, and cost a second listener restart within
+  the hour — and a restart kills in-flight conversations. It traced the defect on the
+  `c2a4e47` bytes instead of trusting the commit message.
+- `verified` 2026-08-11 **DEPLOYED. PRODUCTION IS `0f62485`, SCHEMA 39, PID 65500**,
+  one restart, ~2.5s outage, **0 new tracebacks** against the 1028-line `bot.log`
+  baseline. 11 files synced (7 modified, 4 new), all 11 remote sha256 matched the
+  target blobs programmatically, second sync empty, zero deletions. `.env` and
+  crontab **byte-identical** (sha compared, no 41st `.env` copy written).
+  `followup_nudges` still exactly the 26-row pre-deploy baseline.
+- `needs-testing` 2026-08-11 **NO PREVIEW HAS YET SHOWN A CANDIDATE, AND THE GUARDIAN
+  REFUSED TO LET ME PRETEND OTHERWISE.** `nudge --dry-run` returned `skip: outside
+  business hours` (droplet clock 18:40 PT) — which proves nothing about the fix,
+  because `in_window` short-circuits before any candidate is evaluated. A labelled
+  read-only `--dry-run --force` then returned `skip: daily nudge cap reached (2)`:
+  `--force` skips the window and the slot hold but NOT the cap, and today's two were
+  spent on Kerry (10:00 PT) and Jocelyn (14:15 PT). So the code that HID escalations
+  is gone and the module imports clean, but `offer_unanswered` is 0 rows and the
+  escalation path has never been observed producing a candidate in production. That
+  distinction is the guardian's, and it is the right one.
+- `verified` 2026-08-11 **THE CARD CHASE COMPLAINED ABOUT WOULD HAVE AGED OUT
+  UNMENTIONED.** Measuring the real queue (read-only, future clock) found **65
+  subjects due by Tuesday: 35 stale, 30 live** — and North Palos at position **26 of
+  30**, its two escalations at 27 and 28. At `MAX_NUDGES_PER_DAY=2` that is ~13 days
+  against a 14-day `DROP_AFTER`. `priority_at` sorts by how long the PERSON has
+  waited, which is right for one capability ask against another, but across ALL kinds
+  it means every historical ask outranks every card forever — and cards are the kind
+  that keeps arriving. A queue that never reaches a kind is not a long tail, it is a
+  feature that does not run.
+- `verified` 2026-08-11 **MY FIRST FIX FOR THAT MADE IT WORSE, AND THE GUARDIAN
+  MEASURED IT RATHER THAN BELIEVING ME.** Round-robin across kinds alone moved North
+  Palos **26th → 29th of 30 — last**, and pushed every card back (the oldest live card
+  went 3 → 12). Interleaving helps the OLDEST member of a SMALL kind —
+  `offer_unanswered`, a kind of one, leapt 28 → 3 — and a freshly posted card is the
+  NEWEST member of the LARGEST kind, so it cannot help there at all. I shipped it and
+  claimed the head being unchanged was the check that mattered; it was the wrong
+  question of the right data.
+  **The rotation was not the error, the sort key inside the kind was.** `priority_at`
+  means "how long has the PERSON waited" — and A CARD HAS NO PERSON WAITING ON IT.
+  Cards are now ranked by the lead itself: tier, then money, then freshness, which is
+  the grading this file already states. Every other kind keeps oldest-person-first.
+  Mutation-proven both ways.
+- `verified` 2026-08-11 **THAT WORKED: NORTH PALOS IS POSITION 0**, head of the live
+  queue, measured on production. The three orderings, same filter each time: strict
+  age **26** → rotation only **29** → rotation + lead ranking **0**. Its escalation is
+  at 1 but is due 16:30, past the last tick, so it waits for Wednesday rather than
+  eating Tuesday's second slot. **The head moved** — `capability_now_available` id=4
+  slid to position 2 — and I had told the guardian "if the head moved, the fix is
+  wrong". That criterion was incompatible with this round's goal, since the card could
+  not reach the front without displacing something; the guardian flagged the conflict
+  rather than quietly picking one. Tuesday should now deliver North Palos AND the
+  oldest waiting person.
+- `needs-testing` 2026-08-11 **`posts.style` IS NOT A GRADE VOCABULARY, AND TREATING
+  IT AS ONE COST THE RANKING MOST OF ITS EFFECT.** `card_tier` was `style or kind`,
+  and `kind` holds `rich_award`/`nugget`/`bulletin` — never a tier — so an empty style
+  guaranteed rank 9, LAST. Measured on production: **seven $500,000 awards ranked
+  below a $364,891 gold card**; the grading was really operating on 3 of 10 live
+  cards. Locally `style` is worse, holding free text like `worth-a-look`. It fails
+  safe, which is exactly why nobody would notice it had stopped working. Now reads
+  `leads.lead_grade`, with `style` consulted first ONLY when it names a real rank
+  (platinum exists there and nowhere else). Fixed and mutation-proven, **NOT
+  DEPLOYED** — production is `885ad88` and this is a fourth restart that can wait for
+  daylight, on the guardian's advice. It does not affect North Palos, which wins on
+  all three keys.
+- `verified` 2026-08-11 TIMING, MEASURED RATHER THAN DERIVED: North Palos
+  `card_unengaged` is due Tue 10:30:04 PT and first reachable at the **Tue 10:45**
+  tick; `offer_unanswered` (Jocelyn's) and `card_escalated` are due Tue 16:15/16:30,
+  which is past the 14:45 last tick, so both slip to **Wed 10:15**. Tuesday's drawn
+  slots are 08:48 and 13:19. **The `offer_unanswered` target is the MANAGER**
+  (`U01DFJWQQJ3`), not Jocelyn — the subject is derived from her offer but the
+  message is a channel escalation about her silence.
+- `verified` 2026-08-11 **KERRY IS CORRECTLY EXCLUDED, CHECKED PER ROW.**
+  `_unanswered_offers` requires `engaged_at IS NULL`; her 10:00 offer carries
+  `engaged_at='2026-08-10T17:03:45Z'` — her "Yes", 3m41s after delivery. Escalating
+  about the one person who DID answer is the most embarrassing thing this feature
+  could do, and the filter holds at the database level before `replied_since` is even
+  consulted.
+- `needs-testing` 2026-08-11 **EXPECT `followup_nudges` TO JUMP 26 → ~63 ON THE FIRST
+  UNATTENDED RUN.** `stale` is in `PERMANENT_SUPPRESSIONS`, the 35 stale subjects are
+  the oldest so they sort first, and an `--execute` walk burns them as it passes.
+  That is the backlog retiring by design — but predicted here so it does not read as
+  a runaway.
+- `needs-testing` 2026-08-11 **32 `capability_asks` ARE STILL OPEN, NINE OF THEM ONE
+  PERSON** asking repeatedly to get leads INTO campaigns ("Why theres no leads inside
+  these campaigns?"). That is the loudest unmet request in the data.
+  `load_leads_to_campaigns` has no hand-written wording in `_OFFER_ABOUT` or
+  `_CAPABILITY_HEADLINE`, so declaring it live today would reopen nine asks with
+  generic fallback text. Write the wording first.
+
 <!-- Moved from CLAUDE.md 2026-08-10 at the ~800-line split threshold
      (Constitution rule 4). Nothing retired, only relocated. -->
 
