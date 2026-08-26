@@ -189,8 +189,22 @@ def _enrich_contacts(
         cells = list(pool.map(enrich_one, rows))
     notes: list[str] = []
     if requested_limit > MAX_ENRICH_ROWS:
+        # This is a PERMANENT ceiling for this search, not just a per-run cap, and the
+        # difference is the whole point of saying so. The row set is deterministic by
+        # construction (ORDER BY …, id — pinned by
+        # test_determinism_repeated_search_returns_same_rows, which exists so a second
+        # turn cannot enrich orgs the rep never saw). That same guarantee means
+        # repeating THIS search re-selects the SAME rows, so the overflow is
+        # unreachable by asking again. On 2026-08-26 Grant honestly disclosed "the 27
+        # we couldn't fit at all" and then, in the same message, offered to "keep
+        # chasing the rest" — an offer it could never fulfil for those 27.
         notes.append(
-            f"Contacts are capped at {MAX_ENRICH_ROWS} organizations per search."
+            f"Contacts are capped at {MAX_ENRICH_ROWS} organizations per search and "
+            f"this ask covered {requested_limit}. Repeating this same search always "
+            f"re-selects the SAME {MAX_ENRICH_ROWS} rows, so the other "
+            f"{requested_limit - MAX_ENRICH_ROWS} can NEVER be reached by asking "
+            "again — narrow the search (by grade, amount or date) to bring them into "
+            "range."
         )
     if skipped:
         # RESUMABILITY IS THE POINT OF SAYING THIS — but only as far as it is true.

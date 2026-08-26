@@ -129,3 +129,65 @@ def test_a_complete_batch_makes_no_cost_disclosure_at_all(
     _cells, note = search_enrichment._enrich_contacts(rows, target, 2, None)
 
     assert note == ""
+
+
+def test_overflow_note_says_a_repeat_can_never_reach_the_remainder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Above the cap, the note must say repeating will never reach the overflow.
+
+    The row set is deterministic on purpose, so a repeat of the same search
+    re-selects the same rows. On 2026-08-26 Grant told a rep about "the 27 we
+    couldn't fit at all" and then offered to "keep chasing the rest" — impossible
+    for those 27. The tool's own wording has to close that off.
+    """
+    target = tmp_path / "overflow.db"
+    conn = db.connect(target)
+    rows = list(conn.execute("SELECT 1 AS id UNION ALL SELECT 2 AS id"))
+    conn.close()
+
+    def _enrich(
+        _worker_conn: sqlite3.Connection,
+        _lead_id: int,
+        *_args: object,
+        **_kwargs: object,
+    ) -> ContactOutcome:
+        """Finish inside the budget so only the cap note can fire."""
+        return ContactOutcome("not_found")
+
+    monkeypatch.setattr(tools, "enrich_lead_contact", _enrich)
+    # 127 is the real Pennsylvania number from the thread that exposed this.
+    _cells, note = search_enrichment._enrich_contacts(rows, target, 127, None)
+
+    assert "can NEVER be reached by asking" in note
+    assert "27" in note
+
+
+def test_a_search_inside_the_cap_makes_no_unreachable_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CONTROL: at or below the cap nothing is unreachable, so the note stays silent.
+
+    Proves the wording above is driven by the overflow and is not boilerplate every
+    enriched search carries.
+    """
+    target = tmp_path / "within.db"
+    conn = db.connect(target)
+    rows = list(conn.execute("SELECT 1 AS id UNION ALL SELECT 2 AS id"))
+    conn.close()
+
+    def _enrich(
+        _worker_conn: sqlite3.Connection,
+        _lead_id: int,
+        *_args: object,
+        **_kwargs: object,
+    ) -> ContactOutcome:
+        """Finish inside the budget so no note has a reason to fire."""
+        return ContactOutcome("not_found")
+
+    monkeypatch.setattr(tools, "enrich_lead_contact", _enrich)
+    _cells, note = search_enrichment._enrich_contacts(
+        rows, target, search_enrichment.MAX_ENRICH_ROWS, None
+    )
+
+    assert note == ""
