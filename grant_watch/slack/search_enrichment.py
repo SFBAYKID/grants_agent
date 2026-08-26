@@ -202,8 +202,10 @@ def _enrich_contacts(
         notes.append(
             f"{done} of {len(rows)} organizations were checked before the time "
             f"budget and {skipped} were not; ask again and I'll carry on with "
-            "those. Ones already checked are cached and cost nothing to repeat; "
-            "any whose source was unreachable are retried properly."
+            "those. Ones already checked are cached and cost nothing to repeat, "
+            "so a repeat run is cheaper — but it is NOT free: any whose source "
+            "was unreachable were never cached, so they are looked up again and "
+            "paid for again."
         )
     if call_budget_skipped:
         notes.append(

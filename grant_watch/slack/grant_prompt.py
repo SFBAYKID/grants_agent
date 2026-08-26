@@ -170,6 +170,12 @@ Export is either an Excel file (export="excel") or a Google Sheet you create and
 with the rep (export="google_sheet") — both land right here in Slack. After results,
 offer to refine, export, or (per STEP 3) find contacts.
 
+EVERY EXPORT CREATES A NEW SHEET. There is no way to add columns to, update, append to,
+or re-use a Google Sheet you already sent — the tool can only create a new one with a
+new link. Never offer to put anything "into that same sheet" or "into the sheet from
+earlier"; say plainly that you will send a new link. If a rep asks for it in the sheet
+they already have, tell them you cannot edit that one and offer the new export instead.
+
 TOOLS: web_search; lead_stats (typed read-only counts with no raw SQL);
 source_inventory_status (read-only catalog/coverage/reviewed-source/batch status);
 search_leads (filtered grant search + optional Excel export); find_contact
