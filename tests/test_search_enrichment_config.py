@@ -79,3 +79,53 @@ def test_batch_call_budget_caps_nested_provider_calls(
     assert calls == 3
     assert sum(cell[3] == "not checked (call budget)" for cell in cells) == 1
     assert "fixed 3-call enrichment budget" in note
+
+
+def test_time_budget_note_refuses_to_call_a_repeat_run_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The partial-batch note must state that a repeat run still costs money.
+
+    The sentence is the ONLY thing the model has to reason from, and on 2026-08-26
+    Grant compressed "cached ... retried properly" into "re-running costs nothing
+    extra" for a rep. Completed lookups are cached; an UNREACHABLE source is filed
+    retryable on purpose and is bought again. The note has to carry that itself.
+    """
+    target = tmp_path / "budget.db"
+    conn = db.connect(target)
+    rows = list(conn.execute("SELECT 1 AS id UNION ALL SELECT 2 AS id"))
+    conn.close()
+    # A negative budget puts the deadline in the past, so every row takes the
+    # time-budget branch without any provider call.
+    monkeypatch.setattr(search_enrichment, "ENRICH_TIME_BUDGET_S", -1.0)
+
+    cells, note = search_enrichment._enrich_contacts(rows, target, 2, None)
+
+    assert all(cell[3] == "not checked (time budget)" for cell in cells)
+    assert "NOT free" in note
+    assert "paid for again" in note
+
+
+def test_a_complete_batch_makes_no_cost_disclosure_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CONTROL: nothing skipped means no note, so the wording above cannot be a
+    phrase every batch carries regardless of what happened."""
+    target = tmp_path / "complete.db"
+    conn = db.connect(target)
+    rows = list(conn.execute("SELECT 1 AS id UNION ALL SELECT 2 AS id"))
+    conn.close()
+
+    def _enrich(
+        _worker_conn: sqlite3.Connection,
+        _lead_id: int,
+        *_args: object,
+        **_kwargs: object,
+    ) -> ContactOutcome:
+        """Finish every organization inside the budget without a paid call."""
+        return ContactOutcome("not_found")
+
+    monkeypatch.setattr(tools, "enrich_lead_contact", _enrich)
+    _cells, note = search_enrichment._enrich_contacts(rows, target, 2, None)
+
+    assert note == ""

@@ -604,6 +604,57 @@ def test_google_sheet_success_exports_every_match(
     assert artifact is None
 
 
+def test_google_sheet_success_states_the_sheet_is_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The success string must say the sheet is NEW, because the model relays it.
+
+    `create_sheet` only ever calls drive.files().create — there is no path in this
+    repo that updates a sheet already sent. On 2026-08-26 Grant twice offered a rep
+    to add contact columns "to that same Google Sheet"; the export would have handed
+    back a second link with no way to tell which was current. The fact has to live in
+    the tool's own wording, not only in the prompt.
+    """
+
+    def fake_create(
+        _title: str,
+        _columns: list[str],
+        _rows: list[list[object]],
+        _requested_by: str,
+        _send_as: str,
+    ) -> tuple[str, str]:
+        """Return a created-looking URL without touching Google."""
+        return "created", "https://docs.google.com/spreadsheets/d/test"
+
+    monkeypatch.setattr(google_sheets, "create_sheet", fake_create)
+    text, artifact = search_leads(
+        export="google_sheet",
+        result_scope="all",
+        requester_slack="U01DPJVURHU",
+        db_path=_bulk_db(tmp_path, 3),
+    )
+    assert artifact is None
+    assert "NEW Google Sheet" in text
+    assert "never an update to one sent earlier" in text
+
+
+def test_excel_export_makes_no_new_google_sheet_claim(tmp_path: Path) -> None:
+    """CONTROL: the new-sheet disclosure must not leak onto the Excel path.
+
+    Proves the assertion above pins the Google branch specifically rather than a
+    phrase every export happens to carry.
+    """
+    text, artifact = search_leads(
+        export="excel",
+        result_scope="all",
+        requester_slack="U01DPJVURHU",
+        db_path=_bulk_db(tmp_path, 3),
+    )
+    assert "Google Sheet" not in text
+    if artifact is not None:
+        artifact.cleanup()
+
+
 def test_google_sheet_failure_falls_back_to_complete_excel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

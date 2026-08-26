@@ -853,8 +853,17 @@ def search_leads(
                     )
                 finally:
                     writable.close()
+            # "a NEW Google Sheet" is load-bearing, not decoration. `create_sheet`
+            # ONLY ever calls drive.files().create — there is no update-an-existing
+            # -sheet path anywhere in this repo. On 2026-08-26 Grant twice offered a
+            # rep to "export the 100 with contact columns to that same Google Sheet",
+            # which the export cannot do; the rep would have been handed a second
+            # link and no way to tell which one was current. The model relays this
+            # string, so the honest fact has to live IN it.
             return (
-                f"Found {total} matches and exported {exported_label}: "
+                f"Found {total} matches and exported {exported_label} to a NEW "
+                f"Google Sheet — every export creates a new sheet with a new link, "
+                f"never an update to one sent earlier: "
                 f"{message}{enrich_note}{reference_note}{snapshot_note}"
             ), None
         text, artifact = make_spreadsheet("grant_search.xlsx", [columns] + data_rows)
