@@ -181,13 +181,32 @@ def heartbeat(
 
 @contextmanager
 def fenced_transaction(
-    conn: sqlite3.Connection, lease: PollLease | None
+    conn: sqlite3.Connection,
+    lease: PollLease | None,
+    *,
+    now: datetime | None = None,
 ) -> Iterator[None]:
     """Run a write atomically only while ``lease`` remains the current token.
 
     ``BEGIN IMMEDIATE`` is part of the fence: after ownership is checked, another
     process cannot take over until this short write either commits or rolls back.
     A transaction that outlives its own expiry is rejected at the second check.
+
+    ``now`` exists because every other entry point in this module already takes an
+    injected clock and these two checks did not — they read the WALL clock while
+    `acquire` and `heartbeat` ran on whatever the caller supplied. A caller driving
+    the whole lifecycle on a simulated clock therefore had its own live lease
+    rejected as expired, which is the same defect `channel_guard` carried on
+    2026-08-12 (expiry off the wall clock, workers on an injected `now`).
+
+    TWO PROPERTIES TO PRESERVE, and they pull in opposite directions:
+      * With ``now=None`` — every production caller — `_utc(None)` re-reads the real
+        clock at EACH check, so a transaction that outlives its expiry is still
+        rejected at the second one. That behaviour is unchanged.
+      * With an explicit ``now``, both checks share one instant, so the
+        outlives-its-expiry rejection cannot fire. That is correct: a caller passing
+        a clock is asserting what time it is, and it is the only way a deterministic
+        run can fence at all.
     """
     if lease is None:
         try:
@@ -199,18 +218,25 @@ def fenced_transaction(
         return
     conn.execute("BEGIN IMMEDIATE")
     try:
-        _assert_owned_locked(conn, lease, _utc())
+        _assert_owned_locked(conn, lease, _utc(now))
         yield
-        _assert_owned_locked(conn, lease, _utc())
+        _assert_owned_locked(conn, lease, _utc(now))
         conn.commit()
     except Exception:
         conn.rollback()
         raise
 
 
-def release(conn: sqlite3.Connection, lease: PollLease) -> None:
-    """Expire only this token; releasing an obsolete lease is a harmless no-op."""
-    current = _utc()
+def release(
+    conn: sqlite3.Connection, lease: PollLease, *, now: datetime | None = None
+) -> None:
+    """Expire only this token; releasing an obsolete lease is a harmless no-op.
+
+    Takes ``now`` for the same reason `fenced_transaction` does: this module's four
+    entry points must agree on whose clock they are on, or a caller running on an
+    injected one gets a mixture.
+    """
+    current = _utc(now)
     with conn:
         conn.execute(
             """UPDATE poll_locks SET heartbeat_at=?,expires_at=?
