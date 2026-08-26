@@ -123,6 +123,81 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-08-26, three deploys — two false promises to a rep, and a clock)
+
+- `verified` 2026-08-26 **PRODUCTION IS `c41b8e3`, SCHEMA 47.** THREE deploys today
+  from a starting point of `266f912`: `c412860` → `a03d723` → `c41b8e3`, outages
+  **0.320 / 0.112 / 0.059 s**, every deployable file byte-verified against the pinned
+  commit's blobs, second rsync pass empty each time, `--delete` omitted after a
+  zero-deletion preview, `.env` sha AND mtime unmoved, crontab byte-identical by
+  `cmp`, `.env*` compared as a PATH LIST. No migration; no crontab pause, and the
+  first deploy landed **~1 second after a `*/5` keepalive tick** with the PID count
+  never leaving 1 — the first direct proof of the pgrep guard under a real
+  near-collision, which is why a plain restart needs no pause.
+- `verified` 2026-08-26 **ALL THREE DEFECTS WERE FOUND BY WATCHING A LIVE REP THREAD,
+  NOT BY READING CODE.** Nelly asked for PA leads and contacts; Chase answered. Every
+  one of the three came out of what Grant actually said to them.
+- `verified` 2026-08-26 **GRANT OFFERED A SHEET UPDATE THE EXPORT CANNOT DO, TWICE,
+  AND CHASE SAID YES TO IT.** "export the 100 with contact columns to that same
+  Google Sheet" — `google_sheets.create_sheet` only ever calls `drive.files().create`;
+  there is no update-an-existing-sheet path in this repo. He got a SECOND sheet
+  (`1oXq957…`) beside the first (`1urNeg…`) and nothing said which was current. Fixed
+  in the tool's own success string (the model relays it) AND in `grant_prompt.py`.
+  **Anthony is separately still on standby believing "we can later add to the same
+  sheet"** — he said it on 2026-08-25 and Grant let it stand.
+- `verified` 2026-08-26 **GRANT TOLD A REP A PAID RE-RUN WAS FREE.** "re-running costs
+  nothing extra since the finished ones are cached." The tool schema ALREADY told it to
+  repeat the tool's wording "rather than promising the repeat is free" — but the
+  emitted sentence only said unreachable orgs "are retried properly", which never
+  mentions cost. The comment directly above it already knew ("checked again and may
+  cost again"); **the string it emits did not say it.** Same map-versus-ground shape as
+  every other entry here: the comment is not the artifact.
+- `verified` 2026-08-26 **AND IT OFFERED TO CHASE ROWS IT CAN NEVER REACH.** PA matched
+  127; enrichment caps at 100. Grant honestly disclosed "the 27 we couldn't fit at all"
+  and then offered to "keep chasing the rest" in the same message. The row set is
+  deterministic by construction, pinned by
+  `test_determinism_repeated_search_returns_same_rows` — a test that exists so turn-2
+  cannot enrich orgs the rep never saw. **That same guarantee is what makes the
+  overflow permanently unreachable**; only narrowing the search moves it.
+- `verified` 2026-08-26 **THE POLL-LEASE FENCE READ THE WALL CLOCK WHILE EVERYTHING
+  ELSE TOOK AN INJECTED ONE.** `acquire`/`heartbeat` always accepted `now`;
+  `fenced_transaction` and `release` did not. Identical to the `channel_guard` defect
+  of 2026-08-12. It surfaced as a **droplet-only** test failure: `test_poll_lease`
+  binds `NOW` at module import and leases expire at NOW+121s, so it failed on any run
+  longer than ~121s — droplet 405s, laptop 31s. **Nothing to do with any change; the
+  suite simply crossed a duration threshold.** Worse, the test's NEGATIVE assertion
+  (`pytest.raises(LeaseLost)`) kept passing spuriously, so the control had gone vacuous
+  while only the positive block failed. Production behaviour is unchanged — every
+  caller passes no clock and `_utc(None)` re-reads the real clock at EACH check.
+- `verified` 2026-08-26 **A NOW-RELATIVE TEST COULD NOT HAVE CAUGHT IT, AND THE PROOF
+  HAD TO BE PROVEN TOO.** On a fast machine the broken and fixed code agree. The new
+  tests fence on a clock YEARS from the wall clock, both directions. Then the harness
+  itself was checked: skewing the wall clock 10 years reproduces the droplet's exact
+  error text on the old code and clears it on the new. **A green harness that cannot
+  detect the bug is the fourth kind of disconnected check this file records.**
+  Confirmed at **422s on the droplet — 3.5× the threshold**, which a 31s laptop run
+  can never establish.
+- `needs-testing` 2026-08-26 **ONE DROPLET TEST FAILURE IS STILL UNEXPLAINED, AND TWO
+  PLAUSIBLE MECHANISMS HAVE ALREADY BEEN REFUTED.** `test_contact_fill` asserts
+  `20 == 0` ("a dry run billed") on the droplet only. "An earlier test set `os.environ`
+  directly" is wrong — every `ZOOMINFO_CREDIT_LEDGER_PATH` setter in the tree uses
+  `monkeypatch.setenv`. "A bare `load_dotenv()` leaked the real `.env`" is also wrong —
+  both call sites sit behind `GRANT_LLM_ACCEPTANCE=1`, which was not set. **The real
+  ZoomInfo ledger is untouched** (mtime 2026-08-13, unchanged across the run), so no
+  credits moved. Droplet baseline is now **2 failed / 1649 passed / 87 skipped**.
+- `needs-testing` 2026-08-26 **THE ADVERTISED ENRICHMENT RATE IS NOT THE REAL ONE.**
+  `tool_schemas.py` tells Grant to say **100 organizations per run**; two live paid runs
+  delivered **21** and then **44** inside the 420s budget. At ~23 new orgs per run, 127
+  PA leads needs several more passes. Raising `ENRICH_TIME_BUDGET_S` must stay inside
+  the watchdog's 20-minute `STUCK_AFTER`; lowering the advertised number changes what
+  reps are told. **A product decision, deliberately not made unilaterally.**
+- `verified` 2026-08-26 **TWO HANDOFF NUMBERS I STATED WERE WRONG AND THE GUARDIAN
+  CAUGHT BOTH.** I passed `+16/-1` (that is `--stat`'s changed-line count; numstat is
+  `+15/-1`) and predicted a post-deploy `1650` when the true figure was `1649` (a test
+  flipped fail→pass, which I had not carried through). Neither changed an outcome, and
+  both are the same failure this file already records: **a casually stated number
+  becomes somebody else's premise within one message.**
+
 ## Current status (2026-08-25, the false negative was the MATCHER — deployed, first write proven)
 
 - `verified` 2026-08-25 **PRODUCTION IS `266f912`, SCHEMA 47.** THREE deploys today, from a
@@ -811,92 +886,6 @@ followed, by Chase's decision above. Kept rather than edited away.*
   premise turns out to be false — three of the five deploys this evening were materially
   changed by exactly that, and a hardened script would have sailed past all three.
 
-## Current status (2026-08-11, the accusation guard was not one)
-
-- `verified` 2026-08-11 **"GRANT CAN NEVER POST A FALSE ACCUSATION ABOUT A COLLEAGUE"
-  WAS FALSE, FOUR WAYS.** The architectural-critic did not describe them, it
-  REPRODUCED them as real posted messages. Three fire on completely ordinary replies:
-  (1) `_is_human` rejected any message carrying a `subtype`, and Slack attaches one to
-  `file_share` — which is what "here's the list you asked for" is, the exact reply
-  being chased — plus `thread_broadcast` (the "also send to channel" tick) and
-  `me_message`; (2) a thread over ONE PAGE reported VERIFIED SILENCE, because
-  `has_more` was ignored and Slack returns replies OLDEST FIRST, so the truncated tail
-  is precisely where an answer would be (threshold: 201 messages); (3) a REACTION was
-  invisible, though `grant.py` calls one "the cheapest +1 there is" — and the payload
-  already carried it; (4) the wording claimed Grant's whole inbox ("hasn't come back
-  to me") while the check reads ONE thread. All fixed, each mutation-proven.
-  **The root cause is one sentence: the check inherited the listener's blind spot
-  instead of correcting for it**, which defeated the entire point of asking Slack
-  rather than the receipts table.
-- `verified` 2026-08-11 **A STRANGER'S COMMENT WAS RETIRING SOMEBODY ELSE'S
-  FOLLOW-UP.** `replied_since` answered "did any human speak" and that was used for a
-  claim about ONE person, so Nelly asking something unrelated in Jocelyn's thread
-  permanently suppressed it as `answered_since_offer`. Erring safe on the accusation
-  while silently destroying the feature's purpose. The two kinds now ask different
-  questions — `only_user` for an offer, `exclude_user` for a card.
-- `verified` 2026-08-11 **A QUOTED ASK COULD PING THE WHOLE CHANNEL.** Grant repeats a
-  colleague's words verbatim weeks later and Slack stores mentions as MARKUP, so a
-  quoted `<!here>` broadcasts and a quoted `<@U…>` pings a third party — **the one
-  named person with no opt-out protection**, because nothing knows they are inside a
-  quotation. `presentation.defuse_mentions` renders all six notifying forms as the
-  words the reader originally saw, which is the faithful rendering as well as the
-  inert one. `_plainify_mentions` had neutralised ONE form of six, so a rehearsal
-  could have notified an entire channel — louder than the ping it exists to prevent.
-- `verified` 2026-08-11 **THE CAPS DID NOT HOLD THE NUMBERS THEY CLAIMED.** Both were
-  computed per AUDIENCE, so production + playground + a DM audience each spent their
-  own allowance on the same human: four messages in a day, one rep nudged twice. The
-  per-person cap is about a PHONE, and a phone does not know which channel a
-  notification came from — it is now counted across every audience. A rehearsal in the
-  playground can no longer double a colleague's real notifications.
-- `verified` 2026-08-11 **ONE SLEEPING REP STARVED THE WHOLE QUEUE.** `run` returned
-  on any pacing reason, but two are facts about ONE candidate rather than about the
-  day. A card for a rep at 22:00 their time blocked a fully sendable subject two places
-  back, on every tick, and reported that rep's clock as the reason nothing happened.
-- `verified` 2026-08-11 ALSO FIXED: an escalation is no longer sent into a channel the
-  MANAGER IS NOT IN (full social cost of naming a colleague, audience of nobody,
-  reported as success); `crm_batch_blocked` said "still stuck on 14 orgs" for the real
-  California batch where 13 of 14 matched and ONE was ambiguous — a figure its own data
-  contradicts; the unlocked cron could race itself into an uncaught `IntegrityError`
-  and kill the job; and `card_escalated` gained the `C…`-only guard the offer path got
-  in d4c934d.
-- `verified` 2026-08-11 **THE TEST DOUBLES WERE THE ROOT CAUSE, and that is the durable
-  lesson.** Both Slack stubs hand-built payloads, so they could only ever emit what the
-  code already looked for — no `subtype`, no `has_more`, no `reactions`. Same failure
-  class as the `COUNT()` bug already in this file, where "the unit test MASKED it by
-  stubbing thirteen empty dicts". The doubles now model paging, subtypes, reactions and
-  channel membership, and every fix above fails a test when reverted.
-- `verified` 2026-08-11 **AN OPTED-OUT TERRITORY OWNER FROZE A CARD FOREVER, SILENTLY.**
-  `drip.py` drops the routing mention when the owner has opted out — the card still
-  posts, because the lead belongs to the channel rather than one person — but the
-  follow-up recomputed `tagged` from territory WITHOUT that filter. `card_unengaged`
-  then suppressed as `opted_out`, which is transient and writes NO ledger row, and
-  `_escalation_is_premature` waited forever for a `card_unengaged` row that could never
-  exist. Both subjects sat due and undeliverable until they aged out, with no error, no
-  suppression row and no message. An opt-out now means the follow-up treats the card as
-  untagged, which is the honest reading: nobody was asked, so it asks the room.
-- `verified` 2026-08-11 **PRODUCTION IS `c7d0d54`, PID 67420**, 0 new tracebacks,
-  `.env` and crontab byte-identical, `followup_nudges` still 26. The guardian OVERRODE
-  ITS OWN "stop churning production" advice, correctly: that advice was conditional on
-  no open question needing production, and a defect that can post a false accusation
-  about a named colleague is not that. `nudge --dry-run` now shows a real candidate
-  instead of a false all-clear. Manager `U01DFJWQQJ3` **is** a member of `C01DGT9D11D`
-  (12 members), so the new membership guard suppresses nothing today — it is a latent
-  safety net. Worth remembering as a diagnostic: if escalations ever go unexpectedly
-  quiet, check channel membership before suspecting the code.
-- `needs-testing` 2026-08-11 KNOWN AND NOT FIXED, deliberately: `MIN_GAP` (4h) against
-  a 6h band means a FIRST send delayed past its slot can push the second past the 14:45
-  last tick, quietly costing a delivery. The drawn slots themselves are always
-  reachable; only a delayed send loses capacity. Left alone because `MIN_GAP` is a
-  deliberate anti-spam constant and the fix is a tuning call. Also structural: one card
-  yields TWO subjects, so a card every weekday is 10 subjects a week against a 10-send
-  budget per channel — `_fair_order` shares the shortfall out rather than removing it.
-- `verified` 2026-08-11 The critic also confirmed what holds: `_fair_order` is correct
-  (3,000 random inputs, no losses or duplicates, terminates), `_escalation_is_premature`
-  is genuinely structural, `PERMANENT_SUPPRESSIONS` has no transient leak, `--audience`
-  really is above `_record`, and copying the outreach predicate into `nudge_promises`
-  rather than inventing one is the right shape.
-
-
 Older dated entries live in two files, split for the 1000-line cap and NOT
 retired — several correct an earlier claim that proved false, which is
 exactly the history worth keeping:
@@ -905,9 +894,13 @@ exactly the history worth keeping:
 - [docs/status_log_archive.md](docs/status_log_archive.md) — 2026-08-06 and
   earlier.
 
-Rotated on 2026-08-09, 2026-08-10, 2026-08-11, 2026-08-12, 2026-08-13 and 2026-08-25, by
-date, oldest first. `status_log.md` is now **914 lines** — the next rotation must cut
-its oldest block into `status_log_archive.md` FIRST, or it breaks the cap. When this file passes ~800 lines again, cut its oldest block into
-`status_log.md` the same way rather than letting it grow: the CURRENT state is
-what a new session reads first, and it stops being readable long before it hits
-the cap. `status_log.md` in turn feeds `status_log_archive.md`.
+Rotated on 2026-08-09, 2026-08-10, 2026-08-11, 2026-08-12, 2026-08-13, 2026-08-25 and
+2026-08-26, by date, oldest first. The 2026-08-26 rotation moved `status_log.md`'s
+oldest block (2026-08-09) into the archive FIRST, then this file's oldest block
+(2026-08-11, the accusation guard) into `status_log.md` — that order matters, because
+`status_log.md` was already at 914 and would have broken the cap otherwise. Current
+sizes: this file **906 lines**, `status_log.md` **884 lines**,
+`status_log_archive.md` **795 lines**. This file is past the ~800 line guidance
+again, so the NEXT session to add a status block should rotate before writing: the
+CURRENT state is what a new session reads first, and it stops being readable long
+before it hits the 1000-line cap.

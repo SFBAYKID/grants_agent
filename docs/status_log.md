@@ -12,6 +12,92 @@ file's own history as much as to lead data.
 <!-- Moved from CLAUDE.md 2026-08-25 at the ~800-line split threshold
      (Constitution rule 4). Nothing retired, only relocated. -->
 
+## Current status (2026-08-11, the accusation guard was not one)
+
+- `verified` 2026-08-11 **"GRANT CAN NEVER POST A FALSE ACCUSATION ABOUT A COLLEAGUE"
+  WAS FALSE, FOUR WAYS.** The architectural-critic did not describe them, it
+  REPRODUCED them as real posted messages. Three fire on completely ordinary replies:
+  (1) `_is_human` rejected any message carrying a `subtype`, and Slack attaches one to
+  `file_share` — which is what "here's the list you asked for" is, the exact reply
+  being chased — plus `thread_broadcast` (the "also send to channel" tick) and
+  `me_message`; (2) a thread over ONE PAGE reported VERIFIED SILENCE, because
+  `has_more` was ignored and Slack returns replies OLDEST FIRST, so the truncated tail
+  is precisely where an answer would be (threshold: 201 messages); (3) a REACTION was
+  invisible, though `grant.py` calls one "the cheapest +1 there is" — and the payload
+  already carried it; (4) the wording claimed Grant's whole inbox ("hasn't come back
+  to me") while the check reads ONE thread. All fixed, each mutation-proven.
+  **The root cause is one sentence: the check inherited the listener's blind spot
+  instead of correcting for it**, which defeated the entire point of asking Slack
+  rather than the receipts table.
+- `verified` 2026-08-11 **A STRANGER'S COMMENT WAS RETIRING SOMEBODY ELSE'S
+  FOLLOW-UP.** `replied_since` answered "did any human speak" and that was used for a
+  claim about ONE person, so Nelly asking something unrelated in Jocelyn's thread
+  permanently suppressed it as `answered_since_offer`. Erring safe on the accusation
+  while silently destroying the feature's purpose. The two kinds now ask different
+  questions — `only_user` for an offer, `exclude_user` for a card.
+- `verified` 2026-08-11 **A QUOTED ASK COULD PING THE WHOLE CHANNEL.** Grant repeats a
+  colleague's words verbatim weeks later and Slack stores mentions as MARKUP, so a
+  quoted `<!here>` broadcasts and a quoted `<@U…>` pings a third party — **the one
+  named person with no opt-out protection**, because nothing knows they are inside a
+  quotation. `presentation.defuse_mentions` renders all six notifying forms as the
+  words the reader originally saw, which is the faithful rendering as well as the
+  inert one. `_plainify_mentions` had neutralised ONE form of six, so a rehearsal
+  could have notified an entire channel — louder than the ping it exists to prevent.
+- `verified` 2026-08-11 **THE CAPS DID NOT HOLD THE NUMBERS THEY CLAIMED.** Both were
+  computed per AUDIENCE, so production + playground + a DM audience each spent their
+  own allowance on the same human: four messages in a day, one rep nudged twice. The
+  per-person cap is about a PHONE, and a phone does not know which channel a
+  notification came from — it is now counted across every audience. A rehearsal in the
+  playground can no longer double a colleague's real notifications.
+- `verified` 2026-08-11 **ONE SLEEPING REP STARVED THE WHOLE QUEUE.** `run` returned
+  on any pacing reason, but two are facts about ONE candidate rather than about the
+  day. A card for a rep at 22:00 their time blocked a fully sendable subject two places
+  back, on every tick, and reported that rep's clock as the reason nothing happened.
+- `verified` 2026-08-11 ALSO FIXED: an escalation is no longer sent into a channel the
+  MANAGER IS NOT IN (full social cost of naming a colleague, audience of nobody,
+  reported as success); `crm_batch_blocked` said "still stuck on 14 orgs" for the real
+  California batch where 13 of 14 matched and ONE was ambiguous — a figure its own data
+  contradicts; the unlocked cron could race itself into an uncaught `IntegrityError`
+  and kill the job; and `card_escalated` gained the `C…`-only guard the offer path got
+  in d4c934d.
+- `verified` 2026-08-11 **THE TEST DOUBLES WERE THE ROOT CAUSE, and that is the durable
+  lesson.** Both Slack stubs hand-built payloads, so they could only ever emit what the
+  code already looked for — no `subtype`, no `has_more`, no `reactions`. Same failure
+  class as the `COUNT()` bug already in this file, where "the unit test MASKED it by
+  stubbing thirteen empty dicts". The doubles now model paging, subtypes, reactions and
+  channel membership, and every fix above fails a test when reverted.
+- `verified` 2026-08-11 **AN OPTED-OUT TERRITORY OWNER FROZE A CARD FOREVER, SILENTLY.**
+  `drip.py` drops the routing mention when the owner has opted out — the card still
+  posts, because the lead belongs to the channel rather than one person — but the
+  follow-up recomputed `tagged` from territory WITHOUT that filter. `card_unengaged`
+  then suppressed as `opted_out`, which is transient and writes NO ledger row, and
+  `_escalation_is_premature` waited forever for a `card_unengaged` row that could never
+  exist. Both subjects sat due and undeliverable until they aged out, with no error, no
+  suppression row and no message. An opt-out now means the follow-up treats the card as
+  untagged, which is the honest reading: nobody was asked, so it asks the room.
+- `verified` 2026-08-11 **PRODUCTION IS `c7d0d54`, PID 67420**, 0 new tracebacks,
+  `.env` and crontab byte-identical, `followup_nudges` still 26. The guardian OVERRODE
+  ITS OWN "stop churning production" advice, correctly: that advice was conditional on
+  no open question needing production, and a defect that can post a false accusation
+  about a named colleague is not that. `nudge --dry-run` now shows a real candidate
+  instead of a false all-clear. Manager `U01DFJWQQJ3` **is** a member of `C01DGT9D11D`
+  (12 members), so the new membership guard suppresses nothing today — it is a latent
+  safety net. Worth remembering as a diagnostic: if escalations ever go unexpectedly
+  quiet, check channel membership before suspecting the code.
+- `needs-testing` 2026-08-11 KNOWN AND NOT FIXED, deliberately: `MIN_GAP` (4h) against
+  a 6h band means a FIRST send delayed past its slot can push the second past the 14:45
+  last tick, quietly costing a delivery. The drawn slots themselves are always
+  reachable; only a delayed send loses capacity. Left alone because `MIN_GAP` is a
+  deliberate anti-spam constant and the fix is a tuning call. Also structural: one card
+  yields TWO subjects, so a card every weekday is 10 subjects a week against a 10-send
+  budget per channel — `_fair_order` shares the shortfall out rather than removing it.
+- `verified` 2026-08-11 The critic also confirmed what holds: `_fair_order` is correct
+  (3,000 random inputs, no losses or duplicates, terminates), `_escalation_is_premature`
+  is genuinely structural, `PERMANENT_SUPPRESSIONS` has no transient leak, `--audience`
+  really is above `_record`, and copying the outreach predicate into `nudge_promises`
+  rather than inventing one is the right shape.
+
+
 ## Current status (2026-08-10, following up on silence)
 
 - `verified` 2026-08-10 **AN OFFER NOBODY ANSWERED WAS INDISTINGUISHABLE FROM A
@@ -796,119 +882,3 @@ file's own history as much as to lead data.
   a campaign-status tool so "who's on that campaign?" can be answered, human-asserted
   contact facts, and Jocelyn's missing `reps.json` entry.
 
-## Current status (2026-08-09)
-
-- `verified` 2026-08-09 **THE BIGGEST CAUSE OF SDR CONFUSION IS NOT A GRANT BUG — IT IS
-  ANOTHER BOT.** Read-only audit of all 89 Grant threads (15 in production) found
-  **`Monarch_Sales_Agent`** — the Monarch WEBSITE project's agent — is a member of
-  `C01DGT9D11D`, replies to Grant's own messages as though Grant were its user
-  ("What do you need, Grant?"), and repeatedly told **Nelly and Jocelyn that loading
-  leads into a Campaign is impossible and to use Data Loader — at the moment Grant was
-  successfully doing it.** Grant reads those posts as thread context and capitulates:
-  "Anything said earlier claiming I couldn't build the preview at all was wrong, my
-  apologies." Nelly's reply mid-thread: "What do you mean?" ACTION (Chase's call, not
-  taken): remove that bot from the channel or scope it away from Grant's threads.
-- `verified` 2026-08-09 THREAD AUDIT, six humans, 15 production threads. **Exactly ONE
-  genuine end-to-end success** (Nelly, 08-06, the production write above). The
-  dead-ends: contact enrichment returned "site unreachable" 4-of-5 and then 5-of-5 for
-  Brett; Kerry asked for 231 contacts and got a silent cap at 10/state plus "I'm having
-  trouble thinking right now", and never replied again; Kerry asked Grant to EMAIL the
-  results (it cannot); Chase hit `salesforce_lookup` refusing twice and said "Its okay
-  I can look it up myself"; Jocelyn's Google Sheet exports failed 3× because she is
-  **still not in `config/reps.json`** — the same roster trap that stopped Nelly at the
-  confirm button on 08-06 is armed for her today. `crm_actions`: 9 rows are `ready` and
-  were never clicked. `rich_card_actions` = 0 — **no human has ever clicked a rich-card
-  button.** `contacts` 81 rows: 19 verified (all with an email), 36 linkedin_only, 26
-  not_found — the no-fabrication invariant holds in the DATA.
-- `verified` 2026-08-09 the `CompletedPaidCall` crash was hitting REAL USERS: 12
-  unhandled tracebacks in `bot.log`, surfaced to Nelly as "the contact search errored
-  out … worth trying again a bit later" for four named leads. **Retry could never
-  succeed** — that sentence was false every time it was shown. Fixed locally in
-  **3adebba**; the deployed file still lacks the handler.
-- `verified` 2026-08-09 **`GRANT_SALESFORCE_WRITE_CHANNEL_IDS` DOES NOT EXIST in the
-  droplet `.env`.** With the old fail-open fallback that means the PLAYGROUND
-  `C0B02721MNK` currently has the same production-Salesforce write authority as
-  `C01DGT9D11D`. **254bd5c makes the allowlist fail CLOSED, so it is now a DEPLOY
-  PREREQUISITE: set `GRANT_SALESFORCE_WRITE_CHANNEL_IDS` before shipping that commit or
-  campaign writes stop entirely.**
-- `verified` 2026-08-09 production is cleanly at `90f0420` (90/90 `.py` files
-  byte-identical — the revision stamp is truthful), schema 28, `integrity_check` ok,
-  exactly the two known-and-approved `source_observations` FK orphans and no new ones,
-  listener PID 1227 up since 03:55 PT after a droplet reboot at 03:53. **Nine commits
-  from today are UNDEPLOYED**, including the security fix (bb4e0c9) and the live
-  user-facing crash fix (3adebba). Crontab finally characterized: 10 lines = 5 active
-  jobs + 5 comment lines, nothing unaccounted for; `nces-bind` has NEVER run (added
-  after Mon 08-03, first fire Mon 08-10). `salesforce-followups` is correctly still
-  commented out, but its comment ("subcommand absent") is STALE — the subcommand
-  exists; it must stay off for the M1 reason instead. **OregonBuys has 404'd 11 times**
-  — that poller has returned 0 items since the PDF moved.
-- `verified` 2026-08-09 **254bd5c** four guards, two of them live user-facing:
-  "this is not a bad lead" DESTROYED the lead (phrase matched without negation or
-  question handling, and the override beat the model); `find_person_linkedin` ignored a
-  requested person's name entirely and returned the first name-shaped result — a real
-  but DIFFERENT human under the name the rep typed, persisted toward a Salesforce Lead;
-  `write_channel_allowed` failed open; `lightning.force.com` links were rejected as
-  foreign though Salesforce's own UI produces them (blocked Nelly on three days).
-- `needs-testing` 2026-08-09 **A GRANT-CARD THREAD IS TOOL-DEAD** (`grant.py:496`):
-  inside a rich-card thread the only tool is `web_search`, so a rep cannot search,
-  check Salesforce, enrich, or add to a campaign in the one place leads arrive. The
-  frozen-snapshot rationale is sound but the remedy over-reaches. This blocks the card
-  follow-up work and Chase's "full workflow" requirement, and must be fixed FIRST.
-  Also open from the same review: `posts.kind` and `proactive_daily_slots.delivery_kind`
-  both carry CHECK constraints that exclude a nudge (design around them with threaded
-  replies rather than a third table rebuild); and the rich card currently renders with
-  NO buttons at all, so there is no click evidence a follow-up job could read.
-
-- `verified` 2026-08-09 **A WEB PAGE COULD MINT A SALESFORCE APPROVAL BUTTON.** Found by
-  architectural-critic review of a proposed `fetch_url` tool; REPRODUCED end to end before
-  fixing. `conversation.py:851` harvests `<grant-crm-action>` markers out of TOOL RESULTS,
-  not just model text, and `grant.py` renders each as a real primary-styled "Confirm in
-  Salesforce" button in Grant's voice. `web_search` returns page titles/snippets verbatim,
-  so a page TITLED with the marker produced a live button with attacker-chosen text. This
-  needed no new tool — it was reachable in production. The click always failed closed
-  (`confirm_action` refuses an unknown action_id) so NO CRM write was possible; the harm is
-  a phishing surface in `C01DGT9D11D`, and it is SILENT (the marker is stripped before the
-  model sees it, so Grant cannot report it). FIXED **bb4e0c9**: `run_tool` is now a trust
-  boundary — only the four preview tools may carry a marker out of it; every other tool's
-  output is stripped. NOT deployed. `needs-testing` in production.
-- `verified` 2026-08-09 the two things Grant told SDR Nelly were both TRUE REPORTS OF A
-  LYING TOOL SURFACE, not hallucinations. (a) "I can only enrich up to 100 organizations
-  per pull" came straight off the `search_leads` schema, which said `limit` (max 100) was
-  what `with_contacts` enriches; the real cap is `MAX_ENRICH_ROWS = 10`, applied
-  independently. (b) "none of my sources ever carry phone numbers" — phone IS extracted,
-  page-verified and stored in `contacts.phone`, but `_CONTACT_COLUMNS` never included it.
-  FIXED **d1a83ff** (descriptions now interpolate the enforcing constant so prose cannot
-  drift) and **ca94286** (phone surfaced). Same commit fixes a PRE-EXISTING production
-  defect: `salesforce_contact_records` silently fell back to the org's main line for a
-  Lead's `Phone` with no disclosure, so an SDR dialled a switchboard believing it was the
-  named person — worst for LinkedIn-sourced people, who never have a direct line at all.
-  `choose_phone` now mirrors `choose_email`'s labelling; person and org numbers stay in
-  SEPARATE fields end to end.
-- `verified` 2026-08-09 **3adebba** a re-enriched lead reported "error" instead of its real
-  outcome: the paid ledger is per lead but only `verified`/`not_found` short-circuit ahead
-  of it, so a fallback ending re-hit `paid_calls` and raised `CompletedPaidCall`.
-- `verified` 2026-08-09 ZoomInfo transport landed (**e074b62**), NOT wired into enrichment.
-  Durable credential (client id + secret) is in both `.env`s; the 24h access token was
-  removed as dead weight. Contact SEARCH is FREE and returns `hasEmail`/`hasDirectPhone`/
-  `hasMobilePhone` plus DO-NOT-CALL flags, so a rep can be quoted an exact cost before any
-  credit is spent; ENRICH bills 1 credit per returned record, caps at 25/call, and a
-  NO_MATCH is free. Cloudflare 1010-blocks the default python-requests User-Agent on both
-  hosts — the UA header is load-bearing. Coverage measured live, credit-free, **n=20**
-  (NOT a rate): 11/13 gold districts and 6/7 of Nelly's nonprofits have contacts; ~75% of
-  tech/ops titles have an email, ~61% a mobile; small rural districts (Hoxie AR) are the
-  gap. `enrich_contacts` is `needs-testing` — deliberately never called, because it bills.
-- `needs-testing` 2026-08-09 FOUR OPEN ITEMS, all with a full critic-validated design and
-  none implemented — see the session report: (1) campaign auto-chunking past 200, which
-  must use SIBLING batches with `parent_batch_id`, NOT a UNIQUE-constraint change (that
-  needs a table rebuild with live FK children on a DB whose rollback is restore-from-
-  backup); (2) the `search_request_id` snapshot wired into the batch tool, which the critic
-  rates the real fix for Nelly and needs no migration; (3) the M1 pacing defect, now
-  measured WORSE than recorded — production is rich-enabled, and the rich→daily fallback
-  reaches legacy `pacing_ok`, which counts neither `salesforce_followup_state` nor
-  `proactive_daily_slots`, so a follow-up and a fallback card can BOTH post on a
-  one-post day; (4) ZoomInfo wiring, blocked on a typed contact-provenance model
-  (`db.save_contact` takes `contact_status` as a PARAMETER — one string literal launders
-  vendor data into `verified` and onward to Persequor) and a written DNC compliance answer.
-- `verified` 2026-08-09 CLAUDE.md was split at the cap: the Constitution, mission, agents,
-  working agreements and CURRENT state stay here; every dated entry before today moved to
-  `docs/status_log.md`.
