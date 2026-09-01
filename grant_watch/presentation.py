@@ -6,6 +6,8 @@ produce clean, inert display text without changing stored organization identitie
 
 from __future__ import annotations
 
+from datetime import date
+
 import re
 
 from .state_codes import US_STATE_NAMES
@@ -182,3 +184,42 @@ def for_human(text: str) -> str:
     here.
     """
     return _MODEL_NOTE_RE.sub("", text).replace("  ", " ").strip()
+
+
+def award_age_phrase(value: object, today: date | None = None) -> str:
+    """ "about 10 months ago" for an award date, or "" when the date is unknown.
+
+    WHY A CARD NEEDS THIS AND NOT JUST THE DATE. A rep read "Federal funds obligated
+    October 10, 2025" on a card, phoned the district ten months later, and was told it
+    would have been great if he had called a year ago — the rip-and-replace was already
+    finishing with a competitor (Kerry, 2026-09-01). The date was on the card the whole
+    time. Ages do not read off a calendar date at a glance, and every award card this
+    product has ever sent has been between 9 and 21 months old, so the one number a rep
+    needs to judge a lead was the one number the card made them compute.
+
+    RETURNS "" RATHER THAN GUESSING. An unparseable or absent date is common in older
+    rows and must produce no phrase at all — a card that says "about 0 months ago"
+    because it could not read a date is worse than one that says nothing. Callers append
+    this, so an empty string simply leaves the existing date line unchanged.
+
+    MONTH-PRECISION LANGUAGE IS DELIBERATE. "about" is not hedging for its own sake: an
+    obligation date is when federal paperwork cleared, not when the district decided, so
+    a false air of precision would be its own small dishonesty.
+    """
+    today = today or date.today()
+    try:
+        occurred = date.fromisoformat(str(value or "")[:10])
+    except ValueError:
+        return ""
+    days = (today - occurred).days
+    if days < 0:
+        return ""  # a future date is bad data, not a fresh lead
+    if days < 31:
+        return "today" if days == 0 else f"{days} day{'s' if days > 1 else ''} ago"
+    if days < 365:
+        months = max(1, round(days / 30.44))
+        return f"about {months} month{'s' if months > 1 else ''} ago"
+    years = days / 365.25
+    if years < 2:
+        return "over a year ago"
+    return f"about {round(years)} years ago"

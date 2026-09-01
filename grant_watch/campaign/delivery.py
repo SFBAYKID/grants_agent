@@ -191,7 +191,9 @@ def run(
             "no post attempted"
         )
     if dry_run:
-        preview = replace(choice.draft, fallback_text=card.fallback_text(choice.draft))
+        preview = replace(
+            choice.draft, fallback_text=card.fallback_text(choice.draft, at.date())
+        )
         return f"[dry-run] would post rich_award for lead #{choice.lead_id}: {preview.fallback_text}"
     if not _delivery_veto(
         conn,
@@ -211,7 +213,9 @@ def run(
     if prior is not None:
         return _SKIP_STABLE_DELIVERY_EXISTS
     try:
-        rendered = card.render(frozen)
+        # The tick's own clock, so the age the card prints and the pacing
+        # decisions above cannot disagree about what day it is.
+        rendered = card.render(frozen, at.date())
     except Exception as exc:  # noqa: BLE001 - permanently quarantine bad render input
         delivery_key = db.reserve_notification(
             conn,

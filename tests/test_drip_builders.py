@@ -23,12 +23,20 @@ def test_nugget_is_short_and_factual(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     lead_id = mk_lead(conn)
     row = db.get_lead(conn, lead_id)
-    text, style = drip.build_nugget(row)
+    # A FIXED CLOCK, because the card now states an AGE. Reading the wall clock here
+    # would make the expected string drift a little every month and fail outright once
+    # "11 months" became "over a year" — the shape of the 2026-08-26 poll-lease defect,
+    # where a test passed on a fast machine and failed on a slow one for no reason
+    # anybody had changed.
+    text, style = drip.build_nugget(row, date(2026, 9, 1))
     assert text == (
         "Castle Rock School District 401 in Washington has a verified "
-        "$500,000 SVPP funding award."
+        "$500,000 SVPP funding award, federal funds obligated October 1, 2025 "
+        "— about 11 months ago."
     )
     assert style == "award-brief"
+    # STILL ONE SENTENCE. Chase's rule for this card, and the reason the age is folded
+    # in as a clause rather than appended as a second sentence.
     assert text.count(".") == 1 and "\n" not in text
     assert "http" not in text and "Salesforce" not in text
 
@@ -385,8 +393,11 @@ def test_delivery_reservation_prevents_duplicate_post(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     mk_lead(conn)
     client = SlackClient()
-    first = drip.run_drip(client, "C1", conn, force=True)
-    second = drip.run_drip(client, "C1", conn, force=True)
+    # A FIXED CLOCK: the card states the award's age, so a run against the wall clock
+    # would pin a string that drifts every month.
+    at = datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc)
+    first = drip.run_drip(client, "C1", conn, force=True, now=at)
+    second = drip.run_drip(client, "C1", conn, force=True, now=at)
     assert first.startswith("posted nugget")
     assert second == "skip: nothing new worth saying"
     assert client.calls == 1
@@ -397,7 +408,8 @@ def test_delivery_reservation_prevents_duplicate_post(tmp_path: Path) -> None:
     assert client.last_kwargs["unfurl_media"] is False
     assert client.last_kwargs["text"] == (
         "Castle Rock School District 401 in Washington has a verified "
-        "$500,000 SVPP funding award."
+        "$500,000 SVPP funding award, federal funds obligated October 1, 2025 "
+        "— about 11 months ago."
         "\n\n<@U01E908206M> — Washington is your territory. "
         "Want me to find the right contact?"
         "\n\n<https://x.gov/a|View the source record>"

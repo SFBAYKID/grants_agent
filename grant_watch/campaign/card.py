@@ -13,7 +13,11 @@ from datetime import date
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-from ..presentation import display_entity_name, state_display_name
+from ..presentation import (
+    award_age_phrase,
+    display_entity_name,
+    state_display_name,
+)
 from .policy import forbidden_amount_label, is_website_ownership_proven
 from .routing import RoutingReason
 from .snapshot import FrozenSnapshot, SnapshotDraft
@@ -119,6 +123,16 @@ def _award_date(value: str, precision: str) -> str:
     return _date(value)
 
 
+def _award_age(draft: SnapshotDraft, today: date | None = None) -> str:
+    """ " (about 10 months ago)" for the award date, or "" when it cannot be read.
+
+    Computed at RENDER time, not frozen into the snapshot: a snapshot can be created
+    on one tick and delivered on another, and a stale age is worse than none.
+    """
+    phrase = award_age_phrase(draft.award_date, today)
+    return f" ({phrase})" if phrase else ""
+
+
 def _research_note(draft: SnapshotDraft) -> str:
     """The honest reason(s) an eligible card still needs human review before drafting:
     an ambiguous Salesforce match and/or a website whose org ownership is only inferred
@@ -146,7 +160,7 @@ def _event_date_label(event_type: str) -> str:
     )
 
 
-def fallback_text(draft: SnapshotDraft) -> str:
+def fallback_text(draft: SnapshotDraft, today: date | None = None) -> str:
     """Create complete screen-reader/notification text from deterministic facts."""
     tier = draft.tier.upper()
     # No owner → no routing sentence at all (Chase 2026-08-05: never say
@@ -188,7 +202,8 @@ def fallback_text(draft: SnapshotDraft) -> str:
         f"{tier}: {entity} in {where} "
         f"has a verified {_money(draft.amount)} {safe_text(draft.program, 120)} "
         f"funding award. {_event_date_label(draft.event_type)}: "
-        f"{_award_date(draft.award_date, draft.award_date_precision)}. "
+        f"{_award_date(draft.award_date, draft.award_date_precision)}"
+        f"{_award_age(draft, today)}. "
         f"Spend window: {_date(draft.spend_window_start)} "
         f"through {_date(draft.spend_window_end)}. {route}{crm} {contact} "
         f"{actions}"
@@ -202,7 +217,7 @@ def _link(url: str, label: str) -> str:
     return f"<{safe}|{label}>" if safe else ""
 
 
-def render(snapshot: FrozenSnapshot) -> RenderedCard:
+def render(snapshot: FrozenSnapshot, today: date | None = None) -> RenderedCard:
     """Render the frozen snapshot as controlled Block Kit plus accessible text."""
     draft = snapshot.draft
     research = draft.card_mode == "research_needed"
@@ -233,6 +248,7 @@ def render(snapshot: FrozenSnapshot) -> RenderedCard:
         f"{_money(draft.amount)} · {safe_text(draft.program, 120)}\n"
         f"{_event_date_label(draft.event_type)} "
         f"{_award_date(draft.award_date, draft.award_date_precision)}"
+        f"{_award_age(draft, today)}"
     )
     # FAIL CLOSED on a money line that claims a balance. `drip` catches ValueError from
     # the renderers and quarantines the lead, so a card that would misdescribe an
