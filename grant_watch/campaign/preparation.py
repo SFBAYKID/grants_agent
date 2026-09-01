@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta, timezone
 
 from .. import scoring, territory, reminders
+from ..db_common import UNCLAIMED_LEAD_PREDICATE
 from ..enrich.salesforce_activity import RECENT_ACTIVITY_DAYS
 from . import card, contact_evidence, policy
 from .routing import OwnerEvidence, resolve
@@ -76,7 +77,7 @@ def _rows(conn: sqlite3.Connection, audience: str, limit: int) -> list[sqlite3.R
     """Return bounded unsurfaced Gold projections with their current event/run."""
     candidates = list(
         conn.execute(
-            """SELECT l.*, e.id AS event_id, e.observation_id,
+            f"""SELECT l.*, e.id AS event_id, e.observation_id,
                       e.event_type, e.occurred_on, e.date_precision,
                       e.amount AS event_amount,
                       e.verification_status AS event_verification_status,
@@ -103,7 +104,8 @@ def _rows(conn: sqlite3.Connection, audience: str, limit: int) -> list[sqlite3.R
                  AND l.id NOT IN (SELECT lead_id FROM posts
                                   WHERE lead_id IS NOT NULL AND channel=?)
                  AND l.id NOT IN (SELECT lead_id FROM notification_outbox
-                                  WHERE lead_id IS NOT NULL AND audience=?)""",
+                                  WHERE lead_id IS NOT NULL AND audience=?)
+                 AND {UNCLAIMED_LEAD_PREDICATE}""",
             (audience, audience),
         )
     )

@@ -18,6 +18,7 @@ from .migrations_campaign_batch import (
     migration_27_exact_campaign_batches,
     migration_40_batch_item_inclusion,
 )
+from .migrations_claims import migration_48_lead_claims
 from .migrations_campaign_preview import migration_28_single_ready_campaign_creation
 from .migrations_campaign_attempts import migration_31_campaign_attempts
 from .migrations_human_facts import migration_32_human_asserted_contacts
@@ -778,6 +779,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         47,
         "record when an organization profile was last attempted, for retry cooldown",
         migration_47_org_profile_attempt_clock,
+    ),
+    Migration(
+        48,
+        "who said they were taking a lead, in their own words",
+        migration_48_lead_claims,
     ),
 )
 

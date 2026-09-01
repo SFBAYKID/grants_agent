@@ -88,7 +88,14 @@ def _record_id(proposed_json: str, salesforce_id: str) -> tuple[str, str]:
 def candidates(
     conn: sqlite3.Connection, grace_days: int = DEFAULT_GRACE_BUSINESS_DAYS
 ) -> list[FollowupCandidate]:
-    """Return only memberships whose Campaign and member writes Grant completed."""
+    """Return only memberships whose Campaign and member writes Grant completed.
+
+    A CLAIMED LEAD IS EXCLUDED, because this posts "{entity} still needs follow-up in
+    Salesforce" into the channel and that is a Grant follow-up about the lead like any
+    other — Chase's rule (2026-09-01) is that a claim stops every one of them, not
+    only the card nudges. A membership with no lead_id is untouched: nothing links it
+    to a claimable lead, so there is nothing to suppress on.
+    """
     rows = conn.execute(
         """SELECT i.id,i.campaign_member_id,i.proposed_json,i.salesforce_id,
                   a.campaign_id,a.committed_at,l.entity_name,a.payload_json
@@ -104,6 +111,8 @@ def candidates(
                   SELECT 1 FROM crm_actions c
                    WHERE c.action_type='create_campaign' AND c.state='complete'
                      AND c.campaign_id=a.campaign_id)
+              AND (i.lead_id IS NULL OR i.lead_id NOT IN (
+                    SELECT lead_id FROM lead_claims WHERE released_at IS NULL))
             ORDER BY a.committed_at,i.id"""
     ).fetchall()
     result: list[FollowupCandidate] = []

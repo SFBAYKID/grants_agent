@@ -23,7 +23,7 @@ from tests.contact_support import verified_contact_evidence
 # cannot differ from the migration list while migrations apply at all. The literal
 # is the point: adding a migration must fail this file until someone bumps it
 # deliberately, which is the schema-change review gate.
-HEAD_VERSION = 47
+HEAD_VERSION = 48
 
 
 def test_fresh_database_reaches_current_head_with_all_rich_tables(

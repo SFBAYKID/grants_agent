@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import re
 import sqlite3
-
-from ..record_semantics import semantics_for
 import urllib.parse
+
+from .. import lead_claims, roster
+from ..record_semantics import semantics_for
 
 
 def window_label(row: sqlite3.Row) -> str:
@@ -159,3 +160,39 @@ def contact_suffix(cell: list[object]) -> str:
         # leaking the identifier, which this project bans in replies.
         return " · contact: no result"
     return ""
+
+
+def claimed_phrases(
+    connection: sqlite3.Connection, lead_ids: list[int]
+) -> dict[int, str]:
+    """Who holds each of these leads, rendered for a human — "" when nobody does.
+
+    THIS IS THE SURFACE WHERE A SECOND REP FINDS OUT A LEAD IS TAKEN, which is why
+    the lookup and the rendering live together: a caller that fetched the claim and
+    then formatted it itself is a caller that can leak the wrong thing.
+
+    NEVER A RAW SLACK ID. An id is meaningless in a spreadsheet a rep forwards on,
+    and in Slack's link form it notifies somebody who is not part of the exchange.
+    A claimant the reviewed roster cannot name renders as the DATE alone — Grant
+    knows the lead was taken and honestly cannot say by whom, which is a different
+    fact from nobody having taken it.
+
+    DEGRADES TO SILENCE ON A MISSING TABLE, DELIBERATELY. `search_leads` opens its
+    connection `mode=ro`, so it never applies migrations and the table is simply
+    absent on a database predating migration 48. An unmarked row is exactly how
+    search behaved before this feature; letting the error out would instead turn
+    every search into "ERROR: search failed", which is a far worse answer to a
+    question that had nothing to do with claims.
+    """
+    if not lead_ids:
+        return {}
+    try:
+        held = lead_claims.live_claims(connection, lead_ids)
+    except sqlite3.Error:
+        return {}
+    rendered: dict[int, str] = {}
+    for lead_id, claim in held.items():
+        who = roster.display_name_for_slack(claim.slack_user)
+        stamp = str(claim.claimed_at)[:10]
+        rendered[lead_id] = f"{who} ({stamp})" if who else f"claimed {stamp}"
+    return rendered

@@ -600,6 +600,42 @@ REMINDER_TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "claim_lead",
+        "description": (
+            "Record that this rep is taking an organization's leads, so Grant stops "
+            "surfacing it. Use it the moment somebody says they're taking, working, "
+            "or handling a named organization: 'I'm taking Gobles Public Schools', "
+            "'I've got Castle Rock', 'put Mt. Morris on me'. Grant keeps a claimed "
+            "lead out of the daily cards and sends no follow-ups about it. IT IS NOT "
+            "SALESFORCE OWNERSHIP — Grant cannot set an Owner on any record, and you "
+            "must never suggest a claim changed anything in Salesforce. Pass the "
+            "organization name only; if the rep was vague, ask which organization "
+            "rather than guessing, because a claim holds until a human hands it "
+            "back. Set release=true when somebody gives one up ('I'm off Gobles', "
+            "'hand that back', 'someone else can take it'). Repeat the tool's own "
+            "answer to the rep rather than rephrasing what it did."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The organization's name, as the rep said it.",
+                },
+                "state": {
+                    "type": "string",
+                    "description": "Two-letter state, only if the rep gave one. It "
+                    "settles a name that exists in more than one state.",
+                },
+                "release": {
+                    "type": "boolean",
+                    "description": "True to hand the organization back.",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
         "name": "email_results",
         "description": (
             "Email the requester a list of leads right now. Use when someone asks "

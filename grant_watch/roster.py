@@ -86,3 +86,29 @@ def timezone_for_slack(slack_id: object) -> str:
         if str(raw.get("slack_id") or "") == wanted and wanted in approved:
             return str(raw.get("timezone") or "")
     return ""
+
+
+def display_name_for_slack(slack_id: object) -> str:
+    """A rep's display NAME for prose, or "" when the roster cannot name them.
+
+    Display only, never identity: callers resolve who somebody IS through
+    `email_for_slack`. This exists so a Slack id never reaches a human surface. A raw
+    `U…` is meaningless to a reader, and in Slack's link form it notifies a third
+    party who is not part of the exchange. An unreadable roster names nobody rather
+    than crashing the caller — "" is a fact ("I cannot say who"), which the caller
+    renders differently from "nobody".
+    """
+    wanted = str(slack_id or "").strip()
+    if not wanted:
+        return ""
+    try:
+        return next(
+            (
+                item.name
+                for item in identities()
+                if item.slack_id == wanted and item.name
+            ),
+            "",
+        )
+    except Exception:  # noqa: BLE001 — an unreadable roster names nobody.
+        return ""
