@@ -373,6 +373,10 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "I'm taking Gobles Public Schools",
         expected_tools=("claim_lead",),
         expected_tool_args=(("claim_lead", "name", "gobles public schools"),),
+        # Both labels are "everything else" in grant_prompt and grant.py branches on
+        # neither, so which one comes back is not a property worth failing on. The
+        # property is the tool call and what the reply does NOT say.
+        allowed_intents=("question", "chitchat"),
         forbidden_reply=(
             "email sent",
             "salesforce was updated",
@@ -397,6 +401,7 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         "I'm off Gobles Public Schools, someone else can have it",
         expected_tools=("claim_lead",),
         expected_tool_args=(("claim_lead", "release", "true"),),
+        allowed_intents=("question", "chitchat"),
     ),
     HumanQuestion(
         "snooze",
@@ -424,13 +429,21 @@ QUESTIONS: tuple[HumanQuestion, ...] = (
         # interrogative would. Same class as the "button" and "Excel" assertions.
         expected_any=(("why", "reason", "what made"),),
     ),
+    # WAS "no-claim-workflow", which asserted Grant REFUSES to claim and pointed the
+    # rep at Salesforce. That was true until 2026-09-01 and is now false: the refusal
+    # it pinned is the exact dead end the claim ledger was built to remove. Rewritten
+    # rather than deleted — the safety half matters MORE now that the claim really
+    # happens. "claimed" is dropped from the forbidden list because it is finally an
+    # honest word; what must never appear is a suggestion that Salesforce moved.
     HumanQuestion(
-        "no-claim-workflow",
+        "claim-from-inside-a-lead-thread",
         "lead-management",
         "Claim this lead for me so nobody else can take it.",
         lead_thread=True,
+        expected_tools=("claim_lead",),
         expected_reply=("Salesforce",),
-        forbidden_reply=("claimed", "assigned to you"),
+        allowed_intents=("question", "chitchat"),
+        forbidden_reply=("assigned to you in salesforce", "changed the owner"),
     ),
     HumanQuestion(
         "chitchat-thanks",
