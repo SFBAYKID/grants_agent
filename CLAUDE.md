@@ -123,6 +123,96 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-09-01, a rep said "I'm taking this one" and Grant had nowhere to put it)
+
+- `verified` 2026-09-01 **PRODUCTION IS `03a32f8`, SCHEMA 48.** PID 416410 →
+  **632262**, outage **0.478 s**, 28 deployable files (22 modifications + 6 additions;
+  the `.claude/**` subtraction removed NOTHING this time — the delta contains no such
+  path), **28/28 byte-verified** against the pinned commit's blobs, second rsync pass
+  empty, `--delete` omitted after a zero-deletion preview. `.env` sha AND mtime
+  unmoved, `.env*` compared as a PATH LIST, crontab byte-identical by `cmp`, row counts
+  identical pre/post, FK orphans 2 → 2, tracebacks 13 → 13, one listener. PID 416410
+  was still the exact PID recorded for the `c41b8e3` deploy six days earlier, so no
+  out-of-band restart had happened. Migration 48 is additive: one empty table, two
+  indexes.
+- `verified` 2026-09-01 **THE DEPLOY ORDER ITSELF WAS A LATENT BUG, FOUND DURING THE
+  DEPLOY.** `--files-from` syncs in ALPHABETICAL order, and `campaign/delivery.py`,
+  `campaign/preparation.py` and `migrations.py` all sort BEFORE the modules they
+  import. A cron tick landing mid-sync could have loaded a consumer whose provider was
+  not there yet. Removed structurally with a providers-first two-phase sync (42 ms,
+  then 74 ms gated on the first verifying) rather than by timing luck — which is also
+  why no crontab pause was needed despite this being the first migration deploy since
+  2026-08-13.
+- `verified` 2026-09-01 **A CLAIM MADE IN ANOTHER THREAD WAS INVISIBLE TO THE
+  FOLLOW-UP PATH, AND THE ESCALATION HAD ALREADY GONE OUT.** Kerry wrote "@Grant I'm
+  taking Gobles Public Schools" at 19:22:39. Grant had escalated that same card to the
+  manager as unanswered at **19:15:04 — seven and a half minutes EARLIER**, so the
+  claim reads as a reaction to it. `_unengaged_cards` selects `posts` rows with no
+  `engagement` row, and engagement is keyed on `post_id`; a claim in a different
+  thread leaves the card looking untouched. Migration 48 adds `lead_claims`, holding
+  the rep's words VERBATIM with the Slack coordinates, because Grant later tells a
+  third rep "Kerry has this one" and that is an assertion about a named colleague.
+- `verified` 2026-09-01 **THE SUPPRESSION LIST HAD FOUR ENTRIES, NOT THREE, AND THE
+  ONE I MISSED IS THE ONE THAT POSTS.** `campaign.preparation._rows` is a fourth
+  candidate query — the RICH card, live since 2026-08-05 — and it also feeds
+  `preparable_lead_ids`, which SPENDS Firecrawl and ZoomInfo credits. Filtering only
+  the three `db_engagement` tiers would have silenced the FALLBACK and left the
+  primary path posting the claimed lead and paying to enrich it. One shared
+  `db_common.UNCLAIMED_LEAD_PREDICATE` now feeds all four, plus the delivery veto,
+  both card follow-up kinds, and `salesforce_followups`.
+- `verified` 2026-09-01 **TWO SUPPRESSIONS THAT LOOKED FREE WOULD EACH HAVE BEEN A
+  ONE-WAY DOOR.** Parking via `leads.status` fails `CAMPAIGN_ELIGIBLE_STATUSES` and
+  would lock the claimer out of the Salesforce campaign a claim exists to enable. And
+  `lead_claimed` is deliberately ABSENT from `PERMANENT_SUPPRESSIONS`, unlike its
+  neighbour `lead_parked`: `run()` writes a ledger row only for a permanent reason and
+  that row's uniqueness key retires the subject FOREVER, so recording a REVERSIBLE
+  claim would mean release undoes the claim and destroys the follow-up. Writing an
+  `engagement(kind='claim')` row — the obvious reuse, and what the guardian first
+  advised — has the same effect through `engaged_since_queued`, and additionally
+  asserts somebody engaged with a POST that Grant never observed.
+- `verified` 2026-09-01 **`leads.assigned_to` IS NOT A DEAD COLUMN, AND FILTERING ON
+  IT WOULD HAVE SILENTLY DELETED A REAL LEAD.** I called it dead from a grep of
+  current code, which was accurate and incomplete: exactly ONE production row is
+  populated — lead 229 Castle Rock, written 2026-07-15 by a claim workflow that was
+  removed 34 minutes later. `AND l.assigned_to IS NULL` on four queries would have
+  removed it from every card path with no ledger row and no log line. The ledger is
+  the only store; the columns were left alone.
+- `verified` 2026-09-01 **FOUR OF MY OWN TESTS WERE VACUOUS AND MUTATION TESTING
+  CAUGHT ALL FOUR.** One asserted a claimed lead was absent from an EMPTY set. One
+  asserted a delivery veto returned False when it returned False for an unrelated
+  missing-contact reason. One could not see the read-path mention defusing because the
+  write path had already defused. And a fourth passed on a control that could never
+  have failed. Every guard is now mutation-proven with a control proving it did not
+  over-reach.
+- `verified` 2026-09-01 **RUNNING THE ACCEPTANCE MATRIX BEFORE SHIPPING CHANGED THE
+  SHIP.** The model does reach for `claim_lead` — including `release: true`, and
+  including resolving "this lead" from thread context — which was the one thing that
+  would have made the whole deploy worthless had the prompt replacement not landed.
+  It also exposed `no-claim-workflow`, a PRE-EXISTING case asserting Grant REFUSES to
+  claim and redirects to Salesforce. True until today; it pinned the exact dead end
+  this feature removes. Rewritten, not deleted — its safety half matters MORE now.
+- `needs-testing` 2026-09-01 **THE GOBLES NUDGE IS STILL DUE, AND THIS DEPLOY DOES NOT
+  STOP IT.** Nothing recorded Kerry's claim: the tool only captures claims made after
+  it shipped, and writing one retroactively would attribute words and a timestamp to a
+  named person. `card_unengaged` for post 48 is in window until 2026-09-10, earliest
+  fire 08:00 PT. Eight other cards are due in the same state. The clean fix is a rep
+  saying it to Grant once more.
+- `needs-testing` 2026-09-01 **DROPLET BASELINE IS 1 FAILED / 1690 PASSED / 90
+  SKIPPED, AND THE IMPROVEMENT IS PROBABLY NOT ONE.** Totals reconcile exactly against
+  the laptop's 1691/90 — 1781 both sides, so precisely one test diverges. But
+  `test_contact_fill`, unexplained since 2026-08-26, simply did not reproduce; its
+  documented cause is cross-test interference and this delta added 43 tests, which is
+  exactly the kind of change that shifts ordering. Treat the baseline as "1 or 2".
+  The real ZoomInfo ledger is untouched (mtime 2026-08-13).
+- `needs-testing` 2026-09-01 **KNOWN AND DELIBERATELY NOT BUILT.** (1) A claimed lead
+  still appears unmarked in another rep's saved `reminder_worker` search. (2) Nothing
+  stops a second rep creating a Salesforce record for a claimed lead — the CRM preview
+  path is unguarded. (3) Claims and `territory.DEFAULT_TERRITORY_OWNERS` are two
+  ownership systems with no reconciliation; Kerry owns WA/TX/OR, not MI. (4)
+  `user_memory` keeps the same sentence for 182 days while a claim holds forever, so
+  on day 183 the claim outlives the memory of it being made. (5) `cli.py` is at 999
+  lines and `search.py` at 997 — both effectively at the cap.
+
 ## Current status (2026-08-26, three deploys — two false promises to a rep, and a clock)
 
 - `verified` 2026-08-26 **PRODUCTION IS `c41b8e3`, SCHEMA 47.** THREE deploys today
@@ -723,184 +813,23 @@ followed, by Chase's decision above. Kept rather than edited away.*
   construction rather than by luck. Mutation-proven; the suppression is transient, so
   writing a sentence later revives the ask instead of burning it.
 
-## Current status (2026-08-11, closing the deferred items)
+Older dated entries live in three files, split for the 1000-line cap and NOT
+retired — several correct an earlier claim that proved false, which is exactly
+the history worth keeping:
 
-- `verified` 2026-08-11 **THE DECLARE GUARD IS LIVE, PROVEN BY CALLING IT.** Declaring
-  a capability is a BROADCAST — `mark_available` reopens every ask waiting on that slug
-  at once, and a slug with no hand-written wording sends "Good news — I can do that one
-  now" to all of them, which cannot be unsent. It now raises BEFORE any database write:
-  `mark_available(conn, "track_applications")` → `ValueError: has no hand-written
-  follow-up wording`. So the remaining unwritten slugs fail loudly at declare time
-  instead of broadcasting. **The danger is gone; the capability is not there** — anyone
-  declaring one of them gets a refusal telling them to write the sentence first, which
-  is the correct outcome rather than a lifted constraint.
-- `verified` 2026-08-11 **I STATED A COUNT I HAD NOT MEASURED, AND IT PROPAGATED IN ONE
-  MESSAGE.** The guardian said "13 of 19 slugs have no wording"; the true figure was
-  **16 of 19**. I adopted the 13 verbatim, wrote it into this file and into a deploy
-  instruction, and described a deploy as having written "the 13" — when what I had
-  actually written were the slugs in my LOCAL database, not production's. Only 3 of the
-  ask-set slugs gained wordings in that pass. Map versus ground again, and the number
-  even collided with the true remainder, which is exactly what makes a wrong figure
-  look confirmed. Both of us corrected it by measuring. **A casually stated number
-  becomes somebody else's premise within one message.**
-- `verified` 2026-08-11 SIX MORE WORDINGS WRITTEN AFTER CHECKING EACH FEATURE EXISTS —
-  `salesforce_campaign_add`, `add_campaign_members_via_ids`, `pull_lead_ids_for_campaign`,
-  `contact_lookup`, `search_scoping`, `filter_by_award_date` (the last two verified
-  against the real `search_leads` schema: `result_scope`, `date_field/date_from/date_to`).
-  **Eight remain deliberately unwritten**, each for a reason: `direct_lead_field_edit`
-  (the patch path fills only EMPTY fields and can never overwrite — the promise would
-  be false), `filter_by_application_status` and `track_applications` (no
-  application-tracking feature exists; Grant once promised exactly this and lost a rep),
-  and the upload/Data Loader family plus `campaign_member_enrichment`, which need a
-  product decision rather than a sentence. Leaving them guarded IS the fix.
-- `verified` 2026-08-11 **THE ACCEPTANCE MATRIX WENT 16 FAILED → 6, AND THE REST IS
-  MODEL NON-DETERMINISM.** Measured over seven runs, not argued. Every remaining
-  failure PASSES when re-run on its own; earlier, 6 of 16 flipped on an identical
-  re-run with no code change. That is the suite's floor, and driving it to zero would
-  mean deleting real assertions.
-  **SIX CLASSES OF STALE TEST FIXED, all the same failure — the test encoded what the
-  product USED to do:** the plan-and-confirm preamble (removed 2026-07-18, and its
-  neighbours already forbade it); "every tool called exactly once" (repeating a READ is
-  wasteful, not unsafe — only writes and paid calls keep `== 1`); literal `button` /
-  `Excel` / `Google` / `why` where the fact lives in the tool call; **`award-received`
-  demanded in human prose, which is an INTERNAL IDENTIFIER this file bans in replies**;
-  the internal intent label, where both values are safe and the refusal is the
-  property; and an anchored ask expected to scope.
-  Two cases were internally CONTRADICTORY — `search-material-correction` demanded the
-  preamble the runner forbids three lines above, and `search-missing-shape` failed the
-  anchored-run rule for doing exactly what it was written to check.
-  I got one wrong myself: I marked `search-missing-shape` "open" and exempted it, when
-  it names a state AND an org type and the product was right to run it. Reverted, and
-  the flag deleted rather than left with no user.
-- `verified` 2026-08-11 **RETRIES TURNED THE SUITE FROM NOISE INTO A SIGNAL, AND IT
-  IMMEDIATELY FOUND A SECOND REAL DEFECT.** One sample from a language model is a noisy
-  measurement, and this suite asks about CAPABILITY, not per-sample reliability — so a
-  case now gets 3 attempts and passes if any succeeds, with every retry PRINTED at the
-  end so flakiness stays visible rather than swallowed. A genuine break still fails all
-  three. Result: **43/43 and 42/43 across the two halves, with exactly one case failing
-  all three attempts** — which is precisely the separation retries were added to make.
-- `verified` 2026-08-11 **THAT CASE WAS A DEAD-END, AND IT WAS DETERMINISTIC.**
-  "List five Grants.gov opportunities closing in August 2026 here" — a source, a record
-  kind, a date window, a count and a destination — was answered with *"should I look
-  everywhere or focus on one state?"*. The rep supplied five filters and got a question
-  back. `search_planning.search_confirmation` computed `anchored` from ONLY
-  state/org_type/city/name_contains, so it classed the ask open **and silently
-  overrode the prompt**: the model had already chosen the right tool and arguments and
-  the server replaced them. A missing STATE is not ambiguity — we search nationwide by
-  default. Any material filter now anchors; truly open means nothing to filter on at
-  all. Mutation-proven, and pinned by a FAST deterministic test rather than the
-  11-minute model suite.
-- `verified` 2026-08-11 **ONE REAL PRODUCT DEFECT CAME OUT OF IT, AND IS FIXED.** Given
-  only "Name it 2026 California School Security", the model called
-  `salesforce_campaign_create_preview` with Type="Other", Status="Planned",
-  is_active=true, date_mode="none" — four settings the rep never chose, which the
-  confirmation button would then have asked them to approve. `grant_prompt.py` already
-  said "a name alone is never preview-ready… never infer tool defaults" and was
-  ignored, so it now carries that exact failing example. The case passes on the fixed
-  prompt. **The test was right; the behaviour was wrong — the assertion stayed.**
-- `verified` 2026-08-11 **THE ACCEPTANCE MATRIX IS 16 FAILED / 73 PASSED, NOT 22/58**
-  — the recorded figure was itself stale (`docs/status_log.md`, 2026-08-09). Measured
-  by running it: `GRANT_LLM_ACCEPTANCE=1`, 11m22s. Re-running ONLY those 16 gave **10
-  failed / 6 passed**, so **6 of 16 flipped on a second run with no code change** —
-  roughly a third of the failures are model non-determinism, not defects.
-  Fixed one real stale expectation of exactly the class this file keeps finding: three
-  cases demanded the literal word **"button"** while the product now says *"just click
-  confirm on the card"*. The control is LABELLED Confirm, so the test was pinning a
-  noun rather than the property (an unclicked approval is offered and nothing was
-  written). Now `expected_any=("button","confirm","click")`.
-  The rest are strictness rather than safety — "this tool was called exactly once"
-  failing because the model read a campaign by name, then by link, then by name again.
-  Redundant, not unsafe; every one of those is a READ.
-  **RECOMMENDATION, not done:** split each case's assertions into SAFETY (no
-  fabrication, no unauthorised action, refusal held — must always pass) and
-  STYLE/EFFICIENCY (exact tool counts, particular wording — advisory). A suite that is
-  all-or-nothing on model phrasing goes red for reasons nobody acts on, and then nobody
-  reads it. That is a body of work, and it is Chase's call whether it is worth it.
-- `verified` 2026-08-11 **DELETING A FILE FROM GIT DOES NOT REMOVE IT FROM PRODUCTION,
-  AND NEVER WOULD HAVE.** `deploy_rsync.sh` was removed from the repo — and the 755
-  copy with the hardcoded droplet IP went on sitting in `/home/grantwatch/grants_agent/`
-  because deploys use an explicit `--files-from` list, so a tracked-file deletion never
-  propagates. Anyone reading the repo would have concluded the job was done. Now
-  deleted on the droplet too, proven byte-identical to the repo blob first and proven
-  unreferenced (no crontab line, no `run_bot.sh` reference, no import). The backup was
-  written **mode 600, non-executable, renamed `.bak`** rather than a second runnable
-  copy under the same name — a plain "backup first" would have relocated the trap
-  instead of removing it. Same map-versus-ground failure as the cron schedule: **check
-  both places.** The only executable left in the repo root is `run_bot.sh`, which cron
-  invokes every five minutes and must never be removed.
-- `verified` 2026-08-11 `add_leads_to_campaign` was ALREADY declared live with asks
-  waiting and no wording — which is how the whole class was noticed. Wordings written
-  for the campaign family; deliberately NOT written for slugs with no feature behind
-  them, because a wording implies the capability exists and inventing one sets the
-  exact trap the guard closes.
-- `verified` 2026-08-11 **`MIN_GAP` 4h → 2h, and it moves more than it looks.** At four
-  hours inside a six-hour band, any delay past the first drawn slot pushed the second
-  out of the band entirely — the delivery lost silently and reported as ordinary
-  pacing, halving the drain rate against a ~30-subject backlog. Safe to shorten because
-  `MAX_NUDGES_PER_TARGET_PER_DAY=1` already guarantees the day's two nudges go to
-  DIFFERENT people; this constant only ever guarded channel noise. **It changes which
-  slots are DRAWN, so re-measure the queue after deploying rather than carrying
-  tonight's positions forward.**
-- `verified` 2026-08-11 CAPACITY LOSS IS NO LONGER INVISIBLE. One card yields TWO
-  subjects, so a card every weekday consumes a channel's whole weekly budget before a
-  single capability ask. `_fair_order` shares that shortfall out; it cannot remove it,
-  and the tail retires with a permanent `stale` row that nobody would ever query.
-  `nudge-report` now counts what aged out unsent, per kind — silent capacity loss reads
-  exactly like "there was nothing to send", the one conclusion it must never support.
-- `verified` 2026-08-11 THE REP/MANAGER ASYMMETRY IS NOT A DEFECT, and the reasoning is
-  recorded rather than the conclusion. The rep's turn is a threaded reply while the
-  escalation naming them is a channel post — but `<@U…>` notifies identically from
-  either, so the rep is reached either way. What differs is CHANNEL VISIBILITY, which
-  is the point of an escalation. The unfair case is the manager hearing FIRST, and
-  `_escalation_is_premature` prevents exactly that.
+- [docs/status_log.md](docs/status_log.md) — 2026-08-11, 2026-08-10 and the
+  2026-08-13 remediation entry.
+- [docs/status_log_archive.md](docs/status_log_archive.md) — 2026-08-06 and earlier.
+- [docs/status_log_archive_2.md](docs/status_log_archive_2.md) — 2026-08-09, the
+  first live-tested day.
 
-## Current status (2026-08-11, the documents were stale in four ways)
-
-- `verified` 2026-08-11 **A DOC AUDIT FOUND FOUR CLAIMS THAT WERE SIMPLY FALSE**, each
-  the kind a new agent would act on. `AGENTS.md` said "Campaign writes remain disabled
-  until explicitly approved" — they are LIVE and a human has clicked Confirm.
-  `architectural.md` said the rich card was "implemented locally, feature OFF" — it is
-  the path that actually posts in production and has been since 2026-08-05; said
-  "seven ordered migrations" — there are **39**; said an 11:00 hard cutoff — it is
-  **11:30**; and said card threads "cannot invoke mutable contact/CRM tools" — that
-  restriction was REMOVED, and its removal is what makes a card follow-up's offer
-  actionable where it lands. All corrected, with the retraction stated rather than
-  quietly edited away.
-- `verified` 2026-08-11 **AND ONE WHOLE LIVE SUBSYSTEM WAS ABSENT.** The follow-up
-  system — six modules, eight subject kinds, a cron, and the only messages Grant sends
-  ABOUT one colleague TO another — appeared nowhere in the system design. Now
-  `architectural.md` §5.3, with the constraints that each cost a defect to learn. §5.4
-  adds the three surfaces that spend money or leave the building (ZoomInfo, Resend,
-  Persequor), because "safe by SHAPE, not by a careful caller" is the property a
-  refactor can silently destroy. §6.1 records how a deploy actually happens.
-- `verified` 2026-08-11 **`ruff format --check` HAD BEEN SKIPPED ALL SESSION.** It is in
-  the documented health gate; `ruff check` passes independently, which is exactly why
-  the other one gets missed. Five files had drifted across five production deploys.
-  Now formatted, and AGENTS.md says out loud why that line is easy to skip.
-- `verified` 2026-08-11 **`deploy_rsync.sh` IS DELETED.** It was TRACKED (both CLAUDE.md
-  and the guardian's memory called it untracked — the guardian caught its own error by
-  re-checking rather than agreeing), and it rsynced the laptop WORKING TREE to the
-  droplet with `--delete`, no ancestry check, no hash pin, no clean-tree check, and a
-  hardcoded droplet IP. A hardened version was considered and rejected: **the flags were
-  never the safety.** The safety is the protocol and the willingness to stop when a
-  premise turns out to be false — three of the five deploys this evening were materially
-  changed by exactly that, and a hardened script would have sailed past all three.
-
-Older dated entries live in two files, split for the 1000-line cap and NOT
-retired — several correct an earlier claim that proved false, which is
-exactly the history worth keeping:
-
-- [docs/status_log.md](docs/status_log.md) — all of 2026-08-10 and 2026-08-09.
-- [docs/status_log_archive.md](docs/status_log_archive.md) — 2026-08-06 and
-  earlier.
-
-Rotated on 2026-08-09, 2026-08-10, 2026-08-11, 2026-08-12, 2026-08-13, 2026-08-25 and
-2026-08-26, by date, oldest first. The 2026-08-26 rotation moved `status_log.md`'s
-oldest block (2026-08-09) into the archive FIRST, then this file's oldest block
-(2026-08-11, the accusation guard) into `status_log.md` — that order matters, because
-`status_log.md` was already at 914 and would have broken the cap otherwise. Current
-sizes: this file **906 lines**, `status_log.md` **884 lines**,
-`status_log_archive.md` **795 lines**. This file is past the ~800 line guidance
-again, so the NEXT session to add a status block should rotate before writing: the
-CURRENT state is what a new session reads first, and it stops being readable long
-before it hits the 1000-line cap.
+Rotated on 2026-08-09, 2026-08-10, 2026-08-11, 2026-08-12, 2026-08-13, 2026-08-25,
+2026-08-26 and 2026-09-01, by date, oldest first. **The 2026-09-01 rotation had to
+create a THIRD file, and that is the thing to know before the next one.** The chain
+was full: moving `status_log.md`'s oldest block (218 lines) into an archive already
+at 795 would have broken the very cap the rotation exists to respect, so the usual
+oldest-first move was impossible. `status_log_archive_2.md` is that block. Two blocks
+then came down from this file rather than one, which is why it is comfortably under
+the guidance for once. Current sizes: this file **835 lines**,
+`status_log.md` **831**, `status_log_archive.md` **795**,
+`status_log_archive_2.md` **230**.
