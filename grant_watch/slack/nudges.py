@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-from .. import capability_asks, db, reminders, roster
+from .. import capability_asks, db, lead_claims, reminders, roster
 from ..presentation import defuse_mentions
 from ..migrations_nudges import NUDGE_STATES, NUDGE_SUBJECT_KINDS
 from . import nudge_silence, nudge_variants
@@ -165,6 +165,13 @@ VARIANTS = ("a", "b")
 # `answered_since_offer` joins them because a person answering is exactly as permanent
 # as the other four — once Jocelyn replies, there is nothing left to escalate about,
 # and the subject should be retired rather than reconsidered every half hour.
+#
+# `lead_claimed` IS DELIBERATELY ABSENT, and the asymmetry with its neighbour
+# `lead_parked` is the point rather than an oversight. Parking a lead is a triage
+# state a human sets and Grant never revokes; a CLAIM is reversible by design, so
+# writing it here would mean a rep saying "actually, it's not mine after all" leaves
+# the claim undone and the follow-up permanently retired — the one-way door this
+# feature was specifically built not to be (architectural-critic, 2026-09-01).
 PERMANENT_SUPPRESSIONS = frozenset(
     {
         "stale",
@@ -255,6 +262,25 @@ def suppress_reason(
             "not_relevant",
         }:
             return "lead_parked"
+        # A REP WHO SAID THEY WERE TAKING IT HAS ANSWERED, JUST NOT HERE. This is the
+        # defect that prompted the whole feature: a claim made in another thread
+        # leaves the card with no `engagement` row, so it still reads as ignored and
+        # the manager is told nobody answered.
+        #
+        # READ LIVE, not from `observed`, unlike `lead_parked` above. A claim can land
+        # between the candidate being built and the send, and this module's whole
+        # posture is that anything which changed in between suppresses rather than
+        # posting a claim that is no longer true.
+        #
+        # AND DELIBERATELY TRANSIENT — it is NOT in PERMANENT_SUPPRESSIONS, which is
+        # the one thing about it that is easy to get wrong. `run()` writes a ledger
+        # row only for a permanent reason, and that row's uniqueness key retires the
+        # subject forever. A claim is the one suppression here that a human can
+        # REVERSE, so recording it permanently would mean claim-then-release leaves
+        # the claim undone and the follow-up destroyed, with nothing to show for it.
+        # Held instead, the subject simply ages out at DROP_AFTER if the claim stands.
+        if lead_claims.is_claimed(conn, int(candidate.observed.get("lead_id") or 0)):
+            return "lead_claimed"
     if candidate.subject_kind in ESCALATION_KINDS:
         waiting = _escalation_is_premature(conn, candidate)
         if waiting:

@@ -98,3 +98,24 @@ CRM_CONTEXT_SELECT = """
 def _now() -> str:
     """UTC ISO timestamp — one format everywhere so Postgres migration is painless."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# A lead a rep has said they are taking is out of every proactive surface, until a
+# human hands it back. Chase, 2026-09-01, after a rep wrote "I'm taking Gobles Public
+# Schools" and Grant — correctly, at the time — answered that it had nothing to mark.
+#
+# IT LIVES HERE BECAUSE THERE ARE FOUR CANDIDATE QUERIES, NOT THREE, AND THE ONE THAT
+# IS EASIEST TO MISS IS THE ONE THAT ACTUALLY POSTS. `db_engagement` holds the three
+# legacy drip tiers (nugget/rfp/bulletin); `campaign.preparation._rows` holds the RICH
+# card, which has been the live posting path since 2026-08-05, and also feeds
+# `preparable_lead_ids` — the worker that SPENDS Firecrawl scrapes and ZoomInfo
+# credits enriching leads so they can become cards. Filtering only the first three
+# would have suppressed the fallback and left the primary path posting the very lead
+# a rep had just claimed, plus paying to enrich it (architectural-critic, 2026-09-01).
+#
+# One constant, referenced by all four, for the reason `campaign.delivery` already
+# keeps its `_SKIP_*` strings shared: a reworded literal in one caller is a silent
+# failure, and the fifth candidate query somebody writes next quarter must not be
+# able to omit this by simply not knowing about it.
+UNCLAIMED_LEAD_PREDICATE = """l.id NOT IN (
+    SELECT lead_id FROM lead_claims WHERE released_at IS NULL)"""

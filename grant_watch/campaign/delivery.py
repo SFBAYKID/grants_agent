@@ -15,6 +15,7 @@ from typing import Any, Protocol
 from slack_sdk.errors import SlackApiError
 
 from .. import db
+from .. import lead_claims
 from . import card, contact_evidence, pacing, rich_actions_configured
 from .preparation import CandidateReview, review_candidates
 from .snapshot import award_dedup_key, freeze
@@ -105,6 +106,11 @@ def _delivery_veto(
         str(row["status"] or "new") != "new"
         or int(row["current_event_id"] or 0) != event_id
     ):
+        return False
+    # A CLAIM CAN LAND INSIDE THIS WINDOW. `review_candidates` filters claimed leads
+    # out of the pool, but it ran earlier in the tick; a rep saying "I'm taking this"
+    # between then and here would otherwise get the card posted at them anyway.
+    if lead_claims.is_claimed(conn, lead_id):
         return False
     return (
         contact_evidence.contact_fact_is_verified(contact)

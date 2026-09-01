@@ -671,6 +671,7 @@ def _dispatch_tool(
     workspace: str = "",
     channel: str = "",
     thread_ts: str = "",
+    user_text: str = "",
 ) -> tuple[str, GeneratedArtifact | None]:
     """Dispatch one tool call and return text plus an optional owned artifact.
 
@@ -861,6 +862,17 @@ def _dispatch_tool(
         except Exception as exc:  # noqa: BLE001 — a tool reports, it never kills a turn
             _log_tool_failure(name)
             return f"ERROR: {name} failed ({type(exc).__name__}).", None
+    if name == "claim_lead":
+        from . import claim_tools
+
+        p("Checking who has that one")
+        try:
+            return claim_tools.claim_lead(
+                args, requester_slack, channel, thread_ts, user_text
+            ), None
+        except Exception as exc:  # noqa: BLE001 — a tool reports, it never kills a turn
+            _log_tool_failure("claim_lead")
+            return f"ERROR: claim_lead failed ({type(exc).__name__}).", None
     if name == "fetch_url":
         return fetch_url(str(args.get("url", "")), p), None
     if name == "record_contact_fact":
@@ -917,6 +929,7 @@ def run_tool(
     workspace: str = "",
     channel: str = "",
     thread_ts: str = "",
+    user_text: str = "",
 ) -> tuple[str, GeneratedArtifact | None]:
     """Dispatch one tool call, then sanitize its text before anything else sees it.
 
@@ -934,6 +947,7 @@ def run_tool(
         workspace=workspace,
         channel=channel,
         thread_ts=thread_ts,
+        user_text=user_text,
     )
     if name not in _ACTION_PRODUCING_TOOLS:
         text = strip_action_markers(text)

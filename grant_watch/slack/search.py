@@ -21,6 +21,7 @@ from ..presentation import model_note
 from ..presentation import display_entity_name
 from ..spreadsheets import GeneratedArtifact, make_spreadsheet
 from .search_enrichment import MAX_ENRICH_ROWS, _CONTACT_COLUMNS, _enrich_contacts
+from .search_presentation import claimed_phrases as _claimed_phrases
 from .search_presentation import contact_suffix as _contact_suffix
 from .search_presentation import entity_role_for_row as _entity_role_for_row
 from .search_presentation import grade_phrases as _grade_phrases
@@ -730,6 +731,7 @@ def search_leads(
                 f"WHERE {where_sql} ORDER BY {order_sql}, id LIMIT ?"
             )
             rows = connection.execute(select_sql, params + [row_limit]).fetchall()
+            claimed = _claimed_phrases(connection, [int(row["id"]) for row in rows])
             # Grade split over the FULL match set, so the rep hears "29 gold,
             # 6 silver" up front without knowing the internal grading jargon.
             grade_counts = {
@@ -751,6 +753,7 @@ def search_leads(
         "entity_role",
         *_SEARCH_COLUMNS,
         "date_context",
+        "claimed_by",
     ]
     data_rows: list[list[object]] = [
         [
@@ -762,6 +765,7 @@ def search_leads(
                 for column in _SEARCH_COLUMNS
             ],
             _window_label(row),
+            claimed.get(int(row["id"]), ""),
         ]
         for row in rows
     ]

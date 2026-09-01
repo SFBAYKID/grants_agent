@@ -13,7 +13,12 @@ import uuid
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from .db_common import CRM_CONTEXT_SELECT, LEAD_EVENT_SELECT, _now
+from .db_common import (
+    CRM_CONTEXT_SELECT,
+    LEAD_EVENT_SELECT,
+    UNCLAIMED_LEAD_PREDICATE,
+    _now,
+)
 
 
 def record_engagement(
@@ -284,7 +289,8 @@ def nugget_candidates(conn: sqlite3.Connection, channel: str) -> list[sqlite3.Ro
               AND l.id NOT IN (SELECT lead_id FROM posts
                                WHERE lead_id IS NOT NULL AND channel=?)
               AND l.id NOT IN (SELECT lead_id FROM notification_outbox
-                               WHERE lead_id IS NOT NULL AND audience=?)""",
+                               WHERE lead_id IS NOT NULL AND audience=?)
+              AND {UNCLAIMED_LEAD_PREDICATE}""",
             (channel, channel),
         )
     )
@@ -312,6 +318,7 @@ def rfp_candidates(conn: sqlite3.Connection, channel: str) -> list[sqlite3.Row]:
                                WHERE lead_id IS NOT NULL AND channel=?)
               AND l.id NOT IN (SELECT lead_id FROM notification_outbox
                                WHERE lead_id IS NOT NULL AND audience=?)
+              AND {UNCLAIMED_LEAD_PREDICATE}
               AND l.funds_end != '' AND date(l.funds_end) >= date('now')
             ORDER BY date(l.funds_end) ASC, l.id""",
             (channel, channel),
@@ -340,6 +347,7 @@ def bulletin_candidates(
                                WHERE lead_id IS NOT NULL AND channel=?)
               AND l.id NOT IN (SELECT lead_id FROM notification_outbox
                                WHERE lead_id IS NOT NULL AND audience=?)
+              AND {UNCLAIMED_LEAD_PREDICATE}
               AND l.funds_end != '' AND date(l.funds_end) >= date('now')
             ORDER BY date(l.funds_end) ASC,l.id""",
             (f"-{max_age_days} days", channel, channel),

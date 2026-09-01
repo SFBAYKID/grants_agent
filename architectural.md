@@ -127,11 +127,34 @@ the same award reappears/duplicates. See `docs/FINDINGS.md`.
 **Future backend parity requirement:** a Postgres migration must preserve every SQLite value and
 workflow state. Postgres support is not implemented; test parity rather than assuming it.
 
-**Compatibility debt:** immutable migration 1 still creates `leads.assigned_to`,
-`leads.assigned_at`, and an `engagement.kind='claim'` option from the removed ownership workflow.
-Runtime code does not use them. The storage maintainer owns their removal through a new forward-only
-migration after backup/legacy-upgrade tests; editing the historical migration would break reproducible
-upgrades. Until then, these fields must not be presented as product capabilities.
+**Lead claims (migration 48, 2026-09-01).** A rep saying "I'm taking Gobles Public Schools" is
+recorded in `lead_claims` — an append-only ledger holding their words VERBATIM plus the Slack
+coordinates, because Grant later tells a third rep "Kerry has this one" and that assertion ships
+with its receipt. A live claim removes the lead from ALL FOUR candidate queries
+(`db_engagement.nugget_candidates` / `rfp_candidates` / `bulletin_candidates` and
+`campaign.preparation._rows`, which is the rich card AND the paid enrichment worker) through the
+single shared `db_common.UNCLAIMED_LEAD_PREDICATE`, from `campaign.delivery._delivery_veto`, from
+both card follow-up kinds, and from `salesforce_followups`. It holds until a human releases it —
+no expiry (Chase, 2026-09-01), because a lead drifting back into the pool is Grant re-raising
+something a rep already said they were handling.
+
+Two properties are easy to break and expensive to lose. `leads.status` is NOT touched: a parked
+status would fail `db.CAMPAIGN_ELIGIBLE_STATUSES` and lock the claimer out of the Salesforce
+campaign a claim exists to enable. And `lead_claimed` is deliberately ABSENT from
+`nudges.PERMANENT_SUPPRESSIONS`, unlike its neighbour `lead_parked`: a permanent suppression writes
+a row whose uniqueness key retires the subject forever, so recording a REVERSIBLE claim there would
+mean release undoes the claim and destroys the follow-up.
+
+**Compatibility debt:** immutable migration 1 still creates `leads.assigned_to` and
+`leads.assigned_at` from the removed 2026-07-15 ownership workflow. They are NOT the claim store —
+lead claims use the ledger above — and runtime code does not read or write them. Exactly one
+production row is populated (lead 229, from that removed code, `verified` 2026-09-01), which is why
+no candidate query filters on the column: doing so would silently remove one real lead from every
+card path. `engagement.kind='claim'` remains a legal kind and is likewise not written by the claim
+path — a claim is not evidence that anybody engaged with a particular POST, and `engaged_since_queued`
+is permanent, so writing one would burn the follow-up subject irreversibly. The storage maintainer
+owns the columns' removal through a new forward-only migration after backup/legacy-upgrade tests;
+editing the historical migration would break reproducible upgrades.
 
 ---
 

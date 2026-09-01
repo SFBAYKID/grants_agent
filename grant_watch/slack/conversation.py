@@ -819,6 +819,10 @@ def respond(
                             workspace=workspace,
                             channel=channel,
                             thread_ts=thread_ts,
+                            # The rep's OWN sentence, not the model's rendering of
+                            # it: `claim_lead` stores it verbatim and quotes it to a
+                            # colleague weeks later.
+                            user_text=user_text,
                         )
                     if artifact:
                         files.append(artifact)
