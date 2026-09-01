@@ -39,7 +39,12 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 from .. import db, scoring, territory, reminders
-from ..presentation import display_entity_name, plain_fragment, state_display_name
+from ..presentation import (
+    award_age_phrase,
+    display_entity_name,
+    plain_fragment,
+    state_display_name,
+)
 from .drip_card import render_blocks
 from .search_presentation import record_link
 from .source_status import _safe_url
@@ -203,23 +208,72 @@ def _award_facts(row: sqlite3.Row) -> tuple[str, str, str, str]:
     return entity, location, f" {amt}", program_text
 
 
-def build_nugget(row: sqlite3.Row) -> tuple[str, str]:
+def _award_when(row: sqlite3.Row, today: date | None = None) -> str:
+    """ ", federal funds obligated October 10, 2025 — about 11 months ago" — or "".
+
+    A CLAUSE, NOT A SENTENCE. The card is "one short factual sentence" by Chase's
+    design and three tests pin exactly that, so the age is folded into the sentence
+    the card already had rather than appended as a second one.
+
+    THE LEGACY CARD CARRIED NO DATE AT ALL, and 34 of the 44 award cards ever posted
+    were this shape: "X in Y has a verified $500,000 SVPP funding award." under a
+    GOLD header, with no temporal content anywhere in the payload. A rep could not
+    tell a three-week-old award from a three-year-old one, which is exactly what it
+    cost when one phoned a district ten months after the obligation and was told the
+    replacement was already finishing with a competitor.
+
+    RETURNS "" ON AN UNREADABLE DATE rather than raising. Every gold lead should carry
+    one — `scoring.grade` sends an undated award to SILVER — but three cards were
+    posted in July from events with no date, before the pollers stored them, and a
+    renderer that raised would quarantine a real lead over a missing nicety.
+    """
+    occurred = str(row["current_event_occurred_on"] or "")
+    shown = _event_date(occurred, str(row["current_event_date_precision"] or ""))
+    if not shown:
+        return ""
+    age = award_age_phrase(occurred, today)
+    return f", {_event_label(row).lower()} {shown}{f' — {age}' if age else ''}"
+
+
+def _event_label(row: sqlite3.Row) -> str:
+    """Name the dated event in the source's own terms, never a generic 'awarded'."""
+    return (
+        "Federal funds obligated"
+        if str(row["current_event_type"] or "") == "award_obligated"
+        else "Award announced"
+    )
+
+
+def _event_date(value: str, precision: str) -> str:
+    """Render only the precision the stored evidence actually supports."""
+    try:
+        parsed = date.fromisoformat(value[:10])
+    except ValueError:
+        return ""
+    if precision == "month":
+        return parsed.strftime("%B %Y")
+    return parsed.strftime("%B %d, %Y").replace(" 0", " ")
+
+
+def build_nugget(row: sqlite3.Row, today: date | None = None) -> tuple[str, str]:
     """Build one minimal award sentence using only persisted source facts."""
     entity, location, amount, program_text = _award_facts(row)
     return (
-        f"{entity}{location} has a verified{amount}{program_text} funding award.",
+        f"{entity}{location} has a verified{amount}{program_text} funding award"
+        f"{_award_when(row, today)}.",
         "award-brief",
     )
 
 
-def build_platinum(row: sqlite3.Row) -> tuple[str, str]:
+def build_platinum(row: sqlite3.Row, today: date | None = None) -> tuple[str, str]:
     """The cream: a security grant awarded in the last few days — the buyer is about to
     spend, so the card is timely and action-oriented (Chase: 'contact them now'). Facts
     only — same verified award data as a nugget, just worded for urgency."""
     entity, location, amount, program_text = _award_facts(row)
     return (
         f"{entity}{location} just landed a verified{amount}{program_text} security "
-        "award and is about to spend it — worth reaching out now.",
+        f"award and is about to spend it — worth reaching out now"
+        f"{_award_when(row, today)}.",
         "platinum",
     )
 
@@ -722,7 +776,11 @@ def run_drip(
         "bulletin": build_bulletin,
     }[kind]
     try:
-        text, style = builder(row)
+        # The award builders take the tick's own clock so the age they print and the
+        # pacing decisions above cannot disagree about what day it is.
+        text, style = (
+            builder(row, now.date()) if kind in ("platinum", "nugget") else builder(row)
+        )
     except ValueError as exc:
         # The renderers fail closed on unusable data (an entity that sanitizes to
         # nothing, a missing title) and they run BEFORE any reservation exists — so
