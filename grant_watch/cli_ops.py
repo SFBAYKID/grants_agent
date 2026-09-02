@@ -174,7 +174,7 @@ def cmd_scan_threads(channel: str, dry_run: bool) -> int:
     return 0
 
 
-def cmd_daily_list(limit: int, force: bool, dry_run: bool) -> int:
+def cmd_daily_list(limit: int, force: bool, dry_run: bool, channel: str = "") -> int:
     """Post the day's freshest-awards list to the primary channel.
 
     Designed for ONE cron tick a day. The one-a-day cap lives in the ledger rather
@@ -189,7 +189,10 @@ def cmd_daily_list(limit: int, force: bool, dry_run: bool) -> int:
     from .config import primary_channel_id
     from .slack import daily_list
 
-    channel = primary_channel_id()
+    # An EXPLICIT channel beats the configured default so the target is a crontab
+    # edit rather than a deploy. A first run into a test channel and the switch to the
+    # team's channel are then the same one-line change, made by whoever is watching.
+    channel = channel or primary_channel_id()
     if not channel:
         print("SLACK_CHANNEL_ID is not set in .env", file=sys.stderr)
         return 1

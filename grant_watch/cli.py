@@ -693,6 +693,7 @@ def main(argv: list[str] | None = None) -> int:
     p_list.add_argument("--limit", type=int, default=25)
     p_list.add_argument("--force", action="store_true")
     p_list.add_argument("--dry-run", action="store_true")
+    p_list.add_argument("--channel", default="", help="override the target channel")
     p_drip = sub.add_parser("drip", help="one drip tick (maybe post one nugget)")
     p_drip.add_argument(
         "--force",
@@ -933,7 +934,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "drip-unblock":
         return cmd_drip_unblock(args.channel)
     if args.command == "daily-list":
-        return cmd_daily_list(args.limit, args.force, args.dry_run)
+        return cmd_daily_list(args.limit, args.force, args.dry_run, args.channel)
     if args.command == "drip":
         return cmd_drip(args.force, args.dry_run)
     if args.command == "rich-shadow":
