@@ -19,6 +19,7 @@ from .migrations_campaign_batch import (
     migration_40_batch_item_inclusion,
 )
 from .migrations_claims import migration_48_lead_claims
+from .migrations_daily_list import migration_49_daily_list
 from .migrations_campaign_preview import migration_28_single_ready_campaign_creation
 from .migrations_campaign_attempts import migration_31_campaign_attempts
 from .migrations_human_facts import migration_32_human_asserted_contacts
@@ -784,6 +785,11 @@ MIGRATIONS: tuple[Migration, ...] = (
         48,
         "who said they were taking a lead, in their own words",
         migration_48_lead_claims,
+    ),
+    Migration(
+        49,
+        "what each channel's daily list has already shown, so nothing repeats",
+        migration_49_daily_list,
     ),
 )
 

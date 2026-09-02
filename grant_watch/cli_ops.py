@@ -172,3 +172,59 @@ def cmd_scan_threads(channel: str, dry_run: bool) -> int:
         )
     )
     return 0
+
+
+def cmd_daily_list(limit: int, force: bool, dry_run: bool) -> int:
+    """Post the day's freshest-awards list to the primary channel.
+
+    Designed for ONE cron tick a day. The one-a-day cap lives in the ledger rather
+    than in cron, so a double tick, a retry, or a manual run cannot produce a second
+    list — the same reason `posts` gates the drip rather than the crontab doing it.
+    """
+    import os
+    import sys
+
+    from slack_sdk import WebClient
+
+    from .config import primary_channel_id
+    from .slack import daily_list
+
+    channel = primary_channel_id()
+    if not channel:
+        print("SLACK_CHANNEL_ID is not set in .env", file=sys.stderr)
+        return 1
+    client = None if dry_run else WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    conn = db.connect_readonly() if dry_run else db.connect()
+    try:
+        outcome = daily_list.run(
+            client, channel, conn, limit=limit, force=force, dry_run=dry_run
+        )
+    finally:
+        conn.close()
+    print(outcome)
+    # A refusal or an ambiguous send must exit non-zero: cron.log is the only alarm
+    # this system has, and a silent zero is how a dead feature stays dead.
+    return 1 if outcome.startswith(("error", "unknown")) else 0
+
+
+def cmd_drip_unblock(channel: str) -> int:
+    """Clear a channel-level block after an operator has fixed Slack.
+
+    A systemic Slack failure (`channel_not_found`, `invalid_auth`, …) blocks the channel
+    for an escalating 1h-8h period, because retrying every 30 minutes cannot help and
+    used to consume a lead each time. The guard expires on its own; this command only
+    resumes SOONER, once an operator knows Slack is fixed."""
+    import sys
+
+    from .config import primary_channel_id
+
+    conn = db.connect()
+    target = channel or primary_channel_id()
+    if not target:
+        print("no channel given and SLACK_CHANNEL_ID is not set", file=sys.stderr)
+        return 1
+    if db.clear_channel_guard(conn, target):
+        print(f"cleared the block on {target}; the next tick will post normally")
+        return 0
+    print(f"no block was set on {target}")
+    return 0

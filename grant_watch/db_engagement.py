@@ -17,6 +17,7 @@ from .db_common import (
     CRM_CONTEXT_SELECT,
     LEAD_EVENT_SELECT,
     UNCLAIMED_LEAD_PREDICATE,
+    UNLISTED_LEAD_PREDICATE,
     _now,
 )
 
@@ -290,8 +291,9 @@ def nugget_candidates(conn: sqlite3.Connection, channel: str) -> list[sqlite3.Ro
                                WHERE lead_id IS NOT NULL AND channel=?)
               AND l.id NOT IN (SELECT lead_id FROM notification_outbox
                                WHERE lead_id IS NOT NULL AND audience=?)
-              AND {UNCLAIMED_LEAD_PREDICATE}""",
-            (channel, channel),
+              AND {UNCLAIMED_LEAD_PREDICATE}
+              AND {UNLISTED_LEAD_PREDICATE}""",
+            (channel, channel, channel),
         )
     )
 
@@ -319,9 +321,10 @@ def rfp_candidates(conn: sqlite3.Connection, channel: str) -> list[sqlite3.Row]:
               AND l.id NOT IN (SELECT lead_id FROM notification_outbox
                                WHERE lead_id IS NOT NULL AND audience=?)
               AND {UNCLAIMED_LEAD_PREDICATE}
+              AND {UNLISTED_LEAD_PREDICATE}
               AND l.funds_end != '' AND date(l.funds_end) >= date('now')
             ORDER BY date(l.funds_end) ASC, l.id""",
-            (channel, channel),
+            (channel, channel, channel),
         )
     )
 
@@ -348,8 +351,9 @@ def bulletin_candidates(
               AND l.id NOT IN (SELECT lead_id FROM notification_outbox
                                WHERE lead_id IS NOT NULL AND audience=?)
               AND {UNCLAIMED_LEAD_PREDICATE}
+              AND {UNLISTED_LEAD_PREDICATE}
               AND l.funds_end != '' AND date(l.funds_end) >= date('now')
             ORDER BY date(l.funds_end) ASC,l.id""",
-            (f"-{max_age_days} days", channel, channel),
+            (f"-{max_age_days} days", channel, channel, channel),
         )
     )

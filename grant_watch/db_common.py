@@ -119,3 +119,16 @@ def _now() -> str:
 # able to omit this by simply not knowing about it.
 UNCLAIMED_LEAD_PREDICATE = """l.id NOT IN (
     SELECT lead_id FROM lead_claims WHERE released_at IS NULL)"""
+
+
+# A lead the daily list has already shown must never arrive again as a card. The list
+# has its own ledger (`daily_list_items`, migration 49) rather than `posts`, because
+# one Slack message can own only one `posts` row — so the four existing "already
+# posted" exclusions cannot see list items at all, and every lead on a list would come
+# back as a card the next day.
+#
+# Same shape and same reason as UNCLAIMED_LEAD_PREDICATE above: defined once,
+# referenced by every candidate query, so the next one written cannot omit it by
+# simply not knowing it exists.
+UNLISTED_LEAD_PREDICATE = """l.id NOT IN (
+    SELECT lead_id FROM daily_list_items WHERE channel=?)"""

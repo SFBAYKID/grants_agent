@@ -38,7 +38,13 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from . import db, poll_lease, scoring
-from .cli_ops import cmd_fill_contacts, cmd_scan_threads, cmd_watchdog
+from .cli_ops import (
+    cmd_daily_list,
+    cmd_drip_unblock,
+    cmd_fill_contacts,
+    cmd_scan_threads,
+    cmd_watchdog,
+)
 from .config import primary_channel_id
 from .migrations_nudges import CAPABILITY_KINDS
 from .models import RawItem, RunStats
@@ -349,25 +355,6 @@ def cmd_nces_bind(limit_states: int, dry_run: bool) -> int:
         f"{len(states) - failures} state(s); {failures} failed"
     )
     return 1 if failures else 0
-
-
-def cmd_drip_unblock(channel: str) -> int:
-    """Clear a channel-level block after an operator has fixed Slack.
-
-    A systemic Slack failure (`channel_not_found`, `invalid_auth`, …) blocks the channel
-    for an escalating 1h-8h period, because retrying every 30 minutes cannot help and
-    used to consume a lead each time. The guard expires on its own; this command only
-    resumes SOONER, once an operator knows Slack is fixed."""
-    conn = db.connect()
-    target = channel or primary_channel_id()
-    if not target:
-        print("no channel given and SLACK_CHANNEL_ID is not set", file=sys.stderr)
-        return 1
-    if db.clear_channel_guard(conn, target):
-        print(f"cleared the block on {target}; the next tick will post normally")
-        return 0
-    print(f"no block was set on {target}")
-    return 0
 
 
 def cmd_drip_blocked() -> int:
@@ -700,6 +687,12 @@ def main(argv: list[str] | None = None) -> int:
     p_unblock.add_argument(
         "--channel", default="", help="channel id (defaults to the primary channel)"
     )
+    p_list = sub.add_parser(
+        "daily-list", help="post the day's freshest-awards list (one a day)"
+    )
+    p_list.add_argument("--limit", type=int, default=25)
+    p_list.add_argument("--force", action="store_true")
+    p_list.add_argument("--dry-run", action="store_true")
     p_drip = sub.add_parser("drip", help="one drip tick (maybe post one nugget)")
     p_drip.add_argument(
         "--force",
@@ -939,6 +932,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_drip_blocked()
     if args.command == "drip-unblock":
         return cmd_drip_unblock(args.channel)
+    if args.command == "daily-list":
+        return cmd_daily_list(args.limit, args.force, args.dry_run)
     if args.command == "drip":
         return cmd_drip(args.force, args.dry_run)
     if args.command == "rich-shadow":

@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta, timezone
 
 from .. import scoring, territory, reminders
-from ..db_common import UNCLAIMED_LEAD_PREDICATE
+from ..db_common import UNCLAIMED_LEAD_PREDICATE, UNLISTED_LEAD_PREDICATE
 from ..enrich.salesforce_activity import RECENT_ACTIVITY_DAYS
 from . import card, contact_evidence, policy
 from .routing import OwnerEvidence, resolve
@@ -105,8 +105,9 @@ def _rows(conn: sqlite3.Connection, audience: str, limit: int) -> list[sqlite3.R
                                   WHERE lead_id IS NOT NULL AND channel=?)
                  AND l.id NOT IN (SELECT lead_id FROM notification_outbox
                                   WHERE lead_id IS NOT NULL AND audience=?)
-                 AND {UNCLAIMED_LEAD_PREDICATE}""",
-            (audience, audience),
+                 AND {UNCLAIMED_LEAD_PREDICATE}
+                 AND {UNLISTED_LEAD_PREDICATE}""",
+            (audience, audience, audience),
         )
     )
     candidates.sort(
