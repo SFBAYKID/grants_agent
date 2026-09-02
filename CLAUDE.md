@@ -123,6 +123,84 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-09-02, the daily list is live — freshest first, nothing repeats)
+
+- `verified` 2026-09-02 **PRODUCTION IS `18f8e53`, SCHEMA 49.** Four deploys since
+  `c41b8e3`: `03a32f8` (lead claims, migration 48) → `b87efd6` (award age on cards) →
+  `b7dd214` (the daily list, migration 49) → `3ac8ba0` (contact matcher) → `18f8e53`.
+  Outages **0.478 / 0.189 / 0.080 / ~100 / 0.000 s**. The ~100 s was the guardian's own
+  probe: a `pgrep` pattern collapsed by bash quote-removal matched ITSELF, so
+  `run_bot.sh`'s guard read the probe as a running bot and exited. The bytes were fine;
+  the restart was the incident. The final deploy needed **no restart at all** —
+  `daily_list` is imported only inside a function in `cli_ops`, so the listener's
+  module closure never touches it.
+- `verified` 2026-09-02 **THE DAILY LIST REPLACES NOTHING YET AND POSTS AT 11:02 PT.**
+  `2 11 * * 1-5 … daily-list --limit 25 --channel C0BSDPM2KPB`. The drip cron is
+  DELIBERATELY still enabled: Chase chose "replace the card with the list" believing
+  the list would carry schools and nonprofits together. It does not — it is 100% NSGP
+  nonprofits, and the drip's 165 gold SVPP school leads have ZERO overlap with the
+  list's pool, so switching the drip off would take the school pipeline to zero. The
+  contention is DEFERRED, not absent: `daily_list.candidates` has no grade filter, so
+  as the list walks backwards it WILL reach the gold cohort. Revisit the drip in the
+  same edit that changes that.
+- `verified` 2026-09-02 **A GUARDIAN REFUSING TO POST FOUND THE DEFECT A SUCCESSFUL
+  POST WOULD HAVE HIDDEN.** It declined a test post on authorization — my warrant was a
+  PARAPHRASE of Chase, not his words, and the act included a production write he had
+  never approved — then rendered the payload read-only instead. The list built **22
+  cards from 25 leads** while `run()` marked all 25 delivered: three leads consumed and,
+  under `UNIQUE(channel, lead_id)`, unshowable forever. Invisible, because a dropped
+  lead is indistinguishable from one never selected. The per-card divider made 25 cards
+  cost 53 blocks against Slack's ceiling of 50, so the cap could never have been raised
+  to fit. Fixed by rendering BEFORE reserving, and one block per card.
+- `verified` 2026-09-02 **THREE OF MY OWN TESTS FOR THAT FIX WERE VACUOUS.** Two used a
+  40-lead fixture that never truncated, so both passed for the wrong reason and their
+  mutations survived. A third mutated the lead-id list when the reservation is what
+  bears the weight. Fixtures now assert they truncate BEFORE asserting anything about
+  truncation.
+- `verified` 2026-09-02 **THE CONTACT MATCHER WAS REJECTING THE ORGANIZATION AND
+  ACCEPTING THE DIRECTORY.** `_looks_official` requires every distinctive token, and
+  legal suffixes passed the length filter: for "Lubavitch of Iowa Inc" the required set
+  was {inc, iowa, lubavitch}, so `chabad.org` and `lubavitch.com` were REJECTED and
+  `grantwatch.com` ACCEPTED. Worse, the domain locked on the first ACCEPTED result
+  rather than on one that produced a contact, so one directory discarded every real
+  page behind it. Fill rate 5.3% → **13.3%**, proven reversed on live data. Cost went
+  UP (113 → 121 calls), not down — better matching reads more real pages.
+- `verified` 2026-09-02 **ZOOMINFO COVERS INSTITUTIONS AND NOT CONGREGATIONS.** 3 of 10
+  returned anybody; the 6 genuine zeros were all congregations, re-checked unfiltered.
+  The 7th zero was OURS: `SAINT ANNES EPISCOPAL SCHOOL_443031012` — strip the record
+  number and it returns 24 people including a Director of Facilities. **Five leads carry
+  that suffix and the strip is only in the CARD renderer, not the enrichment path.**
+  2 credits bought 1 phone — the first this cohort has produced by any method, across
+  40 organizations and two web-research runs.
+- `needs-testing` 2026-09-02 **25/DAY IS A BACKLOG DRAIN, NOT A FRESHNESS FEED.** Only
+  **21 leads are under 30 days old**; today's 25 consumes essentially all of them.
+  88 under 90 days, 168 under 180, 790 under a year, 8,675 total. New awards arrive at
+  ~2–3 per business day against 25 consumed — **~10× faster than the data replenishes**.
+  Within a week the list is months old; within ~6 weeks it is past a year, which is the
+  staleness that caused the incident. A variable-length list ("the 6 obligated in the
+  last 90 days") is honest every day; 25 is honest once.
+- `needs-testing` 2026-09-02 **NOTHING HAS EVER POSTED THROUGH THIS PATH.** The renderer
+  is proven byte-for-byte offline; Slack has never accepted the payload. It fails well —
+  every content error is in `_RELEASE_ERRORS` so the leads are released, not burned. The
+  one unmitigated risk is a Slack 5xx at post time, which marks all 25 `unknown` and
+  never retries, deliberately.
+- `verified` 2026-09-02 **CONTENTION CANNOT BURN LEADS, AND I TOLD CHASE IT COULD.**
+  I justified moving the cron off the 11:00 five-job pileup by saying a lock could mark
+  the list `unknown`. It cannot: `_reserve()` sits OUTSIDE the try block, so a lock
+  raises, rolls back and consumes nothing. `unknown` is only ever written for an
+  ambiguous SLACK outcome. The move stands on smaller grounds — defence in depth, and
+  separating the drip card from the list card by two minutes.
+- `needs-testing` 2026-09-02 **KNOWN AND DELIBERATELY NOT FIXED.** (1) `PERSON_ID_RE`
+  rejects negative ZoomInfo person ids — 22% of people returned, including one
+  organization's ONLY decision-maker; diagnosed 2026-08-13 and never widened. (2) A
+  single scrape 403 opens a **15-minute GLOBAL** `credential_or_billing` block; one
+  403 consumed 68% of a 22-minute run. (3) Two list rows can render byte-identical —
+  `LUBAVITCH OF IOWA INC` has two real subawards with the same amount, date and link.
+  (4) The list has no follow-up nudges at all, by design: at 25/day the follow-up
+  window covers ~2.4 days while a nudge comes due at 1, so >96% would age out unseen.
+  (5) `directPhone` is unlicensed on this ZoomInfo plan, and one DNC flag withholds
+  BOTH numbers.
+
 ## Current status (2026-09-01, a rep said "I'm taking this one" and Grant had nowhere to put it)
 
 - `verified` 2026-09-01 **PRODUCTION IS `03a32f8`, SCHEMA 48.** PID 416410 →
@@ -824,12 +902,15 @@ the history worth keeping:
   first live-tested day.
 
 Rotated on 2026-08-09, 2026-08-10, 2026-08-11, 2026-08-12, 2026-08-13, 2026-08-25,
-2026-08-26 and 2026-09-01, by date, oldest first. **The 2026-09-01 rotation had to
+2026-08-26 and 2026-09-01, by date, oldest first. **At 913 lines this file is past the
+~800 guidance again and the NEXT session to add a status block must rotate before
+writing** — `status_log.md` is at 831, so the 2026-08-26 block moves there and its
+oldest 2026-08-11 block moves on to an archive. **The 2026-09-01 rotation had to
 create a THIRD file, and that is the thing to know before the next one.** The chain
 was full: moving `status_log.md`'s oldest block (218 lines) into an archive already
 at 795 would have broken the very cap the rotation exists to respect, so the usual
 oldest-first move was impossible. `status_log_archive_2.md` is that block. Two blocks
 then came down from this file rather than one, which is why it is comfortably under
-the guidance for once. Current sizes: this file **835 lines**,
+the guidance for once. Current sizes: this file **913 lines**,
 `status_log.md` **831**, `status_log_archive.md` **795**,
 `status_log_archive_2.md` **230**.
