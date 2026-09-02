@@ -65,6 +65,24 @@ _SCHOOL_TITLES = (
     "operations director",
     "director of operations",
 )
+# Who actually decides on cameras and access control at a congregation, camp, museum
+# or community center. Not a superintendent; usually the person who runs the building.
+_NONPROFIT_TITLES = (
+    "executive director",
+    "operations director",
+    "director of operations",
+    "facilities director",
+    "director of facilities",
+    "facilities manager",
+    "operations manager",
+    "business manager",
+    "office administrator",
+    "office manager",
+    "administrator",
+    "executive administrator",
+    "security director",
+    "director of security",
+)
 _CITY_TITLES = (
     "city manager",
     "town manager",
@@ -203,8 +221,17 @@ def _org_kind(entity: str) -> str:
 
 
 def _titles_for(entity: str) -> tuple[str, ...]:
-    """Decision-maker titles matched to the org kind (city vs school)."""
-    return _CITY_TITLES if _org_kind(entity) == "city" else _SCHOOL_TITLES
+    """Decision-maker titles matched to the org kind.
+
+    NONPROFITS WERE SCORED AGAINST SCHOOL TITLES, which is why the one contact this
+    cohort ever produced — a parish office manager — scored only `medium`.
+    `find_contact` short-circuits on `high`, so every nonprofit paid the FULL search
+    and scrape budget even when it found the right person on the first angle.
+    """
+    return {
+        "city": _CITY_TITLES,
+        "nonprofit": _NONPROFIT_TITLES,
+    }.get(_org_kind(entity), _SCHOOL_TITLES)
 
 
 _EMAIL_RE = evidence.EMAIL_RE
@@ -298,6 +325,47 @@ _GENERIC_ENTITY_WORDS = {
     "education",
     "isd",
     "usd",
+    # LEGAL FORMS, and this omission cost a whole cohort. `_looks_official` requires
+    # EVERY distinctive token to appear on the page, and "inc" is four letters so it
+    # passed the length filter. Organizations do not print their legal suffix on their
+    # own website; business directories always do. Measured 2026-09-01 on
+    # "Lubavitch of Iowa Inc": chabad.org and lubavitch.com were both REJECTED and
+    # grantwatch.com — a lead-scraping directory — was ACCEPTED, purely on "inc".
+    # Same shape as the ISD and #428 traps: a required token the real source never
+    # prints. Six of the twenty-one organizations researched carried one; none
+    # produced a contact.
+    "inc",
+    "incorporated",
+    "llc",
+    "llp",
+    "lp",
+    "corp",
+    "corporation",
+    "ltd",
+}
+# Sites ABOUT organizations rather than BY them. A directory page carries the legal
+# name, the state and often a phone number, so it satisfies every binding test while
+# being nobody's official page — and because the first accepted result used to lock the
+# search domain, one directory hit discarded every real page that followed.
+_DIRECTORY_HOSTS = {
+    "grantwatch.com",
+    "guidestar.org",
+    "causeiq.com",
+    "charitynavigator.org",
+    "propublica.org",
+    "manta.com",
+    "bizapedia.com",
+    "opencorporates.com",
+    "buzzfile.com",
+    "dnb.com",
+    "zoominfo.com",
+    "yelp.com",
+    "mapquest.com",
+    "yellowpages.com",
+    "chamberofcommerce.com",
+    "usnews.com",
+    "niche.com",
+    "greatschools.org",
 }
 _BLOCKED_HOSTS = {
     "linkedin.com",
@@ -330,7 +398,8 @@ def _looks_official(entity: str, state: str, result: dict[str, Any]) -> bool:
     url = str(result.get("url") or "")
     host = _host(url)
     if not host or any(
-        host == blocked or host.endswith(f".{blocked}") for blocked in _BLOCKED_HOSTS
+        host == blocked or host.endswith(f".{blocked}")
+        for blocked in (_BLOCKED_HOSTS | _DIRECTORY_HOSTS)
     ):
         return False
     raw_haystack = " ".join(
@@ -556,7 +625,6 @@ def find_contact(
             candidate_domain = _host(url)
             if official_domain and not _same_site(candidate_domain, official_domain):
                 continue
-            official_domain = official_domain or candidate_domain
             seen_urls.add(url)
             if len(seen_urls) > max_pages:
                 break
@@ -572,6 +640,13 @@ def find_contact(
             clean_extractions += 1
             if cand is None:
                 continue
+            # THE DOMAIN LOCKS HERE — on a page that actually YIELDED a contact, not
+            # on the first result that merely looked plausible. Locking on acceptance
+            # meant one unhelpful page discarded every real one behind it: measured
+            # 2026-09-01, "The Postville Shul" bound to the city's business directory
+            # and the synagogue's own site was then rejected as off-domain. A page
+            # that produces no contact now costs one scrape instead of the search.
+            official_domain = official_domain or candidate_domain
             if cand.confidence == "high":  # a target-title match — take it immediately
                 say(f"Found {cand.name}")
                 return cand

@@ -78,3 +78,78 @@ def test_a_nonprofit_is_never_asked_for_a_superintendent() -> None:
     angles = " ".join(_angles_for("Christ the King Roman Catholic Church"))
     assert "superintendent" not in angles
     assert "principal" not in angles
+
+
+def _result(url: str, title: str, description: str = "") -> dict[str, str]:
+    """One search result in the shape Firecrawl returns."""
+    return {"url": url, "title": title, "description": description}
+
+
+def test_a_legal_suffix_is_not_a_distinctive_word() -> None:
+    """ "Inc" cost this cohort every contact it might have had.
+
+    `_looks_official` requires EVERY distinctive token on the page. Organizations do
+    not print their legal suffix on their own site; directories always do. Measured
+    live on 2026-09-01: chabad.org and lubavitch.com were both rejected for
+    "Lubavitch of Iowa Inc" while grantwatch.com was accepted, purely on that word.
+    """
+    from grant_watch.enrich.finder import _GENERIC_ENTITY_WORDS
+
+    for suffix in ("inc", "incorporated", "llc", "corp", "corporation", "ltd"):
+        assert suffix in _GENERIC_ENTITY_WORDS
+
+
+def test_the_organizations_own_site_now_binds() -> None:
+    """The exact result that used to be rejected."""
+    from grant_watch.enrich.finder import _looks_official
+
+    assert _looks_official(
+        "Lubavitch of Iowa Inc",
+        "IA",
+        _result(
+            "https://www.chabad.org/centers/iowa",
+            "Lubavitch of Iowa - Jewish Community Center Iowa",
+        ),
+    )
+
+
+def test_a_lead_directory_is_never_the_organization() -> None:
+    """The exact result that used to WIN, and then lock the search domain."""
+    from grant_watch.enrich.finder import _looks_official
+
+    assert not _looks_official(
+        "Lubavitch of Iowa Inc",
+        "IA",
+        _result(
+            "https://www.grantwatch.com/grant/1234",
+            "Chabad Lubavitch of Iowa City INC IA",
+        ),
+    )
+
+
+def test_an_unrelated_organization_is_still_rejected() -> None:
+    """THE CONTROL. Dropping "inc" loosens the binding, so the guard that matters is
+    that a page about somebody else still fails."""
+    from grant_watch.enrich.finder import _looks_official
+
+    assert not _looks_official(
+        "Lubavitch of Iowa Inc",
+        "IA",
+        _result("https://example.org/about", "Some Other Charity of Iowa"),
+    )
+
+
+def test_nonprofits_get_their_own_decision_maker_titles() -> None:
+    """A parish office manager should score HIGH, not medium.
+
+    `find_contact` short-circuits only on high, so scoring nonprofits against school
+    titles made every one of them pay the full search-and-scrape budget even when the
+    right person was on the first page.
+    """
+    from grant_watch.enrich.finder import _titles_for
+
+    titles = _titles_for("St. Mary Church of Solon Iowa")
+    assert "executive director" in titles
+    assert "office manager" in titles
+    assert "superintendent" not in titles
+    assert "technology director" in _titles_for("Gobles Public Schools")
