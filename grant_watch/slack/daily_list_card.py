@@ -72,7 +72,12 @@ def _event_label(event_type: object) -> str:
 
 
 def card(row: sqlite3.Row, today: date, index: int, total: int) -> list[dict]:
-    """One award as its own card."""
+    """One award as its own card — ONE block, deliberately.
+
+    A per-card divider made every card cost two blocks, so 25 cards needed 53 against
+    Slack's hard ceiling of 50 and the renderer silently dropped the last three. The
+    cap could not be raised to fix that; the divider had to go.
+    """
     name = safe_text(clean_entity_name(row["entity_name"]), 90)
     where = state_display_name(row["state"])
     heading = f"*{name}*" + (f" — {where}" if where else "")
@@ -106,24 +111,31 @@ def card(row: sqlite3.Row, today: date, index: int, total: int) -> list[dict]:
                 "type": "mrkdwn",
                 "text": f"{heading}\n{facts}{record}\n_{index} of {total}_",
             },
-        },
-        {"type": "divider"},
+        }
     ]
 
 
-def build_blocks(rows: list[sqlite3.Row], today: date) -> list[dict]:
-    """The whole list, bounded to Slack's block ceiling.
+def build_blocks(
+    rows: list[sqlite3.Row], today: date
+) -> tuple[list[dict], list[sqlite3.Row]]:
+    """The list, bounded to Slack's ceiling, AND the rows it actually rendered.
 
-    Truncating rather than raising is deliberate: `invalid_blocks` is a content error
-    that RELEASES the whole list, so a run that produced 30 cards would post nothing
-    at all. A shorter list is a worse list; no list is an outage.
+    RETURNING THE RENDERED ROWS IS THE WHOLE POINT OF THE SIGNATURE. Truncating is
+    right — `invalid_blocks` is a content error that releases the entire list, so
+    posting 22 cards beats posting none. Truncating SILENTLY is not: the first version
+    of this returned only blocks, the caller marked all 25 leads delivered, and three
+    real leads were consumed and could never be shown to anyone again. They did not
+    even look wrong — a dropped lead is indistinguishable from one that was never
+    selected. The count in the header and in each "n of N" is now the number a reader
+    can actually see, so the message cannot claim 25 while showing 22.
     """
+    shown = rows[: max(0, (MAX_BLOCKS - 3))]
     blocks: list[dict] = [
         {
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"Freshest funding — {len(rows)} newest awards",
+                "text": f"Freshest funding — {len(shown)} newest awards",
             },
         },
         {
@@ -140,11 +152,9 @@ def build_blocks(rows: list[sqlite3.Row], today: date) -> list[dict]:
         },
         {"type": "divider"},
     ]
-    for index, row in enumerate(rows, start=1):
-        if len(blocks) + 2 > MAX_BLOCKS:
-            break
-        blocks.extend(card(row, today, index, len(rows)))
-    return blocks
+    for index, row in enumerate(shown, start=1):
+        blocks.extend(card(row, today, index, len(shown)))
+    return blocks, list(shown)
 
 
 def notification_text(rows: list[sqlite3.Row]) -> str:

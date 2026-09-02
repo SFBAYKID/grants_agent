@@ -204,10 +204,15 @@ def run(
         head = ", ".join(str(row["entity_name"]) for row in rows[:3])
         return f"[dry-run] would list {len(rows)} awards for {channel}: {head}…"
 
-    lead_ids = [int(row["id"]) for row in rows]
-    _reserve(conn, channel, rows, at)
-    blocks = build_blocks(rows, today)
-    text = notification_text(rows)
+    # RENDER FIRST, then reserve exactly what will be SEEN. Reserving all 25 and
+    # rendering 22 consumed three leads nobody could ever be shown — silently, because
+    # a dropped lead is indistinguishable from one that was never selected.
+    blocks, shown = build_blocks(rows, today)
+    if not shown:
+        return "skip: nothing could be rendered"
+    lead_ids = [int(row["id"]) for row in shown]
+    _reserve(conn, channel, shown, at)
+    text = notification_text(shown)
     if client is None:
         _finish(conn, channel, lead_ids, state="release")
         return "error: no Slack client configured; nothing listed"
@@ -236,4 +241,4 @@ def run(
     _finish(
         conn, channel, lead_ids, state="delivered", slack_ts=str(result.get("ts") or "")
     )
-    return f"posted a list of {len(rows)} awards to {channel}"
+    return f"posted a list of {len(shown)} awards to {channel}"

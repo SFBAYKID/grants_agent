@@ -261,3 +261,56 @@ def test_the_blocks_stay_inside_slack_s_ceiling(tmp_path: Path) -> None:
     assert len(rows) == 30
     blocks = daily_list.build_blocks(rows, date(2026, 9, 2))
     assert len(blocks) <= 50
+
+
+def test_a_lead_is_never_consumed_without_being_shown(tmp_path: Path) -> None:
+    """THE SILENT BURN. Found by a guardian refusing to post, not by a passing test.
+
+    The renderer truncates at Slack's block ceiling, and `run()` used to mark EVERY
+    selected lead delivered regardless. Three real leads were consumed and could never
+    be shown to anyone again — and the loss was invisible, because a dropped lead looks
+    exactly like one that was never selected. A successful post would have hidden it.
+    """
+    conn = db.connect(tmp_path / "burn.db")
+    for n in range(60):
+        mk_lead(conn, iid=f"C{n}", entity=f"District {n}")
+    client = FakeSlack()
+    daily_list.run(client, CHANNEL, conn, limit=60, now=DAY_ONE)
+
+    rendered = sum(
+        1
+        for b in client.kwargs["blocks"]
+        if b["type"] == "section" and "of" in str(b["text"]["text"])
+    )
+    consumed = int(conn.execute("SELECT COUNT(*) FROM daily_list_items").fetchone()[0])
+    assert rendered < 60, "this fixture must actually truncate, or it proves nothing"
+    assert consumed == rendered, (
+        f"{consumed} leads consumed but only {rendered} shown — the difference can "
+        "never be surfaced to anyone again"
+    )
+
+
+def test_the_header_never_promises_more_than_it_shows(tmp_path: Path) -> None:
+    """It said "25 newest awards" above 22 cards, whose last one read "22 of 25"."""
+    conn = db.connect(tmp_path / "header.db")
+    for n in range(60):
+        mk_lead(conn, iid=f"D{n}", entity=f"District {n}")
+    rows = daily_list.candidates(conn, CHANNEL, 60)
+    blocks, shown = daily_list.build_blocks(rows, date(2026, 9, 2))
+    assert len(shown) < len(rows), "must truncate, or the header cannot be wrong"
+    header = str(blocks[0]["text"]["text"])
+    assert f"{len(shown)} newest awards" in header
+    assert f"{len(rows)} newest awards" not in header
+    cards = [b for b in blocks if b["type"] == "section" and " of " in str(b)]
+    assert str(len(shown)) in str(cards[-1]["text"]["text"])
+
+
+def test_twenty_five_cards_now_fit(tmp_path: Path) -> None:
+    """The number Chase actually chose. With a divider each it needed 53 of 50."""
+    conn = db.connect(tmp_path / "fit.db")
+    for n in range(25):
+        mk_lead(conn, iid=f"E{n}", entity=f"District {n}")
+    rows = daily_list.candidates(conn, CHANNEL, 25)
+    blocks, shown = daily_list.build_blocks(rows, date(2026, 9, 2))
+    assert len(shown) == 25, "all 25 must render, not 22"
+    assert len(blocks) <= 50
