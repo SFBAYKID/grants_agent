@@ -91,6 +91,18 @@ _SCHOOL_NAME_RE = re.compile(
     r"university|elementary|high\s+school|k-?12|charter|education|regional)\b",
     re.IGNORECASE,
 )
+# A congregation, camp, museum or community center. Checked BEFORE the school pattern
+# because "…Day School" and "…Academy" are common religious-school names and the school
+# angles are wrong for them too — the contact there is an administrator, not a
+# superintendent. Deliberately specific words: a generic "center" or "foundation" is not
+# enough to override a genuine school district.
+_NONPROFIT_NAME_RE = re.compile(
+    r"\b(?:church|chabad|synagogue|temple|shul|congregation|parish|mosque|masjid|"
+    r"islamic|jewish|catholic|episcopal|lutheran|methodist|baptist|presbyterian|"
+    r"ministries|ministry|diocese|archdiocese|yeshiva|federation|hebrew|torah|"
+    r"lubavitch|worship|fellowship|museum|ymca|jcc)\b",
+    re.IGNORECASE,
+)
 _CITY_NAME_RE = re.compile(
     r"\b(?:city|town|village|borough|township|municipal(?:ity)?|county)\b",
     re.IGNORECASE,
@@ -173,11 +185,16 @@ def _looks_like_person_name(name: str) -> bool:
 
 
 def _org_kind(entity: str) -> str:
-    """'city' for a municipal government, else 'school' (the SVPP default).
+    """'nonprofit', 'city', or 'school' (the SVPP default).
 
-    School words win a tie (e.g. "X County School District" is a school), so the
-    school pattern is checked first."""
+    NONPROFIT IS CHECKED FIRST, and that ordering is the whole point. "Saint Anne's
+    Episcopal School" and "Chicago Jewish Day School" match the school pattern, but
+    their security contact is an administrator, not a superintendent — so a school-word
+    tie must NOT win for a religious school. City is checked before the school default
+    for the same reason it always was."""
     name = str(entity or "")
+    if _NONPROFIT_NAME_RE.search(name):
+        return "nonprofit"
     if _SCHOOL_NAME_RE.search(name):
         return "school"
     if _CITY_NAME_RE.search(name):
@@ -483,11 +500,24 @@ _CITY_ANGLES = (
     "{entity} {state} city hall staff directory",
     "{entity} {state} police chief contact",
 )
+# NSGP recipients are congregations, camps, museums and community centers, and their
+# security decision-maker is an executive director, an administrator or a facilities
+# manager — never a superintendent. Asking the school angles about a synagogue spends
+# four real searches to find nobody, which is a bill for a guaranteed not_found.
+_NONPROFIT_ANGLES = (
+    "{entity} {state} executive director email",
+    "{entity} {state} facilities manager contact",
+    "{entity} {state} staff directory contact",
+    "{entity} {state} office administrator email",
+)
 
 
 def _angles_for(entity: str) -> tuple[str, ...]:
     """Search angles matched to the org kind (city vs school)."""
-    return _CITY_ANGLES if _org_kind(entity) == "city" else _SCHOOL_ANGLES
+    return {
+        "city": _CITY_ANGLES,
+        "nonprofit": _NONPROFIT_ANGLES,
+    }.get(_org_kind(entity), _SCHOOL_ANGLES)
 
 
 def find_contact(
