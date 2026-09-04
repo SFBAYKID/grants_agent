@@ -28,6 +28,8 @@ DAY_ONE = datetime(2026, 9, 2, 18, 0, tzinfo=timezone.utc)
 # date pinned near it: the six-month ceiling would otherwise start excluding the
 # wall-clock default on 2026-10-03, with nothing changed (architectural-critic).
 PINNED = "2026-08-15"
+# And every `candidates`/`_rows` call passes `DAY_ONE.date()` for the same reason: a
+# test pins BOTH the award date and the judging clock, or neither.
 
 
 class FakeSlack:
@@ -117,7 +119,7 @@ def test_a_listed_lead_never_comes_back_as_a_card(
     listed = {int(r[0]) for r in conn.execute("SELECT lead_id FROM daily_list_items")}
     assert len(listed) == 4
     nuggets = {int(r["id"]) for r in db_engagement.nugget_candidates(conn, CHANNEL)}
-    rich = {int(r["id"]) for r in preparation._rows(conn, CHANNEL, 50)}
+    rich = {int(r["id"]) for r in preparation._rows(conn, CHANNEL, 50, DAY_ONE.date())}
     assert not (nuggets & listed), "the legacy card is offering a listed lead"
     assert not (rich & listed), "the rich card is offering a listed lead"
     assert nuggets and rich, "the control: the unlisted lead is still offered"
@@ -129,8 +131,8 @@ def test_another_channel_has_its_own_memory(
     """The ledger is per channel, so a test channel cannot silently consume the pool."""
     conn, _ids = pool
     daily_list.run(FakeSlack(), CHANNEL, conn, limit=5, now=DAY_ONE)
-    assert daily_list.candidates(conn, CHANNEL, 5) == []
-    assert len(daily_list.candidates(conn, "C0BSDPM2KPB", 5)) == 5
+    assert daily_list.candidates(conn, CHANNEL, 5, DAY_ONE.date()) == []
+    assert len(daily_list.candidates(conn, "C0BSDPM2KPB", 5, DAY_ONE.date())) == 5
 
 
 def test_a_refused_list_releases_its_leads(
@@ -143,7 +145,7 @@ def test_a_refused_list_releases_its_leads(
     )
     assert "released" in outcome
     assert conn.execute("SELECT COUNT(*) FROM daily_list_items").fetchone()[0] == 0
-    assert len(daily_list.candidates(conn, CHANNEL, 5)) == 5
+    assert len(daily_list.candidates(conn, CHANNEL, 5, DAY_ONE.date())) == 5
 
 
 def test_an_ambiguous_send_keeps_the_leads_and_never_retries(
@@ -169,7 +171,9 @@ def test_an_ambiguous_send_keeps_the_leads_and_never_retries(
     # The three stay spoken for; the two the list never reached are still available.
     # Asserting an EMPTY candidate set here would pass for the wrong reason on a
     # five-lead pool and hide a released reservation.
-    remaining = {int(r["id"]) for r in daily_list.candidates(conn, CHANNEL, 5)}
+    remaining = {
+        int(r["id"]) for r in daily_list.candidates(conn, CHANNEL, 5, DAY_ONE.date())
+    }
     assert not (remaining & held), "an ambiguous send must never be re-listed"
     assert len(remaining) == 2
 
@@ -184,7 +188,7 @@ def test_an_undated_award_is_never_listed(tmp_path: Path) -> None:
         (lead_id,),
     )
     conn.commit()
-    assert daily_list.candidates(conn, CHANNEL, 5) == []
+    assert daily_list.candidates(conn, CHANNEL, 5, DAY_ONE.date()) == []
 
 
 def test_an_amountless_award_is_never_listed(tmp_path: Path) -> None:
@@ -193,7 +197,7 @@ def test_an_amountless_award_is_never_listed(tmp_path: Path) -> None:
     lead_id = mk_lead(conn)
     conn.execute("UPDATE leads SET amount=0 WHERE id=?", (lead_id,))
     conn.commit()
-    assert daily_list.candidates(conn, CHANNEL, 5) == []
+    assert daily_list.candidates(conn, CHANNEL, 5, DAY_ONE.date()) == []
 
 
 def test_a_claimed_lead_is_never_listed(
@@ -214,8 +218,12 @@ def test_a_claimed_lead_is_never_listed(
         claim_text="I'm taking District 5",
         now=DAY_ONE,
     )
-    assert "District 5" not in _names(daily_list.candidates(conn, CHANNEL, 5))
-    assert "District 4" in _names(daily_list.candidates(conn, CHANNEL, 5))
+    assert "District 5" not in _names(
+        daily_list.candidates(conn, CHANNEL, 5, DAY_ONE.date())
+    )
+    assert "District 4" in _names(
+        daily_list.candidates(conn, CHANNEL, 5, DAY_ONE.date())
+    )
 
 
 def test_a_dry_run_reserves_nothing(
@@ -261,7 +269,7 @@ def test_the_blocks_stay_inside_slack_s_ceiling(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "big.db")
     for n in range(30):
         mk_lead(conn, iid=f"B{n}", entity=f"District {n}", start=PINNED)
-    rows = daily_list.candidates(conn, CHANNEL, 30)
+    rows = daily_list.candidates(conn, CHANNEL, 30, DAY_ONE.date())
     assert len(rows) == 30
     blocks = daily_list.build_blocks(rows, date(2026, 9, 2))
     assert len(blocks) <= 50
@@ -299,7 +307,7 @@ def test_the_header_never_promises_more_than_it_shows(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "header.db")
     for n in range(60):
         mk_lead(conn, iid=f"D{n}", entity=f"District {n}", start=PINNED)
-    rows = daily_list.candidates(conn, CHANNEL, 60)
+    rows = daily_list.candidates(conn, CHANNEL, 60, DAY_ONE.date())
     blocks, shown = daily_list.build_blocks(rows, date(2026, 9, 2))
     assert len(shown) < len(rows), "must truncate, or the header cannot be wrong"
     header = str(blocks[0]["text"]["text"])
@@ -314,7 +322,7 @@ def test_twenty_five_cards_now_fit(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "fit.db")
     for n in range(25):
         mk_lead(conn, iid=f"E{n}", entity=f"District {n}", start=PINNED)
-    rows = daily_list.candidates(conn, CHANNEL, 25)
+    rows = daily_list.candidates(conn, CHANNEL, 25, DAY_ONE.date())
     blocks, shown = daily_list.build_blocks(rows, date(2026, 9, 2))
     assert len(shown) == 25, "all 25 must render, not 22"
     assert len(blocks) <= 50

@@ -664,7 +664,7 @@ def _mk_gold_state(
                 url="https://x.gov/a",
                 raw={},
                 event_type=FundingEventType.AWARD_OBLIGATED,
-                event_date="2026-06-01",
+                event_date=FRESH_START,
                 date_precision=DatePrecision.DAY,
                 verification_status=VerificationStatus.VERIFIED,
             ),

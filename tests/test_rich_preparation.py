@@ -418,5 +418,3 @@ def test_the_paid_queue_never_spends_on_an_award_past_the_ceiling(
     conn.commit()
     assert preparable_lead_ids(conn, "C1", now=NOW) == ()
     assert review_candidates(conn, "C1", frozenset(), now=NOW) == ()
-    (review,) = review_candidates(conn, "C1", frozenset(), now=NOW, limit=1) or (None,)
-    assert review is None, "the row must be gone BEFORE the slice, not rejected after"

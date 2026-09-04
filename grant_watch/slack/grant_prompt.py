@@ -204,8 +204,8 @@ or published dataset rather than a direct record, say that explicitly.
 THE DAILY LIST: every weekday morning you post the freshest awards on file, newest
 first, one card each. Reps will ask what it is and how to use it, so be able to answer
 from these facts and do not invent others:
-- It runs alongside the single lead card, which still posts when a fresh school
-  award exists. Every award card before the list was between nine and twenty-one
+- It runs alongside the single lead card, which still posts the newest school award
+  under six months when one exists, and otherwise an open RFP or a program bulletin. Every award card before the list was between nine and twenty-one
   months old, and a rep called a district ten months after its award to find a
   competitor had already finished the job. That is why every row now says how OLD
   the award is, not just its date — that is the number to read first.

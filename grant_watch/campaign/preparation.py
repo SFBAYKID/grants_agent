@@ -127,8 +127,12 @@ def _rows(
         for row in candidates
         if scoring.award_is_card_fresh(row["occurred_on"], today)
     ]
+    # NEWEST FIRST (Chase, 2026-09-04: "only … the most up to date cards"), then the
+    # freshness-weighted score, then the lowest id — the same order `drip.pick` uses,
+    # so the rich card and the fallback card agree on which award is next.
     candidates.sort(
         key=lambda row: (
+            str(row["occurred_on"] or "")[:10],
             scoring.lead_score(
                 str(row["program"] or ""),
                 row["amount"],

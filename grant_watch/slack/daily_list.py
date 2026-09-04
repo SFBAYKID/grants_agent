@@ -1,6 +1,7 @@
 """The daily list: the freshest awards on file, as one card per lead.
 
-WHY THIS REPLACED THE SINGLE DAILY CARD (Chase, 2026-09-01). A rep phoned a district
+WHY THIS WAS ADDED BESIDE THE SINGLE DAILY CARD (Chase, 2026-09-01; the card still
+runs, see CLAUDE.md 2026-09-02). A rep phoned a district
 ten months after its award and was told a competitor had already finished the job.
 Measured afterwards, EVERY award card this product had ever posted was between 277 and
 653 days old, median 301, and the entire eligible pool sat on one date. One card a day

@@ -185,7 +185,7 @@ def test_pick_prefers_top_scored_nugget(tmp_path: Path) -> None:
     mk_lead(
         conn, iid="FRESH", entity="Fresh District", start="2026-06-01", amount=150_000.0
     )
-    kind, row = drip.pick(conn, "C1")
+    kind, row = drip.pick(conn, "C1", today=date(2026, 9, 1))
     assert kind == "nugget" and row["entity_name"] == "Fresh District"
 
 
@@ -245,7 +245,7 @@ def test_pick_puts_a_silver_rfp_after_a_gold_award(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "t.db")
     mk_lead(conn, iid="AWARD", entity="Fresh District", start="2026-06-01")
     mk_rfp(conn, iid="SRFP", entity="City of Ames", grade=LeadGrade.SILVER)
-    kind, row = drip.pick(conn, "C1")
+    kind, row = drip.pick(conn, "C1", today=date(2026, 9, 1))
     assert kind == "nugget" and row["entity_name"] == "Fresh District"
 
 
@@ -280,7 +280,7 @@ def test_pick_prioritizes_existing_salesforce_opportunity(tmp_path: Path) -> Non
         conn,
         iid="SF",
         entity="Salesforce District",
-        start="2026-05-01",
+        start="2026-06-01",  # same date as NET: the CRM tier decides
         amount=300_000.0,
     )
     mk_lead(
@@ -302,7 +302,7 @@ def test_pick_prioritizes_existing_salesforce_opportunity(tmp_path: Path) -> Non
         (sf_lead, checked_at),
     )
     conn.commit()
-    kind, row = drip.pick(conn, "C1")
+    kind, row = drip.pick(conn, "C1", today=date(2026, 9, 1))
     assert kind == "nugget" and row["entity_name"] == "Salesforce District"
     text, _style = drip.build_nugget(row)
     assert "https://sf.test/006SF" not in text and "Anthony" not in text
@@ -317,7 +317,7 @@ def test_unavailable_salesforce_snapshot_cannot_boost_stale_match(
         conn,
         iid="SF",
         entity="Salesforce District",
-        start="2026-05-01",
+        start="2026-06-01",  # same date as NET: the CRM tier decides
         amount=300_000.0,
     )
     mk_lead(
@@ -338,7 +338,7 @@ def test_unavailable_salesforce_snapshot_cannot_boost_stale_match(
         (sf_lead, checked_at),
     )
     conn.commit()
-    kind, row = drip.pick(conn, "C1")
+    kind, row = drip.pick(conn, "C1", today=date(2026, 9, 1))
     assert kind == "nugget" and row["entity_name"] == "Net New District"
 
 

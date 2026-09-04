@@ -160,13 +160,14 @@ affect Chase's other projects.
   the paid queue. Production had bought a `contact_refresh` for lead 8466 alone on TEN
   separate mornings (08-13 → 09-02). Pinned by a test at two clocks.
 - `verified` offline 2026-09-04 **MUTATION-PROVEN BOTH WAYS.** Ceiling set back to 12:
-  **16** tests fail (I first wrote 15; the critic counted). Nudge gate deleted: 2
-  fail. `_rows` filter deleted: 2 fail. Boundary day inclusive on every surface,
+  **18** tests fail (15, then 16, then 18 as tests were added — the critic caught
+  both earlier miscounts, and this figure was re-measured last). Nudge gate deleted:
+  2 fail. `_rows` filter deleted: 2 fail. Boundary day inclusive on every surface,
   judged on the UTC date everywhere. Thirty-two pre-existing drip tests broke on the day the
   ceiling shipped because `drip_support.mk_lead` defaulted every award to 2025-10-01;
   the default is now thirty days before the wall clock, tests that pin a date string
   pass `start` explicitly, and an EMPTY start still means an unknown date. Suite
-  **1762 passed, 90 skipped**; `ruff` clean on `grant_watch/` and `tests/`.
+  **1767 passed, 90 skipped**; `ruff` clean on `grant_watch/` and `tests/`.
 - `verified` 2026-09-04 **THE CRITIC FOUND THE CEILING ONE LAYER TOO HIGH ON THE PAID
   PATH, AND IT WAS RIGHT.** `preparation._rows` selected every gold row, sorted by
   `lead_score`, sliced to 100, and only THEN did `policy.evaluate` apply the ceiling.
@@ -185,8 +186,40 @@ affect Chase's other projects.
   told reps the list "works steadily back through older ones" and "replaced the
   single lead card" — both false, both fixed; the nudge gate read the calendar in
   Pacific while the other three surfaces use UTC (UTC everywhere now); and a
-  one-row list was headed "1 newest awards". Nothing the critic checked found a
-  fifth push surface, a migration need, or a consumer of the renamed reason string.
+  one-row list was headed "1 newest awards". The critic found no fifth proactive
+  lead surface (the `reminder_worker` saved-search path has no ceiling and is
+  rep-asked, deliberately), no migration need, and no consumer of the renamed
+  reason string.
+- `verified` 2026-09-04 **CHASE, VERBATIM, MID-REVIEW: "We should only be surfacing the
+  most up to date cards."** Inside the six-month window the card still chose by
+  QUALITY — CRM link, then amount — so a $500,000 award five months old with a
+  Salesforce opportunity beat a $200,000 award three weeks old. Both card paths now
+  order by obligation date first (`drip._nugget_sort_key`, `preparation._rows`), with
+  the CRM tier and the freshness-weighted score breaking ties WITHIN a date. Every
+  SVPP cohort is hundreds of awards on one day, so on cohort data nothing moves; it
+  matters the moment awards trickle in. Mutation-proven: quality-first restored on
+  the drip, 2 tests fail; on the rich path, 1. The list was already newest-first.
+- `verified` 2026-09-04 **THE CRITIC'S SECOND PASS: THE PRODUCT FIX WAS PROVEN END TO
+  END, AND THE TEST SUITE HAD A FAILURE CALENDAR.** It reproduced the rich-path fix
+  through `delivery.run` itself, then shimmed the clock forward: pinned award dates
+  judged on the wall clock would have gone red on **2026-11-02**, 2026-12-02,
+  2027-02-02 and 2027-02-16 — including three tests I had "fixed" the same way hours
+  earlier by pinning the date and not the clock. Every such site now pins BOTH or
+  NEITHER, and `drip_support` says so. Also from that pass: the rich-window test's
+  paid-queue assertion admitted the empty tuple (removed, with the reason stated);
+  `rich-shadow` can no longer count `AWARD_TOO_OLD`, because `_rows` drops those rows
+  before review — deliberately NOT restored, and instead the drip's own skip line
+  now reads `skip: nothing new worth saying (162 gold awards on file past the
+  six-month line)` so cron.log carries the number; `run_drip` judges the UTC date
+  like every other surface; and `drip.py` reached **1016 lines**, so the card-text
+  builders moved to `drip_text.py` (242 lines, pure functions, re-exported for the
+  25 `drip.*` call sites) — `drip.py` is 812.
+- `needs-testing` 2026-09-04 **FOUND BY THE CRITIC AND NOT TOUCHED.** `search.py:616`
+  opens `DEFAULT_DB_PATH` read-only through raw `sqlite3.connect`, bypassing the
+  conftest guard that wraps only `db.connect`, so `test_contact_fill` reads the
+  developer's REAL `grant_watch.db` and fails anywhere that file is absent. A
+  candidate mechanism for the droplet-only `test_contact_fill` failure recorded
+  2026-08-26. Its own change; not this one.
 - `needs-testing` 2026-09-04 **WHEN THIS DEPLOYS, THE DRIP CARD GOES SILENT FOR SCHOOLS.**
   All 162 gold leads fall outside the line at once; each tick falls through to silver
   RFPs, then bulletins, then `skip: nothing new worth saying`. That is the honest
@@ -847,6 +880,6 @@ archive II, which had the room — `status_log_archive.md` at 795 still does not
 the next rotation must also use archive II. **The 2026-09-01 rotation had to create
 that THIRD file:** the chain was full, and moving a 218-line block into an archive
 already at 795 would have broken the very cap the rotation exists to respect.
-Current sizes: this file **834 lines**, `status_log.md`
+Current sizes: this file **885 lines**, `status_log.md`
 **855**, `status_log_archive.md` **795**,
 `status_log_archive_2.md` **374**.

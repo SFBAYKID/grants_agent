@@ -67,10 +67,14 @@ def test_the_daily_card_never_picks_an_award_past_the_ceiling(tmp_path: Path) ->
     assert {int(r["id"]) for r in db.nugget_candidates(conn, "C1")} == {old, fresh}
     kind, row = drip.pick(conn, "C1", today=TODAY)
     assert kind == "nugget" and int(row["id"]) == fresh
-    # CONTROL — the same pool judged when the old award was four months old picks it,
-    # so the gate is the CLOCK, not the row.
+    # CONTROL — the same pool judged when the old award was four months old still
+    # holds it, so the gate is the CLOCK, not the row. Newest-first means the April
+    # award is the card first; once it is surfaced, the February one is next.
     kind, row = drip.pick(conn, "C1", today=date(2026, 6, 1))
-    assert kind == "nugget" and int(row["id"]) == old, "higher amount wins when fresh"
+    assert kind == "nugget" and int(row["id"]) == fresh
+    db.mark_surfaced(conn, [fresh])
+    kind, row = drip.pick(conn, "C1", today=date(2026, 6, 1))
+    assert kind == "nugget" and int(row["id"]) == old, "inside the line at that clock"
 
 
 def test_with_only_old_gold_the_card_falls_through_to_an_rfp(tmp_path: Path) -> None:
@@ -267,6 +271,123 @@ def test_the_rich_review_window_is_not_filled_by_the_old_cohort(tmp_path: Path) 
         )
     }
     assert reviewed == {fresh}, "the window must hold the fresh lead and nothing old"
-    assert preparation.preparable_lead_ids(conn, "C1", now=at) in ((fresh,), ()), (
-        "the paid queue may hold only the fresh lead, never an old one"
+    # The paid queue is NOT asserted here: these bare fixtures review as
+    # EVENT_EVIDENCE_MISSING, which is not remediable, so the queue is empty with or
+    # without the ceiling. `test_rich_preparation` proves the queue on a full fixture.
+
+
+# ------------------------------------------------------------------ newest first
+def _link_opportunity(conn: object, lead_id: int) -> None:
+    """A high-confidence Salesforce opportunity match, the top CRM tier."""
+    checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    conn.execute(  # type: ignore[attr-defined]
+        "INSERT INTO salesforce_lookup_state(lead_id,status,checked_at) VALUES (?,'found',?)",
+        (lead_id, checked_at),
+    )
+    conn.execute(  # type: ignore[attr-defined]
+        """INSERT INTO salesforce_matches
+             (lead_id,sobject,record_id,name,owner,link,confidence,account_id,
+              stage,is_closed,checked_at)
+           VALUES (?,'Opportunity','006SF','Security Upgrade','Anthony',
+                   'https://sf.test/006SF','high','001SF','Prospecting',0,?)""",
+        (lead_id, checked_at),
+    )
+    conn.commit()  # type: ignore[attr-defined]
+
+
+def test_the_daily_card_is_the_newest_award_not_the_biggest(tmp_path: Path) -> None:
+    """Chase, 2026-09-04: "We should only be surfacing the most up to date cards."
+
+    A $500,000 award five months old, with a Salesforce opportunity on it, against a
+    $200,000 award three weeks old: the newer one is the card. Before this the date
+    only entered through `lead_score`, which is flat for six months, so the bigger,
+    CRM-linked, older award won every time.
+    """
+    conn = db.connect(tmp_path / "t.db")
+    older = mk_lead(conn, iid="BIG", entity="Big Older District", start="2026-04-01")
+    _link_opportunity(conn, older)
+    mk_lead(
+        conn,
+        iid="NEW",
+        entity="Small Newer District",
+        start="2026-08-14",
+        amount=200_000.0,
+    )
+    kind, row = drip.pick(conn, "C1", today=TODAY)
+    assert kind == "nugget" and row["entity_name"] == "Small Newer District"
+
+
+def test_within_one_date_quality_still_breaks_the_tie(tmp_path: Path) -> None:
+    """CONTROL. Every SVPP cohort is hundreds of awards on one day, so the old order
+    must survive inside a date: a CRM link first, then the higher amount."""
+    conn = db.connect(tmp_path / "t.db")
+    mk_lead(
+        conn, iid="SMALL", entity="Small District", start="2026-08-14", amount=100_000.0
+    )
+    big = mk_lead(conn, iid="BIG", entity="Big District", start="2026-08-14")
+    linked = mk_lead(
+        conn,
+        iid="LINKED",
+        entity="Linked District",
+        start="2026-08-14",
+        amount=100_000.0,
+    )
+    _link_opportunity(conn, linked)
+    kind, row = drip.pick(conn, "C1", today=TODAY)
+    assert kind == "nugget" and int(row["id"]) == linked, "the CRM link wins the tie"
+    db.mark_surfaced(conn, [linked])
+    kind, row = drip.pick(conn, "C1", today=TODAY)
+    assert kind == "nugget" and int(row["id"]) == big, "then the bigger award"
+
+
+def test_the_rich_card_reviews_the_newest_award_first(tmp_path: Path) -> None:
+    """Same rule on the rich path, so the two cards agree on what is next."""
+    from grant_watch.campaign import preparation
+
+    conn = db.connect(tmp_path / "t.db")
+    mk_lead(conn, iid="BIG", entity="Big Older District", start="2026-04-01")
+    newer = mk_lead(
+        conn,
+        iid="NEW",
+        entity="Small Newer District",
+        start="2026-08-14",
+        amount=200_000.0,
+    )
+    at = datetime(2026, 9, 4, 17, 0, tzinfo=timezone.utc)
+    (first,) = preparation.review_candidates(conn, "C1", frozenset(), limit=1, now=at)
+    assert first.lead_id == newer
+
+
+# ------------------------------------------------------------------ the log line
+def test_the_skip_line_counts_what_the_ceiling_is_holding_back(tmp_path: Path) -> None:
+    """After the ceiling the cron log's "nothing new" is the whole story every tick,
+    and it must not read like an empty pool when 162 awards are simply too old."""
+    conn = db.connect(tmp_path / "t.db")
+    for n in range(3):
+        mk_lead(conn, iid=f"OLD{n}", entity=f"Old {n}", start="2025-10-10")
+    at = datetime(2026, 9, 4, 17, 0, tzinfo=timezone.utc)
+    assert drip.excluded_by_ceiling(conn, "C1", TODAY) == 3
+    outcome = drip.run_drip(SlackClient(), "C1", conn, force=True, now=at)
+    assert outcome == (
+        "skip: nothing new worth saying (3 gold awards on file past the six-month line)"
+    )
+    empty = db.connect(tmp_path / "empty.db")
+    assert drip.run_drip(SlackClient(), "C1", empty, force=True, now=at) == (
+        "skip: nothing new worth saying"
+    )
+
+
+def test_a_one_row_list_is_headed_in_the_singular(tmp_path: Path) -> None:
+    """ "1 newest award", never "1 newest awards" — common now that the list is as long
+    as the fresh material."""
+    from grant_watch.slack import daily_list_card
+
+    conn = db.connect(tmp_path / "t.db")
+    mk_lead(conn, iid="ONE", entity="Only District", start="2026-08-30")
+    rows = daily_list.candidates(conn, "C1", 25, TODAY)
+    blocks, shown = daily_list_card.build_blocks(rows, TODAY)
+    assert len(shown) == 1
+    assert blocks[0]["text"]["text"] == "Freshest funding — 1 newest award"
+    assert daily_list_card.notification_text(rows).startswith(
+        "Freshest funding: 1 newest award, starting with"
     )

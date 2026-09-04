@@ -197,7 +197,7 @@ def test_proactive_pick_orders_rows_by_freshness(tmp_path: Path) -> None:
         "2029-09-30",
         event_date="2026-05-01",
     )
-    choice = drip.pick(conn, "C1")
+    choice = drip.pick(conn, "C1", today=date(2026, 9, 1))  # pinned with the dates
     assert choice is not None
     assert choice[1]["entity_name"] == "Fresh District"
 
