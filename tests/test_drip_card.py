@@ -102,8 +102,6 @@ def test_posted_card_carries_blocks_that_mirror_the_text(tmp_path: Path) -> None
         conn,
         iid="PA9",
         entity="Bethlehem Area School District",
-        start="2025-10-10",
-        end="2028-09-30",
     )
     conn.execute("UPDATE leads SET state='PA' WHERE source_item_id='PA9'")
     conn.commit()

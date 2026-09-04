@@ -144,14 +144,32 @@ def _card(
     kind: str = "rich_award",
     style: str = "gold",
     lead_id: int = 900,
+    awarded_on: str | None = None,
+    event_type: str = "award_obligated",
 ) -> None:
-    """A posted lead card of one tier, which nobody engaged with."""
+    """A posted lead card of one tier, which nobody engaged with.
+
+    Without `awarded_on` the lead carries no funding event at all — the shape every
+    test here used before the award-age ceiling existed, and still the control for it:
+    a card with no evidence of age is chased. With it, a current event of `event_type`
+    dated `awarded_on` is attached, so the ceiling has something to judge.
+    """
     conn.execute(
         "INSERT INTO leads (id,source,source_item_id,entity_name,state,detail_url,"
         "amount,status) VALUES (?,'usaspending:svpp',?,"
         "'NORTH PALOS SCHOOL DISTRICT 117','IL','u',500000,'new')",
         (lead_id, f"x{lead_id}"),
     )
+    if awarded_on is not None:
+        cur = conn.execute(
+            "INSERT INTO funding_events (lead_id,event_type,occurred_on,date_precision,"
+            "amount,verification_status,created_at) VALUES (?,?,?,'day',500000,"
+            "'verified',?)",
+            (lead_id, event_type, awarded_on or None, when.isoformat()),
+        )
+        conn.execute(
+            "UPDATE leads SET current_event_id=? WHERE id=?", (cur.lastrowid, lead_id)
+        )
     conn.execute(
         "INSERT INTO posts (id,channel,ts,posted_at,lead_id,kind,style) "
         "VALUES (?,?,?,?,?,?,?)",

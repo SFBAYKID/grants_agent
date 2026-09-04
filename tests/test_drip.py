@@ -228,8 +228,6 @@ def test_backfilled_gold_award_still_reaches_the_daily_card(tmp_path: Path) -> N
         conn,
         iid="BACKFILL",
         entity="Montebello Unified School District",
-        start="2025-10-10",
-        end="2028-09-30",
         backfill=True,
     )
     assert (
@@ -250,8 +248,6 @@ def test_gold_award_outranks_an_open_rfp_even_when_backfilled(tmp_path: Path) ->
         conn,
         iid="G_WIN",
         entity="Castle Rock School District 401",
-        start="2025-10-10",
-        end="2028-09-30",
     )
     kind, _ = drip.pick(conn, "C1")
     assert kind == "nugget"
@@ -261,7 +257,7 @@ def test_nugget_never_repeats_an_already_posted_lead(tmp_path: Path) -> None:
     """A lead already in `posts` can never be picked again, even if a later poll resets
     its status to 'new' (upsert_lead does exactly that when a new event lands)."""
     conn = db.connect(tmp_path / "t.db")
-    lead_id = mk_lead(conn, iid="ONCE", start="2025-10-10", end="2028-09-30")
+    lead_id = mk_lead(conn, iid="ONCE")
     db.record_post(conn, "nugget", lead_id, "C1", "1.0", "award-brief")
     conn.execute("UPDATE leads SET status='new' WHERE id=?", (lead_id,))
     conn.commit()
@@ -326,8 +322,6 @@ def test_posted_card_tags_the_territory_owner(tmp_path: Path) -> None:
         conn,
         iid="PA1",
         entity="Bethlehem Area School District",
-        start="2025-10-10",
-        end="2028-09-30",
     )
     conn.execute("UPDATE leads SET state='PA' WHERE source_item_id='PA1'")
     conn.commit()
@@ -342,7 +336,7 @@ def test_posted_card_tags_the_territory_owner(tmp_path: Path) -> None:
 def test_posted_card_for_an_unowned_state_goes_out_untagged(tmp_path: Path) -> None:
     """No rep owns New York, so the card ships with no mention — never a wrong one."""
     conn = db.connect(tmp_path / "t.db")
-    mk_lead(conn, iid="NY1", start="2025-10-10", end="2028-09-30")
+    mk_lead(conn, iid="NY1")
     conn.execute("UPDATE leads SET state='NY' WHERE source_item_id='NY1'")
     conn.commit()
     client = SlackClient()
@@ -357,7 +351,7 @@ def test_award_card_spells_out_a_state_beyond_the_original_five(
 ) -> None:
     """Polling is nationwide; a Texas award used to render the bare code 'in TX'."""
     conn = db.connect(tmp_path / "t.db")
-    mk_lead(conn, iid="TX1", start="2025-10-10", end="2028-09-30")
+    mk_lead(conn, iid="TX1")
     conn.execute("UPDATE leads SET state='TX' WHERE source_item_id='TX1'")
     conn.commit()
     text, _ = drip.build_nugget(db.nugget_candidates(conn, "C1")[0])
@@ -397,8 +391,6 @@ def test_cap_holds_when_recording_a_confirmed_send_fails(
             conn,
             iid=f"G{index}",
             entity=f"District {index}",
-            start="2025-10-10",
-            end="2028-09-30",
             backfill=True,
         )
     client = SlackClient()
@@ -440,8 +432,6 @@ def test_amountless_gold_lead_cannot_wedge_the_drip(tmp_path: Path) -> None:
         conn,
         iid="NOAMT",
         amount=None,
-        start="2025-10-10",
-        end="2028-09-30",
         backfill=True,
     )
     conn.execute("UPDATE leads SET lead_grade='gold' WHERE source_item_id='NOAMT'")

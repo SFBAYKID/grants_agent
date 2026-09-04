@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .. import reminders, roster, territory
+from .. import reminders, roster, scoring, territory
 from ..migrations_nudges import NUDGE_SUBJECT_KINDS
 from .drip import PT as BUSINESS_TZ
 
@@ -225,14 +225,28 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
 
     Grant knows only what happened in Slack and in its own tables. That is why the
     message says "nothing has come back HERE", never "nobody followed up".
+
+    EXCEPT AN AWARD PAST THE CEILING, WHICH IS NEVER CHASED (Chase, 2026-09-04). The
+    follow-up and the escalation both tag a person and both say "the window's open",
+    and for a card whose award was obligated eleven months earlier that is reminding
+    the manager of a lead the card itself had already dated as old. The rule is
+    `scoring.award_is_card_fresh` at the moment the nudge is CONSIDERED, not at post
+    time — the same constant the card paths use, so the day a card would no longer be
+    posted is the day it stops being chased. Only AWARD cards are subject to it: an
+    RFP card has a deadline, not an obligation date, and is chased exactly as before.
+    An award card with no date at all is chased too — the gate is on evidence of age,
+    never on its absence.
     """
     rows = conn.execute(
         """SELECT p.id,p.channel,p.ts,p.posted_at,p.lead_id,p.kind,p.style,
                   l.entity_name,l.status,l.state,l.source,l.amount,l.lead_grade,
-                  s.slack_user_id AS snapshot_tagged
+                  s.slack_user_id AS snapshot_tagged,
+                  e.event_type AS award_event_type,
+                  e.occurred_on AS award_occurred_on
              FROM posts p
              LEFT JOIN leads l ON l.id=p.lead_id
              LEFT JOIN rich_card_snapshots s ON s.id=p.snapshot_id
+             LEFT JOIN funding_events e ON e.id=l.current_event_id
             WHERE p.lead_id IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM engagement e WHERE e.post_id=p.id)
             ORDER BY p.id DESC LIMIT 60"""
@@ -241,6 +255,8 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
     for row in rows:
         posted = parse_ts(row["posted_at"])
         if posted is None or posted > now:
+            continue
+        if _award_past_ceiling(row, now):
             continue
         # WHO DID THE CARD ACTUALLY TAG? Recomputed through the SAME gate the card
         # used, so the follow-up can only name a rep the card itself named. Using
@@ -607,6 +623,28 @@ _LEAD_KINDS = frozenset({"card_unengaged", "card_escalated"})
 # guessed at — which is safe, and was also how this quietly stopped working. See
 # `_tier_of`.
 _TIER_RANK = {"platinum": 0, "gold": 1, "rfp": 2, "silver": 2, "watch": 3, "nugget": 4}
+
+
+def _award_past_ceiling(row: sqlite3.Row, now: datetime) -> bool:
+    """Whether this card's award is too old for Grant to keep pushing it.
+
+    True only for a DATED award event older than `scoring.CARD_MAX_AWARD_MONTHS` at
+    `now` (business time — the ceiling is a calendar rule, so it is judged on the
+    calendar the reps live by). RFP cards, undated awards and cards with no event at
+    all return False and are chased as they always were.
+    """
+    if str(row["award_event_type"] or "") not in _AWARD_EVENT_TYPES:
+        return False
+    occurred = str(row["award_occurred_on"] or "")[:10]
+    if not occurred:
+        return False
+    today = now.astimezone(BUSINESS_TZ).date()
+    return not scoring.award_is_card_fresh(occurred, today)
+
+
+# The two event types that mean "money was granted" — the same pair every award
+# candidate query filters on. A card about anything else carries no obligation date.
+_AWARD_EVENT_TYPES = frozenset({"award_announced", "award_obligated"})
 
 
 def _tier_of(row: sqlite3.Row) -> str:

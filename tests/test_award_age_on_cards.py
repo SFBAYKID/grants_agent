@@ -29,7 +29,7 @@ TODAY = date(2026, 9, 1)
 def gold_row(tmp_path: Path) -> sqlite3.Row:
     """One verified gold award, obligated 2025-10-01 — the real cohort's shape."""
     conn = db.connect(tmp_path / "age.db")
-    row = db.get_lead(conn, mk_lead(conn))
+    row = db.get_lead(conn, mk_lead(conn, start="2025-10-01"))
     assert row is not None
     return row
 

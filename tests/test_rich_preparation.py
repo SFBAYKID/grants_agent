@@ -9,7 +9,11 @@ from pathlib import Path
 from grant_watch import db
 from grant_watch.campaign import contact_evidence, report
 from grant_watch.campaign.policy import Reason
-from grant_watch.campaign.preparation import _fresh_activity, review_candidates
+from grant_watch.campaign.preparation import (
+    _fresh_activity,
+    preparable_lead_ids,
+    review_candidates,
+)
 from grant_watch.campaign.routing import RoutingReason
 from tests.contact_support import verified_contact_evidence
 
@@ -393,3 +397,20 @@ def test_shadow_report_is_deterministic_and_contains_no_contact_or_crm_pii(
     assert '"mapped_route_ready": 0' in rendered
     assert '"unassigned_route_ready": 1' in rendered
     assert "montebello" not in rendered.lower()
+
+
+def test_the_paid_queue_never_spends_on_an_award_past_the_ceiling(
+    tmp_path: Path,
+) -> None:
+    """`rich-prepare --execute` buys Firecrawl scrapes and ZoomInfo credits for every
+    lead `preparable_lead_ids` returns. Production had bought a contact refresh for
+    the same eleven-month-old lead on ten separate mornings. Past
+    `scoring.CARD_MAX_AWARD_MONTHS` the review's first rejection is AWARD_TOO_OLD,
+    which is not remediable, so the queue is empty — and the CONTROL is the same
+    fixture inside the ceiling, where it is queued."""
+    conn = _eligible_conn(tmp_path / "old.db")
+    assert preparable_lead_ids(conn, "C1", now=NOW) == (1,)
+    later = datetime(2026, 12, 22, 18, 0, tzinfo=timezone.utc)  # award is 6m21d old
+    assert preparable_lead_ids(conn, "C1", now=later) == ()
+    (review,) = review_candidates(conn, "C1", frozenset(), now=later)
+    assert review.reason is Reason.AWARD_TOO_OLD

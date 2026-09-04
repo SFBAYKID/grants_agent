@@ -8,6 +8,7 @@ these, so the two files cannot drift into disagreeing about what a lead looks li
 from __future__ import annotations
 
 import sqlite3
+from datetime import date, timedelta
 
 from grant_watch import db
 from grant_watch.models import (
@@ -20,6 +21,11 @@ from grant_watch.models import (
 )
 
 
+# Thirty days before the wall clock: inside every freshness rule the product has,
+# and far enough back that a run straddling midnight cannot make it a future date.
+FRESH_START = (date.today() - timedelta(days=30)).isoformat()
+
+
 def mk_lead(
     conn: sqlite3.Connection,
     iid: str = "A1",
@@ -27,16 +33,28 @@ def mk_lead(
     grade: LeadGrade = LeadGrade.GOLD,
     source: str = "usaspending:16.071",
     amount: float | None = 500_000.0,
-    start: str = "2025-10-01",
+    start: str | None = None,
     end: str = "2028-09-30",
     title: str = "SVPP award",
     backfill: bool = False,
 ) -> int:
     """Provide test-local behavior for mk lead.
 
+    `start` is the obligation date AND the spend-window start. Omitted, it is
+    FRESH_START — thirty days before the wall clock; an EMPTY string is still an
+    unknown date, which some tests need. The fresh default exists because the card paths now
+    refuse any award older than `scoring.CARD_MAX_AWARD_MONTHS`, and a fixed default
+    of 2025-10-01 would have made every wall-clock test fail the day the ceiling
+    shipped and every fixed-clock test fail some day nobody changed anything (the
+    2026-08-26 poll-lease defect). A test that pins a DATE STRING in its assertion, or
+    runs the drip on a FIXED clock, must pass `start` explicitly so the fixture and
+    the clock agree.
+
     `backfill` reproduces what every award poller actually sets for an award obligated
     more than 90 days ago — the shape ALL 638 production gold leads have — which
-    db.upsert_lead stores as suppressed=1."""
+    db.upsert_lead stores as suppressed=1. It is independent of `start` here on
+    purpose: the flag is what the tests are about, not the date that caused it."""
+    start = FRESH_START if start is None else start
     event_type = (
         FundingEventType.APPLICATION_WINDOW_OPENED
         if source in {"grants.gov", "ca-grants-portal"}

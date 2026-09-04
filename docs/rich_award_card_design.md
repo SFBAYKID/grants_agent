@@ -72,7 +72,9 @@ A candidate qualifies only if EVERY rule holds (else the card is ineligible; if 
 candidate qualifies, **post nothing** — never fall back to RFP/bulletin/stale/generic):
 
 Award: stored grade GOLD; verified `award_announced`|`award_obligated`; positive finite
-amount; award date exact enough for the wording, not future, `≤ 12 months`; spend window
+amount; award date exact enough for the wording, not future, `≤ 6 months`
+(`scoring.CARD_MAX_AWARD_MONTHS`, shared with the daily card, the daily list and the
+follow-up nudges — Chase, 2026-09-04; it was 12 until then); spend window
 explicit and currently open. Platinum is a presentation tier only (verified award `≤ 7`
 days meeting the existing strong physical-security program rule).
 

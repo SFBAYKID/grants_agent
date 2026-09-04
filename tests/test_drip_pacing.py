@@ -18,7 +18,7 @@ from slack_sdk.errors import SlackApiError
 from grant_watch import db, territory
 from grant_watch.slack import drip
 
-from drip_support import SlackClient, mk_lead, mk_rfp
+from drip_support import SlackClient, mk_lead, mk_rfp, FRESH_START
 
 
 def test_ambiguous_send_does_not_wedge_the_drip_forever(tmp_path: Path) -> None:
@@ -39,8 +39,6 @@ def test_ambiguous_send_does_not_wedge_the_drip_forever(tmp_path: Path) -> None:
         iid="STUCK",
         entity="Stuck District",
         amount=500_000.0,
-        start="2025-10-10",
-        end="2028-09-30",
         backfill=True,
     )
     mk_lead(
@@ -48,8 +46,6 @@ def test_ambiguous_send_does_not_wedge_the_drip_forever(tmp_path: Path) -> None:
         iid="NEXT",
         entity="Next District",
         amount=400_000.0,
-        start="2025-10-10",
-        end="2028-09-30",
         backfill=True,
     )
     failing = SlackClient(fail=True)
@@ -82,7 +78,7 @@ def test_an_ambiguous_send_does_not_bury_the_lower_tiers(tmp_path: Path) -> None
     """`run_drip`'s early return meant one stuck GOLD lead also hid every RFP and
     bulletin beneath it — the outage was total, not partial."""
     conn = db.connect(tmp_path / "t.db")
-    mk_lead(conn, iid="ONLYGOLD", start="2025-10-10", end="2028-09-30", backfill=True)
+    mk_lead(conn, iid="ONLYGOLD", backfill=True)
     mk_rfp(conn, iid="RFP1", end="2031-12-31")
     failing = SlackClient(fail=True)
     assert drip.run_drip(failing, "C1", conn, force=True).startswith("unknown:")
@@ -156,7 +152,7 @@ def test_systemic_slack_rejection_releases_the_lead(tmp_path: Path) -> None:
     definitive 'no' as ambiguous consumed a real lead per attempt — measured at 1-2 gold
     leads destroyed per weekday while nothing was posted. The lead must go back."""
     conn = db.connect(tmp_path / "t.db")
-    mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    mk_lead(conn, iid="G1", backfill=True)
     client = _RejectingClient("channel_not_found")
     outcome = drip.run_drip(client, "C1", conn, force=True)
     assert outcome.startswith("blocked:") and "channel_not_found" in outcome
@@ -176,7 +172,7 @@ def test_systemic_slack_rejection_releases_the_lead(tmp_path: Path) -> None:
 def test_lead_specific_rejection_is_quarantined_not_released(tmp_path: Path) -> None:
     """A card Slack refuses on its own merits must not be retried forever either."""
     conn = db.connect(tmp_path / "t.db")
-    mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    mk_lead(conn, iid="G1", backfill=True)
     outcome = drip.run_drip(_RejectingClient("msg_too_long"), "C1", conn, force=True)
     # "quarantined:", not "skip:" — a destroyed lead must not read as a routine tick,
     # and cli.FAILING_DRIP_OUTCOMES turns this into a non-zero exit.
@@ -193,7 +189,7 @@ def test_ambiguous_failure_still_burns_the_lead(tmp_path: Path) -> None:
     """The distinction is the invariant: ambiguous KEEPS the reservation (a duplicate is
     worse than a lost lead), definitive rejection releases it."""
     conn = db.connect(tmp_path / "t.db")
-    mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    mk_lead(conn, iid="G1", backfill=True)
     assert drip.run_drip(SlackClient(fail=True), "C1", conn, force=True).startswith(
         "unknown:"
     )
@@ -216,8 +212,6 @@ def test_unrenderable_lead_is_quarantined_and_the_next_one_posts(
         iid="BAD",
         entity="Good District",
         amount=900_000.0,
-        start="2025-10-10",
-        end="2028-09-30",
         backfill=True,
     )
     mk_lead(
@@ -225,8 +219,6 @@ def test_unrenderable_lead_is_quarantined_and_the_next_one_posts(
         iid="OK",
         entity="Next District",
         amount=400_000.0,
-        start="2025-10-10",
-        end="2028-09-30",
         backfill=True,
     )
     # '***' sanitizes to an empty entity, so build_nugget raises.
@@ -250,7 +242,7 @@ def test_a_playground_reservation_does_not_burn_a_production_lead(
     """Both exclusions are audience-scoped, so testing in one channel cannot silently
     consume the other channel's inventory."""
     conn = db.connect(tmp_path / "t.db")
-    mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    mk_lead(conn, iid="G1", backfill=True)
     assert drip.run_drip(
         SlackClient(fail=True), "PLAYGROUND", conn, force=True
     ).startswith("unknown:")
@@ -297,8 +289,6 @@ def test_systemic_failure_blocks_the_channel_for_later_ticks(tmp_path: Path) -> 
             iid=f"G{index}",
             entity=f"District {index}",
             amount=500_000.0 - index,
-            start="2025-10-10",
-            end="2028-09-30",
             backfill=True,
         )
     client = _RejectingClient("invalid_auth")
@@ -326,7 +316,7 @@ def test_unknown_slack_error_code_releases_rather_than_quarantines(
     """Not knowing what went wrong is NOT evidence the lead is unusable. Only
     explicitly allowlisted content errors may destroy inventory."""
     conn = db.connect(tmp_path / "t.db")
-    mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    mk_lead(conn, iid="G1", backfill=True)
     outcome = drip.run_drip(
         _RejectingClient("some_new_slack_error"), "C1", conn, force=True
     )
@@ -344,7 +334,7 @@ def test_unknown_slack_error_code_releases_rather_than_quarantines(
 def test_rate_limit_backs_off_without_consuming_a_lead(tmp_path: Path) -> None:
     """429 is neither ambiguous nor this lead's fault. Respect Retry-After."""
     conn = db.connect(tmp_path / "t.db")
-    mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    mk_lead(conn, iid="G1", backfill=True)
     client = _RateLimitedClient(retry_after="45")
     outcome = drip.run_drip(client, "C1", conn, force=True)
     assert outcome.startswith("backoff:") and "45s" in outcome
@@ -368,7 +358,7 @@ def test_lapsed_backoff_clears_itself(tmp_path: Path) -> None:
 def test_dry_run_does_not_claim_a_quarantine_happened(tmp_path: Path) -> None:
     """--dry-run writes NOTHING (CLAUDE.md), so it must not report that it did."""
     conn = db.connect(tmp_path / "t.db")
-    bad = mk_lead(conn, iid="BAD", start="2025-10-10", end="2028-09-30", backfill=True)
+    bad = mk_lead(conn, iid="BAD", backfill=True)
     conn.execute("UPDATE leads SET entity_name='***' WHERE id=?", (bad,))
     conn.commit()
     outcome = drip.run_drip(None, "C1", conn, force=True, dry_run=True)
@@ -431,7 +421,7 @@ def test_dry_run_leaves_the_database_unchanged_with_an_expired_guard(
     """C2 regression: a dry run must write NOTHING, even when a guard has lapsed."""
     path = tmp_path / "t.db"
     conn = db.connect(path)
-    mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    mk_lead(conn, iid="G1", backfill=True)
     db.set_channel_guard(
         conn, "C1", "backoff", "ratelimited", available_at="2000-01-01T00:00:00+00:00"
     )
@@ -449,7 +439,7 @@ def test_dry_run_survives_a_readonly_connection_with_an_expired_guard(
     to raise `attempt to write a readonly database` there."""
     path = tmp_path / "t.db"
     writable = db.connect(path)
-    mk_lead(writable, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    mk_lead(writable, iid="G1", backfill=True)
     db.set_channel_guard(
         writable,
         "C1",
@@ -494,7 +484,7 @@ def test_a_successful_post_clears_the_guard(tmp_path: Path) -> None:
     """Recovery is automatic on the writable path: a confirmed delivery proves the
     channel works again."""
     conn = db.connect(tmp_path / "t.db")
-    mk_lead(conn, iid="G1", start="2025-10-10", end="2028-09-30", backfill=True)
+    mk_lead(conn, iid="G1", backfill=True)
     db.set_channel_guard(
         conn, "C1", "blocked", "invalid_auth", available_at="2000-01-01T00:00:00+00:00"
     )
@@ -518,8 +508,6 @@ def test_drip_blocked_renders_guards_and_leads_together(
         conn,
         iid="Q1",
         entity="Quarantined District",
-        start="2025-10-10",
-        end="2028-09-30",
         backfill=True,
     )
     db.quarantine_lead(conn, lead_id, None, "C1", "nugget", "unrenderable: no entity")
@@ -569,8 +557,6 @@ def test_a_new_incident_escalates_from_the_beginning(tmp_path: Path) -> None:
             iid=f"N{_}",
             entity=f"District {_}",
             amount=500_000.0 - _,
-            start="2025-10-10",
-            end="2028-09-30",
             backfill=True,
         )
         drip.run_drip(_RejectingClient("invalid_auth"), "C1", conn, force=True)
@@ -673,7 +659,7 @@ def _mk_gold_state(
                 state=state,
                 program="SVPP",
                 amount=amount,
-                start="2025-10-01",
+                start=FRESH_START,
                 end="2028-09-30",
                 url="https://x.gov/a",
                 raw={},
@@ -777,16 +763,12 @@ def test_force_overrides_the_timing_but_never_the_daily_budget(tmp_path: Path) -
         conn,
         iid="A",
         entity="First District",
-        start="2025-10-10",
-        end="2028-09-30",
         backfill=True,
     )
     mk_lead(
         conn,
         iid="B",
         entity="Second District",
-        start="2025-10-10",
-        end="2028-09-30",
         backfill=True,
     )
     client = SlackClient()
@@ -810,16 +792,12 @@ def test_a_lead_that_cannot_render_does_not_spend_the_day(tmp_path: Path) -> Non
         conn,
         iid="BAD",
         entity="Bad District",
-        start="2025-10-10",
-        end="2028-09-30",
         backfill=True,
     )
     mk_lead(
         conn,
         iid="OK",
         entity="Good District",
-        start="2025-10-10",
-        end="2028-09-30",
         backfill=True,
     )
     conn.execute("UPDATE leads SET entity_name='***' WHERE id=?", (bad,))
@@ -843,7 +821,7 @@ def test_repeated_slack_refusals_stop_draining_the_lead_pool(tmp_path: Path) -> 
     permanently. Three in a day is a broken card, not three unlucky leads.
     """
     conn = db.connect(tmp_path / "t.db")
-    lead = mk_lead(conn, iid="A", start="2025-10-10", end="2028-09-30", backfill=True)
+    lead = mk_lead(conn, iid="A", backfill=True)
     now = datetime.now(timezone.utc)
     for index in range(drip.MAX_REJECTIONS_PER_DAY):
         conn.execute(
@@ -871,7 +849,7 @@ def test_repeated_slack_refusals_stop_draining_the_lead_pool(tmp_path: Path) -> 
 def test_one_or_two_refusals_do_not_stop_the_queue(tmp_path: Path) -> None:
     """The floor must not become a new way to lose the day to a couple of bad rows."""
     conn = db.connect(tmp_path / "t.db")
-    lead = mk_lead(conn, iid="A", start="2025-10-10", end="2028-09-30", backfill=True)
+    lead = mk_lead(conn, iid="A", backfill=True)
     now = datetime.now(timezone.utc)
     conn.execute(
         """INSERT INTO notification_outbox

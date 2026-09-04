@@ -228,3 +228,147 @@ to be false, which is the history most worth keeping.
   a campaign-status tool so "who's on that campaign?" can be answered, human-asserted
   contact facts, and Jocelyn's missing `reps.json` entry.
 
+<!-- Moved from docs/status_log.md 2026-09-04: the log's oldest block, so the
+     2026-08-26 and 2026-08-25 blocks coming down from CLAUDE.md fit under the cap. -->
+
+## Current status (2026-08-09, follow-ups + email)
+
+- `verified` 2026-08-09 **THE JULY DEAD-ENDS, ROOT-CAUSED FROM THE REAL CHANNEL.** A
+  full read of `C01DGT9D11D` (Grant joined 07-19; 6 humans, 19 threads) found **26
+  unmet asks** and, more importantly, that **13 of 19 threads DEAD-ENDED**. Nelly is
+  the power user (91 messages) and her last message was never answered; Jocelyn and
+  Brett each used Grant once and never returned. Grant's LAST words in the channel
+  were a false capability claim. Evidence file with verbatim quotes + permalinks:
+  `data/capability_asks/unmet_asks_20260809.json`.
+- `verified` 2026-08-09 **GRANT DID NOT FABRICATE CONTACTS.** The worst hypothesis —
+  five named LinkedIn people invented on 07-23 and reported as "saved to the lead",
+  then reported two weeks later as never found — was investigated in production and
+  **ruled out**: all five are real rows (ids 47,52,53,55,56) with distinct profile
+  URLs, written in a batch dated by three independent orderings to the exact minute
+  of the message. The 08-06 message was a true report of a `CompletedPaidCall` crash
+  (fixed 3adebba) described in words that implied the RECORDS were empty. `contacts`
+  ids run 1..85 with **zero gaps** and there are no triggers, so nothing was ever
+  deleted. Residual defect, now fixed: re-enrichment accumulates several
+  `linkedin_only` rows per lead and row order decided which human a rep saw — one
+  production lead holds both a Teacher and an Assistant Superintendent.
+  `_best_linkedin_contact` now ranks by decision-maker title, then any title, then id.
+- `verified` 2026-08-09 **A RAW JSON ENVELOPE REACHED A REP.** `_parse_final` treated
+  a truncated envelope as prose and passed it through, so a rep received a message
+  starting `{"intent": "question", "reply": "Both Excel files are done` ending
+  mid-word; three others were cut mid-sentence. A failed parse now distinguishes
+  "spoke prose" from "was cut off", salvages the reply, trims to a finished sentence,
+  and says there was more. `max_tokens` 1500 → 3000.
+- `verified` 2026-08-09 **REMINDERS, OPT-OUT, AND EMAIL** (migrations 33-35, schema
+  → 35). `notify/resend_client.py` sends via Resend using a **sending-only key scoped
+  to monarchconnected.com**. THE GUARDRAIL IS THE SIGNATURE: `send_to_rep` takes a
+  SLACK USER ID and resolves it through the reviewed roster itself — no parameter
+  anywhere accepts an address, so no prompt or scraped page can aim Grant's mail at
+  an outside inbox. A test asserts on the SIGNATURE so a refactor cannot loosen it.
+  First real email `verified` sent to chase@ (Resend id `6ed37271…`). `stop_followups`
+  is a first-class tool; an `all` opt-out silences reminders AND nudges, because
+  someone who asks for quiet means everywhere.
+- `verified` 2026-08-09 **THE NUDGE WORKER WAS DESTROYING ITS OWN BACKLOG.** It wrote
+  a PERMANENT suppression for every reason including `channel_guard_active` — a Slack
+  outage — so one run during an outage would have silently burned **22** pending
+  follow-ups with nothing in the output to say so. Only `PERMANENT_SUPPRESSIONS` are
+  recorded now. Separately, `DROP_AFTER` 5 → 14 days: the eligible window was only
+  three days wide, and 28 of 36 due subjects were already unreachable the day the
+  feature shipped.
+- `verified` 2026-08-09 THREE NEW FOLLOW-UP KINDS. `capability_now_available` reopens
+  an ask when the feature ships, quoting the person verbatim; its clock starts at the
+  SHIP, not the ask, so an old ask is not stale — no bigger `DROP_AFTER` could fix
+  that, because the gap grows a day every day. `card_escalated` DMs the manager once
+  after 4 days (roster `manager: true`, fails closed if zero or several rows carry
+  it). *(Superseded 2026-08-11: it is a CHANNEL post at 30h, and it now covers
+  untagged cards too. The `manager: true` fail-closed rule still holds.)* `thread_abandoned` reopens on GRANT'S OWN admission of failure
+  (`needs_reconciliation`), never if the person posted again. Card follow-ups now
+  address the rep the card actually tagged, via the SAME verified-source gate the card
+  used. Where Grant made a FALSE PROMISE ("I'll keep watching these states"), the
+  reopened ask carries a written `correction` instead of the neutral line.
+- `verified` 2026-08-09 **TOOL OUTPUT HAS TWO AUDIENCES — a durable rule.** A LIVE
+  playground reminder posted model-facing coaching straight to a human: "Offer these
+  to the user (with counts) and ask which to run; do not stop at a bare no-results
+  answer." Tool text is written FOR THE MODEL; the reminder worker posts it with no
+  model in between. Guidance is now wrapped in `presentation.model_note`; `for_model`
+  strips the delimiters (the model still gets the guidance) and `for_human` strips the
+  guidance entirely. ANY surface that shows tool text to a person unmediated MUST call
+  `for_human`. No unit test caught this — only posting a real message did. And the
+  first regression test I wrote for it exercised `for_human` directly and PASSED
+  against a worker that had reverted to raw text: it proved the sanitiser worked while
+  proving nothing about whether anyone called it. Mutation testing caught that; the
+  test now drives `run()`.
+- `verified` 2026-08-09 the LOCAL `.env` points Salesforce WRITES at the **monarchdev
+  sandbox** while production has no `SALESFORCE_WRITE_MY_DOMAIN_URL` and falls back to
+  the production reader. So `salesforce_campaign_search` finding nothing LOCALLY is a
+  config artifact, not a bug — under production config both California campaigns
+  resolve with working links, and the campaign Nelly linked reports **13 members**.
+  Her exact `lightning.force.com` link — rejected three times in July — now parses.
+- `verified` 2026-08-09 **THREE THINGS READ AS FINISHED AND WERE NOT** (full critic
+  sweep). (1) `email_results` was LIVE and mailed a rep the model-facing coaching
+  string verbatim, then dead-ended — the same defect fixed in the sibling caller two
+  commits earlier. Fixing it in both places would have left the trap for the third
+  caller, so both now share `lead_digest.render`. (2) The RICH card — the loudest
+  sender and what actually posts in production — ignored the opt-out entirely; C4 had
+  only fixed the legacy drip, so "I've stopped following up with you" was false for
+  the message a rep is most likely to mean. (3) The escalation named a rep recomputed
+  from TERRITORY, but a rich card routes by Salesforce ownership first, so it could
+  tell a manager "this went to X" about somebody who was never asked; it now reads
+  `rich_card_snapshots.slack_user_id`, the value the card actually recorded.
+- `verified` 2026-08-09 `SALESFORCE_LEAD_ENRICHMENT_UPDATES_ENABLED=1` sits in the
+  droplet `.env` and **gates no code anywhere** — the string appears nowhere in the
+  repo. It reads as a shipped feature flag and is not one, which is precisely the
+  "I was told it was configured" trap. Being removed.
+- `needs-testing` 2026-08-09 **THE SALESFORCE UPDATE PATH DOES NOT EXIST.** The
+  gateway deliberately contains no update or delete primitive (zero `requests.patch`
+  in the package), so BACKFILLING the Leads already written is currently impossible.
+  Organization-only Leads now carry Street/City/PostalCode/Website/students/Industry
+  — but those columns are written by ONE enrichment path the campaign batch never
+  calls, so on a bulk load they may still be empty. Coverage is being measured before
+  this ask is called closed. Still missing outright: `Phone` on the org payload,
+  `MobilePhone` anywhere, ZoomInfo firmographics (`Industry` is a local guess from the
+  entity name, `NumberOfEmployees` is never set), and any fallback to a
+  superintendent when the ideal contact is not found.
+- `needs-testing` 2026-08-09 **THE LEARNING SYSTEM AND CROSS-PERSON ROUTING ARE NOT
+  BUILT.** Nothing scores message wording by engagement, rewrites, or re-sends; no
+  tool can message a third party (that is currently unrepresentable, by the same
+  design that makes the Resend surface safe, so building it deliberately widens a
+  safety boundary and needs care). `db_engagement` + `followup_nudges.state` are
+  enough to measure a variant's reply rate — measure before optimising.
+- `verified` 2026-08-10 **ALL THREE SYSTEMS EXERCISED LIVE, NOT JUST UNIT-TESTED.**
+  SLACK (production, playground): "remind me friday morning to circle back on the
+  texas rfps" → Grant resolved the date itself and confirmed in one line; "what
+  reminders do i have" listed it; "stop reminding me" → *"all reminders and
+  follow-ups are off, and I cancelled the Texas RFP one"* — the confirmation naming
+  what it ACTUALLY cancelled is the C2 fix live; "turn them back on" → restored, and
+  it pointedly did NOT silently resurrect the cancelled reminder, it offered to.
+  SALESFORCE: *"whats in salesforce for bellaire"* returned BOTH matches **with
+  working Lightning links in the message**, flagged possible-not-confirmed, and
+  called the health centre out as likely unrelated — the exact gap Chase reported.
+  ZOOMINFO: through Slack, a free preview quoted three IT people, their exact cost
+  (3 credits), the remaining balance, and all three do-not-call flags, then ASKED
+  before spending.
+- `verified` 2026-08-10 **A REAL PAID ZOOMINFO PULL FILLED THE LEAD CHASE OPENED.**
+  Birmingham Community Charter: 25 people found for ZERO credits, 2 pulled for 2
+  credits — Vic Chalabian (Manager, Information Technology Systems) and Kristine
+  Torres (Chief Business Officer), both with real `@bcchs.net` emails. Vic's number
+  was WITHHELD as do-not-call. Stored `vendor_licensed`, never `verified`.
+- `verified` 2026-08-10 **THAT PULL EXPOSED A FALSE CLAIM BEING WRITTEN INTO THE
+  CRM.** The Salesforce Lead Description read *"Contact verified verbatim on unknown
+  source."* — a claim of verification, citing nothing, about vendor data nobody
+  checked. `_contact_evidence` special-cased only `linkedin_only` and fell through to
+  the verified wording for everything else. Every evidence class now says what it
+  actually is, and a contact with no captured source page claims no verification at
+  all. This string outlives every Slack thread, which is what makes it the most
+  durable claim Grant makes about a person.
+- `verified` 2026-08-10 **THE CREDIT LEDGER IS PER-DATABASE, NOT A VENDOR BALANCE.**
+  Production's ledger reads 2 consumed and my laptop's also reads 2, but BOTH drew on
+  the same ZoomInfo account, so true vendor consumption this period is 4. The cap
+  still protects each database from overspending itself; it cannot see spend from
+  anywhere else. Worth knowing before anyone treats "998 remaining" as a fact about
+  the account rather than about that database.
+- `needs-testing` 2026-08-09: **no nudge, escalation, reminder or capability follow-up
+  has been delivered live.** `followup_nudges` and `reminders` are empty in production;
+  no `nudge` cron line exists; production asks are NOT seeded. LinkedIn connection
+  messages (Chase asked) are NOT built. The 07-20 "367 gold California" figure told to
+  Chase matches nothing in the database (true: 49 raw / 14 searchable) and was never
+  corrected in-channel.

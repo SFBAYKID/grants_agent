@@ -16,6 +16,7 @@ Rules (Chase, refined 2026-07-19 — grants outrank RFPs; freshness is everythin
 
 from __future__ import annotations
 
+import calendar
 from datetime import date, timedelta
 
 from .models import Lead, LeadGrade, RawItem
@@ -30,6 +31,26 @@ AWARD_SOURCES_PREFIX = (
 RFP_SOURCES = ("webs", "sam.gov", "oregonbuys", "rfp")
 
 FRESH_MONTHS = 12  # Chase: after ~a year, awardees likely have vendors locked in.
+
+# THE CEILING ON WHAT GRANT WILL PROACTIVELY SURFACE. Calendar months, inclusive.
+#
+# GOLD (FRESH_MONTHS) is the grade: "money in hand, obligated within a year". This is
+# a stricter rule about what Grant is allowed to PUSH at a person — a card in the
+# channel, a name tagged, a manager escalated to. Chase, 2026-09-04, on a nudge that
+# tagged the manager about a $499,730 award obligated October 2025: "You're reminding
+# everybody of a really really old lead ... We need to be reminding people of the
+# newest leads." Every award card the drip had ever posted was between 9 and 21
+# months old (see presentation.award_age_phrase), because the only ceiling was the
+# grade's twelve months.
+#
+# Six, not twelve, because `lead_score` already treats an award as fully fresh only
+# through six months, and because the rep who phoned a district ten months after
+# obligation was told the competitor's install was already finishing (Kerry,
+# 2026-09-01). ONE constant, read by the rich card policy, the fallback daily card,
+# the daily list and the follow-up nudges, so no surface can drift older than the
+# others. A lead past this ceiling is still GOLD, still searchable, still exportable —
+# it is simply never pushed unasked.
+CARD_MAX_AWARD_MONTHS = 6
 
 
 def _parse_date(iso: str) -> date | None:
@@ -88,6 +109,32 @@ def grade(item: RawItem, today: date | None = None) -> Lead:
 
     # grants.gov + anything unrecognized: keep as watch, never drop (CLAUDE.md).
     return Lead(item, LeadGrade.WATCH)
+
+
+def card_award_cutoff(today: date) -> date:
+    """The oldest obligation date Grant will still push unasked, inclusive.
+
+    Calendar months, day-clamped: from 2026-08-31 six months back is 2026-02-28, not a
+    ValueError and not a silent 183-day window. Kept separate from `is_fresh` (the
+    grade's 360-day rule) because the two answer different questions.
+    """
+    month_index = today.year * 12 + (today.month - 1) - CARD_MAX_AWARD_MONTHS
+    year, month0 = divmod(month_index, 12)
+    month = month0 + 1
+    day = min(today.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def award_is_card_fresh(occurred_on: object, today: date) -> bool:
+    """Whether an award date is recent enough for Grant to surface it proactively.
+
+    Undated is NOT fresh: a card's whole claim is recency, and `grade` already sends
+    undated awards to SILVER for the same reason. A FUTURE date is not fresh either —
+    it is bad data, and `award_age_phrase` refuses to describe it. Both fail closed:
+    the lead stays in the pool for a human to find, and is simply never pushed.
+    """
+    occurred = _parse_date(str(occurred_on or "")[:10])
+    return occurred is not None and card_award_cutoff(today) <= occurred <= today
 
 
 def is_fresh(item: RawItem, today: date | None = None) -> bool:

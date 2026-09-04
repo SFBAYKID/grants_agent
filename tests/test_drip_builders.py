@@ -21,7 +21,7 @@ from grant_watch.slack import drip
 def test_nugget_is_short_and_factual(tmp_path: Path) -> None:
     """Verify nugget is short and factual."""
     conn = db.connect(tmp_path / "t.db")
-    lead_id = mk_lead(conn)
+    lead_id = mk_lead(conn, start="2025-10-01")
     row = db.get_lead(conn, lead_id)
     # A FIXED CLOCK, because the card now states an AGE. Reading the wall clock here
     # would make the expected string drift a little every month and fail outright once
@@ -391,10 +391,12 @@ def test_drip_dry_run_writes_nothing(tmp_path: Path) -> None:
 def test_delivery_reservation_prevents_duplicate_post(tmp_path: Path) -> None:
     """The same funding event can be proactively delivered only once per channel."""
     conn = db.connect(tmp_path / "t.db")
-    mk_lead(conn)
-    client = SlackClient()
     # A FIXED CLOCK: the card states the award's age, so a run against the wall clock
-    # would pin a string that drifts every month.
+    # would pin a string that drifts every month. The award date is pinned with it,
+    # three months back — inside the ceiling at that clock, and never inside it on
+    # the wall clock this test does not read.
+    mk_lead(conn, start="2026-06-01")
+    client = SlackClient()
     at = datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc)
     first = drip.run_drip(client, "C1", conn, force=True, now=at)
     second = drip.run_drip(client, "C1", conn, force=True, now=at)
@@ -408,8 +410,8 @@ def test_delivery_reservation_prevents_duplicate_post(tmp_path: Path) -> None:
     assert client.last_kwargs["unfurl_media"] is False
     assert client.last_kwargs["text"] == (
         "Castle Rock School District 401 in Washington has a verified "
-        "$500,000 SVPP funding award, federal funds obligated October 1, 2025 "
-        "— about 11 months ago."
+        "$500,000 SVPP funding award, federal funds obligated June 1, 2026 "
+        "— about 3 months ago."
         "\n\n<@U01E908206M> — Washington is your territory. "
         "Want me to find the right contact?"
         "\n\n<https://x.gov/a|View the source record>"

@@ -123,6 +123,87 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-09-04, the card was eleven months old and so was every card before it)
+
+- `verified` 2026-09-04 **PRODUCTION IS STILL `18f8e53`, SCHEMA 49. NOTHING FROM THIS
+  SESSION IS DEPLOYED.** The change below is on `main` and needs Chase's own
+  authorization to ship; a guardian read-only pass (14:16–14:22 PDT, one multiplexed
+  SSH, DB opened `mode=ro`, no Slack client built) supplied every production number
+  here.
+- `verified` 2026-09-04 **THE GOLD POOL IS ONE DATE.** `nugget_candidates` on
+  `C0BSDPM2KPB` returns **162** leads: all SVPP, all `award_obligated 2025-10-10`, all
+  `entity_type=''`. The last 20 cards were all that cohort, **305.8 → 329.8 days old
+  at post time**; the next pick would have been Sheridan SD, OR, $500,000, same date.
+  USAspending's newest SVPP obligation is 2025-10-10 on `16.071` and **2025-03-05** on
+  `16.710` — the FY2026 cohort has not appeared yet. So "post the freshest school
+  award" and "post an eleven-month-old award" were the same instruction, and the
+  only ceiling anywhere was the GOLD grade's twelve months
+  (`policy.AWARD_MAX_MONTHS = 12`, the pre-existing rule that let Cuba City through).
+- `verified` 2026-09-04 **THE NUDGE CHASE PASTED WAS A `card_escalated` FOR POST 52.**
+  Cuba City ($499,730, rich card 09-02 10:30 PT, untagged, no engagement row) escalated
+  to Anthony 09-04 10:45 PT. Six escalations went out in the last 14 days and every one
+  was about a 2025-10-10 award: School Dist 103, Mescalero, Atwood Heights, Gobles,
+  Chickasha, Cuba City. The follow-up system was doing exactly what it was built to do,
+  about cards that should not have existed.
+- `verified` 2026-09-04 **ONE CONSTANT NOW GATES EVERY PUSH: `scoring.CARD_MAX_AWARD_MONTHS
+  = 6`, calendar months, inclusive.** Read by the rich-card policy (was its own 12), the
+  fallback daily card (`drip.pick`, which had NO age rule), the daily list
+  (`daily_list.candidates`, which had none either), and the follow-ups
+  (`nudge_sources._unengaged_cards`, gated at the moment a nudge is CONSIDERED, so the
+  day a card would no longer post is the day it stops being chased). A lead past the
+  line is still GOLD, still searchable, still exportable — it is simply never pushed
+  unasked. Undated and future dates fail closed. RFP cards, undated awards and cards
+  with no event are chased exactly as before; each is a mutation control.
+- `verified` 2026-09-04 **A PAID SIDE EFFECT, IN THE RIGHT DIRECTION.** `rich-prepare
+  --execute` (07:45 daily) spends Firecrawl and ZoomInfo on `preparable_lead_ids`, and
+  `AWARD_TOO_OLD` is not a remediable reason, so the whole 162-lead cohort drops out of
+  the paid queue. Production had bought a `contact_refresh` for lead 8466 alone on TEN
+  separate mornings (08-13 → 09-02). Pinned by a test at two clocks.
+- `verified` offline 2026-09-04 **MUTATION-PROVEN BOTH WAYS.** Ceiling set back to 12:
+  15 tests fail. Nudge gate deleted: 2 fail. Boundary day inclusive on every surface,
+  judged in Pacific business time for the nudges so a card is not dropped at 17:00 PT
+  because UTC rolled over. Thirty-two pre-existing drip tests broke on the day the
+  ceiling shipped because `drip_support.mk_lead` defaulted every award to 2025-10-01;
+  the default is now thirty days before the wall clock, tests that pin a date string
+  pass `start` explicitly, and an EMPTY start still means an unknown date. Suite
+  **1761 passed, 90 skipped**; `ruff` clean on `grant_watch/` and `tests/`.
+- `needs-testing` 2026-09-04 **WHEN THIS DEPLOYS, THE DRIP CARD GOES SILENT FOR SCHOOLS.**
+  All 162 gold leads fall outside the line at once; each tick falls through to silver
+  RFPs, then bulletins, then `skip: nothing new worth saying`. That is the honest
+  state — there is no fresh school award to post — and it ends the moment the FY2026
+  SVPP cohort lands in USAspending. The six already-posted cards get no further
+  follow-up (Shonto's `card_unengaged`, due 09-05, will not fire). The daily list
+  continues: three lists had already consumed everything newer than 2026-06-08, and
+  roughly a hundred NSGP awards remain inside the line, after which the list is as
+  long as the day's arrivals (~2–3) — Chase's variable-length list, by construction.
+- `verified` 2026-09-04 **FRESH SCHOOL AWARDS EXIST AND ARE ALL `watch`.** The newest
+  verified awards on file are NSGP subawards — St Aloysius School WI (2026-08-24),
+  Saint Anne's Episcopal DE, ten Iowa congregations and schools dated 2026-08-03 —
+  88 of them under 90 days. USAspending's subaward endpoint publishes no recipient
+  spend deadline (`usaspending.py` sets `end=""`), and `scoring.grade` sends any award
+  without a spend-window end to WATCH. They reach the daily list (no grade filter)
+  and can never be the drip card. Whether an NSGP subaward should grade GOLD without a
+  window is a product call, deliberately not made here.
+- `verified` 2026-09-04 **THE NUDGE NAMED SOMEBODY THE CARD NEVER SHOWED, AND IT IS NOT
+  FIXED.** The card said Tina Birkett (from `contact_evidence` via the snapshot,
+  verified 09-02 from the district homepage). `nudge_promises.best_offer` reads
+  `contacts`, which for lead 8466 holds two ZoomInfo `vendor_licensed` rows — Aaron
+  Olson, Superintendent, and Tami Budden — both with emails on file and **both
+  `do_not_call=1`**, and no Tina at all. So the nudge offered to "chase down an email
+  for Aaron": a person the rep had not seen, whose email the vendor had already
+  supplied, whom the vendor says not to call. Two tables, two truths, the same
+  defect shape as `best_offer` on 2026-08-12. Left for its own design pass (which
+  table is the card's truth; what a DNC flag forbids in an OFFER; whether the outreach
+  path would accept the card's contact), because a wrong fix here promises a rep an
+  intro Grant cannot send.
+- `needs-testing` 2026-09-04 **KNOWN AND NOT DONE.** (1) `ruff check .` is red on
+  `.claude/agent-memory/grants-ops-guardian/matcher_scoring_harness.py` (untracked,
+  nine errors, the guardian's scratch harness) — `grant_watch/` and `tests/` are
+  clean, and the file is not mine to delete. (2) The escalation wording still says
+  "the window's open" and never states the award's age; true, but it is the one
+  number the card had to be changed to carry. (3) Nothing re-grades the 2025-10-10
+  cohort to SILVER until the poller re-observes it after 2026-10-05 (`FRESH_MONTHS`).
+
 ## Current status (2026-09-02, the daily list is live — freshest first, nothing repeats)
 
 - `verified` 2026-09-02 **PRODUCTION IS `18f8e53`, SCHEMA 49.** Four deploys since
@@ -290,169 +371,6 @@ affect Chase's other projects.
   `user_memory` keeps the same sentence for 182 days while a claim holds forever, so
   on day 183 the claim outlives the memory of it being made. (5) `cli.py` is at 999
   lines and `search.py` at 997 — both effectively at the cap.
-
-## Current status (2026-08-26, three deploys — two false promises to a rep, and a clock)
-
-- `verified` 2026-08-26 **PRODUCTION IS `c41b8e3`, SCHEMA 47.** THREE deploys today
-  from a starting point of `266f912`: `c412860` → `a03d723` → `c41b8e3`, outages
-  **0.320 / 0.112 / 0.059 s**, every deployable file byte-verified against the pinned
-  commit's blobs, second rsync pass empty each time, `--delete` omitted after a
-  zero-deletion preview, `.env` sha AND mtime unmoved, crontab byte-identical by
-  `cmp`, `.env*` compared as a PATH LIST. No migration; no crontab pause, and the
-  first deploy landed **~1 second after a `*/5` keepalive tick** with the PID count
-  never leaving 1 — the first direct proof of the pgrep guard under a real
-  near-collision, which is why a plain restart needs no pause.
-- `verified` 2026-08-26 **ALL THREE DEFECTS WERE FOUND BY WATCHING A LIVE REP THREAD,
-  NOT BY READING CODE.** Nelly asked for PA leads and contacts; Chase answered. Every
-  one of the three came out of what Grant actually said to them.
-- `verified` 2026-08-26 **GRANT OFFERED A SHEET UPDATE THE EXPORT CANNOT DO, TWICE,
-  AND CHASE SAID YES TO IT.** "export the 100 with contact columns to that same
-  Google Sheet" — `google_sheets.create_sheet` only ever calls `drive.files().create`;
-  there is no update-an-existing-sheet path in this repo. He got a SECOND sheet
-  (`1oXq957…`) beside the first (`1urNeg…`) and nothing said which was current. Fixed
-  in the tool's own success string (the model relays it) AND in `grant_prompt.py`.
-  **Anthony is separately still on standby believing "we can later add to the same
-  sheet"** — he said it on 2026-08-25 and Grant let it stand.
-- `verified` 2026-08-26 **GRANT TOLD A REP A PAID RE-RUN WAS FREE.** "re-running costs
-  nothing extra since the finished ones are cached." The tool schema ALREADY told it to
-  repeat the tool's wording "rather than promising the repeat is free" — but the
-  emitted sentence only said unreachable orgs "are retried properly", which never
-  mentions cost. The comment directly above it already knew ("checked again and may
-  cost again"); **the string it emits did not say it.** Same map-versus-ground shape as
-  every other entry here: the comment is not the artifact.
-- `verified` 2026-08-26 **AND IT OFFERED TO CHASE ROWS IT CAN NEVER REACH.** PA matched
-  127; enrichment caps at 100. Grant honestly disclosed "the 27 we couldn't fit at all"
-  and then offered to "keep chasing the rest" in the same message. The row set is
-  deterministic by construction, pinned by
-  `test_determinism_repeated_search_returns_same_rows` — a test that exists so turn-2
-  cannot enrich orgs the rep never saw. **That same guarantee is what makes the
-  overflow permanently unreachable**; only narrowing the search moves it.
-- `verified` 2026-08-26 **THE POLL-LEASE FENCE READ THE WALL CLOCK WHILE EVERYTHING
-  ELSE TOOK AN INJECTED ONE.** `acquire`/`heartbeat` always accepted `now`;
-  `fenced_transaction` and `release` did not. Identical to the `channel_guard` defect
-  of 2026-08-12. It surfaced as a **droplet-only** test failure: `test_poll_lease`
-  binds `NOW` at module import and leases expire at NOW+121s, so it failed on any run
-  longer than ~121s — droplet 405s, laptop 31s. **Nothing to do with any change; the
-  suite simply crossed a duration threshold.** Worse, the test's NEGATIVE assertion
-  (`pytest.raises(LeaseLost)`) kept passing spuriously, so the control had gone vacuous
-  while only the positive block failed. Production behaviour is unchanged — every
-  caller passes no clock and `_utc(None)` re-reads the real clock at EACH check.
-- `verified` 2026-08-26 **A NOW-RELATIVE TEST COULD NOT HAVE CAUGHT IT, AND THE PROOF
-  HAD TO BE PROVEN TOO.** On a fast machine the broken and fixed code agree. The new
-  tests fence on a clock YEARS from the wall clock, both directions. Then the harness
-  itself was checked: skewing the wall clock 10 years reproduces the droplet's exact
-  error text on the old code and clears it on the new. **A green harness that cannot
-  detect the bug is the fourth kind of disconnected check this file records.**
-  Confirmed at **422s on the droplet — 3.5× the threshold**, which a 31s laptop run
-  can never establish.
-- `needs-testing` 2026-08-26 **ONE DROPLET TEST FAILURE IS STILL UNEXPLAINED, AND TWO
-  PLAUSIBLE MECHANISMS HAVE ALREADY BEEN REFUTED.** `test_contact_fill` asserts
-  `20 == 0` ("a dry run billed") on the droplet only. "An earlier test set `os.environ`
-  directly" is wrong — every `ZOOMINFO_CREDIT_LEDGER_PATH` setter in the tree uses
-  `monkeypatch.setenv`. "A bare `load_dotenv()` leaked the real `.env`" is also wrong —
-  both call sites sit behind `GRANT_LLM_ACCEPTANCE=1`, which was not set. **The real
-  ZoomInfo ledger is untouched** (mtime 2026-08-13, unchanged across the run), so no
-  credits moved. Droplet baseline is now **2 failed / 1649 passed / 87 skipped**.
-- `needs-testing` 2026-08-26 **THE ADVERTISED ENRICHMENT RATE IS NOT THE REAL ONE.**
-  `tool_schemas.py` tells Grant to say **100 organizations per run**; two live paid runs
-  delivered **21** and then **44** inside the 420s budget. At ~23 new orgs per run, 127
-  PA leads needs several more passes. Raising `ENRICH_TIME_BUDGET_S` must stay inside
-  the watchdog's 20-minute `STUCK_AFTER`; lowering the advertised number changes what
-  reps are told. **A product decision, deliberately not made unilaterally.**
-- `verified` 2026-08-26 **TWO HANDOFF NUMBERS I STATED WERE WRONG AND THE GUARDIAN
-  CAUGHT BOTH.** I passed `+16/-1` (that is `--stat`'s changed-line count; numstat is
-  `+15/-1`) and predicted a post-deploy `1650` when the true figure was `1649` (a test
-  flipped fail→pass, which I had not carried through). Neither changed an outcome, and
-  both are the same failure this file already records: **a casually stated number
-  becomes somebody else's premise within one message.**
-
-## Current status (2026-08-25, the false negative was the MATCHER — deployed, first write proven)
-
-- `verified` 2026-08-25 **PRODUCTION IS `266f912`, SCHEMA 47.** THREE deploys today, from a
-  starting point of `900af52`: `2dd6e91` → `1ce9b8f` → `266f912`, outages
-  **0.084 / 0.084 / 0.081 s**,
-  every file byte-verified against the pinned commit's blobs, second rsync pass empty
-  each time, `--delete` omitted after a zero-deletion preview, `.env` and crontab
-  byte-identical (crontab by `cmp` against a captured copy). No migration; no crontab
-  pause, deliberately, because a restart cannot race the `pgrep`-guarded keepalive.
-  Row counts compared pre/post, tracebacks **13 → 13** throughout.
-- `verified` 2026-08-25 **NELLY WAS RIGHT AND GRANT WAS LYING BY OMISSION.** She said
-  "There is a lead"; Grant said Salesforce held no record for DeKalb. **Six Leads
-  exist and the token can see all six** (401,601 of 401,606 Leads are owned by other
-  users, so sharing was never the constraint). The SOSL RETURNED them and
-  `_confidence` threw them away. Two defects had to fire together:
-  `'#428'.isdigit()` is **False** so `#428` stayed a required identity token the CRM
-  could never match, and states were compared as RAW TEXT while the CRM holds `IL` on
-  one record and `Illinois` on the others — a false conflict whose only escape is the
-  exact token equality the `#` had already made impossible. A third effect:
-  `search_terms` used the same digit test, so the most TOLERANT variant was
-  de-duplicated away and **the broad search-by-name-alone was never issued.**
-- `verified` 2026-08-25 **THE OBVIOUS FIX WOULD HAVE MADE GRANT CREATE DUPLICATES.**
-  The handoff I was given said "current lookup finds nothing → allow a new preview".
-  `_resolve_existing_record` maps `NO_MATCH → return None → CREATE`. Had that shipped
-  against a false negative, Grant would have written a fifth DeKalb Lead. Measured
-  before writing code, not after.
-- `verified` 2026-08-25 **MY OWN FIRST FIX REGRESSED IT, AND THE GUARDIAN CAUGHT IT
-  BEFORE IT SHIPPED.** Normalizing `#40` to `40` and dropping it as a digit took
-  "Baboquivari Unified School District #40" — ONE distinctive word — under the
-  `len(words) >= 2` threshold, so no candidate could ever be confident again. The sets
-  still MATCHED; the THRESHOLD refused. It fails as a silent refusal, indistinguishable
-  from correct caution, and would have hit **14 of the 34** `#` leads. Names and record
-  numbers are now separate dimensions: words must match as a set, numbers must
-  INTERSECT (not be equal, because the CRM holds `BABOQUIVARI … #40 (4412)`), and one
-  distinctive word plus an agreeing number is as strong as two words. `906d237` was
-  withdrawn and never synced.
-- `verified` 2026-08-25 **OUR OWN LEAST-PRIVILEGE CUTOVER LOCKED CHASE OUT OF EVERY
-  SALESFORCE WRITE.** Salesforce enforces a unique Username but **not** a unique
-  Email, and the 2026-08-22 provisioning put his address in the integration users'
-  Email field. `IsActive=true AND Email='…'` returned **four** active users — all
-  `UserType='Standard'`, so type is no discriminator — and `requester_owner` refused.
-  Only Chase was affected; the other five reps resolved fine. Now also matches
-  Username, which is the identity Salesforce guarantees. **`MAX_OWNER_CANDIDATES = 5`
-  leaves ONE ROW OF HEADROOM** — provision another integration user on that address
-  and the defect returns in its original form.
-- `verified` 2026-08-25 **THE FIRST WRITE AS THE INTEGRATION USER LANDED, CONFIRMED IN
-  SALESFORCE RATHER THAN IN SLACK.** Lead 9247 Shalhevet, attach mode: ContentNote
-  `069iL000003IV3dQAG` linked to Lead `00QUZ00000c9NxH2AU` with `ShareType='V'`,
-  **no duplicate Lead**, and the target Lead's `LastModifiedDate` never moved. Ledger
-  `complete`, `crm_actions` 64 → 65, nothing else in the database changed. **A
-  ContentNote always auto-links to its AUTHOR, so "it has a link" is not "it is on the
-  record"** — both links were checked. My premise that this was the first write
-  through the path was WRONG: three production records from 2026-08-11 already exist,
-  created as Chase's own user. This was the first write as the INTEGRATION user.
-  `CreatedById` is `005iL000001OsUvQAK`, which renders in Salesforce as
-  `Agent Leads Only\Read\Write` — **not Chase**, and reps will ask.
-- `needs-testing` 2026-08-25 **TWO PRODUCTION NOTES ARE PERMANENTLY MALFORMED AND ONLY
-  A HUMAN CAN FIX THEM.** LinkedIn truncates its own headlines, so `contacts.title` can
-  end in `" at ..."` and `_contact_title_phrase` appended `" at {entity}"` on top.
-  `069iL000003IV3dQAG` (lead 9247) and `069UZ00000jHTdBYAW` (lead 233 San Ysidro,
-  written **2026-08-11**) both carry it. Notes are CREATE-ONLY and Grant never edits
-  one. **26 of 134 titled contacts have the tail, all `linkedin_only`.** The cause is
-  fixed; the two existing notes are not. Note the search trap: San Ysidro's shape is a
-  bare `...` plus the appended `at`, NOT the doubled `at ... at`, so grepping the
-  obvious symptom finds only one of the two — **search for the truncation marker.**
-- `verified` 2026-08-25 **FOUR TIMES TODAY A CHECK PASSED BECAUSE IT WAS NEVER
-  CONNECTED TO THE THING IT CHECKED**, and the green result was evidence of the
-  disconnection rather than of correctness. A mutation test whose replacement string
-  did not match the escaped `…` in the source, so nothing was mutated and the suite
-  passed. Two greps asserting on source text instead of the emitted artifact
-  (`LIMIT 2` still appeared — in the docstring). `LIMIT 2` itself reporting 2 when the
-  answer was 4. And a raw count of **zero** that measured the QUERY, not the CRM:
-  lead 7784 Livingston looked like a clean zero-match and the CRM holds two
-  `LIVINGSTON ISD` rows, one `Status='Contact Established'`. **A cap can only ever
-  report a number less than or equal to itself.**
-- `needs-testing` 2026-08-25 **KNOWN AND DELIBERATELY NOT FIXED.** (1) `ISD` ⇄
-  "Independent School District" — SOSL ANDs the words, so an abbreviated CRM name
-  yields a FALSE `no_match`, and `NO_MATCH → create` is still unsafe for that shape.
-  (2) **Eight leads remain blocked by sandbox-era `00QVC…` ids** stranded when the
-  droplet writer was repointed at production; DeKalb is one. (3) `_rerun_guard` filters
-  `action_type='create_contact_record'`, so it cannot see a campaign-path row — a
-  re-run attaches a SECOND note rather than refusing. (4) **772 of 10,869 leads** have
-  fewer than two distinctive words and no record number, so they can never reach
-  `high` on name alone; loosening the threshold is unsafe because `_GENERIC_WORDS`
-  collapses "Lincoln Elementary SD" and "Lincoln Unified SD" to the same single token.
-  (5) `Lead.updateable=false` and `Contact.createable=false` — the Lead-fill update
-  path is dead and Grant can never create a Salesforce Contact.
 
 ## Current status (2026-08-17, Grant can be DMed — deployed, but unproven end to end)
 
@@ -895,22 +813,20 @@ Older dated entries live in three files, split for the 1000-line cap and NOT
 retired — several correct an earlier claim that proved false, which is exactly
 the history worth keeping:
 
-- [docs/status_log.md](docs/status_log.md) — 2026-08-11, 2026-08-10 and the
-  2026-08-13 remediation entry.
+- [docs/status_log.md](docs/status_log.md) — 2026-08-26, 2026-08-25, 2026-08-11,
+  2026-08-10 and the 2026-08-13 remediation entry.
 - [docs/status_log_archive.md](docs/status_log_archive.md) — 2026-08-06 and earlier.
 - [docs/status_log_archive_2.md](docs/status_log_archive_2.md) — 2026-08-09, the
-  first live-tested day.
+  first live-tested day, and the 2026-08-09 follow-ups entry.
 
 Rotated on 2026-08-09, 2026-08-10, 2026-08-11, 2026-08-12, 2026-08-13, 2026-08-25,
-2026-08-26 and 2026-09-01, by date, oldest first. **At 913 lines this file is past the
-~800 guidance again and the NEXT session to add a status block must rotate before
-writing** — `status_log.md` is at 831, so the 2026-08-26 block moves there and its
-oldest 2026-08-11 block moves on to an archive. **The 2026-09-01 rotation had to
-create a THIRD file, and that is the thing to know before the next one.** The chain
-was full: moving `status_log.md`'s oldest block (218 lines) into an archive already
-at 795 would have broken the very cap the rotation exists to respect, so the usual
-oldest-first move was impossible. `status_log_archive_2.md` is that block. Two blocks
-then came down from this file rather than one, which is why it is comfortably under
-the guidance for once. Current sizes: this file **913 lines**,
-`status_log.md` **831**, `status_log_archive.md` **795**,
-`status_log_archive_2.md` **230**.
+2026-08-26, 2026-09-01 and 2026-09-04, by date, oldest first. The 2026-09-04 rotation
+moved TWO blocks down (2026-08-26 and 2026-08-25) because one would have left this
+file near 900, and moved `status_log.md`'s oldest block (2026-08-09 follow-ups) into
+archive II, which had the room — `status_log_archive.md` at 795 still does not, so
+the next rotation must also use archive II. **The 2026-09-01 rotation had to create
+that THIRD file:** the chain was full, and moving a 218-line block into an archive
+already at 795 would have broken the very cap the rotation exists to respect.
+Current sizes: this file **834 lines**, `status_log.md`
+**855**, `status_log_archive.md` **795**,
+`status_log_archive_2.md` **374**.

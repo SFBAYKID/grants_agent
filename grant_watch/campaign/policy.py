@@ -23,6 +23,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import tldextract
 
+from .. import scoring
+
 # Offline registrable-domain extractor: uses the Public Suffix List snapshot bundled in
 # the tldextract package (``suffix_list_urls=()`` => never the network — gov servers are
 # not hammered and tests stay deterministic). One shared instance.
@@ -70,7 +72,11 @@ def _same_site(left: str, right: str) -> bool:
 POLICY_VERSION = 1
 
 # Freshness constants (named, per spec). Calendar days.
-AWARD_MAX_MONTHS = 12  # award no older than this
+# The award-age ceiling lives in `scoring.CARD_MAX_AWARD_MONTHS` — one constant shared
+# with the fallback daily card, the daily list and the follow-up nudges, so this card
+# cannot be fresher or staler than the surfaces around it. Re-exported by name only so
+# the shadow report and this module's readers keep one vocabulary.
+AWARD_MAX_MONTHS = scoring.CARD_MAX_AWARD_MONTHS
 PLATINUM_DAYS = 7  # a verified award within a week is the platinum presentation tier
 # The observation must be re-confirmed by a COMPLETE, SUCCESSFUL run within this window
 # (Chase A1). 6 calendar days, not 4, so a Friday award survives a weekend + one holiday
@@ -233,7 +239,7 @@ class Reason(str, Enum):
     BAD_AMOUNT = "amount_not_finite_positive"
     AWARD_DATE_MISSING = "award_date_missing_or_imprecise"
     AWARD_DATE_FUTURE = "award_date_in_future"
-    AWARD_TOO_OLD = "award_older_than_12_months"
+    AWARD_TOO_OLD = "award_older_than_card_ceiling"
     WINDOW_CLOSED = "spend_window_missing_or_closed"
     STALE_OBSERVATION = "observation_not_confirmed_by_recent_complete_run"
     KIND_UNSUPPORTED = "entity_kind_unsupported"
@@ -423,15 +429,6 @@ def _parse_datetime(iso: str) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _twelve_month_cutoff(today: date) -> date:
-    """Return the same calendar date one year ago, handling leap day explicitly."""
-    years = AWARD_MAX_MONTHS // 12
-    try:
-        return today.replace(year=today.year - years)
-    except ValueError:
-        return today.replace(year=today.year - years, day=28)
-
-
 def evaluate(c: CandidateEvidence) -> Eligibility:
     """Judge one candidate. Returns the FIRST failing reason (order = cheapest/most
     fundamental first) so the shadow report attributes a single clear cause per reject."""
@@ -453,7 +450,7 @@ def evaluate(c: CandidateEvidence) -> Eligibility:
         return Eligibility(False, Reason.AWARD_DATE_MISSING, "")
     if awarded > c.today:
         return Eligibility(False, Reason.AWARD_DATE_FUTURE, "")
-    if awarded < _twelve_month_cutoff(c.today):
+    if awarded < scoring.card_award_cutoff(c.today):
         return Eligibility(False, Reason.AWARD_TOO_OLD, "")
 
     window_start = _parse_date(c.spend_window_start)

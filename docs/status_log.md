@@ -9,6 +9,172 @@ a decision and the evidence behind it, and several correct an earlier claim that
 turned out to be false. Those corrections are the point: rule 1 applies to this
 file's own history as much as to lead data.
 
+<!-- Moved from CLAUDE.md 2026-09-04 at the ~800-line split threshold: two blocks,
+     because one would have left CLAUDE.md at ~900. -->
+
+## Current status (2026-08-26, three deploys — two false promises to a rep, and a clock)
+
+- `verified` 2026-08-26 **PRODUCTION IS `c41b8e3`, SCHEMA 47.** THREE deploys today
+  from a starting point of `266f912`: `c412860` → `a03d723` → `c41b8e3`, outages
+  **0.320 / 0.112 / 0.059 s**, every deployable file byte-verified against the pinned
+  commit's blobs, second rsync pass empty each time, `--delete` omitted after a
+  zero-deletion preview, `.env` sha AND mtime unmoved, crontab byte-identical by
+  `cmp`, `.env*` compared as a PATH LIST. No migration; no crontab pause, and the
+  first deploy landed **~1 second after a `*/5` keepalive tick** with the PID count
+  never leaving 1 — the first direct proof of the pgrep guard under a real
+  near-collision, which is why a plain restart needs no pause.
+- `verified` 2026-08-26 **ALL THREE DEFECTS WERE FOUND BY WATCHING A LIVE REP THREAD,
+  NOT BY READING CODE.** Nelly asked for PA leads and contacts; Chase answered. Every
+  one of the three came out of what Grant actually said to them.
+- `verified` 2026-08-26 **GRANT OFFERED A SHEET UPDATE THE EXPORT CANNOT DO, TWICE,
+  AND CHASE SAID YES TO IT.** "export the 100 with contact columns to that same
+  Google Sheet" — `google_sheets.create_sheet` only ever calls `drive.files().create`;
+  there is no update-an-existing-sheet path in this repo. He got a SECOND sheet
+  (`1oXq957…`) beside the first (`1urNeg…`) and nothing said which was current. Fixed
+  in the tool's own success string (the model relays it) AND in `grant_prompt.py`.
+  **Anthony is separately still on standby believing "we can later add to the same
+  sheet"** — he said it on 2026-08-25 and Grant let it stand.
+- `verified` 2026-08-26 **GRANT TOLD A REP A PAID RE-RUN WAS FREE.** "re-running costs
+  nothing extra since the finished ones are cached." The tool schema ALREADY told it to
+  repeat the tool's wording "rather than promising the repeat is free" — but the
+  emitted sentence only said unreachable orgs "are retried properly", which never
+  mentions cost. The comment directly above it already knew ("checked again and may
+  cost again"); **the string it emits did not say it.** Same map-versus-ground shape as
+  every other entry here: the comment is not the artifact.
+- `verified` 2026-08-26 **AND IT OFFERED TO CHASE ROWS IT CAN NEVER REACH.** PA matched
+  127; enrichment caps at 100. Grant honestly disclosed "the 27 we couldn't fit at all"
+  and then offered to "keep chasing the rest" in the same message. The row set is
+  deterministic by construction, pinned by
+  `test_determinism_repeated_search_returns_same_rows` — a test that exists so turn-2
+  cannot enrich orgs the rep never saw. **That same guarantee is what makes the
+  overflow permanently unreachable**; only narrowing the search moves it.
+- `verified` 2026-08-26 **THE POLL-LEASE FENCE READ THE WALL CLOCK WHILE EVERYTHING
+  ELSE TOOK AN INJECTED ONE.** `acquire`/`heartbeat` always accepted `now`;
+  `fenced_transaction` and `release` did not. Identical to the `channel_guard` defect
+  of 2026-08-12. It surfaced as a **droplet-only** test failure: `test_poll_lease`
+  binds `NOW` at module import and leases expire at NOW+121s, so it failed on any run
+  longer than ~121s — droplet 405s, laptop 31s. **Nothing to do with any change; the
+  suite simply crossed a duration threshold.** Worse, the test's NEGATIVE assertion
+  (`pytest.raises(LeaseLost)`) kept passing spuriously, so the control had gone vacuous
+  while only the positive block failed. Production behaviour is unchanged — every
+  caller passes no clock and `_utc(None)` re-reads the real clock at EACH check.
+- `verified` 2026-08-26 **A NOW-RELATIVE TEST COULD NOT HAVE CAUGHT IT, AND THE PROOF
+  HAD TO BE PROVEN TOO.** On a fast machine the broken and fixed code agree. The new
+  tests fence on a clock YEARS from the wall clock, both directions. Then the harness
+  itself was checked: skewing the wall clock 10 years reproduces the droplet's exact
+  error text on the old code and clears it on the new. **A green harness that cannot
+  detect the bug is the fourth kind of disconnected check this file records.**
+  Confirmed at **422s on the droplet — 3.5× the threshold**, which a 31s laptop run
+  can never establish.
+- `needs-testing` 2026-08-26 **ONE DROPLET TEST FAILURE IS STILL UNEXPLAINED, AND TWO
+  PLAUSIBLE MECHANISMS HAVE ALREADY BEEN REFUTED.** `test_contact_fill` asserts
+  `20 == 0` ("a dry run billed") on the droplet only. "An earlier test set `os.environ`
+  directly" is wrong — every `ZOOMINFO_CREDIT_LEDGER_PATH` setter in the tree uses
+  `monkeypatch.setenv`. "A bare `load_dotenv()` leaked the real `.env`" is also wrong —
+  both call sites sit behind `GRANT_LLM_ACCEPTANCE=1`, which was not set. **The real
+  ZoomInfo ledger is untouched** (mtime 2026-08-13, unchanged across the run), so no
+  credits moved. Droplet baseline is now **2 failed / 1649 passed / 87 skipped**.
+- `needs-testing` 2026-08-26 **THE ADVERTISED ENRICHMENT RATE IS NOT THE REAL ONE.**
+  `tool_schemas.py` tells Grant to say **100 organizations per run**; two live paid runs
+  delivered **21** and then **44** inside the 420s budget. At ~23 new orgs per run, 127
+  PA leads needs several more passes. Raising `ENRICH_TIME_BUDGET_S` must stay inside
+  the watchdog's 20-minute `STUCK_AFTER`; lowering the advertised number changes what
+  reps are told. **A product decision, deliberately not made unilaterally.**
+- `verified` 2026-08-26 **TWO HANDOFF NUMBERS I STATED WERE WRONG AND THE GUARDIAN
+  CAUGHT BOTH.** I passed `+16/-1` (that is `--stat`'s changed-line count; numstat is
+  `+15/-1`) and predicted a post-deploy `1650` when the true figure was `1649` (a test
+  flipped fail→pass, which I had not carried through). Neither changed an outcome, and
+  both are the same failure this file already records: **a casually stated number
+  becomes somebody else's premise within one message.**
+
+## Current status (2026-08-25, the false negative was the MATCHER — deployed, first write proven)
+
+- `verified` 2026-08-25 **PRODUCTION IS `266f912`, SCHEMA 47.** THREE deploys today, from a
+  starting point of `900af52`: `2dd6e91` → `1ce9b8f` → `266f912`, outages
+  **0.084 / 0.084 / 0.081 s**,
+  every file byte-verified against the pinned commit's blobs, second rsync pass empty
+  each time, `--delete` omitted after a zero-deletion preview, `.env` and crontab
+  byte-identical (crontab by `cmp` against a captured copy). No migration; no crontab
+  pause, deliberately, because a restart cannot race the `pgrep`-guarded keepalive.
+  Row counts compared pre/post, tracebacks **13 → 13** throughout.
+- `verified` 2026-08-25 **NELLY WAS RIGHT AND GRANT WAS LYING BY OMISSION.** She said
+  "There is a lead"; Grant said Salesforce held no record for DeKalb. **Six Leads
+  exist and the token can see all six** (401,601 of 401,606 Leads are owned by other
+  users, so sharing was never the constraint). The SOSL RETURNED them and
+  `_confidence` threw them away. Two defects had to fire together:
+  `'#428'.isdigit()` is **False** so `#428` stayed a required identity token the CRM
+  could never match, and states were compared as RAW TEXT while the CRM holds `IL` on
+  one record and `Illinois` on the others — a false conflict whose only escape is the
+  exact token equality the `#` had already made impossible. A third effect:
+  `search_terms` used the same digit test, so the most TOLERANT variant was
+  de-duplicated away and **the broad search-by-name-alone was never issued.**
+- `verified` 2026-08-25 **THE OBVIOUS FIX WOULD HAVE MADE GRANT CREATE DUPLICATES.**
+  The handoff I was given said "current lookup finds nothing → allow a new preview".
+  `_resolve_existing_record` maps `NO_MATCH → return None → CREATE`. Had that shipped
+  against a false negative, Grant would have written a fifth DeKalb Lead. Measured
+  before writing code, not after.
+- `verified` 2026-08-25 **MY OWN FIRST FIX REGRESSED IT, AND THE GUARDIAN CAUGHT IT
+  BEFORE IT SHIPPED.** Normalizing `#40` to `40` and dropping it as a digit took
+  "Baboquivari Unified School District #40" — ONE distinctive word — under the
+  `len(words) >= 2` threshold, so no candidate could ever be confident again. The sets
+  still MATCHED; the THRESHOLD refused. It fails as a silent refusal, indistinguishable
+  from correct caution, and would have hit **14 of the 34** `#` leads. Names and record
+  numbers are now separate dimensions: words must match as a set, numbers must
+  INTERSECT (not be equal, because the CRM holds `BABOQUIVARI … #40 (4412)`), and one
+  distinctive word plus an agreeing number is as strong as two words. `906d237` was
+  withdrawn and never synced.
+- `verified` 2026-08-25 **OUR OWN LEAST-PRIVILEGE CUTOVER LOCKED CHASE OUT OF EVERY
+  SALESFORCE WRITE.** Salesforce enforces a unique Username but **not** a unique
+  Email, and the 2026-08-22 provisioning put his address in the integration users'
+  Email field. `IsActive=true AND Email='…'` returned **four** active users — all
+  `UserType='Standard'`, so type is no discriminator — and `requester_owner` refused.
+  Only Chase was affected; the other five reps resolved fine. Now also matches
+  Username, which is the identity Salesforce guarantees. **`MAX_OWNER_CANDIDATES = 5`
+  leaves ONE ROW OF HEADROOM** — provision another integration user on that address
+  and the defect returns in its original form.
+- `verified` 2026-08-25 **THE FIRST WRITE AS THE INTEGRATION USER LANDED, CONFIRMED IN
+  SALESFORCE RATHER THAN IN SLACK.** Lead 9247 Shalhevet, attach mode: ContentNote
+  `069iL000003IV3dQAG` linked to Lead `00QUZ00000c9NxH2AU` with `ShareType='V'`,
+  **no duplicate Lead**, and the target Lead's `LastModifiedDate` never moved. Ledger
+  `complete`, `crm_actions` 64 → 65, nothing else in the database changed. **A
+  ContentNote always auto-links to its AUTHOR, so "it has a link" is not "it is on the
+  record"** — both links were checked. My premise that this was the first write
+  through the path was WRONG: three production records from 2026-08-11 already exist,
+  created as Chase's own user. This was the first write as the INTEGRATION user.
+  `CreatedById` is `005iL000001OsUvQAK`, which renders in Salesforce as
+  `Agent Leads Only\Read\Write` — **not Chase**, and reps will ask.
+- `needs-testing` 2026-08-25 **TWO PRODUCTION NOTES ARE PERMANENTLY MALFORMED AND ONLY
+  A HUMAN CAN FIX THEM.** LinkedIn truncates its own headlines, so `contacts.title` can
+  end in `" at ..."` and `_contact_title_phrase` appended `" at {entity}"` on top.
+  `069iL000003IV3dQAG` (lead 9247) and `069UZ00000jHTdBYAW` (lead 233 San Ysidro,
+  written **2026-08-11**) both carry it. Notes are CREATE-ONLY and Grant never edits
+  one. **26 of 134 titled contacts have the tail, all `linkedin_only`.** The cause is
+  fixed; the two existing notes are not. Note the search trap: San Ysidro's shape is a
+  bare `...` plus the appended `at`, NOT the doubled `at ... at`, so grepping the
+  obvious symptom finds only one of the two — **search for the truncation marker.**
+- `verified` 2026-08-25 **FOUR TIMES TODAY A CHECK PASSED BECAUSE IT WAS NEVER
+  CONNECTED TO THE THING IT CHECKED**, and the green result was evidence of the
+  disconnection rather than of correctness. A mutation test whose replacement string
+  did not match the escaped `…` in the source, so nothing was mutated and the suite
+  passed. Two greps asserting on source text instead of the emitted artifact
+  (`LIMIT 2` still appeared — in the docstring). `LIMIT 2` itself reporting 2 when the
+  answer was 4. And a raw count of **zero** that measured the QUERY, not the CRM:
+  lead 7784 Livingston looked like a clean zero-match and the CRM holds two
+  `LIVINGSTON ISD` rows, one `Status='Contact Established'`. **A cap can only ever
+  report a number less than or equal to itself.**
+- `needs-testing` 2026-08-25 **KNOWN AND DELIBERATELY NOT FIXED.** (1) `ISD` ⇄
+  "Independent School District" — SOSL ANDs the words, so an abbreviated CRM name
+  yields a FALSE `no_match`, and `NO_MATCH → create` is still unsafe for that shape.
+  (2) **Eight leads remain blocked by sandbox-era `00QVC…` ids** stranded when the
+  droplet writer was repointed at production; DeKalb is one. (3) `_rerun_guard` filters
+  `action_type='create_contact_record'`, so it cannot see a campaign-path row — a
+  re-run attaches a SECOND note rather than refusing. (4) **772 of 10,869 leads** have
+  fewer than two distinctive words and no record number, so they can never reach
+  `high` on name alone; loosening the threshold is unsafe because `_GENERIC_WORDS`
+  collapses "Lincoln Elementary SD" and "Lincoln Unified SD" to the same single token.
+  (5) `Lead.updateable=false` and `Contact.createable=false` — the Lead-fill update
+  path is dead and Grant can never create a Salesforce Contact.
+
 <!-- Moved from CLAUDE.md 2026-08-25 at the ~800-line split threshold
      (Constitution rule 4). Nothing retired, only relocated. -->
 
@@ -687,145 +853,3 @@ file's own history as much as to lead data.
   `org_phone` 13 → 29. Still only ~11% of gold; 254 candidates remain. It now pays
   once per ORGANIZATION (gold holds ~30 duplicate names; one run bought Mt. Morris
   three times).
-
-## Current status (2026-08-09, follow-ups + email)
-
-- `verified` 2026-08-09 **THE JULY DEAD-ENDS, ROOT-CAUSED FROM THE REAL CHANNEL.** A
-  full read of `C01DGT9D11D` (Grant joined 07-19; 6 humans, 19 threads) found **26
-  unmet asks** and, more importantly, that **13 of 19 threads DEAD-ENDED**. Nelly is
-  the power user (91 messages) and her last message was never answered; Jocelyn and
-  Brett each used Grant once and never returned. Grant's LAST words in the channel
-  were a false capability claim. Evidence file with verbatim quotes + permalinks:
-  `data/capability_asks/unmet_asks_20260809.json`.
-- `verified` 2026-08-09 **GRANT DID NOT FABRICATE CONTACTS.** The worst hypothesis —
-  five named LinkedIn people invented on 07-23 and reported as "saved to the lead",
-  then reported two weeks later as never found — was investigated in production and
-  **ruled out**: all five are real rows (ids 47,52,53,55,56) with distinct profile
-  URLs, written in a batch dated by three independent orderings to the exact minute
-  of the message. The 08-06 message was a true report of a `CompletedPaidCall` crash
-  (fixed 3adebba) described in words that implied the RECORDS were empty. `contacts`
-  ids run 1..85 with **zero gaps** and there are no triggers, so nothing was ever
-  deleted. Residual defect, now fixed: re-enrichment accumulates several
-  `linkedin_only` rows per lead and row order decided which human a rep saw — one
-  production lead holds both a Teacher and an Assistant Superintendent.
-  `_best_linkedin_contact` now ranks by decision-maker title, then any title, then id.
-- `verified` 2026-08-09 **A RAW JSON ENVELOPE REACHED A REP.** `_parse_final` treated
-  a truncated envelope as prose and passed it through, so a rep received a message
-  starting `{"intent": "question", "reply": "Both Excel files are done` ending
-  mid-word; three others were cut mid-sentence. A failed parse now distinguishes
-  "spoke prose" from "was cut off", salvages the reply, trims to a finished sentence,
-  and says there was more. `max_tokens` 1500 → 3000.
-- `verified` 2026-08-09 **REMINDERS, OPT-OUT, AND EMAIL** (migrations 33-35, schema
-  → 35). `notify/resend_client.py` sends via Resend using a **sending-only key scoped
-  to monarchconnected.com**. THE GUARDRAIL IS THE SIGNATURE: `send_to_rep` takes a
-  SLACK USER ID and resolves it through the reviewed roster itself — no parameter
-  anywhere accepts an address, so no prompt or scraped page can aim Grant's mail at
-  an outside inbox. A test asserts on the SIGNATURE so a refactor cannot loosen it.
-  First real email `verified` sent to chase@ (Resend id `6ed37271…`). `stop_followups`
-  is a first-class tool; an `all` opt-out silences reminders AND nudges, because
-  someone who asks for quiet means everywhere.
-- `verified` 2026-08-09 **THE NUDGE WORKER WAS DESTROYING ITS OWN BACKLOG.** It wrote
-  a PERMANENT suppression for every reason including `channel_guard_active` — a Slack
-  outage — so one run during an outage would have silently burned **22** pending
-  follow-ups with nothing in the output to say so. Only `PERMANENT_SUPPRESSIONS` are
-  recorded now. Separately, `DROP_AFTER` 5 → 14 days: the eligible window was only
-  three days wide, and 28 of 36 due subjects were already unreachable the day the
-  feature shipped.
-- `verified` 2026-08-09 THREE NEW FOLLOW-UP KINDS. `capability_now_available` reopens
-  an ask when the feature ships, quoting the person verbatim; its clock starts at the
-  SHIP, not the ask, so an old ask is not stale — no bigger `DROP_AFTER` could fix
-  that, because the gap grows a day every day. `card_escalated` DMs the manager once
-  after 4 days (roster `manager: true`, fails closed if zero or several rows carry
-  it). *(Superseded 2026-08-11: it is a CHANNEL post at 30h, and it now covers
-  untagged cards too. The `manager: true` fail-closed rule still holds.)* `thread_abandoned` reopens on GRANT'S OWN admission of failure
-  (`needs_reconciliation`), never if the person posted again. Card follow-ups now
-  address the rep the card actually tagged, via the SAME verified-source gate the card
-  used. Where Grant made a FALSE PROMISE ("I'll keep watching these states"), the
-  reopened ask carries a written `correction` instead of the neutral line.
-- `verified` 2026-08-09 **TOOL OUTPUT HAS TWO AUDIENCES — a durable rule.** A LIVE
-  playground reminder posted model-facing coaching straight to a human: "Offer these
-  to the user (with counts) and ask which to run; do not stop at a bare no-results
-  answer." Tool text is written FOR THE MODEL; the reminder worker posts it with no
-  model in between. Guidance is now wrapped in `presentation.model_note`; `for_model`
-  strips the delimiters (the model still gets the guidance) and `for_human` strips the
-  guidance entirely. ANY surface that shows tool text to a person unmediated MUST call
-  `for_human`. No unit test caught this — only posting a real message did. And the
-  first regression test I wrote for it exercised `for_human` directly and PASSED
-  against a worker that had reverted to raw text: it proved the sanitiser worked while
-  proving nothing about whether anyone called it. Mutation testing caught that; the
-  test now drives `run()`.
-- `verified` 2026-08-09 the LOCAL `.env` points Salesforce WRITES at the **monarchdev
-  sandbox** while production has no `SALESFORCE_WRITE_MY_DOMAIN_URL` and falls back to
-  the production reader. So `salesforce_campaign_search` finding nothing LOCALLY is a
-  config artifact, not a bug — under production config both California campaigns
-  resolve with working links, and the campaign Nelly linked reports **13 members**.
-  Her exact `lightning.force.com` link — rejected three times in July — now parses.
-- `verified` 2026-08-09 **THREE THINGS READ AS FINISHED AND WERE NOT** (full critic
-  sweep). (1) `email_results` was LIVE and mailed a rep the model-facing coaching
-  string verbatim, then dead-ended — the same defect fixed in the sibling caller two
-  commits earlier. Fixing it in both places would have left the trap for the third
-  caller, so both now share `lead_digest.render`. (2) The RICH card — the loudest
-  sender and what actually posts in production — ignored the opt-out entirely; C4 had
-  only fixed the legacy drip, so "I've stopped following up with you" was false for
-  the message a rep is most likely to mean. (3) The escalation named a rep recomputed
-  from TERRITORY, but a rich card routes by Salesforce ownership first, so it could
-  tell a manager "this went to X" about somebody who was never asked; it now reads
-  `rich_card_snapshots.slack_user_id`, the value the card actually recorded.
-- `verified` 2026-08-09 `SALESFORCE_LEAD_ENRICHMENT_UPDATES_ENABLED=1` sits in the
-  droplet `.env` and **gates no code anywhere** — the string appears nowhere in the
-  repo. It reads as a shipped feature flag and is not one, which is precisely the
-  "I was told it was configured" trap. Being removed.
-- `needs-testing` 2026-08-09 **THE SALESFORCE UPDATE PATH DOES NOT EXIST.** The
-  gateway deliberately contains no update or delete primitive (zero `requests.patch`
-  in the package), so BACKFILLING the Leads already written is currently impossible.
-  Organization-only Leads now carry Street/City/PostalCode/Website/students/Industry
-  — but those columns are written by ONE enrichment path the campaign batch never
-  calls, so on a bulk load they may still be empty. Coverage is being measured before
-  this ask is called closed. Still missing outright: `Phone` on the org payload,
-  `MobilePhone` anywhere, ZoomInfo firmographics (`Industry` is a local guess from the
-  entity name, `NumberOfEmployees` is never set), and any fallback to a
-  superintendent when the ideal contact is not found.
-- `needs-testing` 2026-08-09 **THE LEARNING SYSTEM AND CROSS-PERSON ROUTING ARE NOT
-  BUILT.** Nothing scores message wording by engagement, rewrites, or re-sends; no
-  tool can message a third party (that is currently unrepresentable, by the same
-  design that makes the Resend surface safe, so building it deliberately widens a
-  safety boundary and needs care). `db_engagement` + `followup_nudges.state` are
-  enough to measure a variant's reply rate — measure before optimising.
-- `verified` 2026-08-10 **ALL THREE SYSTEMS EXERCISED LIVE, NOT JUST UNIT-TESTED.**
-  SLACK (production, playground): "remind me friday morning to circle back on the
-  texas rfps" → Grant resolved the date itself and confirmed in one line; "what
-  reminders do i have" listed it; "stop reminding me" → *"all reminders and
-  follow-ups are off, and I cancelled the Texas RFP one"* — the confirmation naming
-  what it ACTUALLY cancelled is the C2 fix live; "turn them back on" → restored, and
-  it pointedly did NOT silently resurrect the cancelled reminder, it offered to.
-  SALESFORCE: *"whats in salesforce for bellaire"* returned BOTH matches **with
-  working Lightning links in the message**, flagged possible-not-confirmed, and
-  called the health centre out as likely unrelated — the exact gap Chase reported.
-  ZOOMINFO: through Slack, a free preview quoted three IT people, their exact cost
-  (3 credits), the remaining balance, and all three do-not-call flags, then ASKED
-  before spending.
-- `verified` 2026-08-10 **A REAL PAID ZOOMINFO PULL FILLED THE LEAD CHASE OPENED.**
-  Birmingham Community Charter: 25 people found for ZERO credits, 2 pulled for 2
-  credits — Vic Chalabian (Manager, Information Technology Systems) and Kristine
-  Torres (Chief Business Officer), both with real `@bcchs.net` emails. Vic's number
-  was WITHHELD as do-not-call. Stored `vendor_licensed`, never `verified`.
-- `verified` 2026-08-10 **THAT PULL EXPOSED A FALSE CLAIM BEING WRITTEN INTO THE
-  CRM.** The Salesforce Lead Description read *"Contact verified verbatim on unknown
-  source."* — a claim of verification, citing nothing, about vendor data nobody
-  checked. `_contact_evidence` special-cased only `linkedin_only` and fell through to
-  the verified wording for everything else. Every evidence class now says what it
-  actually is, and a contact with no captured source page claims no verification at
-  all. This string outlives every Slack thread, which is what makes it the most
-  durable claim Grant makes about a person.
-- `verified` 2026-08-10 **THE CREDIT LEDGER IS PER-DATABASE, NOT A VENDOR BALANCE.**
-  Production's ledger reads 2 consumed and my laptop's also reads 2, but BOTH drew on
-  the same ZoomInfo account, so true vendor consumption this period is 4. The cap
-  still protects each database from overspending itself; it cannot see spend from
-  anywhere else. Worth knowing before anyone treats "998 remaining" as a fact about
-  the account rather than about that database.
-- `needs-testing` 2026-08-09: **no nudge, escalation, reminder or capability follow-up
-  has been delivered live.** `followup_nudges` and `reminders` are empty in production;
-  no `nudge` cron line exists; production asks are NOT seeded. LinkedIn connection
-  messages (Chase asked) are NOT built. The 07-20 "367 gold California" figure told to
-  Chase matches nothing in the database (true: 49 raw / 14 searchable) and was never
-  corrected in-channel.

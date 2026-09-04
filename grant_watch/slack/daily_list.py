@@ -16,6 +16,12 @@ impossible because `daily_list_items` carries `UNIQUE(channel, lead_id)`, so whe
 material runs out the next-newest unseen lead is simply an older one. There is no
 backfill mode to get wrong, and no pointer that can be left in the wrong place.
 
+THE WALK STOPS AT THE CEILING (Chase, 2026-09-04). Three lists consumed every award
+newer than 2026-06-08, and at 25 a day against ~2–3 arriving the next stop was 2025.
+`candidates` now admits only awards obligated within `scoring.CARD_MAX_AWARD_MONTHS`,
+so N is a cap and the list is as long as the fresh material — short on a quiet day,
+never padded with old money. The same constant gates the drip card and the nudges.
+
 EVERY ROW STATES ITS AGE. `presentation.award_age_phrase` exists because of the call
 above; a date a rep has to do arithmetic on is not the same as being told the money is
 eleven months gone.
@@ -38,6 +44,7 @@ from datetime import date, datetime, timezone
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
+from .. import scoring
 from ..db_common import LEAD_EVENT_SELECT, UNCLAIMED_LEAD_PREDICATE
 from .daily_list_card import build_blocks, notification_text
 
@@ -52,19 +59,33 @@ _AWARD_EVENTS = ("award_obligated", "award_announced")
 
 
 def candidates(
-    conn: sqlite3.Connection, channel: str, limit: int = DEFAULT_LIST_SIZE
+    conn: sqlite3.Connection,
+    channel: str,
+    limit: int = DEFAULT_LIST_SIZE,
+    today: date | None = None,
 ) -> list[sqlite3.Row]:
-    """The freshest unseen awards for one channel, newest first.
+    """The freshest unseen awards for one channel, newest first — and none past the
+    ceiling.
 
     `occurred_on` MUST be present. An undated award cannot be placed in a list whose
     entire claim is recency, and `scoring.grade` already sends undated awards to
     SILVER for the same reason. `amount > 0` is the renderer's precondition, carried
     in the query that feeds it — the lesson `nugget_candidates` records at length.
 
+    THE LIST IS VARIABLE-LENGTH BY DESIGN (Chase, 2026-09-04). `limit` is a cap, not a
+    quota: the list shows every unseen award obligated on or after
+    `scoring.card_award_cutoff(today)` and stops there, so on a quiet day it is short
+    and it is never padded out with older awards to look busy. Before this, 25 a day
+    against ~2–3 new awards a day meant the list walked backwards ~10× faster than
+    the data arrived, and would have been serving year-old awards within six weeks —
+    the exact staleness the drip card was being asked to stop. A future date is
+    excluded for the same reason `award_age_phrase` refuses to describe one.
+
     `id DESC` breaks ties so a repeated run returns the SAME rows: 17 of the freshest
     25 in production share one `occurred_on`, and without a total order the selection
     is nondeterministic.
     """
+    today = today or datetime.now(timezone.utc).date()
     placeholders = ",".join("?" for _ in _AWARD_EVENTS)
     return list(
         conn.execute(
@@ -74,6 +95,7 @@ def candidates(
                   AND e.verification_status='verified'
                   AND e.event_type IN ({placeholders})
                   AND e.occurred_on IS NOT NULL AND e.occurred_on != ''
+                  AND date(e.occurred_on) BETWEEN ? AND ?
                   AND l.amount IS NOT NULL AND l.amount > 0
                   AND l.id NOT IN (SELECT lead_id FROM daily_list_items
                                    WHERE channel=?)
@@ -82,7 +104,14 @@ def candidates(
                   AND {UNCLAIMED_LEAD_PREDICATE}
                 ORDER BY date(e.occurred_on) DESC, l.id DESC
                 LIMIT ?""",
-            (*_AWARD_EVENTS, channel, channel, limit),
+            (
+                *_AWARD_EVENTS,
+                scoring.card_award_cutoff(today).isoformat(),
+                today.isoformat(),
+                channel,
+                channel,
+                limit,
+            ),
         )
     )
 
@@ -196,7 +225,7 @@ def run(
     today = at.date()
     if not force and already_listed_today(conn, channel, today):
         return "skip: this channel already had its list today"
-    rows = candidates(conn, channel, limit)
+    rows = candidates(conn, channel, limit, today)
     if not rows:
         return "skip: nothing unseen to list"
 

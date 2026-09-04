@@ -166,14 +166,27 @@ def test_school_qualifies_like_a_district() -> None:
     assert result.eligible
 
 
-def test_exact_twelve_month_boundary_is_inclusive() -> None:
-    """An award exactly one calendar year old remains eligible."""
-    assert policy.evaluate(_valid(award_date="2025-07-22")).eligible
+def test_exact_ceiling_boundary_is_inclusive() -> None:
+    """An award exactly `CARD_MAX_AWARD_MONTHS` calendar months old is still eligible.
+
+    Six months, not twelve (Chase, 2026-09-04): the twelve-month rule let an award
+    obligated October 2025 reach the channel — and the manager's phone — in
+    September 2026. TODAY is 2026-07-22, so the cutoff is 2026-01-22.
+    """
+    assert policy.AWARD_MAX_MONTHS == 6
+    assert policy.evaluate(_valid(award_date="2026-01-22")).eligible
 
 
-def test_one_day_beyond_twelve_month_boundary_is_rejected() -> None:
-    """Calendar-month policy does not silently become a 372-day window."""
-    result = policy.evaluate(_valid(award_date="2025-07-21"))
+def test_one_day_beyond_the_ceiling_is_rejected() -> None:
+    """Calendar-month policy does not silently become a 183-day window."""
+    result = policy.evaluate(_valid(award_date="2026-01-21"))
+    assert result.reason is Reason.AWARD_TOO_OLD
+
+
+def test_an_eleven_month_old_award_is_no_longer_a_card() -> None:
+    """The Cuba City shape: obligated 2025-10-10, judged on 2026-09-02. It passed
+    the old rule with a month to spare and must fail this one."""
+    result = policy.evaluate(_valid(award_date="2025-10-10", today=date(2026, 9, 2)))
     assert result.reason is Reason.AWARD_TOO_OLD
 
 

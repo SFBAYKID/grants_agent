@@ -571,7 +571,17 @@ def pick(
     with a low hit rate (so RFPs are silver at best, never surfaced above a grant). A
     program bulletin is the last resort. The daily cap keeps it to one."""
     today = today or datetime.now(timezone.utc).date()
-    nuggets = db.nugget_candidates(conn, channel)
+    # ONLY AN AWARD UNDER THE CEILING IS PUSHED. `nugget_candidates` is the grade's
+    # view (gold = within a year); this card is the one that tags a person, and
+    # `scoring.CARD_MAX_AWARD_MONTHS` is the rule for that. Filtered here rather than
+    # in the query because this is where the tick's clock is, and because an empty
+    # result must fall through to RFPs and bulletins exactly as an empty pool does —
+    # never to an older award.
+    nuggets = [
+        n
+        for n in db.nugget_candidates(conn, channel)
+        if scoring.award_is_card_fresh(n["current_event_occurred_on"], today)
+    ]
     platinum = [n for n in nuggets if _is_platinum(n, today)]
     if platinum:
         return "platinum", _best_nugget(conn, platinum, channel)
