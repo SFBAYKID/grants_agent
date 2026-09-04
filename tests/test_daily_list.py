@@ -24,6 +24,10 @@ from drip_support import mk_lead
 
 CHANNEL = "C0B02721MNK"
 DAY_ONE = datetime(2026, 9, 2, 18, 0, tzinfo=timezone.utc)
+# Every test here runs on the FIXED clock above, so a fixture must carry an award
+# date pinned near it: the six-month ceiling would otherwise start excluding the
+# wall-clock default on 2026-10-03, with nothing changed (architectural-critic).
+PINNED = "2026-08-15"
 
 
 class FakeSlack:
@@ -236,7 +240,7 @@ def test_an_empty_pool_says_so_rather_than_posting_nothing(
         daily_list.run(
             FakeSlack(), CHANNEL, conn, limit=5, now=DAY_ONE + timedelta(days=1)
         )
-        == "skip: nothing unseen to list"
+        == "skip: nothing unseen inside the six-month line to list"
     )
 
 
@@ -256,7 +260,7 @@ def test_the_blocks_stay_inside_slack_s_ceiling(tmp_path: Path) -> None:
     """`invalid_blocks` RELEASES the whole list, so 30 cards must not post nothing."""
     conn = db.connect(tmp_path / "big.db")
     for n in range(30):
-        mk_lead(conn, iid=f"B{n}", entity=f"District {n}")
+        mk_lead(conn, iid=f"B{n}", entity=f"District {n}", start=PINNED)
     rows = daily_list.candidates(conn, CHANNEL, 30)
     assert len(rows) == 30
     blocks = daily_list.build_blocks(rows, date(2026, 9, 2))
@@ -273,7 +277,7 @@ def test_a_lead_is_never_consumed_without_being_shown(tmp_path: Path) -> None:
     """
     conn = db.connect(tmp_path / "burn.db")
     for n in range(60):
-        mk_lead(conn, iid=f"C{n}", entity=f"District {n}")
+        mk_lead(conn, iid=f"C{n}", entity=f"District {n}", start=PINNED)
     client = FakeSlack()
     daily_list.run(client, CHANNEL, conn, limit=60, now=DAY_ONE)
 
@@ -294,7 +298,7 @@ def test_the_header_never_promises_more_than_it_shows(tmp_path: Path) -> None:
     """It said "25 newest awards" above 22 cards, whose last one read "22 of 25"."""
     conn = db.connect(tmp_path / "header.db")
     for n in range(60):
-        mk_lead(conn, iid=f"D{n}", entity=f"District {n}")
+        mk_lead(conn, iid=f"D{n}", entity=f"District {n}", start=PINNED)
     rows = daily_list.candidates(conn, CHANNEL, 60)
     blocks, shown = daily_list.build_blocks(rows, date(2026, 9, 2))
     assert len(shown) < len(rows), "must truncate, or the header cannot be wrong"
@@ -309,7 +313,7 @@ def test_twenty_five_cards_now_fit(tmp_path: Path) -> None:
     """The number Chase actually chose. With a divider each it needed 53 of 50."""
     conn = db.connect(tmp_path / "fit.db")
     for n in range(25):
-        mk_lead(conn, iid=f"E{n}", entity=f"District {n}")
+        mk_lead(conn, iid=f"E{n}", entity=f"District {n}", start=PINNED)
     rows = daily_list.candidates(conn, CHANNEL, 25)
     blocks, shown = daily_list.build_blocks(rows, date(2026, 9, 2))
     assert len(shown) == 25, "all 25 must render, not 22"

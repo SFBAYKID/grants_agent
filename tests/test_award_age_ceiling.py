@@ -227,11 +227,12 @@ def test_the_gate_reads_only_evidence_of_age_never_its_absence(tmp_path: Path) -
 
 
 def test_the_follow_up_line_is_the_card_line(tmp_path: Path) -> None:
-    """A card exactly at the ceiling is still chased; one day past it is not. Judged in
-    business time, so a card is not dropped at 17:00 Pacific because UTC rolled over."""
+    """A card exactly at the ceiling is still chased; one day past it is not. Judged on
+    the UTC date, the same calendar the card paths use, so one award is inside or
+    outside the line on every surface at once."""
     from nudge_helpers import _card, _conn
 
-    # 2026-09-04 23:30 UTC is still 2026-09-04 in Pacific; the cutoff is 2026-03-04.
+    # 2026-09-04 23:30 UTC: the cutoff is 2026-03-04 on every surface.
     judged = datetime(2026, 9, 4, 23, 30, tzinfo=timezone.utc)
     conn = _conn(_isolated(tmp_path, "edge"))
     _card(conn, judged - timedelta(days=2), awarded_on="2026-03-04")
@@ -241,3 +242,31 @@ def test_the_follow_up_line_is_the_card_line(tmp_path: Path) -> None:
     _card(conn, judged - timedelta(days=2), awarded_on="2026-03-03")
     assert _card_kinds(conn, judged) == set()
     conn.close()
+
+
+# ------------------------------------------------------------------ the rich card
+def test_the_rich_review_window_is_not_filled_by_the_old_cohort(tmp_path: Path) -> None:
+    """One hundred and fifty old $500,000 golds and one fresh $150,000 gold. The old
+    rows out-SCORE the fresh one (an eleven-month award is 0.86 fresh to `lead_score`),
+    so a ceiling applied only after the 100-row slice would review 100 rejections and
+    never see the fresh lead — while the paid queue, reading a wider pool, enriched it
+    for a card delivery could not reach (architectural-critic, 2026-09-04)."""
+    from grant_watch.campaign import preparation
+
+    conn = db.connect(tmp_path / "t.db")
+    for n in range(150):
+        mk_lead(conn, iid=f"OLD{n}", entity=f"Old {n}", start="2025-10-10")
+    fresh = mk_lead(
+        conn, iid="FRESH", entity="Fresh District", start="2026-08-15", amount=150_000.0
+    )
+    at = datetime(2026, 9, 4, 17, 0, tzinfo=timezone.utc)
+    reviewed = {
+        r.lead_id
+        for r in preparation.review_candidates(
+            conn, "C1", frozenset(), limit=100, now=at
+        )
+    }
+    assert reviewed == {fresh}, "the window must hold the fresh lead and nothing old"
+    assert preparation.preparable_lead_ids(conn, "C1", now=at) in ((fresh,), ()), (
+        "the paid queue may hold only the fresh lead, never an old one"
+    )

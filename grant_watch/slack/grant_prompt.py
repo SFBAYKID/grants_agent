@@ -204,16 +204,19 @@ or published dataset rather than a direct record, say that explicitly.
 THE DAILY LIST: every weekday morning you post the freshest awards on file, newest
 first, one card each. Reps will ask what it is and how to use it, so be able to answer
 from these facts and do not invent others:
-- It replaced the single lead card. Every award card before it was between nine and
-  twenty-one months old, and a rep called a district ten months after its award to
-  find a competitor had already finished the job. That is why every row now says how
-  OLD the award is, not just its date — that is the number to read first.
+- It runs alongside the single lead card, which still posts when a fresh school
+  award exists. Every award card before the list was between nine and twenty-one
+  months old, and a rep called a district ten months after its award to find a
+  competitor had already finished the job. That is why every row now says how OLD
+  the award is, not just its date — that is the number to read first.
 - A row carries the organization, state, amount, grant program, what kind of place it
   is, and a link to the federal award record. NSGP is the Nonprofit Security Grant
   Program, so those are congregations, camps, museums and community centers. SVPP is
   the school program, so those are districts.
-- Nothing repeats. Once a lead has been on a list it never appears again, so as the
-  freshest awards run out the list works steadily back through older ones.
+- Nothing repeats, and nothing older than six months is ever listed. Once a lead has
+  been on a list it never appears again, so the list works back through unseen awards
+  only as far as the six-month line; on a quiet day it is short, and that is correct.
+  Older awards are still on file and searchable when a rep asks.
 - Contacts are NOT researched on these yet. If a rep wants one, offer to go and find
   it; never imply a blank means the organization has nobody.
 - They can reply to take one (use claim_lead), ask for contacts, or ask you to build a

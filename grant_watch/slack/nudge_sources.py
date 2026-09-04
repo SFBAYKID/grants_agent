@@ -241,12 +241,12 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
         """SELECT p.id,p.channel,p.ts,p.posted_at,p.lead_id,p.kind,p.style,
                   l.entity_name,l.status,l.state,l.source,l.amount,l.lead_grade,
                   s.slack_user_id AS snapshot_tagged,
-                  e.event_type AS award_event_type,
-                  e.occurred_on AS award_occurred_on
+                  fe.event_type AS award_event_type,
+                  fe.occurred_on AS award_occurred_on
              FROM posts p
              LEFT JOIN leads l ON l.id=p.lead_id
              LEFT JOIN rich_card_snapshots s ON s.id=p.snapshot_id
-             LEFT JOIN funding_events e ON e.id=l.current_event_id
+             LEFT JOIN funding_events fe ON fe.id=l.current_event_id
             WHERE p.lead_id IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM engagement e WHERE e.post_id=p.id)
             ORDER BY p.id DESC LIMIT 60"""
@@ -628,18 +628,25 @@ _TIER_RANK = {"platinum": 0, "gold": 1, "rfp": 2, "silver": 2, "watch": 3, "nugg
 def _award_past_ceiling(row: sqlite3.Row, now: datetime) -> bool:
     """Whether this card's award is too old for Grant to keep pushing it.
 
-    True only for a DATED award event older than `scoring.CARD_MAX_AWARD_MONTHS` at
-    `now` (business time — the ceiling is a calendar rule, so it is judged on the
-    calendar the reps live by). RFP cards, undated awards and cards with no event at
-    all return False and are chased as they always were.
+    True for a DATED award event that `scoring.award_is_card_fresh` rejects at `now`
+    — older than `CARD_MAX_AWARD_MONTHS`, or dated in the future, which is bad data
+    and not fresh either. RFP cards, undated awards and cards with no event at all
+    return False and are chased as they always were.
+
+    THE CALENDAR IS UTC, LIKE THE OTHER THREE SURFACES. `drip.run_drip`,
+    `daily_list.run` and `delivery.run` all judge the ceiling on `now.date()` in UTC;
+    a Pacific reading here would have made the drip's line one day stricter than the
+    nudge's during a 16:00–16:59 PST tick (architectural-critic, 2026-09-04). One
+    calendar means one award is inside or outside the line on all four at once.
     """
     if str(row["award_event_type"] or "") not in _AWARD_EVENT_TYPES:
         return False
     occurred = str(row["award_occurred_on"] or "")[:10]
     if not occurred:
         return False
-    today = now.astimezone(BUSINESS_TZ).date()
-    return not scoring.award_is_card_fresh(occurred, today)
+    return not scoring.award_is_card_fresh(
+        occurred, now.astimezone(timezone.utc).date()
+    )
 
 
 # The two event types that mean "money was granted" — the same pair every award

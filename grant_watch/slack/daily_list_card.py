@@ -135,7 +135,7 @@ def build_blocks(
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"Freshest funding — {len(shown)} newest awards",
+                "text": f"Freshest funding — {_count(len(shown))}",
             },
         },
         {
@@ -157,7 +157,13 @@ def build_blocks(
     return blocks, list(shown)
 
 
+def _count(n: int) -> str:
+    """ "1 newest award" / "7 newest awards". A variable-length list makes one
+    common, and a header that says "1 newest awards" reads as a bug."""
+    return f"{n} newest award{'' if n == 1 else 's'}"
+
+
 def notification_text(rows: list[sqlite3.Row]) -> str:
     """The lock-screen line: names the count and the freshest organization."""
     first = safe_text(clean_entity_name(rows[0]["entity_name"], 60), 60) if rows else ""
-    return f"Freshest funding: {len(rows)} newest awards, starting with {first}"
+    return f"Freshest funding: {_count(len(rows))}, starting with {first}"

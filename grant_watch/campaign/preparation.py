@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, replace
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from .. import scoring, territory, reminders
 from ..db_common import UNCLAIMED_LEAD_PREDICATE, UNLISTED_LEAD_PREDICATE
@@ -73,8 +73,20 @@ REMEDIABLE_REASONS = frozenset(
 )
 
 
-def _rows(conn: sqlite3.Connection, audience: str, limit: int) -> list[sqlite3.Row]:
-    """Return bounded unsurfaced Gold projections with their current event/run."""
+def _rows(
+    conn: sqlite3.Connection, audience: str, limit: int, today: date | None = None
+) -> list[sqlite3.Row]:
+    """Return bounded unsurfaced Gold projections with their current event/run.
+
+    THE AGE CEILING IS APPLIED HERE, BEFORE THE SLICE — not only in `policy.evaluate`
+    (architectural-critic, 2026-09-04). `lead_score` treats an eleven-month award as
+    0.86 fresh, so every $500,000 row of the 2025-10-10 cohort outranks any fresher
+    award under ~$360,000. With the ceiling checked only after the `limit` slice, the
+    review window was one hundred AWARD_TOO_OLD rejections and a fresh $150,000 gold
+    was never reviewed — and `preparable_lead_ids`, which reads a wider pool, would
+    still have paid to enrich it for a card the delivery path could never reach.
+    """
+    today = today or datetime.now(timezone.utc).date()
     candidates = list(
         conn.execute(
             f"""SELECT l.*, e.id AS event_id, e.observation_id,
@@ -110,6 +122,11 @@ def _rows(conn: sqlite3.Connection, audience: str, limit: int) -> list[sqlite3.R
             (audience, audience, audience),
         )
     )
+    candidates = [
+        row
+        for row in candidates
+        if scoring.award_is_card_fresh(row["occurred_on"], today)
+    ]
     candidates.sort(
         key=lambda row: (
             scoring.lead_score(
@@ -541,7 +558,7 @@ def review_candidates(
     at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     return tuple(
         _candidate(conn, row, audience, channel_members, at)
-        for row in _rows(conn, audience, limit)
+        for row in _rows(conn, audience, limit, at.date())
     )
 
 

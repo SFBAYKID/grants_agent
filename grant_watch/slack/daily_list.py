@@ -13,8 +13,9 @@ we are always checking for fresh data."
 WALKING BACKWARDS IS NOT IMPLEMENTED, AND THAT IS THE POINT. Order by award date
 descending, skip what this channel has already been shown, take the top N. Repeats are
 impossible because `daily_list_items` carries `UNIQUE(channel, lead_id)`, so when fresh
-material runs out the next-newest unseen lead is simply an older one. There is no
-backfill mode to get wrong, and no pointer that can be left in the wrong place.
+material runs out the next-newest unseen lead is simply an older one — down to the
+ceiling below, and no further. There is no backfill mode to get wrong, and no pointer
+that can be left in the wrong place.
 
 THE WALK STOPS AT THE CEILING (Chase, 2026-09-04). Three lists consumed every award
 newer than 2026-06-08, and at 25 a day against ~2–3 arriving the next stop was 2025.
@@ -227,7 +228,7 @@ def run(
         return "skip: this channel already had its list today"
     rows = candidates(conn, channel, limit, today)
     if not rows:
-        return "skip: nothing unseen to list"
+        return "skip: nothing unseen inside the six-month line to list"
 
     if dry_run:
         head = ", ".join(str(row["entity_name"]) for row in rows[:3])

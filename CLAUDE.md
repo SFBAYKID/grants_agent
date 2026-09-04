@@ -160,13 +160,33 @@ affect Chase's other projects.
   the paid queue. Production had bought a `contact_refresh` for lead 8466 alone on TEN
   separate mornings (08-13 → 09-02). Pinned by a test at two clocks.
 - `verified` offline 2026-09-04 **MUTATION-PROVEN BOTH WAYS.** Ceiling set back to 12:
-  15 tests fail. Nudge gate deleted: 2 fail. Boundary day inclusive on every surface,
-  judged in Pacific business time for the nudges so a card is not dropped at 17:00 PT
-  because UTC rolled over. Thirty-two pre-existing drip tests broke on the day the
+  **16** tests fail (I first wrote 15; the critic counted). Nudge gate deleted: 2
+  fail. `_rows` filter deleted: 2 fail. Boundary day inclusive on every surface,
+  judged on the UTC date everywhere. Thirty-two pre-existing drip tests broke on the day the
   ceiling shipped because `drip_support.mk_lead` defaulted every award to 2025-10-01;
   the default is now thirty days before the wall clock, tests that pin a date string
   pass `start` explicitly, and an EMPTY start still means an unknown date. Suite
-  **1761 passed, 90 skipped**; `ruff` clean on `grant_watch/` and `tests/`.
+  **1762 passed, 90 skipped**; `ruff` clean on `grant_watch/` and `tests/`.
+- `verified` 2026-09-04 **THE CRITIC FOUND THE CEILING ONE LAYER TOO HIGH ON THE PAID
+  PATH, AND IT WAS RIGHT.** `preparation._rows` selected every gold row, sorted by
+  `lead_score`, sliced to 100, and only THEN did `policy.evaluate` apply the ceiling.
+  `lead_score` calls an eleven-month award 0.86 fresh, so every $500,000 row of the
+  2025-10-10 cohort outranked any fresher award under ~$360,000: the review window
+  would have been one hundred `AWARD_TOO_OLD` rejections, a fresh $150,000 gold never
+  reviewed and posted only as the plain fallback card — while `preparable_lead_ids`,
+  reading a 500-row pool, PAID to enrich it for a card delivery could never reach.
+  Second commit: the ceiling runs in `_rows` before the slice, pinned by 150 old
+  $500k rows plus one fresh $150k row at `limit=100`. From the same review: my
+  paid-queue test was vacuous (a later clock let `STALE_OBSERVATION` carry it —
+  rewritten to re-date the award at the SAME clock); four daily-list tests on a
+  fixed 2026-09-02 clock would have started failing on 2026-10-03 with a `KeyError`
+  that says nothing about dates (pinned); one claim-suppression test judged at a
+  2031 clock went empty (now the wall clock its fixture uses); `grant_prompt.py`
+  told reps the list "works steadily back through older ones" and "replaced the
+  single lead card" — both false, both fixed; the nudge gate read the calendar in
+  Pacific while the other three surfaces use UTC (UTC everywhere now); and a
+  one-row list was headed "1 newest awards". Nothing the critic checked found a
+  fifth push surface, a migration need, or a consumer of the renamed reason string.
 - `needs-testing` 2026-09-04 **WHEN THIS DEPLOYS, THE DRIP CARD GOES SILENT FOR SCHOOLS.**
   All 162 gold leads fall outside the line at once; each tick falls through to silver
   RFPs, then bulletins, then `skip: nothing new worth saying`. That is the honest

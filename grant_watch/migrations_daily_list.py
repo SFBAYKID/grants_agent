@@ -13,7 +13,8 @@ posted the data from a previous day then we slowly go back but we are always che
 for fresh data". Walking backwards needs no logic at all once repeats are impossible:
 order by award date descending, skip what this channel has already seen, take the top
 N. When fresh material runs out the next-newest unseen lead is by definition older, so
-the list works back through history on its own.
+the list works back through history on its own — as far as `scoring.CARD_MAX_AWARD_MONTHS`
+(2026-09-04), and no further.
 
 THE STATE COLUMN EXISTS FOR THE AMBIGUOUS SEND. Rows are reserved BEFORE the Slack
 call. A clean success marks them `delivered`; a definite refusal releases them so the

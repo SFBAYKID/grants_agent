@@ -98,10 +98,16 @@ def test_the_paid_enrichment_worker_will_not_buy_for_a_claimed_lead(
     """
     conn, subject, control = two_leads
     _take(conn, "Castle Rock")
+    # THE WALL CLOCK, NOT `NOW`. The fixture's awards are dated thirty days before
+    # the wall clock (`drip_support.FRESH_START`), and `review_candidates` now drops
+    # any award past the six-month ceiling BEFORE the review — judged at 2031 the set
+    # would be empty and the assertion below would fire for a reason that has nothing
+    # to do with claims. The two clocks agree by construction here; a fixed one would
+    # need a fixed award date to match it.
     reviewed = {
         review.lead_id
         for review in preparation.review_candidates(
-            conn, CHANNEL, frozenset(), limit=500, now=NOW
+            conn, CHANNEL, frozenset(), limit=500, now=datetime.now(timezone.utc)
         )
     }
     assert reviewed, "an empty review set would make this assertion meaningless"

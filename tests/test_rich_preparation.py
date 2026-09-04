@@ -409,8 +409,14 @@ def test_the_paid_queue_never_spends_on_an_award_past_the_ceiling(
     which is not remediable, so the queue is empty — and the CONTROL is the same
     fixture inside the ceiling, where it is queued."""
     conn = _eligible_conn(tmp_path / "old.db")
-    assert preparable_lead_ids(conn, "C1", now=NOW) == (1,)
-    later = datetime(2026, 12, 22, 18, 0, tzinfo=timezone.utc)  # award is 6m21d old
-    assert preparable_lead_ids(conn, "C1", now=later) == ()
-    (review,) = review_candidates(conn, "C1", frozenset(), now=later)
-    assert review.reason is Reason.AWARD_TOO_OLD
+    assert preparable_lead_ids(conn, "C1", now=NOW) == (1,), "control: queued"
+    # The production shape: the award is old but the OBSERVATION is fresh (the poller
+    # re-confirmed it this morning). Judged at the same NOW, so nothing else in the
+    # fixture can be the reason — a later clock would have let STALE_OBSERVATION carry
+    # the assertion instead (architectural-critic, 2026-09-04).
+    conn.execute("UPDATE funding_events SET occurred_on='2026-01-01' WHERE id=2")
+    conn.commit()
+    assert preparable_lead_ids(conn, "C1", now=NOW) == ()
+    assert review_candidates(conn, "C1", frozenset(), now=NOW) == ()
+    (review,) = review_candidates(conn, "C1", frozenset(), now=NOW, limit=1) or (None,)
+    assert review is None, "the row must be gone BEFORE the slice, not rejected after"
