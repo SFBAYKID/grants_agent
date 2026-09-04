@@ -125,11 +125,58 @@ affect Chase's other projects.
 
 ## Current status (2026-09-04, the card was eleven months old and so was every card before it)
 
-- `verified` 2026-09-04 **PRODUCTION IS STILL `18f8e53`, SCHEMA 49. NOTHING FROM THIS
-  SESSION IS DEPLOYED.** The change below is on `main` and needs Chase's own
-  authorization to ship; a guardian read-only pass (14:16–14:22 PDT, one multiplexed
-  SSH, DB opened `mode=ro`, no Slack client built) supplied every production number
-  here.
+- `verified` 2026-09-04 **PRODUCTION IS `96e9f45`, SCHEMA 49.** Chase, verbatim:
+  *"deploy it"*, in reply to a message that said production was still `18f8e53` and
+  shipping needed his own go-ahead. Pre-deploy revision READ from disk (`18f8e53`);
+  25/25 pre-existing files at that revision's blobs and the 2 new files absent, so a
+  stale tree rather than a half-written one. Synced from a `git archive` of the
+  pinned commit in two phases — `scoring.py` and the NEW `drip_text.py` first (42 ms,
+  verified, gated), then the other 25 (52 ms) — because alphabetical order lands
+  `drip.py` before the module it now imports. **27/27 byte-verified**, second pass
+  empty with a one-byte control, `--delete` omitted after a zero-deletion preview.
+  PID 665836 (the exact PID the `3ac8ba0` deploy recorded) → **782890**, **outage
+  0.222 s**, one listener, Bolt clean, tracebacks 13 → 13. `.env` sha and mtime
+  unmoved, 63 `.env*` copies as a path list by `cmp`, crontab byte-identical by
+  `cmp`, no migration (`migrations_daily_list.py` is docstring-only), schema 49 → 49.
+  Rows leads 11033, posts 54, `followup_nudges` 116, `daily_list_items` 75,
+  `lead_claims` 2, FK orphans 2 — all unmoved. Backup
+  `~/grant_watch.db.bak.20260904T233655Z`, `integrity_check ok` on the copy;
+  `pre46` untouched. The listener's MODULE-LEVEL closure held none of the changed
+  code, but `conversation.py` imports `grant_prompt` at module level and is itself
+  imported lazily, so 7 of the 10 changed modules were reachable — a closure read at
+  boot is a lower bound, and the restart was required.
+- `verified` 2026-09-04 **THE CEILING HOLDS ON PRODUCTION DATA, PROVEN READ-ONLY
+  BEFORE ANY CRON TICK.** `drip.pick` → **None** (162 gold candidates, 0 fresh, 0 RFPs,
+  84 bulletins none relevant); `run_drip` dry-run → `skip: nothing new worth saying
+  (162 gold awards on file past the six-month line)`. `daily_list.candidates` at 25 →
+  25 rows, 2026-06-08 back to 2026-05-26, all inside the 2026-03-04 line; **98 remain
+  inside the line today, 96 at Monday's cutoff**. `_unengaged_cards` at now and at
+  Monday 08:00 PT → 14 candidates on 7 anchors (bulletins and RFPs, all
+  ledger-suppressed) and **none of posts 49–54** — Valle Lindo (50) and Shonto (54)
+  had zero ledger rows and would otherwise have fired. `preparable_lead_ids` → `()`
+  and `review_candidates` → 0 at now and at Monday 07:45, so `rich-prepare` will
+  spend nothing on the cohort. **The CLI dry-run of `drip` cannot show any of this:**
+  it says `skip: daily cap reached (1)`, because the rich path runs first and a cap
+  outcome never falls through — the held-back line was read by calling `run_drip`
+  directly on the deployed bytes.
+- `verified` 2026-09-04 **DROPLET PYTEST IS 2 FAILED / 1765 PASSED / 90 SKIPPED, TOTALS
+  RECONCILE TO 1857, AND BOTH FAILURES NOW HAVE ONE PROVEN CAUSE.** `cli.py:674` runs a
+  bare `load_dotenv()` as `main()`'s first line, and `test_cli.py:308` calls
+  `cli.main([command])`, loading the production `.env` into the test session
+  (`GRANT_RICH_CARD_ENABLED=1`, the real ledger path). Leaker plus victim fails,
+  victim alone passes, for BOTH `test_unresolved_cron_outcomes_return_nonzero` and
+  `test_contact_fill` — and the laptop reproduces with the flag set. So the
+  2026-08-26 "unexplained" failure was never ordering or cross-test state: the ledger
+  test reads REAL current-month ZoomInfo spend. The fix is one `monkeypatch` line in
+  the leaker; not done in this change, and it supersedes the `search.py:616` guess
+  recorded below as the candidate cause.
+- `verified` 2026-09-04 **TWO PREMISES IN MY DEPLOY BRIEF WERE WRONG AND THE GUARDIAN
+  CORRECTED BOTH.** "No cron job ticks until Monday" — the `*/5` keepalive, the
+  `3-59/10` watchdog and the 17:00/17:30 drip ticks all run on a Friday evening, so
+  the sync and restart were timed into gaps rather than assumed safe. And
+  "`grant_prompt` is in the listener's import closure" — not at module level (see
+  above). The 17:00 PT drip tick is the first cron execution on the new code; its
+  `cron.log` line is `needs-testing` until the guardian's watcher relays it.
 - `verified` 2026-09-04 **THE GOLD POOL IS ONE DATE.** `nugget_candidates` on
   `C0BSDPM2KPB` returns **162** leads: all SVPP, all `award_obligated 2025-10-10`, all
   `entity_type=''`. The last 20 cards were all that cohort, **305.8 → 329.8 days old
@@ -219,7 +266,9 @@ affect Chase's other projects.
   conftest guard that wraps only `db.connect`, so `test_contact_fill` reads the
   developer's REAL `grant_watch.db` and fails anywhere that file is absent. A
   candidate mechanism for the droplet-only `test_contact_fill` failure recorded
-  2026-08-26. Its own change; not this one.
+  2026-08-26. Its own change; not this one. *(Superseded the same evening: the
+  proven cause is the bare `load_dotenv()` in `cli.py`, above. Kept, not edited
+  away.)*
 - `needs-testing` 2026-09-04 **WHEN THIS DEPLOYS, THE DRIP CARD GOES SILENT FOR SCHOOLS.**
   All 162 gold leads fall outside the line at once; each tick falls through to silver
   RFPs, then bulletins, then `skip: nothing new worth saying`. That is the honest
@@ -880,6 +929,6 @@ archive II, which had the room — `status_log_archive.md` at 795 still does not
 the next rotation must also use archive II. **The 2026-09-01 rotation had to create
 that THIRD file:** the chain was full, and moving a 218-line block into an archive
 already at 795 would have broken the very cap the rotation exists to respect.
-Current sizes: this file **885 lines**, `status_log.md`
+Current sizes: this file **934 lines**, `status_log.md`
 **855**, `status_log_archive.md` **795**,
 `status_log_archive_2.md` **374**.
