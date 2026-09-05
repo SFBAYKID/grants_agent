@@ -167,16 +167,32 @@ affect Chase's other projects.
   victim alone passes, for BOTH `test_unresolved_cron_outcomes_return_nonzero` and
   `test_contact_fill` — and the laptop reproduces with the flag set. So the
   2026-08-26 "unexplained" failure was never ordering or cross-test state: the ledger
-  test reads REAL current-month ZoomInfo spend. The fix is one `monkeypatch` line in
-  the leaker; not done in this change, and it supersedes the `search.py:616` guess
-  recorded below as the candidate cause.
+  test reads REAL current-month ZoomInfo spend. It supersedes the `search.py:616`
+  guess recorded below as the candidate cause. **Fixed the same evening, on the
+  laptop** (Chase: *"fix any last bugs"*): an autouse conftest guard patches
+  `cli.load_dotenv` to a no-op for every test — in conftest, not in the one leaking
+  test, for the same reason the real-database guard lives there — pinned by a test
+  that reads the repo `.env`'s KEY NAMES (never values), calls `cli.main`, and
+  asserts none arrived; disabling the guard fails it. And the cron-outcomes test
+  now `delenv`s the rich flag, so it is true in a shell that exports it on purpose —
+  proven by running the pair under `GRANT_RICH_CARD_ENABLED=1`. Suite
+  **1768 passed, 90 skipped**. `needs-testing`: these are test files, NOT synced to the droplet, so
+  the droplet suite still reads 2 failed until a tests-only sync (no restart) lands.
 - `verified` 2026-09-04 **TWO PREMISES IN MY DEPLOY BRIEF WERE WRONG AND THE GUARDIAN
   CORRECTED BOTH.** "No cron job ticks until Monday" — the `*/5` keepalive, the
   `3-59/10` watchdog and the 17:00/17:30 drip ticks all run on a Friday evening, so
   the sync and restart were timed into gaps rather than assumed safe. And
   "`grant_prompt` is in the listener's import closure" — not at module level (see
-  above). The 17:00 PT drip tick is the first cron execution on the new code; its
-  `cron.log` line is `needs-testing` until the guardian's watcher relays it.
+  above). **The 17:00 and 17:30 PT drip ticks both logged `skip: daily cap reached
+  (1)`** — the RICH path's cap from the 11:00 card, which never falls through to
+  `run_drip` — so the held-back line has still never appeared in `cron.log`, and its
+  first chance is Monday 04:00 PT. The guardian's tick watcher itself failed (its
+  control master was gone when it woke; exit 255, header only) and the ticks were
+  read from `cron.log` directly. Close-out `verified`: watchdog `nothing stuck` ×5,
+  keepalive `healthy` ×10, tracebacks 13 / 0 new, one listener (PID 782890), `posts`
+  54 → 54 with nothing posted after the deploy, `notification_outbox` rows since the
+  restart 0, `.env` and crontab unmoved, only the named backups and inventories left
+  on the tenant.
 - `verified` 2026-09-04 **THE GOLD POOL IS ONE DATE.** `nugget_candidates` on
   `C0BSDPM2KPB` returns **162** leads: all SVPP, all `award_obligated 2025-10-10`, all
   `entity_type=''`. The last 20 cards were all that cohort, **305.8 → 329.8 days old
@@ -929,6 +945,6 @@ archive II, which had the room — `status_log_archive.md` at 795 still does not
 the next rotation must also use archive II. **The 2026-09-01 rotation had to create
 that THIRD file:** the chain was full, and moving a 218-line block into an archive
 already at 795 would have broken the very cap the rotation exists to respect.
-Current sizes: this file **934 lines**, `status_log.md`
+Current sizes: this file **950 lines**, `status_log.md`
 **855**, `status_log_archive.md` **795**,
 `status_log_archive_2.md` **374**.

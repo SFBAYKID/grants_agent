@@ -312,6 +312,30 @@ def test_direct_slack_posting_cli_commands_do_not_exist(command: str) -> None:
     assert exc.value.code == 2
 
 
+def test_running_the_cli_in_a_test_does_not_load_the_real_dotenv() -> None:
+    """The test above is the one that used to poison every test after it.
+
+    `cli.main` loads the repo's `.env` from the calling file's directory upward, so
+    working directory and `tmp_path` cannot isolate it; only the conftest guard can.
+    This reads the real file's KEY NAMES (never values, never printed) to know what a
+    leak would look like, and asserts none of them arrived. Skipped, not passed,
+    where there is no `.env` to leak — a scrubbed CI copy proves nothing here.
+    """
+    import os
+
+    from dotenv import dotenv_values
+
+    keys = set(dotenv_values(Path(cli.__file__).resolve().parents[1] / ".env"))
+    if not keys:
+        pytest.skip("no repo .env to leak, so nothing to prove")
+    absent_before = keys - set(os.environ)
+    assert absent_before, "the environment already holds every .env key"
+    with pytest.raises(SystemExit):
+        cli.main(["digest"])
+    leaked = absent_before & set(os.environ)
+    assert not leaked, f"cli.main loaded {len(leaked)} .env key(s) into the session"
+
+
 def test_unresolved_cron_outcomes_return_nonzero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -324,6 +348,13 @@ def test_unresolved_cron_outcomes_return_nonzero(
     monkeypatch.setattr(cli.db, "connect", lambda: sentinel)
     monkeypatch.setenv("SLACK_CHANNEL_ID", "CGRANTS")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "offline-token")
+    # THE PLAIN DRIP PATH, SAID OUT LOUD. `cmd_drip` runs the rich card first when
+    # `GRANT_RICH_CARD_ENABLED` is set, and that path calls `.execute` on the
+    # sentinel before the patched `run_drip` is ever reached — the droplet failure
+    # of 2026-08-26 → 2026-09-04, once the CLI's own `load_dotenv()` had leaked
+    # production's flag into the session. The guard in conftest stops the leak; this
+    # line makes the test true in a shell that exports the flag on purpose.
+    monkeypatch.delenv("GRANT_RICH_CARD_ENABLED", raising=False)
     monkeypatch.setattr(
         drip,
         "run_drip",

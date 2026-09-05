@@ -103,3 +103,32 @@ def _never_touch_the_real_database(
     _real_readonly = db.connect_readonly
     monkeypatch.setattr(db, "connect", guarded)
     monkeypatch.setattr(db, "connect_readonly", guarded_readonly)
+
+
+@pytest.fixture(autouse=True)
+def _never_load_the_real_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the CLI's `load_dotenv()` from pouring the developer's `.env` into the
+    test session.
+
+    `cli.main` calls a bare `load_dotenv()` as its first line — correct for cron,
+    where the CLI IS the process — and `python-dotenv` resolves that from the CALLING
+    FILE'S directory upward, so from `grant_watch/cli.py` it always finds the repo's
+    real `.env`, whatever the working directory. One test calls `cli.main([...])` to
+    prove two commands do not exist, and every test after it in the session then
+    ran with production's environment: `GRANT_RICH_CARD_ENABLED=1` and the real
+    ZoomInfo ledger path. On the droplet that failed two tests for two weeks
+    (`test_unresolved_cron_outcomes_return_nonzero`, and `test_contact_fill`'s dry
+    run, which was reading REAL current-month spend) and it was recorded as
+    "unexplained" on 2026-08-26 because the laptop's `.env` lacks the flag. Found by
+    the guardian on the 2026-09-04 deploy: leaker plus victim fails, victim alone
+    passes.
+
+    Patched HERE, not in that one test, for the same reason the database guard
+    above is here: the next test to call `cli.main` must not be able to leak by
+    simply not knowing this. The name is patched on the `cli` module only — the
+    acceptance harness behind `GRANT_LLM_ACCEPTANCE=1` still loads its own `.env`
+    deliberately, through `dotenv` directly.
+    """
+    from grant_watch import cli
+
+    monkeypatch.setattr(cli, "load_dotenv", lambda *args, **kwargs: False)
