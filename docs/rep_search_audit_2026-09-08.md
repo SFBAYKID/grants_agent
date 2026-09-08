@@ -149,6 +149,11 @@ covering 41 programs. It is not included in the PA/ME workbook. Its Brooklyn row
 between programming and total; do not silently normalize source inconsistencies. General education
 awards are distinct from proven security procurement eligibility.
 
+`verified`: New York's
+[June 12 school food infrastructure announcement](https://agriculture.ny.gov/news/governor-hochul-awards-10-million-through-round-three-new-yorks-regional-school-food)
+names Putnam-Northern Westchester BOCES and KIPP NYC, each awarded $5 million. These two awards
+are not in the PA/ME workbook, and do not establish eligibility for security purchases.
+
 `verified`: guardian deployed committed revision `839eef3e312df3a40addf8639e786c49e072eb5f`
 from `origin/main` with a consistent integrity-checked DB backup and code backup. All 16 deployed
 files match the pinned commit; providers were synced before consumers. Production imports/config
@@ -161,6 +166,20 @@ counts remained unchanged. Post-restart monitoring found zero new tracebacks.
 identity, the exact approved explanatory comment, same-thread placement, filename and 25,090-byte
 hosted attachment. The source file hash matched the approved workbook before upload. The reply
 explicitly states partial coverage, approval/announcement dates, and unknown security eligibility for
-the Maine examples. Source verification for other states remains in progress.
+the Maine examples. Guardian then updated that same comment once with the verified CT/NY links
+and their award facts. Readback confirmed the same message and file, exact wording after Slack URL
+normalization, and an unchanged 17-message thread. No additional post or attachment was created.
 
-Comparable recent school award lists for NH/NY have not yet been verified by this follow-up.
+`verified`: a full runtime comparison confirmed all 152 production modules match `839eef3`, with
+a passing checksum negative control. On deployed code, the actual thread history makes Brett's NY
+export follow-up inherit March 8–September 8, and the pure guard corrects deliberately widened tool
+dates. This verification did not execute a search, write the database, or call a model.
+
+Comparable recent school award lists for NH have not yet been verified by this follow-up.
+
+`verified`: bounded live monitoring ended 12:20:46 PT, 5 minutes 9 seconds after upload. No new
+human messages, tool errors, or tracebacks appeared. Thread remained at 17 messages; all six
+original receipts were complete/delivered; listener PID 879302 remained the single healthy process.
+Temporary deployment/test/receipt artifacts and the SSH control connection were cleaned up; backups
+were retained. `needs-testing`: no fresh human-to-model turn arrived after deployment, so that live
+path was not observed beyond the focused offline tests and actual-history pure-guard verification.
