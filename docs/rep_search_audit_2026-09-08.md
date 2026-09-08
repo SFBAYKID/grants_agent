@@ -127,5 +127,40 @@ the document's programmatic/fiscal conditions. Per-row category, funds receipt, 
 are not established. PDF SHA-256: `e159930d550c2dd828081d47653c3c05a6bbfbded92da1953dfa6702585b4e80`.
 The PCCD catalog's reviewed live evidence does not mean a runtime poller exists; none does.
 
-`needs-testing`: deployment and source-workbook delivery require independent guardian readback.
-Comparable recent school award lists for ME/NH/CT/NY have not yet been verified by this follow-up.
+`verified`: a PA/ME workbook was independently reopened and checked after authoring and visual QA.
+All 353 PA rows retain applicant, county, IU, amount and PDF page. An independent PDF name-column
+extraction matches every applicant after whitespace normalization. The amount formula reconciles to
+the official total; approval dates are typed 2026-06-03 values. The Maine sheet contains four
+recent school/district examples from official announcements:
+
+- [July 30 greenhouse awards](https://www3.maine.gov/governor/mills/news/governor-mills-announces-500000-grants-help-expand-local-food-production-and-agricultural):
+  Limestone Community School, MSAD 33–Valley Unified Education Service Center, and RSU 50. The
+  source gives no recipient amounts; cells remain blank rather than splitting the program total.
+- [June 12 Augusta Schools award](https://mainedoenews.net/2026/06/12/augusta-schools-receives-later-secondary-school-start-time-planning-grant/):
+  $75,000 for later secondary school start time planning, with a June 1–September 10 contract period.
+
+These Maine grants do not establish security-purchase eligibility. This is a partial statewide
+research result, not exhaustive coverage or a runtime ingestion. Workbook SHA-256:
+`14f9d191adcec9128479aa7d18408b7800b813c494b6487ea91c21510cd25f0c` (25,090 bytes).
+
+`verified`: Connecticut also published an
+[August 17 special-education award list](https://portal.ct.gov/governor/news/press-releases/2026/08-2026/governor-lamont-announces-state-grants-to-strengthen-in-district-special-education)
+covering 41 programs. It is not included in the PA/ME workbook. Its Brooklyn row has a $1 difference
+between programming and total; do not silently normalize source inconsistencies. General education
+awards are distinct from proven security procurement eligibility.
+
+`verified`: guardian deployed committed revision `839eef3e312df3a40addf8639e786c49e072eb5f`
+from `origin/main` with a consistent integrity-checked DB backup and code backup. All 16 deployed
+files match the pinned commit; providers were synced before consumers. Production imports/config
+and 53 focused offline tests passed. Only the identified listener was restarted (new PID 879302,
+0.166-second measured restart). Environment hash/mtime, crontab, schema 49, and captured database
+counts remained unchanged. Post-restart monitoring found zero new tracebacks.
+
+`verified`: at 12:15:37 PT Grant uploaded the PA/ME workbook once in Brett's original thread
+(message `1788894937.713059`, file `F0C0C7YC0TG`). Guardian readback independently confirmed Grant's
+identity, the exact approved explanatory comment, same-thread placement, filename and 25,090-byte
+hosted attachment. The source file hash matched the approved workbook before upload. The reply
+explicitly states partial coverage, approval/announcement dates, and unknown security eligibility for
+the Maine examples. Source verification for other states remains in progress.
+
+Comparable recent school award lists for NH/NY have not yet been verified by this follow-up.
