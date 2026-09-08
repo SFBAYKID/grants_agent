@@ -16,6 +16,8 @@ because the candidate carries the evidence it was derived from in `observed`.
 
 from __future__ import annotations
 
+from ..reviewed_awards import PROACTIVE_SOURCE_PREDICATE
+
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -238,7 +240,7 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
     never on its absence.
     """
     rows = conn.execute(
-        """SELECT p.id,p.channel,p.ts,p.posted_at,p.lead_id,p.kind,p.style,
+        f"""SELECT p.id,p.channel,p.ts,p.posted_at,p.lead_id,p.kind,p.style,
                   l.entity_name,l.status,l.state,l.source,l.amount,l.lead_grade,
                   s.slack_user_id AS snapshot_tagged,
                   fe.event_type AS award_event_type,
@@ -248,6 +250,7 @@ def _unengaged_cards(conn: sqlite3.Connection, now: datetime) -> list[NudgeCandi
              LEFT JOIN rich_card_snapshots s ON s.id=p.snapshot_id
              LEFT JOIN funding_events fe ON fe.id=l.current_event_id
             WHERE p.lead_id IS NOT NULL
+              AND {PROACTIVE_SOURCE_PREDICATE}
               AND NOT EXISTS (SELECT 1 FROM engagement e WHERE e.post_id=p.id)
             ORDER BY p.id DESC LIMIT 60"""
     ).fetchall()

@@ -63,6 +63,8 @@ def grant_summary(row: sqlite3.Row) -> str:
             f"{_amount_text(row)} {program} grant; spend window {window}. "
             f"Grant source {source}."
         )
+    if meaning.kind is RecordKind.AWARD:
+        return f"{program} {meaning.angle}. Source {source}."
     if meaning.kind is RecordKind.SOLICITATION:
         return (
             f"{program} solicitation; response due "
@@ -129,6 +131,8 @@ def _grant_headline(row: sqlite3.Row) -> str:
     # "SVPP · $487,657" in a create-only CRM note reads as an award no matter what the
     # body says, and the note cannot be corrected afterwards.
     parts = [str(row["program"] or meaning.noun)]
+    if meaning.kind is RecordKind.AWARD and not meaning.asserts_award:
+        parts.append(meaning.noun)
     if meaning.asserts_amount:
         parts.append(_amount_text(row))
     window = _spend_window(row)

@@ -5,7 +5,7 @@ AR,2,1,0,1,3,1,2,candidate_found,candidate_found,candidate_found
 AZ,2,1,1,1,4,1,3,candidate_found,candidate_found,candidate_found
 CA,2,4,2,3,10,1,5,candidate_found,candidate_found,candidate_found
 CO,2,1,1,1,4,1,4,candidate_found,candidate_found,candidate_found
-CT,2,0,1,1,4,1,4,not_applicable,candidate_found,candidate_found
+CT,3,0,1,1,4,2,4,not_applicable,candidate_found,candidate_found
 DC,3,0,0,1,1,2,3,not_applicable,candidate_found,candidate_found
 DE,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
 FL,2,1,0,3,5,1,4,candidate_found,candidate_found,candidate_found
@@ -20,7 +20,7 @@ KY,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
 LA,3,1,0,1,3,2,3,candidate_found,candidate_found,candidate_found
 MA,2,1,1,1,4,1,4,candidate_found,candidate_found,candidate_found
 MD,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
-ME,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
+ME,4,1,0,1,3,3,3,candidate_found,candidate_found,candidate_found
 MI,2,2,0,1,5,1,5,candidate_found,candidate_found,candidate_found
 MN,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
 MO,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
@@ -29,11 +29,11 @@ MT,2,2,0,1,3,1,4,candidate_found,candidate_found,candidate_found
 NC,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
 ND,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
 NE,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
-NH,2,2,2,1,6,1,5,candidate_found,candidate_found,candidate_found
+NH,2,2,2,2,6,2,5,candidate_found,candidate_found,candidate_found
 NJ,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
 NM,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
 NV,2,1,1,1,4,1,4,candidate_found,candidate_found,candidate_found
-NY,2,1,1,1,4,1,4,candidate_found,candidate_found,candidate_found
+NY,3,1,1,1,4,2,4,candidate_found,candidate_found,candidate_found
 OH,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
 OK,2,1,0,1,3,1,3,candidate_found,candidate_found,candidate_found
 OR,2,1,0,1,3,1,2,candidate_found,candidate_found,candidate_found

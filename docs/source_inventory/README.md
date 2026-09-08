@@ -45,12 +45,12 @@ human-reviewed step.
   for all 50 states plus DC. Research-status columns distinguish `not_researched`,
   `researched_not_found`, and structurally `not_applicable` layers.
 
-## Scope status as of 2026-08-12
+## Scope status as of 2026-09-08
 
 - `verified`: Firecrawl returned at least one live discovery result for every state and DC during
   the nationwide search pass.
-- `verified`: the canonical catalog validates 271 records: 19 federal, 105 state, 56 county,
-  59 school-district, 15 city, 3 education-service-agency, 1 regional-government, 1 special-district,
+- `verified`: the canonical catalog validates 276 records: 19 federal, 109 state, 56 county,
+  60 school-district, 15 city, 3 education-service-agency, 1 regional-government, 1 special-district,
   1 multi-jurisdiction, and 11 national portal-family sources. The added Starbridge row is a
   research-only third-party catalog entry, not an enabled poller or verified official RFP source.
 - `verified`: all 50 states plus DC have at least one state-level, grant, and exact school-district
@@ -58,7 +58,7 @@ human-reviewed step.
 - `verified`: exact county candidates exist where a county layer was found. Connecticut, DC, and
   Rhode Island are marked `not_applicable`; Vermont is `researched_not_found`, with evidence in
   `data/source_catalog/coverage_exceptions.csv`.
-- `verified`: generated access views classify 34 sources as verified public without authentication,
+- `verified`: generated access views classify 39 sources as verified public without authentication,
   11 as no-auth candidates, 2 as public APIs requiring keys, 15 as free-account sources, 4 as
   supplier-account sources, and 205 as unknown-access candidates. OregonBuys moved into unknown
   after its published PDF began returning 404; its runtime poller is disabled.
@@ -69,8 +69,8 @@ human-reviewed step.
   3,073 explicitly `not_researched` entities. Census documents the public release at
   `https://www.census.gov/geographies/reference-files/2025/geo/gazetter-file.html`.
 - `verified`: four official 2025 Census school-district layers are independently pinned by URL,
-  SHA-256, and row count. Their 13,363 entities contain 66 linked candidates, 19 structural
-  placeholders, and 13,278 `not_researched` tasks.
+  SHA-256, and row count. Their 13,363 entities contain 67 linked candidates, 19 structural
+  placeholders, and 13,277 `not_researched` tasks.
 - `verified`: the official 2025 incorporated-place Gazetteer is pinned by URL, SHA-256, row count,
   and exact functional-status totals. Its 32,058 places contain 14 linked candidates, 12,587
   structural rows, and 19,457 `not_researched` tasks. This is not a unique-government count; an
@@ -89,3 +89,6 @@ human-reviewed step.
   Those older candidate URLs cannot be independently replayed from repository evidence alone.
 - `needs-testing`: a catalog candidate is not a working poller. Only integration rows explicitly
   marked `live_positive_verified` or `live_zero_verified` have been exercised against live data.
+
+The September 8 reviewed school-award integration refreshes six fixed announcements; see
+[`reviewed_school_awards.md`](../reviewed_school_awards.md). It is not exhaustive statewide discovery.

@@ -29,6 +29,8 @@ import sqlite3
 from dataclasses import dataclass
 from enum import Enum
 
+from .reviewed_awards import CONDITIONAL_SOURCE
+
 
 class RecordKind(str, Enum):
     """Canonical record meanings. Values are the strings search/export already emit."""
@@ -75,6 +77,11 @@ class RecordSemantics:
         application deadline depending on the kind, and picking wrong is a false claim.
         """
         start_text, end_text = start or "?", end or "?"
+        if self.kind is RecordKind.AWARD and not self.asserts_award:
+            return (
+                f"conditional approval {event_date or '?'}; project start {start_text}; "
+                "subject to programmatic/fiscal resolution; payment not verified"
+            )
         if self.kind is RecordKind.AWARD:
             prefix = f"award event {event_date}; " if event_date else ""
             return f"{prefix}spend window {start_text} through {end_text}"
@@ -107,6 +114,20 @@ _AWARD = RecordSemantics(
     asserts_amount=True,
     asserts_dates=True,
     window_noun="spend window",
+)
+# This exact reviewed source is a conditional approval, even though the public
+# award table and date belong in award searches. Never imply funds were received.
+_CONDITIONAL_AWARD = RecordSemantics(
+    kind=RecordKind.AWARD,
+    noun="conditional grant approval",
+    entity_role="conditionally approved applicant",
+    angle="conditional grant approval pending programmatic/fiscal resolution; payment unverified",
+    subject_kind="conditional grant approval",
+    planning_clause="If the conditional grant approval is finalized and the project fits",
+    asserts_award=False,
+    asserts_amount=False,
+    asserts_dates=False,
+    window_noun="project window",
 )
 _SOLICITATION = RecordSemantics(
     kind=RecordKind.SOLICITATION,
@@ -170,4 +191,12 @@ def event_type_of(row: sqlite3.Row) -> str:
 
 def semantics_for(row: sqlite3.Row) -> RecordSemantics:
     """Return what this record IS, derived only from its verified event type."""
+    try:
+        if (
+            row["source"] == CONDITIONAL_SOURCE
+            and event_type_of(row) == "award_announced"
+        ):
+            return _CONDITIONAL_AWARD
+    except (IndexError, KeyError):
+        pass
     return _BY_EVENT_TYPE.get(event_type_of(row), _UNKNOWN)

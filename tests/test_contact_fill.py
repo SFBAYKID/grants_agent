@@ -599,7 +599,9 @@ def test_only_one_paid_bulk_pull_may_run_per_human_message() -> None:
     assert _single_execution_tool_key("zoominfo_enrich_contacts", {"lead_id": 1})
 
 
-def test_an_emailed_row_carries_a_clickable_link_not_slack_markup() -> None:
+def test_an_emailed_row_carries_a_clickable_link_not_slack_markup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """`<url|label>` is Slack mrkdwn, and `send_to_rep` posts a text-only payload.
 
     So every emailed row arrived carrying literal angle brackets and a pipe. The one
@@ -612,6 +614,14 @@ def test_an_emailed_row_carries_a_clickable_link_not_slack_markup() -> None:
     from grant_watch import lead_digest
     from grant_watch.slack.search import search_leads
 
+    from tests.drip_support import mk_lead
+
+    # This assertion must not depend on a developer's personal grants database.
+    path = tmp_path / "email-links.db"
+    conn = db.connect(path)
+    mk_lead(conn, start="2026-08-17")
+    conn.close()
+    monkeypatch.setattr(db, "DEFAULT_DB_PATH", path)
     email_body = lead_digest.render({"program": "SVPP", "limit": 3})
     assert email_body, "no leads rendered; the assertion below would be vacuous"
     assert not re.search(r"<https?://[^>]*\|", email_body), (

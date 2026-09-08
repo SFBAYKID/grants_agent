@@ -40,6 +40,8 @@ WHAT THIS DELIBERATELY DOES NOT DO, so nobody reads capability into silence:
 
 from __future__ import annotations
 
+from ..reviewed_awards import PROACTIVE_SOURCE_PREDICATE
+
 import sqlite3
 from datetime import date, datetime, timezone
 
@@ -103,7 +105,8 @@ def candidates(
                                    WHERE channel=?)
                   AND l.id NOT IN (SELECT lead_id FROM posts
                                    WHERE lead_id IS NOT NULL AND channel=?)
-                  AND {UNCLAIMED_LEAD_PREDICATE}
+                  AND {PROACTIVE_SOURCE_PREDICATE}
+                 AND {UNCLAIMED_LEAD_PREDICATE}
                 ORDER BY date(e.occurred_on) DESC, l.id DESC
                 LIMIT ?""",
             (

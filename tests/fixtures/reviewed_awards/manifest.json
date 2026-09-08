@@ -1,0 +1,50 @@
+[
+  {
+    "fixture": "me_greenhouse.html",
+    "url": "https://www3.maine.gov/governor/mills/news/governor-mills-announces-500000-grants-help-expand-local-food-production-and-agricultural",
+    "retrieved_on": "2026-09-08",
+    "sha256": "35a895970e62186d643874a664e2a990c42179f72c5a59009d25202a0e1f918e",
+    "transformation": "HTML line separators replaced with spaces",
+    "fixture_sha256": "70305e2922a098070387e3cabfaa2c7183547080f16030ea8c569357ee7844a0"
+  },
+  {
+    "fixture": "me_augusta.html",
+    "url": "https://mainedoenews.net/2026/06/12/augusta-schools-receives-later-secondary-school-start-time-planning-grant/",
+    "retrieved_on": "2026-09-08",
+    "sha256": "3561ade893d3165df5cdde57e1392b066d207b13d4b6ea3149521f77a098f928",
+    "transformation": "HTML line separators replaced with spaces",
+    "fixture_sha256": "93ce1c952bdc0da510b90368c4d5f77b20fd8c4f248220923b06c1e38b4b829a"
+  },
+  {
+    "fixture": "ct_special.html",
+    "url": "https://portal.ct.gov/governor/news/press-releases/2026/08-2026/governor-lamont-announces-state-grants-to-strengthen-in-district-special-education",
+    "retrieved_on": "2026-09-08",
+    "sha256": "c3926d875de5998d3c638198c26d69a9e291f0ef5e8c5db64499c653ad67facb",
+    "transformation": "HTML line separators replaced with spaces",
+    "fixture_sha256": "1899bf508ff2e738d97dd12e986b59b23eed0d4ef73711cd3493d13cbcdb86f2"
+  },
+  {
+    "fixture": "ny_food.html",
+    "url": "https://agriculture.ny.gov/news/governor-hochul-awards-10-million-through-round-three-new-yorks-regional-school-food",
+    "retrieved_on": "2026-09-08",
+    "sha256": "14f8c970d53a301d634165eb50b2f05c3bcf79961642f64ced6733abb652e38b",
+    "transformation": "HTML line separators replaced with spaces",
+    "fixture_sha256": "d2d0d51c2f390d402dba98ef1a421744582d5d8da0cc7a18fd65699e13027ba6"
+  },
+  {
+    "fixture": "nh_rochester.pdf",
+    "url": "https://files-backend.assets.thrillshare.com/documents/asset/uploaded_file/2192/Rsd/f3223740-bbd1-4d6b-aff2-785752a191ec/Full-Board-Agenda-05.14.26.pdf?disposition=inline",
+    "retrieved_on": "2026-09-08",
+    "sha256": "7e44c3dd26a79c0c94d0c1a3296f980260a112eedb8216f477371c8da645e341",
+    "transformation": "none",
+    "fixture_sha256": "7e44c3dd26a79c0c94d0c1a3296f980260a112eedb8216f477371c8da645e341"
+  },
+  {
+    "fixture": "pa_pccd.pdf",
+    "retrieved_on": "2026-09-08",
+    "sha256": "e159930d550c2dd828081d47653c3c05a6bbfbded92da1953dfa6702585b4e80",
+    "transformation": "none",
+    "url": "https://www.pa.gov/content/dam/copapwp-pagov/en/pccd/documents/schoolsafety/school-safety-award-documents/25-26%20targeted%20school%20safety%20final%20awards%20approved%206-3-26.pdf",
+    "fixture_sha256": "e159930d550c2dd828081d47653c3c05a6bbfbded92da1953dfa6702585b4e80"
+  }
+]

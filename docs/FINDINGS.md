@@ -1,4 +1,4 @@
-# FINDINGS — Integrated Grant Lead Research (through 2026-08-12)
+# FINDINGS — Integrated Grant Lead Research (through 2026-09-08)
 
 This records live integrations, verified lead findings, and open implementation work. It is not the
 complete nationwide candidate list. See `docs/source_inventory/README.md` and its generated CSVs for
@@ -245,3 +245,12 @@ PA: School District of Philadelphia ($500K, FY22), Harrisburg SD, Lehigh CTI.
 - WEBS keyword scan on test day: 0 security hits in visible rows — inconclusive (collapsed
   rows not scanned); the Python parser must work from raw HTML.
 - ESSER is dead (deadlines passed). Ignore.
+
+## Recent school-award search coverage repair (2026-09-08)
+
+`verified`: six reviewed-source parsers returned 401 live announcement/approval records across
+PA, ME, CT, NY, and NH. They preserve conditional approvals, unpublished/conflicting amounts,
+and reimbursement deadlines. School-kind propagation fixes abbreviated-name omissions.
+The dedicated source namespace is excluded from proactive/paid-preparation queries, while
+remaining available to user-requested search/export. See [reviewed school awards](reviewed_school_awards.md).
+These fixed-cohort refreshes do not establish exhaustive statewide or future-round discovery.

@@ -7,6 +7,8 @@ ambiguous Slack outcome is finalized ``unknown`` and never blind-retried.
 
 from __future__ import annotations
 
+from ..reviewed_awards import is_reviewed_award
+
 import sqlite3
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -94,13 +96,13 @@ def _delivery_veto(
 ) -> bool:
     """Use mutable state only as a final cancellation veto, never as display truth."""
     row = conn.execute(
-        "SELECT status,current_event_id FROM leads WHERE id=?", (lead_id,)
+        "SELECT status,current_event_id,source FROM leads WHERE id=?", (lead_id,)
     ).fetchone()
     contact = conn.execute(
         "SELECT * FROM contact_evidence WHERE id=?",
         (contact_evidence_id,),
     ).fetchone()
-    if row is None or contact is None:
+    if row is None or contact is None or is_reviewed_award(row["source"]):
         return False
     if (
         str(row["status"] or "new") != "new"

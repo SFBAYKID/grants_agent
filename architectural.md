@@ -630,3 +630,13 @@ A clean offline gate is not a substitute for a live source smoke test.
 
 `verified` = ran it, saw real live data. `assumed` = reasoned, unproven. `needs-testing` = written,
 never executed. Every source module, every status report, and every claim to Chase carries one of these.
+
+## Reviewed school-award refresh boundary (2026-09-08)
+
+Six source modules refresh fixed reviewed PA/ME/CT/NY/NH announcement cohorts. They emit
+`reviewed-school-award:` records, preserve source-evidenced entity kinds through grading, and
+remain search-only independently of grade. Shared proactive SQL exclusions and a rich-delivery
+veto prevent scheduled outreach. PCCD conditional approvals use central conditional semantics
+across search/export/CRM/outreach. See [reviewed school awards](docs/reviewed_school_awards.md)
+for evidence, limits, failure behavior, and operational entrypoints. Future-round discovery is
+not implemented by these fixed-document refreshes.

@@ -84,9 +84,9 @@ def test_canonical_counts_and_exact_coverage_match_published_inventory() -> None
         JurisdictionLevel.MULTI_JURISDICTION: 1,
         JurisdictionLevel.PORTAL_FAMILY: 11,
         JurisdictionLevel.REGIONAL_GOVERNMENT: 1,
-        JurisdictionLevel.SCHOOL_DISTRICT: 59,
+        JurisdictionLevel.SCHOOL_DISTRICT: 60,
         JurisdictionLevel.SPECIAL_DISTRICT: 1,
-        JurisdictionLevel.STATE: 105,
+        JurisdictionLevel.STATE: 109,
     }
     rows = coverage_rows(entries, load_coverage_exceptions())
     assert all(row.state_sources > 0 and row.grant_sources > 0 for row in rows)
@@ -101,7 +101,7 @@ def test_canonical_counts_and_exact_coverage_match_published_inventory() -> None
     assert access_counts == {
         AccessMode.FREE_ACCOUNT: 15,
         AccessMode.PUBLIC_API_KEY: 2,
-        AccessMode.PUBLIC_NO_AUTH: 45,
+        AccessMode.PUBLIC_NO_AUTH: 50,
         AccessMode.SUPPLIER_ACCOUNT: 4,
         AccessMode.UNKNOWN: 205,
     }
@@ -111,7 +111,7 @@ def test_canonical_counts_and_exact_coverage_match_published_inventory() -> None
             and entry.access_status == VerificationLabel.VERIFIED
             for entry in entries
         )
-        == 34
+        == 39
     )
 
 

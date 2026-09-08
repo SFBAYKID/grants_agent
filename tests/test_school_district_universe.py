@@ -131,9 +131,9 @@ def test_canonical_school_universe_matches_all_pins_and_links() -> None:
         "unified_school_district": 10_862,
     }
     assert Counter(task.research_status for task in tasks) == {
-        "candidate_found": 66,
+        "candidate_found": 67,
         "not_applicable": PLACEHOLDER_COUNT,
-        "not_researched": 13_278,
+        "not_researched": 13_277,
     }
     assert (
         sum(task.entity_disposition == "statistical_placeholder" for task in tasks)
