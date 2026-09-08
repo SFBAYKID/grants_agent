@@ -34,9 +34,13 @@ Lead definitions: **GOLD** = entity just received security funding. **SILVER** =
 - Caveat: keyword noise — "surveillance"/"security" pull CDC + cyber; use phrase list + scoring
 
 ### 4. PA PCCD award PDFs (pa.gov)
-- Lead type: GOLD, highest density found anywhere
-- Verified: pulled the 6/3/2026 Targeted School Safety awards PDF — 347 nonpublic schools,
-  $19.4M, projects START 7/1/2026 (shopping NOW)
+- Lead type: official school-safety award evidence; vendor selection and funds receipt unknown.
+- `verified` 2026-09-08: the 6/3/2026 Targeted School Safety approval PDF lists 353 applicants:
+  347 nonpublic schools and six municipality/law-enforcement/approved third-party applicants.
+  Its listed amounts total $19,356,596, with programmatic/fiscal conditions and a 7/1/2026 project
+  start. Individual rows do not label applicant category. Approval does not prove funds arrived.
+- This reviewed source is not a runtime poller and its awards were absent from the rep-search index
+  in the September 8 audit; see `rep_search_audit_2026-09-08.md`. Earlier "shopping NOW" was unsupported.
 - Also: $100M/yr formula grants to ALL PA public school entities (FY25-26 round announced Dec 2025)
 - Access: PDFs on pa.gov — scrape the school-safety-award-documents directory; parse w/ pdfplumber
 

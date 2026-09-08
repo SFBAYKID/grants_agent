@@ -42,6 +42,7 @@ from .search_planning import search_confirmation as _search_confirmation
 from .search_planning import search_plan_confirmed as _search_plan_confirmed
 from .grant_prompt import SYSTEM_PROMPT
 from .source_status import slack_source_status_reply
+from .search_recency import disclose_recent_search, recent_award_scope
 
 DEFAULT_MODEL = "claude-sonnet-5"
 MAX_TOOL_TURNS = 6  # runaway guard for the agent loop
@@ -697,6 +698,10 @@ def respond(
     paid_fetches = 0  # scrapes actually billed (drives MAX_FETCHES_PER_TURN)
     model = os.environ.get("GRANT_MODEL", DEFAULT_MODEL)
     search_confirmed = _search_plan_confirmed(user_text, thread_context)
+    recent_scope = recent_award_scope(user_text, thread_context)
+    recent_disclosure = ""
+    if recent_scope:
+        messages[0]["content"] += "\n\nSearch constraint: " + recent_scope.disclosure
 
     try:
         for turn_index in range(MAX_TOOL_TURNS):
@@ -736,7 +741,7 @@ def respond(
                 )
                 out["files"] = files
                 out["pending_crm_actions"] = pending_actions
-                return out
+                return disclose_recent_search(out, recent_disclosure)
             # Execute every tool call in this turn and feed results back.
             messages.append({"role": "assistant", "content": msg.content})
             results = []
@@ -772,6 +777,11 @@ def respond(
                             "pending_crm_actions": pending_actions,
                         }
                 tool_args = dict(block.input)
+                if block.name == "search_leads" and recent_scope:
+                    # Human scope wins on EVERY attempt, including model-authored
+                    # widening after zero matches and each state in a multi-file ask.
+                    tool_args = recent_scope.constrain(tool_args)
+                    recent_disclosure = recent_scope.disclosure
                 cache_key = f"{block.name}:{json.dumps(tool_args, sort_keys=True)}"
                 # Server-side breadcrumb (bot.log): without it a failed turn leaves
                 # no record of which tools ran — proven undiagnosable live.
@@ -834,7 +844,16 @@ def respond(
                 if block.name == "fetch_url":
                     fetched_pages += 1
                 results.append(
-                    {"type": "tool_result", "tool_use_id": block.id, "content": text}
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": text
+                        + (
+                            "\n" + recent_disclosure
+                            if block.name == "search_leads"
+                            else ""
+                        ),
+                    }
                 )
             messages.append({"role": "user", "content": results})
             if fetched_pages:
@@ -884,14 +903,17 @@ def respond(
             )
             out["files"] = files
             out["pending_crm_actions"] = pending_actions
-            return out
+            return disclose_recent_search(out, recent_disclosure)
     except Exception:  # noqa: BLE001 — degraded path; fall back to the honest stub
         print("[tool-error] exhaustion finalizer failed:", file=sys.stderr)
         traceback.print_exc()
-    return {
-        "intent": "question",
-        "files": files,
-        "pending_crm_actions": pending_actions,
-        "reply": "That took more digging than I expected and I hit my limit — "
-        "try narrowing the ask and I'll go again.",
-    }
+    return disclose_recent_search(
+        {
+            "intent": "question",
+            "files": files,
+            "pending_crm_actions": pending_actions,
+            "reply": "That took more digging than I expected and I hit my limit — "
+            "try narrowing the ask and I'll go again.",
+        },
+        recent_disclosure,
+    )

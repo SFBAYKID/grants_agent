@@ -19,7 +19,7 @@ from ..record_semantics import semantics_for
 from .. import db
 from ..presentation import model_note
 from ..presentation import display_entity_name
-from ..spreadsheets import GeneratedArtifact, make_spreadsheet
+from ..spreadsheets import GeneratedArtifact, make_spreadsheet, search_export_filename
 from .search_enrichment import MAX_ENRICH_ROWS, _CONTACT_COLUMNS, _enrich_contacts
 from .search_presentation import claimed_phrases as _claimed_phrases
 from .search_presentation import contact_suffix as _contact_suffix
@@ -824,6 +824,7 @@ def search_leads(
         else f"the top {len(rows)}"
     )
     export_job_id = ""
+    export_name = search_export_filename(state)
     if export_value and requester_slack:
         writable = db.connect(db_target)
         try:
@@ -870,7 +871,7 @@ def search_leads(
                 f"never an update to one sent earlier: "
                 f"{message}{enrich_note}{reference_note}{snapshot_note}"
             ), None
-        text, artifact = make_spreadsheet("grant_search.xlsx", [columns] + data_rows)
+        text, artifact = make_spreadsheet(export_name, [columns] + data_rows)
         if export_job_id:
             writable = db.connect(db_target)
             try:
@@ -886,7 +887,7 @@ def search_leads(
             artifact,
         )
     if export_value == ExportFormat.EXCEL.value:
-        text, artifact = make_spreadsheet("grant_search.xlsx", [columns] + data_rows)
+        text, artifact = make_spreadsheet(export_name, [columns] + data_rows)
         if export_job_id:
             writable = db.connect(db_target)
             try:

@@ -20,6 +20,16 @@ SpreadsheetValue: TypeAlias = str | int | float | bool | None
 _FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 
+def search_export_filename(state: str) -> str:
+    """Label a state's export without letting model text supply a filesystem path."""
+    code = state.strip().upper()
+    return (
+        f"grant_search_{code}.xlsx"
+        if re.fullmatch(r"[A-Z]{2}", code)
+        else "grant_search.xlsx"
+    )
+
+
 @dataclass(frozen=True)
 class GeneratedArtifact:
     """A generated local file whose creator remains responsible for cleanup."""

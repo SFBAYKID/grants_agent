@@ -175,14 +175,32 @@ def thread_history(client: WebClient, channel: str, thread_ts: str | None) -> li
     returns oldest first. Reading a DM in the raw order would hand the model the
     transcript backwards — still an answer, just to a conversation that never
     happened, and nothing would raise.
+    Thread reads page to completion (at most five pages). Partial/failed reads are
+    discarded: an older page can contain a date constraint that a newer page
+    superseded. Return the bounded complete history for deterministic constraint
+    resolution; the conversation separately limits what it sends to the model.
     """
     try:
         if thread_ts:
-            messages = list(
-                client.conversations_replies(
-                    channel=channel, ts=thread_ts, limit=12
-                ).get("messages", [])
-            )
+            messages = []
+            cursor = ""
+            seen_cursors: set[str] = set()
+            for _page in range(5):
+                response = client.conversations_replies(
+                    channel=channel, ts=thread_ts, limit=100, cursor=cursor or None
+                )
+                messages.extend(response.get("messages", []))
+                next_cursor = str(
+                    (response.get("response_metadata") or {}).get("next_cursor") or ""
+                ).strip()
+                if not response.get("has_more") and not next_cursor:
+                    break
+                if not next_cursor or next_cursor in seen_cursors:
+                    return []
+                seen_cursors.add(next_cursor)
+                cursor = next_cursor
+            else:
+                return []
         else:
             messages = list(
                 client.conversations_history(channel=channel, limit=12).get(
@@ -198,4 +216,4 @@ def thread_history(client: WebClient, channel: str, thread_ts: str | None) -> li
         txt = re.sub(r"<@[^>]+>", "", m.get("text") or "").strip()
         if txt:
             lines.append(f"{who}: {txt}")
-    return lines[-10:]
+    return lines

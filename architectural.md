@@ -293,6 +293,16 @@ not installed in production cron. The long-lived Socket Mode listener intentiona
 posts replies and has no dry-run flag, so exercise it through offline tests unless a real channel
 interaction is explicitly intended. Grant never fabricates a lead, contact, or award figure.
 
+`slack/search_recency.py` resolves plain recent-award requests to an inclusive six-calendar-month
+window using the current UTC date. `conversation.py` applies that constraint before each search
+cache lookup and execution, including retries, exports, and contact searches, and appends a
+deterministic date/coverage disclosure. Narrow state/format/contact follow-ups inherit only human
+context; explicit human date/history changes supersede the default. Mixed windows and complex
+negation remain model-handled. `venues.py` reads complete bounded thread pagination (five pages of
+100); failures discard partial history rather than treating stale fragments as complete context.
+The model still receives only the latest ten context lines. State-specific XLSX filenames are
+generated centrally in `spreadsheets.py`, including the Google Sheets fallback.
+
 Source-discovery inventory is available through the same natural-language Slack surface. The
 `grant_watch/slack/source_status.py` boundary reads validated repository evidence and renders only
 aggregates or reviewed catalog fields. Deterministic routing runs before the Anthropic conversation

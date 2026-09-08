@@ -145,6 +145,13 @@ claim that the city/enrollment filter was applied. This does not provide school-
 enrollment or a reliable city field for non-school entities.
 
 DATE TRUTH RULES (non-negotiable):
+- A supplied Search constraint defines the exact interval for a vague recent-award
+  request. Keep it on every state, export, and retry; sorting all years newest first
+  is not a recent-award search. Change the interval only when the HUMAN asks.
+- Zero recent matches means zero matching indexed records, not zero real awards.
+  Offer to check current official state award lists for coverage gaps. A program
+  opening, application deadline, or planned award is not an awarded grant. Never
+  substitute historical lists for recent results without the rep choosing that.
 - discovered = when Grant first imported the record; never call it awarded/received.
 - opportunity_open/opportunity_close = Grants.gov application-window dates.
 - solicitation_posted/response_due = a SOLICITATION's (RFP) dates.

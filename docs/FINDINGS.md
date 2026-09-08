@@ -208,9 +208,12 @@ Saginaw Chippewa Tribe, Westwood Community SD.
 PA: School District of Philadelphia ($500K, FY22), Harrisburg SD, Lehigh CTI.
 
 ### PA PCCD — single richest source found
-- **347 nonpublic schools awarded 6/3/2026, $19.4M, project start 7/1/2026** — full named
-  list w/ county + amount in the awards PDF (fetched + verified). These schools have fresh
-  money and (likely) no vendor locked. Purest gold leads in the dataset.
+- `verified` again 2026-09-08: the **6/3/2026 approval list contains 353 applicants**, comprising
+  347 nonpublic schools and six municipality/law-enforcement/approved third-party applicants.
+  Listed amounts total **$19,356,596**, subject to programmatic/fiscal conditions; project start is
+  7/1/2026. The prior claims about fresh money and vendor availability were unsupported.
+  This source has no runtime poller and was missing from the rep-search index at audit time;
+  reviewed source evidence is not proof of ingestion. See `rep_search_audit_2026-09-08.md`.
 - Plus **$100M/yr formula grants to ALL PA public school entities** (FY25-26 round opened
   Dec 2025; eligible-amount-per-district appendix published in the solicitation).
 - Award PDFs directory: pa.gov → PCCD → schoolsafety → school-safety-award-documents.
