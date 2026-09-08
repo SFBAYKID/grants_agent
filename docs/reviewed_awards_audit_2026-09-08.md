@@ -25,7 +25,7 @@ See [source details and limits](reviewed_school_awards.md).
 | `python -m grant_watch.coverage_universe` | verified; 3,144 county tasks |
 | `python -m grant_watch.school_district_universe` | verified; 13,363 tasks, 67 linked candidates |
 | `python -m grant_watch.incorporated_place_universe` | verified; 32,058 tasks |
-| `git diff --check` | verified; passed |
+| `git diff --check` | verified after staging all new fixtures and normalizing trailing whitespace |
 
 Vulture was compared with a temporary checkout of the preceding commit: 81 baseline findings,
 83 current findings, three new findings for PCCD TypedDict fields `x0`, `top`, and `bottom`.
@@ -41,7 +41,7 @@ duplicate identity, idempotence, classification, cross-consumer conditional word
 redirects, byte limits, and otherwise eligible GOLD proactive exclusions have regression coverage.
 
 `verified`: runtime size at the code phase is 159 Python modules / 49,420 lines. Largest files:
-search998, Salesforce gateway995, CLI995, Campaign batch989, Campaign985+; the health gate
+search998, Salesforce gateway995, CLI995, Campaign batch989, Campaign988; the health gate
 confirms every text file remains within the 1,000-line limit. No new source module approaches it.
 
 ## Production and delivery
