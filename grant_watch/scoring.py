@@ -71,9 +71,9 @@ def grade(item: RawItem, today: date | None = None) -> Lead:
         end = _parse_date(item.end)
         # Missing dollars/window cannot prove money is available; keep as WATCH.
         if item.amount is None or item.amount <= 0:
-            return Lead(item, LeadGrade.WATCH)
+            return Lead(item, LeadGrade.WATCH, entity_type=item.entity_type)
         if end is None or end < today:
-            return Lead(item, LeadGrade.WATCH)
+            return Lead(item, LeadGrade.WATCH, entity_type=item.entity_type)
         # Gold-fresh / silver-older split (Chase): a security award obligated within the
         # last FRESH_MONTHS is a hot new buyer (GOLD); the same award obligated over a
         # year ago still has an open window but the awardee likely has vendors locked in,
@@ -90,10 +90,10 @@ def grade(item: RawItem, today: date | None = None) -> Lead:
         # SILVER; they are simply not served as proactive GOLD.
         awarded = _parse_date(item.event_date)
         if awarded is None:
-            return Lead(item, LeadGrade.SILVER)
+            return Lead(item, LeadGrade.SILVER, entity_type=item.entity_type)
         if awarded < today - timedelta(days=FRESH_MONTHS * 30):
-            return Lead(item, LeadGrade.SILVER)
-        return Lead(item, LeadGrade.GOLD)
+            return Lead(item, LeadGrade.SILVER, entity_type=item.entity_type)
+        return Lead(item, LeadGrade.GOLD, entity_type=item.entity_type)
 
     # RFPs are SILVER at best, never GOLD/PLATINUM (Chase, 2026-07-19): winning an RFP is
     # a lot of work with a relatively low hit rate, so an open solicitation is a Silver
@@ -105,10 +105,11 @@ def grade(item: RawItem, today: date | None = None) -> Lead:
         return Lead(
             item,
             LeadGrade.SILVER if deadline and deadline >= today else LeadGrade.WATCH,
+            entity_type=item.entity_type,
         )
 
     # grants.gov + anything unrecognized: keep as watch, never drop (CLAUDE.md).
-    return Lead(item, LeadGrade.WATCH)
+    return Lead(item, LeadGrade.WATCH, entity_type=item.entity_type)
 
 
 def card_award_cutoff(today: date) -> date:

@@ -8,6 +8,8 @@ on a read-only connection and therefore cannot mutate even SQLite sidecars.
 
 from __future__ import annotations
 
+from ..reviewed_awards import PROACTIVE_SOURCE_PREDICATE
+
 import sqlite3
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
@@ -117,6 +119,7 @@ def _rows(
                                   WHERE lead_id IS NOT NULL AND channel=?)
                  AND l.id NOT IN (SELECT lead_id FROM notification_outbox
                                   WHERE lead_id IS NOT NULL AND audience=?)
+                 AND {PROACTIVE_SOURCE_PREDICATE}
                  AND {UNCLAIMED_LEAD_PREDICATE}
                  AND {UNLISTED_LEAD_PREDICATE}""",
             (audience, audience, audience),

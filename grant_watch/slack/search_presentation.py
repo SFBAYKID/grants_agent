@@ -59,7 +59,9 @@ def grade_phrases(
             kind = "solicitation"
         elif kinds == {"application_window_opened"}:
             kind = "funding_opportunity"
-    if kind == "award":
+    if kind == "award" and not any(
+        not semantics_for(row).asserts_award for row in (rows or [])
+    ):
         return {
             "gold": "gold (award won, money to spend)",
             "silver": "silver (funding in progress)",

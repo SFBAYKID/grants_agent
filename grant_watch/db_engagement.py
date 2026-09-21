@@ -8,6 +8,8 @@ program bulletins). Shared row shapes come from db_common so this never imports 
 
 from __future__ import annotations
 
+from .reviewed_awards import PROACTIVE_SOURCE_PREDICATE
+
 import sqlite3
 import uuid
 from datetime import datetime, time, timedelta, timezone
@@ -291,7 +293,8 @@ def nugget_candidates(conn: sqlite3.Connection, channel: str) -> list[sqlite3.Ro
                                WHERE lead_id IS NOT NULL AND channel=?)
               AND l.id NOT IN (SELECT lead_id FROM notification_outbox
                                WHERE lead_id IS NOT NULL AND audience=?)
-              AND {UNCLAIMED_LEAD_PREDICATE}
+              AND {PROACTIVE_SOURCE_PREDICATE}
+                 AND {UNCLAIMED_LEAD_PREDICATE}
               AND {UNLISTED_LEAD_PREDICATE}""",
             (channel, channel, channel),
         )
@@ -320,7 +323,8 @@ def rfp_candidates(conn: sqlite3.Connection, channel: str) -> list[sqlite3.Row]:
                                WHERE lead_id IS NOT NULL AND channel=?)
               AND l.id NOT IN (SELECT lead_id FROM notification_outbox
                                WHERE lead_id IS NOT NULL AND audience=?)
-              AND {UNCLAIMED_LEAD_PREDICATE}
+              AND {PROACTIVE_SOURCE_PREDICATE}
+                 AND {UNCLAIMED_LEAD_PREDICATE}
               AND {UNLISTED_LEAD_PREDICATE}
               AND l.funds_end != '' AND date(l.funds_end) >= date('now')
             ORDER BY date(l.funds_end) ASC, l.id""",
@@ -350,7 +354,8 @@ def bulletin_candidates(
                                WHERE lead_id IS NOT NULL AND channel=?)
               AND l.id NOT IN (SELECT lead_id FROM notification_outbox
                                WHERE lead_id IS NOT NULL AND audience=?)
-              AND {UNCLAIMED_LEAD_PREDICATE}
+              AND {PROACTIVE_SOURCE_PREDICATE}
+                 AND {UNCLAIMED_LEAD_PREDICATE}
               AND {UNLISTED_LEAD_PREDICATE}
               AND l.funds_end != '' AND date(l.funds_end) >= date('now')
             ORDER BY date(l.funds_end) ASC,l.id""",

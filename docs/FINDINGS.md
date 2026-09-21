@@ -1,4 +1,4 @@
-# FINDINGS — Integrated Grant Lead Research (through 2026-08-12)
+# FINDINGS — Integrated Grant Lead Research (through 2026-09-08)
 
 This records live integrations, verified lead findings, and open implementation work. It is not the
 complete nationwide candidate list. See `docs/source_inventory/README.md` and its generated CSVs for
@@ -208,9 +208,12 @@ Saginaw Chippewa Tribe, Westwood Community SD.
 PA: School District of Philadelphia ($500K, FY22), Harrisburg SD, Lehigh CTI.
 
 ### PA PCCD — single richest source found
-- **347 nonpublic schools awarded 6/3/2026, $19.4M, project start 7/1/2026** — full named
-  list w/ county + amount in the awards PDF (fetched + verified). These schools have fresh
-  money and (likely) no vendor locked. Purest gold leads in the dataset.
+- `verified` again 2026-09-08: the **6/3/2026 approval list contains 353 applicants**, comprising
+  347 nonpublic schools and six municipality/law-enforcement/approved third-party applicants.
+  Listed amounts total **$19,356,596**, subject to programmatic/fiscal conditions; project start is
+  7/1/2026. The prior claims about fresh money and vendor availability were unsupported.
+  This source has no runtime poller and was missing from the rep-search index at audit time;
+  reviewed source evidence is not proof of ingestion. See `rep_search_audit_2026-09-08.md`.
 - Plus **$100M/yr formula grants to ALL PA public school entities** (FY25-26 round opened
   Dec 2025; eligible-amount-per-district appendix published in the solicitation).
 - Award PDFs directory: pa.gov → PCCD → schoolsafety → school-safety-award-documents.
@@ -242,3 +245,12 @@ PA: School District of Philadelphia ($500K, FY22), Harrisburg SD, Lehigh CTI.
 - WEBS keyword scan on test day: 0 security hits in visible rows — inconclusive (collapsed
   rows not scanned); the Python parser must work from raw HTML.
 - ESSER is dead (deadlines passed). Ignore.
+
+## Recent school-award search coverage repair (2026-09-08)
+
+`verified`: six reviewed-source parsers returned 401 live announcement/approval records across
+PA, ME, CT, NY, and NH. They preserve conditional approvals, unpublished/conflicting amounts,
+and reimbursement deadlines. School-kind propagation fixes abbreviated-name omissions.
+The dedicated source namespace is excluded from proactive/paid-preparation queries, while
+remaining available to user-requested search/export. See [reviewed school awards](reviewed_school_awards.md).
+These fixed-cohort refreshes do not establish exhaustive statewide or future-round discovery.

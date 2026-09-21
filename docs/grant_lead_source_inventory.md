@@ -1,6 +1,6 @@
 # Integrated and High-Value Grant-Lead Sources — Monarch Connected
 
-Updated through 2026-08-12. This narrative covers integrated sources and high-value follow-ups;
+Updated through 2026-09-08. This narrative covers integrated sources and high-value follow-ups;
 historical live-check dates remain attached to the exact behavior that was exercised.
 The canonical nationwide candidate catalog and separate access lists live in
 `docs/source_inventory/`; discovery rows there are not automatically live integrations.
@@ -34,9 +34,14 @@ Lead definitions: **GOLD** = entity just received security funding. **SILVER** =
 - Caveat: keyword noise — "surveillance"/"security" pull CDC + cyber; use phrase list + scoring
 
 ### 4. PA PCCD award PDFs (pa.gov)
-- Lead type: GOLD, highest density found anywhere
-- Verified: pulled the 6/3/2026 Targeted School Safety awards PDF — 347 nonpublic schools,
-  $19.4M, projects START 7/1/2026 (shopping NOW)
+- Lead type: official school-safety award evidence; vendor selection and funds receipt unknown.
+- `verified` 2026-09-08: the 6/3/2026 Targeted School Safety approval PDF lists 353 applicants:
+  347 nonpublic schools and six municipality/law-enforcement/approved third-party applicants.
+  Its listed amounts total $19,356,596, with programmatic/fiscal conditions and a 7/1/2026 project
+  start. Individual rows do not label applicant category. Approval does not prove funds arrived.
+- The reviewed cohort now has a search-only runtime refresh, live-parser verified September 8.
+  It was absent from the index during the first thread correction; see `reviewed_school_awards.md`
+  for the repair and five-state scope. Earlier "shopping NOW" was unsupported.
 - Also: $100M/yr formula grants to ALL PA public school entities (FY25-26 round announced Dec 2025)
 - Access: PDFs on pa.gov — scrape the school-safety-award-documents directory; parse w/ pdfplumber
 

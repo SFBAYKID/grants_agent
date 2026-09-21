@@ -27,7 +27,7 @@ from grant_watch.source_discovery_store import initialize_batch, replace_checkpo
 def test_canonical_summary_preserves_inventory_lead_and_poller_boundaries() -> None:
     """Slack summary exposes exact aggregates without collapsing evidence layers."""
     text = status.source_inventory_status()
-    assert "271 candidate sources catalogued" in text
+    assert "276 candidate sources catalogued" in text
     assert "29 reviewed by hand so far" in text
     assert "30 pages checked with saved evidence" in text
     assert "1 raw search batch stored" in text
@@ -35,10 +35,10 @@ def test_canonical_summary_preserves_inventory_lead_and_poller_boundaries() -> N
     assert "56 with a source link" in text
     assert "3,073 not yet researched" in text
     assert "School districts: 13,363 in total" in text
-    assert "66 with a source link" in text
+    assert "67 with a source link" in text
     assert "Incorporated places: 32,058 in total" in text
     assert "This is our research list, not the leads themselves" in text
-    assert "5 live and finding matches" in text
+    assert "10 live and finding matches" in text
 
 
 def test_state_summary_counts_only_batches_that_include_that_state() -> None:
@@ -231,7 +231,7 @@ def test_status_request_bypasses_anthropic_and_web_search(
     monkeypatch.setattr(conversation, "Anthropic", forbidden)
     result = conversation.respond("Show source discovery status", None)
     assert result["intent"] == "question"
-    assert "271 candidate sources catalogued" in result["reply"]
+    assert "276 candidate sources catalogued" in result["reply"]
 
 
 def test_tool_schema_and_dispatch_expose_only_read_only_status() -> None:

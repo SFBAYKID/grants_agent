@@ -293,6 +293,16 @@ not installed in production cron. The long-lived Socket Mode listener intentiona
 posts replies and has no dry-run flag, so exercise it through offline tests unless a real channel
 interaction is explicitly intended. Grant never fabricates a lead, contact, or award figure.
 
+`slack/search_recency.py` resolves plain recent-award requests to an inclusive six-calendar-month
+window using the current UTC date. `conversation.py` applies that constraint before each search
+cache lookup and execution, including retries, exports, and contact searches, and appends a
+deterministic date/coverage disclosure. Narrow state/format/contact follow-ups inherit only human
+context; explicit human date/history changes supersede the default. Mixed windows and complex
+negation remain model-handled. `venues.py` reads complete bounded thread pagination (five pages of
+100); failures discard partial history rather than treating stale fragments as complete context.
+The model still receives only the latest ten context lines. State-specific XLSX filenames are
+generated centrally in `spreadsheets.py`, including the Google Sheets fallback.
+
 Source-discovery inventory is available through the same natural-language Slack surface. The
 `grant_watch/slack/source_status.py` boundary reads validated repository evidence and renders only
 aggregates or reviewed catalog fields. Deterministic routing runs before the Anthropic conversation
@@ -620,3 +630,13 @@ A clean offline gate is not a substitute for a live source smoke test.
 
 `verified` = ran it, saw real live data. `assumed` = reasoned, unproven. `needs-testing` = written,
 never executed. Every source module, every status report, and every claim to Chase carries one of these.
+
+## Reviewed school-award refresh boundary (2026-09-08)
+
+Six source modules refresh fixed reviewed PA/ME/CT/NY/NH announcement cohorts. They emit
+`reviewed-school-award:` records, preserve source-evidenced entity kinds through grading, and
+remain search-only independently of grade. Shared proactive SQL exclusions and a rich-delivery
+veto prevent scheduled outreach. PCCD conditional approvals use central conditional semantics
+across search/export/CRM/outreach. See [reviewed school awards](docs/reviewed_school_awards.md)
+for evidence, limits, failure behavior, and operational entrypoints. Future-round discovery is
+not implemented by these fixed-document refreshes.

@@ -22,8 +22,9 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 4. **Conversation.** Humans can @mention Grant in the configured channel or reply in a proactive alert
    thread. Grant answers from the database and clearly says when it doesn't know.
 5. **On-demand search.** A rep @mentions Grant (or talks in a thread) and asks for grants by any
-   criteria. Grant **confirms its understanding first** — restating the full filter set and asking how
-   many results and which format (Excel / Google Sheet / just in Slack) — then searches its indexed
+   criteria. State/org/city/entity-anchored requests execute immediately; fully open-ended asks get
+   one scoping question. The previous confirm-first description was stale (`verified` by
+   `test_anchored_first_search_executes_immediately`, 2026-09-08). Grant searches its indexed
    database (state, org type, program, grade, amount, record kind, explicit date meaning). Ordering is
    total (an id tiebreak) so a repeated search returns the same rows. Inline results report the true
    match count; complete Excel/Google exports are all-or-nothing under a declared 5,000-row safety cap.
@@ -64,8 +65,17 @@ carries the Constitution (`CLAUDE.md`) on its sleeve: **honest, human-in-the-loo
 - Detail replies identify the exact event record and link; a generic source domain is
   never presented as record-level evidence.
 - Grant distinguishes discovery dates, application windows, solicitation deadlines, and award spend
-  windows. The database does not yet contain a verified award-announcement date, so "received funding
-  during this range" is reported as unsupported instead of being mapped to an import or spend date.
+  windows. `date_field=award_received` selects verified announced/obligated event dates, not when
+  funds arrived. The previous claim that verified announcement dates were unavailable was stale
+  (`verified` by the award-date search tests, 2026-09-08). With no date bounds this field sorts
+  newest first without an age cutoff; that alone does not satisfy a request for recent awards.
+- Plain recent-award requests now use the last six calendar months, inclusive, with exact dates
+  disclosed. `search_recency.py` carries that shared window through narrow human state/export/contact
+  follow-ups and enforces it before every search attempt and cache lookup. Explicit human dates or
+  historical requests supersede the default. Mixed date scopes and complex negation still defer to
+  model handling. Zero indexed matches do not establish that no real awards exist.
+- Thread context is paginated before resolving that window; incomplete pagination discards partial
+  history. Excel exports include a valid state code in the filename, including Google Sheets fallback.
 - Organization type falls back to conservative name classification while source-provided entity types
   remain sparse; Grant discloses that limitation in filtered results.
 - Every send passes through a human. Outreach identifies Monarch Connected, no impersonation, opt-out.

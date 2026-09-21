@@ -106,6 +106,9 @@ class RawItem:
     evidence_excerpt: str = ""
     verification_status: VerificationStatus = VerificationStatus.NEEDS_TESTING
     backfill: bool = False
+    entity_type: str = (
+        ""  # Only source-evidenced kinds; mixed/unknown recipients stay blank.
+    )
 
     def raw_json(self, cap: int = 5000) -> str:
         """Serialize valid JSON within ``cap`` without slicing through syntax.
@@ -162,6 +165,9 @@ class RawItem:
             "evidence_excerpt": self.evidence_excerpt,
             "verification_status": self.verification_status.value,
         }
+        # Preserve existing-source hashes; a new evidenced kind is a substantive fact.
+        if self.entity_type:
+            facts["entity_type"] = self.entity_type
         payload = json.dumps(facts, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
