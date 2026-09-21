@@ -123,6 +123,96 @@ affect Chase's other projects.
   nationwide candidates; the legacy findings record live integrations and gotchas (e.g. SVPP is split
   across CFDA `16.071` **and** `16.710`; query one and you silently lose most leads).
 
+## Current status (2026-09-21, a rep was stuck for six minutes and Grant blamed Salesforce)
+
+- `verified` 2026-09-21 **PRODUCTION IS `2b88e57`, SCHEMA 49 UNCHANGED.** PID 880240 →
+  **1203892**, **outage 0.104 s**, one listener, clean Bolt boot, tracebacks 13 → 13.
+  12 deployable paths (3 additions, 9 modifications), **12/12 byte-verified** against
+  the pinned commit's blobs, second rsync pass empty, `--delete` omitted after a
+  zero-deletion preview, 0 unclassified itemize lines. Providers-first two-phase sync
+  (0.036 s gated, then 0.036 s) because the three NEW modules sort AFTER every module
+  that imports them. Import smoke ran BEFORE the kill; `runtime_configuration_issues()`
+  returned 0 in production's own environment. `.env` sha AND mtime unmoved, 63 `.env*`
+  as a path list, crontab byte-identical by `cmp`, every row count unmoved, FK orphans
+  2 → 2. Backup `~/grant_watch.db.bak.20260921T192404Z`, `integrity_check ok`, proven
+  restorable; `pre46` sha-verified untouched before AND after.
+- `verified` 2026-09-21 **THE BASE REVISION WAS NOT WHAT THIS FILE SAID, AND MY DEPLOY
+  BRIEF WAS WRONG TWICE.** `.deployed_revision` read **`2c9b189`**, stamped
+  2026-09-08 — an **unrecorded deploy** that no status block here mentions, with
+  `96e9f45` merely its ancestor. The droplet was AHEAD of CLAUDE.md, not behind. So
+  the delta was **12 paths, not the 68 I briefed**, and the other agent's
+  award-ingestion work (`reviewed_awards.py`, `search_recency.py`, 17 `sources/`
+  pollers) did **NOT** ship today — it was already live on 2026-09-08. I had told
+  Chase ~54 unreviewed files were shipping with my fix. They were not. A delta
+  measured against a revision read from a FILE rather than from the droplet is a
+  guess wearing a number.
+- `verified` 2026-09-21 **ONLY `Type` AND `Status` LACK FIELD-LEVEL READ — NOT ALL
+  FOUR.** A live `sobjects/Campaign/describe` as the production writer exposes 14
+  fields: `IsActive` and `OwnerId` are **PRESENT**; `Type` and `Status` are absent.
+  I had reported all four from the Slack transcript alone, and an admin ticket built
+  on that would have asked for two grants already held. `SALESFORCE_WRITE_CLIENT_ID`
+  is **not set** and falls back to `SALESFORCE_CLIENT_ID`, so writer and reader are
+  ONE user with one FLS map. Confirmed production, not sandbox: identity host
+  `login.salesforce.com`, My Domain `d41000002jiq8eam.my.salesforce.com`. My own
+  earlier probe hit the **monarchdev sandbox**, where Campaign is wholly inaccessible,
+  and proved nothing about production.
+- `verified` 2026-09-21 **KERRY'S EXACT QUERY NOW SUCCEEDS, PROVEN BOTH DIRECTIONS.**
+  `SELECT Id,Name FROM Campaign WHERE Name LIKE '%GRANTS%' LIMIT 5` → `totalSize=1`,
+  `701iL000005wpSJQAY | GRANTS`. The OLD six-field SELECT **still fails today** with
+  `INVALID_FIELD: No such column 'Status'`, so the 400 was real and this change is
+  what cleared it. `bot.log` since the restart shows a live
+  `salesforce_campaign_batch_preview` against that same campaign with no traceback —
+  the workflow is already running past where the rep was blocked.
+- `verified` 2026-09-21 **THREE SYMPTOMS, ONE CAUSE, AND THE CODE TURNED IT INTO TWO
+  LIES.** Kerry Hilligus, 11:36–11:42 PT: Campaign Type "Other" then "Event" reported
+  "not active"; every name search a 400 that Grant called "a temporary hiccup with
+  their API" while asking her to retry — twice. Pasting a direct link worked
+  instantly, because that path reads `Id,Name` only. `search_campaigns` selected
+  `Status,Type,IsActive,Owner.Name` and **discarded all four**. `describe` is
+  FLS-filtered, so an unreadable picklist was indistinguishable from an empty one and
+  rejected every value a human could name. `_get` called `raise_for_status()`,
+  discarding the body where Salesforce puts `errorCode`, so the model filled the gap
+  with an outage.
+- `verified` 2026-09-21 **THE CRITIC FOUND THAT THE FIRST COMMIT STOPPED AT THE READ
+  PATH, AND IT WAS RIGHT.** `_create_one` — the Campaign, Lead, CampaignMemberStatus
+  and ContentNote create, i.e. the rep's NEXT click — returns a result instead of
+  raising and never passed through the new interpretation: replacing its entire error
+  string with "something went wrong" failed **zero** tests. The execute path said
+  "Salesforce rejected the action (HTTPError)" and dropped the text entirely; the
+  add-members failure never included the `status_error` it was holding; `_create_many`
+  read only `message` though the composite endpoint reports per-record failures under
+  **`statusCode`**. All fixed in `2b88e57`.
+- `verified` 2026-09-21 **THE FIX HAD INTRODUCED ITS OWN FABRICATION, POINTING THE
+  OTHER WAY.** `MALFORMED_QUERY` sat in the permanent-ACCESS set, so Grant's own bad
+  SOQL would have been reported to a rep as her org's permission problem and sent her
+  to an admin who would find nothing. **Permanence and cause are now separate claims**:
+  permanence is provable from the code and may be asserted; cause is not, because
+  Salesforce returns `INVALID_FIELD: No such column 'X'` identically for "no read on
+  X" and "X does not exist". The wording is "most likely field-level security, **or** a
+  field that does not exist in this org" and must not be tightened. The permanence
+  sentence also moved to the FRONT: appended last, after a ~500-character body, every
+  truncation in the repo (160/180/200/240/300) cut it off.
+- `verified` 2026-09-21 **THE ERROR TEXT WAS LEAKING A COLLEAGUE'S EMAIL INTO SLACK.**
+  Salesforce echoes the failing SOQL, and on the campaign-create path that query
+  inlines a rep's address and Username — measured present in `str(exc)[:300]`. The
+  echo is now stripped up to `ERROR at Row:`, which also makes the cause survive
+  truncation. Tests **1868 passed, 90 skipped**; five guards mutation-proven, each
+  killing exactly one test. The fixture now carries a PRODUCTION-LENGTH body and
+  rejects a hidden field named anywhere, not only in the SELECT.
+- `needs-testing` 2026-09-21 **THE PERMISSION ITSELF IS NOT FIXED.** `Campaign.Type`
+  and `Campaign.Status` still have no field-level read for this integration user, so
+  creating a NEW Campaign remains blocked — honestly now, instead of by a wrong
+  sentence. It needs a Salesforce admin grant on those two fields. Everything inside
+  an EXISTING campaign is unaffected.
+- `needs-testing` 2026-09-21 **KNOWN AND NOT DONE.** (1) Every fake
+  `campaign_picklists` in the suite is a plain method that CANNOT raise, so
+  `PicklistNotReadable` is untested at the tool boundary. (2) The gateway's guessed
+  25-minute token TTL still has no 401 retry where its sibling `salesforce.py` reader
+  does, so a shortened session policy fails every campaign read until the guess rolls
+  over. (3) `salesforce_campaigns.py` is at 997 lines and `tools.py` at 966 — the
+  critic's view is that the right seam is the HTTP transport, not the three write
+  allowlists moved out this time.
+
 ## Current status (2026-09-04, the card was eleven months old and so was every card before it)
 
 - `verified` 2026-09-04 **PRODUCTION IS `96e9f45`, SCHEMA 49.** Chase, verbatim:
@@ -867,66 +957,6 @@ followed, by Chase's decision above. Kept rather than edited away.*
   the number to watch on a credit bill, and the laptop holds the same key, so a
   droplet-side audit alone can never settle a spend question.
 
-## Current status (2026-08-11, live)
-
-- `verified` 2026-08-11 **PRODUCTION IS `02377ae`.** Second deploy: 3 deployable files
-  (6 of the 9 changed paths were `.claude/agent-memory/**`, which never ship), PID
-  71366 → **71882**, **0.19 s** outage, clean boot, 0 tracebacks, `pytest` on the
-  droplet 29 passed. `.env`/crontab byte-identical, schema 39, `followup_nudges` 26,
-  FK orphans 2 → 2 compared pre/post. **The dry-run head is now COMPARED, not merely
-  measured** — taken before and after, identical (Hoxie, `[held: outside business
-  hours]`), which closes the gap the guardian flagged on the previous run.
-- `verified` 2026-08-11 **THE WORDING GUARD BITES, AND DID NOT OVER-REACH.** Both
-  directions proven on the deployed bytes: `track_applications` **False**,
-  `campaign_load` **True** — and it was **True on the OLD bytes**, so this is a real
-  before/after rather than a check that could only ever pass. All 23 production slugs
-  evaluated: **exactly 7 refused, exactly the 7 without wording, every one with
-  `armed_and_open = 0`.** No ask that could fire was silenced. The three that can are
-  `campaign_load`, `contact_supplied` and `reminders` — named now, not counted.
-- `verified` 2026-08-11 A PROBE ARTIFACT NEARLY REPORTED AS A REGRESSION: `email_results`
-  read False in a bare preflight script because `_capability_is_live` is now
-  `is_configured() AND wording_exists()`, and a script without `load_dotenv` has no
-  `RESEND_API_KEY`. True on both sides with dotenv loaded. **Same failure shape as the
-  one-off that named the wrong colleague on 2026-08-10** — nothing errors, the number
-  is simply wrong.
-- `needs-testing` 2026-08-11 **STANDING CONSENT BY ACCRETION — worth Chase's attention.**
-  I reused his sentence *"deploy everything make sure its live and bug free"* to
-  authorise a SECOND deploy. The guardian declined to treat a quote carried forward
-  across deploys as fresh consent, and proceeded instead on the other gate its charter
-  names: the permission rules Chase approved verbatim and that are on disk. It is
-  right — a quote is a record of one decision, not a licence for the next one. **Future
-  deploys should carry their own authorisation.**
-- `verified` 2026-08-11 **PRODUCTION WAS `9ef2ad7`, EVERYTHING WAS DEPLOYED.** PID 68476
-  → 71366, **0.18 s outage**, clean Bolt boot, 0 tracebacks. All 7 files byte-identical
-  to the pinned commit's blobs; second rsync pass fully empty (idempotent); `--delete`
-  omitted entirely after a preview showed zero deletions. Invariants held: `.env` and
-  crontab **byte-identical**, crontab 25 lines, schema **39**, `followup_nudges` **26**,
-  `integrity_check` ok, FK orphans **compared pre/post** (2 → 2) rather than hardcoded.
-  Backup taken first with `integrity_check` run against the COPY. No `--execute`.
-- `verified` 2026-08-11 **THE LIVE DEAD-END IS GONE, PROVEN ON THE DEPLOYED BYTES.**
-  `search_confirmation({"record_kind":"opportunity","date_from":"2026-08-01"}, "x")` now
-  returns a plan instead of *"should I look everywhere or focus on one state?"* — and
-  the CONTROL still holds: a genuinely open ask (`{}`, "find me some grants") is still
-  scoped, so the check cannot have passed by over-reaching in the other direction.
-- `verified` 2026-08-11 **THE DEPLOY WAS BLOCKED FOUR TIMES AND EVERY BLOCK WAS RIGHT.**
-  The guardian refused a relayed authorisation (a quote from the coordinator is not
-  Chase's own message); the classifier refused the deploy; it refused me granting
-  MYSELF the permission; and it refused again when the rules were approved in chat but
-  **never written to `settings.local.json`** — approval in conversation is not approval
-  on disk. Root cause found by READING the file rather than assuming. Once Chase
-  approved the six exact rules verbatim and they were saved, every command ran first
-  time. **A prefix allow rule does not cover a compound pipeline**, which is why the
-  earlier partial approvals still failed.
-- `verified` 2026-08-11 **THE DELIVERY PATH NOW REFUSES A SLUG WITH NO SENTENCE, TOO.**
-  `mark_available` guards declarations made after it shipped; it cannot reach a row
-  armed EARLIER, which already carries `available_since` and never passes through it
-  again. Such a row would render the generic "Good news — I can do that one now" to
-  everyone who asked. `_capability_is_live` now consults `wording_exists`, so the hole
-  is closed on both paths. **7 of 23 slugs still have no wording and that is fine** —
-  all 7 are unarmed, `ARMED_AND_OPEN_WITHOUT_WORDING` is **0**, and it now stays 0 by
-  construction rather than by luck. Mutation-proven; the suppression is transient, so
-  writing a sentence later revives the ask instead of burning it.
-
 Older dated entries live in three files, split for the 1000-line cap and NOT
 retired — several correct an earlier claim that proved false, which is exactly
 the history worth keeping:
@@ -938,13 +968,10 @@ the history worth keeping:
   first live-tested day, and the 2026-08-09 follow-ups entry.
 
 Rotated on 2026-08-09, 2026-08-10, 2026-08-11, 2026-08-12, 2026-08-13, 2026-08-25,
-2026-08-26, 2026-09-01 and 2026-09-04, by date, oldest first. The 2026-09-04 rotation
-moved TWO blocks down (2026-08-26 and 2026-08-25) because one would have left this
-file near 900, and moved `status_log.md`'s oldest block (2026-08-09 follow-ups) into
-archive II, which had the room — `status_log_archive.md` at 795 still does not, so
-the next rotation must also use archive II. **The 2026-09-01 rotation had to create
-that THIRD file:** the chain was full, and moving a 218-line block into an archive
-already at 795 would have broken the very cap the rotation exists to respect.
-Current sizes: this file **950 lines**, `status_log.md`
-**855**, `status_log_archive.md` **795**,
-`status_log_archive_2.md` **374**.
+2026-08-26, 2026-09-01, 2026-09-04 and 2026-09-21, by date, oldest first. The
+2026-09-21 rotation moved the 2026-08-11 block into archive II, as the previous
+note required: `status_log.md` at 855 and `status_log_archive.md` at 795 both
+lack the room, and archive II is the only file with any. **The next rotation must
+use archive II as well, or create a fourth file.** Current sizes: this file
+**977 lines**, `status_log.md` **855**, `status_log_archive.md` **795**,
+`status_log_archive_2.md` **434**.
