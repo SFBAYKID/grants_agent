@@ -18,6 +18,18 @@ from urllib.parse import urlparse
 import requests
 
 from . import salesforce_privileges
+
+# Re-exported: the write boundary is defined in its own module, but importers and
+# tests have always read these off the gateway and that is the honest place to look.
+from .salesforce_write_allowlists import (  # noqa: F401
+    DO_NOT_CALL_MARKER,
+    _ALLOWED_CREATE_OBJECTS,
+    _ALLOWED_LEAD_FILL_FIELDS,
+)
+from .salesforce_rest import (
+    active_picklist_values,
+    raise_for_salesforce_status,
+)
 from .salesforce_gateway_identity import (
     _conditional_headers,
     parse_identity_url,
@@ -38,47 +50,6 @@ MAX_ACTION_ORGANIZATIONS = 100
 # code could not have said three even if asked.
 MAX_OWNER_CANDIDATES = 5
 MEMBER_STATUS = "Identified by Grant"
-# Grant never creates Salesforce activity Tasks (Chase, 2026-07-18: "we don't use
-# tasks — log it as a note"). Task is deliberately absent from the allowlist so a
-# future bug cannot create one; the grant context is logged as a ContentNote.
-_ALLOWED_CREATE_OBJECTS = {
-    "Campaign",
-    "CampaignMemberStatus",
-    "Lead",
-    "CampaignMember",
-    "Note",
-    "ContentNote",
-    "ContentDocumentLink",
-}
-# THE ONLY Lead fields Grant may write into an EXISTING record, and only while they
-# are EMPTY. This is the narrowest possible breach of the create-only rule, shaped so
-# it cannot destroy anything: no field here is ever overwritten and nothing is ever
-# cleared. Name, Company, OwnerId and Status are deliberately ABSENT — those are
-# identity and workflow, and filling them would change what a record IS and who owns
-# it, rather than what is known about it.
-_ALLOWED_LEAD_FILL_FIELDS = frozenset(
-    {
-        "Street",
-        "City",
-        "State",
-        "PostalCode",
-        "Phone",
-        "MobilePhone",
-        "Email",
-        "Title",
-        "Website",
-        "Industry",
-        "Number_of_Students__c",
-    }
-)
-
-# The exact sentence written onto an existing Lead. Code-owned and fixed: the
-# marking primitive takes no caller text at all, which is what keeps "mark this lead
-# do-not-call" from becoming "append anything to this record".
-DO_NOT_CALL_MARKER = (
-    "DO NOT CALL: this person is flagged do-not-call; any number for them must "
-    "not be dialled, including the main line below."
-)
 
 
 @dataclass(frozen=True)
@@ -352,7 +323,7 @@ class SalesforceCampaignGateway:
             headers={"Authorization": f"Bearer {token}"},
             timeout=20,
         )
-        response.raise_for_status()
+        raise_for_salesforce_status(response)
         return response.json()  # type: ignore[no-any-return]  # third-party JSON
 
     def _query_all(self, soql: str, cap: int = 5_000) -> list[dict[str, Any]]:
@@ -411,7 +382,7 @@ class SalesforceCampaignGateway:
             headers={"Authorization": f"Bearer {token}"},
             timeout=30,
         )
-        response.raise_for_status()
+        raise_for_salesforce_status(response)
         body: list[dict[str, Any]] = response.json()  # third-party collection result
         results: list[CreateResult] = []
         for item in body:
@@ -432,17 +403,15 @@ class SalesforceCampaignGateway:
         return f"{instance}/lightning/r/{sobject}/{record_id}/view"
 
     def campaign_picklists(self) -> tuple[set[str], set[str]]:
-        """Return currently valid Campaign Type and Status picklist values."""
-        body = self._get("sobjects/Campaign/describe")
-        values: dict[str, set[str]] = {"Type": set(), "Status": set()}
-        for field in body.get("fields") or []:
-            name = str(field.get("name") or "")
-            if name in values:
-                values[name] = {
-                    str(item.get("value"))
-                    for item in field.get("picklistValues") or []
-                    if item.get("active")
-                }
+        """Return currently valid Campaign Type and Status picklist values.
+
+        Raises `PicklistNotReadable` when Salesforce did not expose one of the
+        fields at all, which is a different fact from "no value is active" and
+        used to be reported as though it were the same one.
+        """
+        values = active_picklist_values(
+            self._get("sobjects/Campaign/describe"), ("Type", "Status")
+        )
         return values["Type"], values["Status"]
 
     def find_active_user_by_email(self, email: str) -> list[SalesforceRecordRef]:
@@ -494,10 +463,23 @@ class SalesforceCampaignGateway:
         ]
 
     def search_campaigns(self, name: str) -> list[SalesforceRecordRef]:
-        """Return exact/contains Campaign candidates for human selection."""
+        """Return exact/contains Campaign candidates for human selection.
+
+        The SELECT is deliberately Id and Name, the only two fields the returned
+        `SalesforceRecordRef` carries. It also asked for Status, Type, IsActive and
+        Owner.Name -- every one discarded, and any one of which answers HTTP 400
+        `INVALID_FIELD` when this integration user has no field-level read on it.
+        That is what made EVERY campaign name search fail in production on
+        2026-09-21 while pasting a Campaign link still worked, because the link
+        path reads Id and Name only. The same user already has no read on
+        `Lead.DoNotCall` (see `mark_do_not_call` below), so this is a standing
+        property of the least-privilege cutover, not a one-off.
+
+        Do not widen this list without a consumer for the field.
+        """
         literal = _soql_literal(name.strip())
         soql = (
-            "SELECT Id,Name,Status,Type,IsActive,Owner.Name FROM Campaign "
+            "SELECT Id,Name FROM Campaign "
             f"WHERE Name LIKE '%{literal}%' ORDER BY LastModifiedDate DESC LIMIT 20"
         )
         records = self._get("query", {"q": soql}).get("records") or []
