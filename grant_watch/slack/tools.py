@@ -27,6 +27,7 @@ from .contact_enrichment import (  # re-export: search.py and tests call these
     enrich_lead_contact,
 )
 from ..presentation import for_model, model_note
+from ..enrich.salesforce_rest import permanent_failure_guidance
 from .search import search_leads
 from .salesforce_campaign_tools import (
     salesforce_campaign_batch_preview,
@@ -394,7 +395,11 @@ def salesforce_campaign_search(name_or_link: str) -> str:
         else:
             records = gateway.search_campaigns(query)
     except (ValueError, KeyError, requests.RequestException) as exc:
-        return f"ERROR: Campaign search failed ({type(exc).__name__}): {str(exc)[:160]}"
+        guidance = permanent_failure_guidance(exc)
+        return (
+            f"ERROR: Campaign search failed ({type(exc).__name__}): {str(exc)[:300]}"
+            + (model_note(guidance) if guidance else "")
+        )
     if not records:
         return (
             f"No Salesforce Campaign found for '{query}'. Ask for a direct Campaign "

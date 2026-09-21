@@ -28,6 +28,7 @@ from .salesforce_campaign_ownership import (
     campaign_lead_payload,
     requester_owner,
 )
+from .salesforce_rest import picklist_refusal
 from .salesforce_campaign_policy import (
     iso_timestamp as _iso,
     now_utc as _now,
@@ -194,9 +195,9 @@ def prepare_campaign_creation(
         validate_record_id(draft.owner_id, "User")
     types, statuses = gateway.campaign_picklists()
     if draft.campaign_type not in types:
-        raise ValueError(f"Campaign Type '{draft.campaign_type}' is not active")
+        raise ValueError(picklist_refusal("Type", draft.campaign_type, types))
     if draft.status not in statuses:
-        raise ValueError(f"Campaign Status '{draft.status}' is not active")
+        raise ValueError(picklist_refusal("Status", draft.status, statuses))
     action_seed = str(uuid.uuid4())
     payload = draft.payload(action_seed, requester)
     try:

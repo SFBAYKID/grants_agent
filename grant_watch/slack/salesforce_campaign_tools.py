@@ -16,6 +16,8 @@ from ..enrich.salesforce_campaign_batch import prepare_campaign_batch
 from ..enrich.salesforce_campaign_batch_models import CampaignTargetRequest
 from ..enrich.salesforce_campaign_gateway import SalesforceCampaignGateway
 from ..enrich.salesforce_campaign_models import PreparedAction
+from ..enrich.salesforce_rest import permanent_failure_guidance
+from ..presentation import model_note
 
 CAMPAIGN_CREATE_TOOL_SCHEMA: dict[str, Any] = {
     "name": "salesforce_campaign_create_preview",
@@ -209,8 +211,10 @@ def salesforce_campaign_create_preview(
         sqlite3.IntegrityError,
         requests.RequestException,
     ) as exc:
+        guidance = permanent_failure_guidance(exc)
         return (
-            f"ERROR: Campaign preview failed ({type(exc).__name__}): {str(exc)[:180]}"
+            f"ERROR: Campaign preview failed ({type(exc).__name__}): {str(exc)[:300]}"
+            + (model_note(guidance) if guidance else "")
         )
     return f"{action.preview}\n{_action_marker(action)}"
 
@@ -265,9 +269,11 @@ def salesforce_campaign_batch_preview(
             allow_resolved_only=bool(args.get("allow_resolved_only", False)),
         )
     except (ValueError, PermissionError, KeyError, requests.RequestException) as exc:
+        guidance = permanent_failure_guidance(exc)
         return (
             "ERROR: Campaign batch preview failed "
-            f"({type(exc).__name__}): {str(exc)[:240]}"
+            f"({type(exc).__name__}): {str(exc)[:300]}"
+            + (model_note(guidance) if guidance else "")
         )
     markers = "\n".join(_action_marker(action) for action in batch.actions)
     return f"{batch.summary}\n{markers}".strip()

@@ -82,6 +82,10 @@ def test_writer_scope_verifies_exact_sandbox_org(
     class Response:
         """Return one authoritative sandbox Organization row."""
 
+        #: Real responses always carry a status; the gateway now reads it so it can
+        #: quote Salesforce's own error text instead of a bare "400 Bad Request".
+        status_code = 200
+
         def raise_for_status(self) -> None:
             """Model a successful identity query."""
 
@@ -137,6 +141,9 @@ def test_writer_scope_fails_closed_on_identity_mismatch(
 
     class Response:
         """Return a configurable Organization identity."""
+
+        #: See the note above: a fake without a status cannot model a real one.
+        status_code = 200
 
         def raise_for_status(self) -> None:
             """Model a successful HTTP response."""
