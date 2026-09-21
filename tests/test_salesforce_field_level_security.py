@@ -2,14 +2,20 @@
 
 Production, 2026-09-21: a rep asked Grant to put Oregon leads into a Salesforce
 campaign. Every Campaign Type she named came back "not active", every campaign name
-search came back a 400 that Grant described as a temporary hiccup, and the task was
-abandoned. Neither statement was true. The integration user simply has no
-field-level read on `Campaign.Type`, `Status`, `IsActive` and `OwnerId` -- the same
-gap already documented for `Lead.DoNotCall` -- and the code turned that one
-permission fact into two confident, wrong sentences.
+search came back HTTP 400 that Grant described as "a temporary hiccup with their
+API", and the task was abandoned. Neither statement was true. The integration user
+simply has no field-level read on `Campaign.Type`, `Status`, `IsActive` and
+`OwnerId` -- the same gap already documented for `Lead.DoNotCall` -- and the code
+turned one permission fact into two confident, wrong sentences.
 
-These fixtures model Salesforce's REAL contract: describe OMITS a field the user
-cannot read, and a SELECT naming one answers HTTP 400 INVALID_FIELD.
+These fixtures model Salesforce's REAL contract, which is what the repo's previous
+fixture failures did not:
+
+- describe OMITS a field the user cannot read, rather than returning it empty;
+- a hidden field answers 400 INVALID_FIELD wherever it appears, SELECT or WHERE;
+- the error body is ~400 characters of echoed SOQL before the actual sentence, so
+  anything appended after it is truncated away before a rep sees it;
+- a create reports per-record failures under `statusCode`, not `errorCode`.
 """
 
 from __future__ import annotations
@@ -21,9 +27,17 @@ import requests
 
 from grant_watch.enrich import salesforce_campaign_gateway as gw
 from grant_watch.enrich import salesforce_rest
+from grant_watch.presentation import for_human
 
 #: Fields this integration user cannot read, exactly as production behaves.
 _HIDDEN = ("Type", "Status", "IsActive", "OwnerId", "Owner.Name")
+
+#: The OLD query, kept so the fixture's precondition can be asserted against the
+#: thing it is supposed to reject rather than against a constant.
+_OLD_SOQL = (
+    "SELECT Id,Name,Status,Type,IsActive,Owner.Name FROM Campaign "
+    "WHERE Name LIKE '%GRANTS%' ORDER BY LastModifiedDate DESC LIMIT 20"
+)
 
 
 class _Response:
@@ -42,15 +56,23 @@ class _Response:
         return self._payload
 
 
-def _invalid_field(field: str) -> _Response:
-    """Salesforce's actual answer when a SELECT names an unreadable field."""
+def _invalid_field(field: str, soql: str = _OLD_SOQL) -> _Response:
+    """Salesforce's ACTUAL answer, at production length.
+
+    A real INVALID_FIELD body echoes the whole failing query, a caret, a row/column
+    marker and a closing advice paragraph. The short fixture this file first used
+    was ~90 characters, which hid the fact that every rep-facing caller truncates.
+    """
     return _Response(
         400,
         [
             {
                 "message": (
-                    f"\nSELECT ... FROM Campaign\n       ^\nERROR at Row:1:Column:8\n"
-                    f"No such column '{field}' on entity 'Campaign'."
+                    f"\n{soql}\n{' ' * 30}^\nERROR at Row:1:Column:53\n"
+                    f"No such column '{field}' on entity 'Campaign'. If you are "
+                    "attempting to use a custom field, be sure to append the '__c' "
+                    "after the custom field name. Please reference your WSDL or the "
+                    "describe call for the appropriate names."
                 ),
                 "errorCode": "INVALID_FIELD",
             }
@@ -66,51 +88,61 @@ def gateway(monkeypatch: pytest.MonkeyPatch) -> gw.SalesforceCampaignGateway:
         "_auth",
         lambda self, force=False: ("tok", "https://x.my.salesforce.com"),
     )
+    monkeypatch.setattr(
+        gw.SalesforceCampaignGateway, "verify_write_scope", lambda self: None
+    )
     return gw.SalesforceCampaignGateway()
+
+
+def _hidden_field_in(soql: str) -> str:
+    """Return the first unreadable field named ANYWHERE in the query.
+
+    Salesforce rejects a hidden field in a WHERE or an ORDER BY exactly as it
+    rejects one in a SELECT. A fake that inspects only the SELECT clause lets three
+    of the five hidden names through, which is how a WHERE-clause regression would
+    have passed this whole file.
+    """
+    return next((field for field in _HIDDEN if field in soql), "")
 
 
 def test_campaign_name_search_survives_a_least_privilege_user(
     gateway: gw.SalesforceCampaignGateway, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """THE production failure: searching by name must not 400 on unused fields.
-
-    Mutation control: restore any of the four discarded fields to the SELECT and
-    this fails, because the fake rejects them exactly as Salesforce does.
-    """
+    """THE production failure: searching by name must not 400 on unused fields."""
     seen: list[str] = []
 
     def fake_get(url: str, **kwargs: Any) -> _Response:
-        """Reject any SELECT naming a field this user may not read."""
+        """Reject any query naming a field this user may not read, anywhere."""
         soql = kwargs.get("params", {}).get("q", "")
         seen.append(soql)
-        selected = soql.split(" FROM ")[0] if " FROM " in soql else soql
-        for field in _HIDDEN:
-            if field in selected:
-                return _invalid_field(field)
+        hidden = _hidden_field_in(soql)
+        if hidden:
+            return _invalid_field(hidden, soql)
         return _Response(
             200, {"records": [{"Id": "701iL000005wpSJQAY", "Name": "GRANTS"}]}
         )
 
     monkeypatch.setattr(gw.requests, "get", fake_get)
 
+    # The precondition that makes this test meaningful, asserted against the OLD
+    # query rather than against a constant the helper was handed.
+    assert fake_get("", params={"q": _OLD_SOQL}).status_code == 400
+
     found = gateway.search_campaigns("GRANTS")
 
     assert [record.name for record in found] == ["GRANTS"]
     assert found[0].record_id == "701iL000005wpSJQAY"
-    # The precondition that makes this test meaningful: the fake WOULD have refused
-    # the old query, so a pass here cannot be an accident of a permissive fixture.
-    assert _invalid_field("Type").status_code == 400
-    assert "Type" not in seen[0] and "IsActive" not in seen[0]
+    assert not _hidden_field_in(seen[-1]), f"query still names a hidden field: {seen}"
 
 
 def test_an_unreadable_picklist_is_reported_as_unreadable_not_inactive(
     gateway: gw.SalesforceCampaignGateway, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Describe omits an invisible field; that is not evidence any value is inactive."""
-
-    def fake_get(url: str, **kwargs: Any) -> _Response:
-        """Return a describe payload with Type withheld by field-level security."""
-        return _Response(
+    monkeypatch.setattr(
+        gw.requests,
+        "get",
+        lambda url, **kwargs: _Response(
             200,
             {
                 "fields": [
@@ -122,9 +154,8 @@ def test_an_unreadable_picklist_is_reported_as_unreadable_not_inactive(
                     },
                 ]
             },
-        )
-
-    monkeypatch.setattr(gw.requests, "get", fake_get)
+        ),
+    )
 
     with pytest.raises(salesforce_rest.PicklistNotReadable) as excinfo:
         gateway.campaign_picklists()
@@ -132,18 +163,17 @@ def test_an_unreadable_picklist_is_reported_as_unreadable_not_inactive(
     message = str(excinfo.value)
     assert "Type" in message
     assert "field-level security" in message
-    # It must NOT claim anything about which values are active.
-    assert "not active" not in message
+    assert "not active" not in message, "it must not claim anything about values"
 
 
 def test_a_readable_picklist_still_returns_its_active_values(
     gateway: gw.SalesforceCampaignGateway, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Control: the ordinary path is unchanged, and inactive values stay excluded."""
-
-    def fake_get(url: str, **kwargs: Any) -> _Response:
-        """Return a describe payload exposing both fields."""
-        return _Response(
+    monkeypatch.setattr(
+        gw.requests,
+        "get",
+        lambda url, **kwargs: _Response(
             200,
             {
                 "fields": [
@@ -160,9 +190,8 @@ def test_a_readable_picklist_still_returns_its_active_values(
                     },
                 ]
             },
-        )
-
-    monkeypatch.setattr(gw.requests, "get", fake_get)
+        ),
+    )
 
     types, statuses = gateway.campaign_picklists()
 
@@ -201,9 +230,49 @@ def test_salesforce_explains_its_own_400_instead_of_a_bare_status_line(
     message = str(excinfo.value)
     assert "INVALID_FIELD" in message
     assert "No such column 'Type'" in message
-    assert "retrying will not help" in message
-    # Still an HTTPError, so every existing `except requests.RequestException` holds.
+    assert "Retrying will not help" in message
     assert isinstance(excinfo.value, requests.RequestException)
+
+
+def test_the_cause_survives_every_truncation_a_rep_facing_caller_applies(
+    gateway: gw.SalesforceCampaignGateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE reason the permanence sentence goes first, at production body length.
+
+    Measured: the real message is ~500 characters. Appended last, the permanence
+    sentence was cut at every truncation in the repo -- 160, 180, 200, 240 and 300 --
+    so it existed and no rep ever saw it.
+    """
+    monkeypatch.setattr(
+        gw.requests, "get", lambda url, **kwargs: _invalid_field("Type")
+    )
+
+    with pytest.raises(requests.HTTPError) as excinfo:
+        gateway._get("query", {"q": _OLD_SOQL})
+
+    message = str(excinfo.value)
+    assert len(_invalid_field("Type").json()[0]["message"]) > 350, "fixture too short"
+    for cut in (160, 180, 200, 240, 300):
+        assert "Retrying will not help" in message[:cut], f"lost at [:{cut}]"
+
+
+def test_the_echoed_query_is_stripped_so_a_colleagues_email_does_not_reach_slack(
+    gateway: gw.SalesforceCampaignGateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Salesforce echoes the failing SOQL, which on the create path inlines a rep."""
+    leaky = (
+        "SELECT Id,Name,Username FROM User "
+        "WHERE Email='kerry@monarchconnected.com' AND IsActive=true"
+    )
+    monkeypatch.setattr(
+        gw.requests, "get", lambda url, **kwargs: _invalid_field("IsActive", leaky)
+    )
+
+    with pytest.raises(requests.HTTPError) as excinfo:
+        gateway._get("query", {"q": leaky})
+
+    assert "kerry@monarchconnected.com" not in str(excinfo.value)
+    assert "No such column 'IsActive'" in str(excinfo.value)
 
 
 def test_a_genuinely_transient_failure_is_not_labelled_permanent(
@@ -221,46 +290,113 @@ def test_a_genuinely_transient_failure_is_not_labelled_permanent(
     with pytest.raises(requests.HTTPError) as excinfo:
         gateway._get("query", {"q": "SELECT Id FROM Campaign"})
 
-    assert "retrying will not help" not in str(excinfo.value)
+    assert "Retrying will not help" not in str(excinfo.value)
     assert "SERVER_UNAVAILABLE" in str(excinfo.value)
 
 
-def test_a_non_json_error_body_falls_back_to_its_own_text(
-    gateway: gw.SalesforceCampaignGateway, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An ugly true string beats a tidy invented one."""
-    monkeypatch.setattr(
-        gw.requests,
-        "get",
-        lambda url, **kwargs: _Response(502, None, text="<html>Bad Gateway</html>"),
+def test_grants_own_bad_query_is_never_blamed_on_the_customers_permissions() -> None:
+    """A malformed query is permanent AND ours; a rep must not be sent to an admin."""
+    response = _Response(
+        400, [{"message": "unexpected token: 'FROMM'", "errorCode": "MALFORMED_QUERY"}]
     )
 
-    with pytest.raises(requests.HTTPError) as excinfo:
-        gateway._get("query", {"q": "SELECT Id FROM Campaign"})
+    note = salesforce_rest.permanence_note(response)
+    guidance = salesforce_rest.permanent_failure_guidance(
+        requests.HTTPError("x", response=response)
+    )
 
-    assert "Bad Gateway" in str(excinfo.value)
+    assert "retrying will not help" in note.lower()
+    assert "defect in Grant" in note
+    assert "field-level security" not in note
+    assert "bug in Grant" in guidance
+    assert "Salesforce admin" not in guidance.replace(
+        "do NOT send the rep to a Salesforce admin", ""
+    )
+
+
+def test_a_write_side_permission_failure_is_classified_permanent() -> None:
+    """The likeliest failure of the rep's NEXT step: adding members to a Campaign."""
+    response = _Response(
+        400,
+        [
+            {
+                "message": "insufficient access rights on cross-reference id",
+                "errorCode": "INSUFFICIENT_ACCESS_ON_CROSS_REFERENCE_ENTITY",
+            }
+        ],
+    )
+
+    assert salesforce_rest.is_permanent_error(response)
+    assert salesforce_rest.is_access_error(response)
+
+
+def test_a_composite_per_record_failure_reports_under_status_code() -> None:
+    """Batched Lead and CampaignMember creates use `statusCode`, not `errorCode`."""
+    response = _Response(
+        400,
+        [
+            {
+                "message": "No such column 'Type'",
+                "statusCode": "INVALID_FIELD_FOR_INSERT_UPDATE",
+            }
+        ],
+    )
+
+    assert salesforce_rest.error_codes(response) == {"INVALID_FIELD_FOR_INSERT_UPDATE"}
+    assert salesforce_rest.is_access_error(response)
+
+
+def test_a_rejected_create_carries_the_reason_not_a_bare_status(
+    gateway: gw.SalesforceCampaignGateway, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The create path returns a result instead of raising, and was never improved.
+
+    This is the Campaign, Lead, CampaignMemberStatus and ContentNote create -- the
+    rep's next click after the search this fix unblocked.
+    """
+    monkeypatch.setattr(
+        gw.requests,
+        "post",
+        lambda url, **kwargs: _Response(
+            400,
+            [
+                {
+                    "message": "Unable to create/update fields: Type.",
+                    "errorCode": "INVALID_FIELD_FOR_INSERT_UPDATE",
+                }
+            ],
+        ),
+    )
+
+    result = gateway.create_campaign({"Name": "OREGON grants", "Type": "Other"})
+
+    assert result.success is False
+    assert "INVALID_FIELD_FOR_INSERT_UPDATE" in result.error
+    assert "Type" in result.error
+    assert "Retrying will not help" in result.error
 
 
 def test_a_permission_failure_forbids_the_retry_advice_that_looped_a_rep() -> None:
     """The judgement travels with the error, because the response is gone by then."""
-    response = _invalid_field("Type")
-    error = requests.HTTPError("HTTP 400 from Salesforce", response=response)
+    error = requests.HTTPError("x", response=_invalid_field("Type"))
 
     guidance = salesforce_rest.permanent_failure_guidance(error)
 
-    assert "Do NOT suggest retrying" in guidance
-    assert "admin change" in guidance
+    assert "Do NOT suggest waiting, trying again" in guidance
+    assert "Salesforce admin" in guidance
 
 
 def test_a_transient_failure_gets_no_permanence_guidance() -> None:
     """Control: a real outage must still be describable as one."""
     response = _Response(503, [{"message": "down", "errorCode": "SERVER_UNAVAILABLE"}])
-    error = requests.HTTPError("HTTP 503", response=response)
 
-    assert salesforce_rest.permanent_failure_guidance(error) == ""
     assert (
-        salesforce_rest.permanent_failure_guidance(ValueError("something else")) == ""
+        salesforce_rest.permanent_failure_guidance(
+            requests.HTTPError("x", response=response)
+        )
+        == ""
     )
+    assert salesforce_rest.permanent_failure_guidance(ValueError("other")) == ""
 
 
 def test_an_unreadable_picklist_forbids_asking_the_rep_to_guess() -> None:
@@ -269,14 +405,14 @@ def test_an_unreadable_picklist_forbids_asking_the_rep_to_guess() -> None:
         salesforce_rest.PicklistNotReadable("Type withheld")
     )
 
-    assert "do NOT ask the rep which values" in guidance.replace("Do NOT", "do NOT")
+    assert "Do NOT ask the rep which values" in guidance
     assert "admin" in guidance
 
 
 def test_the_campaign_search_tool_hands_the_model_the_permanence_note(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """End to end at the tool boundary: the rep-facing path carries the guidance."""
+    """End to end at the tool boundary, at production body length."""
     from grant_watch.slack import tools
 
     monkeypatch.setattr(
@@ -292,8 +428,5 @@ def test_the_campaign_search_tool_hands_the_model_the_permanence_note(
 
     assert result.startswith("ERROR: Campaign search failed")
     assert "INVALID_FIELD" in result, "the rep-facing path must carry the real cause"
-    assert "Do NOT suggest retrying" in result
-    # The guidance is for the model only and must never be shown verbatim.
-    from grant_watch.presentation import for_human
-
-    assert "Do NOT suggest retrying" not in for_human(result)
+    assert "Do NOT suggest waiting" in result
+    assert "Do NOT suggest waiting" not in for_human(result), "guidance is model-only"

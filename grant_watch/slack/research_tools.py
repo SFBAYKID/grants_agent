@@ -20,6 +20,7 @@ import requests
 
 from .. import db
 from ..presentation import model_note
+from ..enrich.salesforce_rest import permanent_failure_guidance
 
 Progress = Callable[[str], None]
 
@@ -237,7 +238,11 @@ def salesforce_campaign_status(name_or_link: str) -> str:
             campaign = found[0]
             campaign_id = campaign.record_id
     except (ValueError, KeyError, requests.RequestException) as exc:
-        return f"ERROR: Campaign lookup failed ({type(exc).__name__}): {str(exc)[:160]}"
+        guidance = permanent_failure_guidance(exc)
+        return (
+            f"ERROR: Campaign lookup failed ({type(exc).__name__}): {str(exc)[:300]}"
+            + (model_note(guidance) if guidance else "")
+        )
 
     conn = db.connect()
     added = conn.execute(

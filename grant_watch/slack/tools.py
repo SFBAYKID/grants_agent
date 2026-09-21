@@ -495,7 +495,11 @@ def salesforce_campaign_members_preview(
             allow_resolved_only=bool(args.get("allow_resolved_only", False)),
         )
     except (ValueError, PermissionError, KeyError, requests.RequestException) as exc:
-        return f"ERROR: Campaign member preview failed ({type(exc).__name__}): {str(exc)[:180]}"
+        guidance = permanent_failure_guidance(exc)
+        return (
+            f"ERROR: Campaign member preview failed ({type(exc).__name__}): "
+            f"{str(exc)[:300]}" + (model_note(guidance) if guidance else "")
+        )
     return _crm_action_result(
         action.action_id, action.nonce, action.preview, action.expires_at
     )
@@ -597,9 +601,11 @@ def salesforce_contact_record_preview(
             int(args["contact_id"]) if args.get("contact_id") is not None else None,
         )
     except (ValueError, PermissionError, KeyError, requests.RequestException) as exc:
+        guidance = permanent_failure_guidance(exc)
         return (
             "ERROR: contact record preview failed "
-            f"({type(exc).__name__}): {str(exc)[:200]}"
+            f"({type(exc).__name__}): {str(exc)[:300]}"
+            + (model_note(guidance) if guidance else "")
         )
     return _crm_action_result(
         action.action_id, action.nonce, action.preview, action.expires_at

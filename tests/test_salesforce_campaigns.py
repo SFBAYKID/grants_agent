@@ -46,7 +46,11 @@ class FakeGateway:
     campaign_name: str = "Grant QA"
 
     def campaign_picklists(self) -> tuple[set[str], set[str]]:
-        """Return the sandbox-verified defaults used by Grant-created Campaigns."""
+        """Return a WORKING org's picklists, so this fixture exercises the happy path.
+
+        Sandbox-only. Production rejects BOTH of these values -- that is the
+        2026-09-21 incident -- so do not read this as a claim about production.
+        """
         return {"Other", "Event"}, {"Planned", "In Progress"}
 
     def search_campaigns(self, _name: str) -> list[campaigns.SalesforceRecordRef]:

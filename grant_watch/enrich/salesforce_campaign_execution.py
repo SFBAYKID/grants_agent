@@ -796,7 +796,8 @@ def execute_membership(
             )
         return ActionExecution(
             CampaignActionState.FAILED,
-            f"No members were added because {MEMBER_STATUS} could not be created.",
+            f"No members were added because {MEMBER_STATUS} could not be created. "
+            f"Salesforce said: {status_error[:300]}",
         )
     item_rows = list(
         conn.execute(

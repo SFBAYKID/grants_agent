@@ -28,7 +28,8 @@ from .salesforce_campaign_ownership import (
     campaign_lead_payload,
     requester_owner,
 )
-from .salesforce_rest import picklist_refusal
+from .salesforce_rest import permanent_failure_guidance, picklist_refusal
+from ..presentation import model_note
 from .salesforce_campaign_policy import (
     iso_timestamp as _iso,
     now_utc as _now,
@@ -983,7 +984,14 @@ def confirm_action(
             CampaignActionState.FAILED,
             error=f"{type(exc).__name__}: {str(exc)[:300]}",
         )
+        # The reason travels with the refusal. This message used to name only the
+        # exception CLASS, so an HTTPError carrying "INVALID_FIELD ... retrying
+        # will not help" reached a rep as "Salesforce rejected the action
+        # (HTTPError)" -- the 2026-09-21 incident, one button-click later.
+        guidance = permanent_failure_guidance(exc)
         return ActionExecution(
             CampaignActionState.FAILED,
-            f"Salesforce rejected the action ({type(exc).__name__}); nothing was submitted.",
+            f"Salesforce rejected the action; nothing was submitted. "
+            f"{type(exc).__name__}: {str(exc)[:300]}"
+            + (model_note(guidance) if guidance else ""),
         )

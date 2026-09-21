@@ -21,13 +21,14 @@ from . import salesforce_privileges
 
 # Re-exported: the write boundary is defined in its own module, but importers and
 # tests have always read these off the gateway and that is the honest place to look.
-from .salesforce_write_allowlists import (  # noqa: F401
+from .salesforce_write_allowlists import (
     DO_NOT_CALL_MARKER,
     _ALLOWED_CREATE_OBJECTS,
     _ALLOWED_LEAD_FILL_FIELDS,
 )
 from .salesforce_rest import (
     active_picklist_values,
+    create_failure_detail,
     raise_for_salesforce_status,
 )
 from .salesforce_gateway_identity import (
@@ -354,9 +355,11 @@ class SalesforceCampaignGateway:
             timeout=20,
         )
         if response.status_code not in (200, 201):
-            return CreateResult(
-                False, error=f"HTTP {response.status_code}: {response.text[:200]}"
-            )
+            # Carries Salesforce's own code and, where it is knowable, whether a
+            # human can do anything about it. This path used to emit a bare status
+            # and raw JSON, and it is the one the rep reaches immediately AFTER the
+            # search that this fix unblocked.
+            return CreateResult(False, error=create_failure_detail(response))
         body: dict[str, Any] = (
             response.json()
         )  # Salesforce create JSON is runtime-shaped
@@ -387,7 +390,18 @@ class SalesforceCampaignGateway:
         results: list[CreateResult] = []
         for item in body:
             errors = item.get("errors") or []
-            error = "; ".join(str(err.get("message") or err) for err in errors)
+            error = "; ".join(
+                ": ".join(
+                    piece
+                    for piece in (
+                        str(err.get("statusCode") or err.get("errorCode") or ""),
+                        str(err.get("message") or ""),
+                    )
+                    if piece
+                )
+                or str(err)
+                for err in errors
+            )
             results.append(
                 CreateResult(
                     bool(item.get("success")),
@@ -439,7 +453,9 @@ class SalesforceCampaignGateway:
             return []
         literal = _soql_literal(clean)
         soql = (
-            "SELECT Id,Name,Email,Username FROM User "
+            # Email is FILTERED on below but never read back, so it is not in
+            # the SELECT: an unreadable field named in a SELECT is a 400.
+            "SELECT Id,Name,Username FROM User "
             f"WHERE IsActive=true AND (Email='{literal}' OR Username='{literal}') "
             f"LIMIT {MAX_OWNER_CANDIDATES}"
         )
