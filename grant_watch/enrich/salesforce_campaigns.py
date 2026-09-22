@@ -424,7 +424,7 @@ def prepare_membership(
                     gateway, requester
                 )
             proposed_lead, note, person_name = campaign_lead_payload(
-                conn, row, requester, action_seed, organization_owner
+                conn, row, requester, action_seed, organization_owner, gateway
             )
             if person_name:
                 created_people[key] = person_name

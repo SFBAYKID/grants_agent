@@ -24,6 +24,15 @@ from grant_watch.enrich.salesforce_contact_records import contact_lead_payload
 from grant_watch.models import FundingEventType, Lead, LeadGrade, RawItem
 from tests.contact_support import verified_contact_evidence
 
+
+class _RecordTypes:
+    """The one gateway call campaign_lead_payload makes: the record type lookup."""
+
+    def lead_record_type_id(self, developer_name: str) -> str:
+        """Resolve the production Verkada Lead record type id."""
+        return "0122M000000viFyQAI" if developer_name == "Verkada" else ""
+
+
 OWNER = SalesforceRecordRef(
     "User", "005000000000001", "Test Rep", "https://writer.salesforce.test/u"
 )
@@ -196,7 +205,9 @@ def test_a_campaign_lead_carries_the_person_when_grant_has_one(tmp_path: Path) -
         email="dreyes@imperialusd.org",
         status="verified",
     )
-    payload, note, person = campaign_lead_payload(conn, lead, "UREP", "act", OWNER)
+    payload, note, person = campaign_lead_payload(
+        conn, lead, "UREP", "act", OWNER, _RecordTypes()
+    )
     assert person == "Dana Reyes"
     assert payload["FirstName"] == "Dana"
     assert payload["LastName"] == "Reyes"
@@ -216,7 +227,9 @@ def test_a_campaign_lead_stays_organization_only_without_a_verified_person(
     """
     conn = db.connect(tmp_path / "orgonly.db")
     bare = _lead_row(conn, entity="SAVANNA SCHOOL DISTRICT")
-    payload, _note, person = campaign_lead_payload(conn, bare, "UREP", "act", OWNER)
+    payload, _note, person = campaign_lead_payload(
+        conn, bare, "UREP", "act", OWNER, _RecordTypes()
+    )
     assert person == ""
     assert payload["LastName"] == "SAVANNA SCHOOL DISTRICT"
     assert "FirstName" not in payload
@@ -230,7 +243,9 @@ def test_a_campaign_lead_stays_organization_only_without_a_verified_person(
         email="",
         status="linkedin_only",
     )
-    payload, _note, person = campaign_lead_payload(conn, linked, "UREP", "act", OWNER)
+    payload, _note, person = campaign_lead_payload(
+        conn, linked, "UREP", "act", OWNER, _RecordTypes()
+    )
     assert person == ""
     assert payload["LastName"] == "CORNING UNION HIGH SCHOOL DISTRICT"
     assert "Title" not in payload

@@ -974,8 +974,9 @@ class SalesforceCampaignGateway:
     def lead_record_type_id(self, developer_name: str) -> str:
         """Resolve one active Lead RecordType id by DeveloperName, or '' if absent.
 
-        Cached per gateway instance; failing closed to '' lets the caller omit
-        RecordTypeId and inherit the org default rather than send a bad id."""
+        Cached per PROCESS, and only on success: a transient failure cached as ''
+        would refuse every Lead create until restart. The writer's default type is
+        Master, which Salesforce rejects, so callers must not treat '' as usable."""
         if developer_name in _RECORD_TYPE_CACHE:
             return _RECORD_TYPE_CACHE[developer_name]
         soql = (
@@ -988,6 +989,7 @@ class SalesforceCampaignGateway:
             records = body.get("records") or []
             record_id = str(records[0]["Id"]) if records else ""
         except (requests.RequestException, KeyError, IndexError):
-            record_id = ""
-        _RECORD_TYPE_CACHE[developer_name] = record_id
+            return ""
+        if record_id:
+            _RECORD_TYPE_CACHE[developer_name] = record_id
         return record_id

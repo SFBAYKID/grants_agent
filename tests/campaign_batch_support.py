@@ -23,6 +23,15 @@ CAMPAIGNS = {
 }
 
 
+# The production Verkada Lead record type (measured 2026-09-22). The writer's
+# DEFAULT type is Master, which Salesforce rejects, so fakes refuse a Lead create
+# that omits RecordTypeId exactly as production does.
+VERKADA_RECORD_TYPE_ID = "0122M000000viFyQAI"
+MISSING_RECORD_TYPE_ERROR = (
+    "CANNOT_INSERT_UPDATE_ACTIVATE_ENTITY: record type missing for: Lead"
+)
+
+
 def campaign_link(sobject: str, record_id: str) -> str:
     """Build one fake Lightning URL for the configured sandbox writer."""
     return f"https://writer.salesforce.test/lightning/r/{sobject}/{record_id}/view"
@@ -41,6 +50,11 @@ class BatchGateway:
     write_mode: str = "normal"
     create_member_calls: int = 0
     reconciliation_delays: tuple[float, ...] = (0.0, 0.0, 0.0)
+    record_type_id: str = VERKADA_RECORD_TYPE_ID
+
+    def lead_record_type_id(self, developer_name: str) -> str:
+        """Resolve the Verkada type, or '' as the real gateway does on failure."""
+        return self.record_type_id if developer_name == "Verkada" else ""
 
     def verify_write_scope(self) -> SalesforceOrganizationIdentity:
         """Return one frozen sandbox identity."""

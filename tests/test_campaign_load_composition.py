@@ -24,7 +24,13 @@ from grant_watch.enrich.salesforce_campaign_gateway import (
 )
 from grant_watch.models import LeadGrade
 
-from campaign_batch_support import CAMPAIGNS, BatchGateway, campaign_link, insert_leads
+from campaign_batch_support import (
+    CAMPAIGNS,
+    MISSING_RECORD_TYPE_ERROR,
+    BatchGateway,
+    campaign_link,
+    insert_leads,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -69,6 +75,9 @@ class NellyGateway(BatchGateway):
         """Create Leads and register them so the readback in execution succeeds."""
         results: list[CreateResult] = []
         for index, payload in enumerate(payloads, start=1):
+            if not payload.get("RecordTypeId"):
+                results.append(CreateResult(False, "", MISSING_RECORD_TYPE_ERROR))
+                continue
             record_id = f"00Qorg{index:012d}"
             self.records[record_id] = SalesforceRecordRef(
                 "Lead",
