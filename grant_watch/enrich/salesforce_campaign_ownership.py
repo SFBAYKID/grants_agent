@@ -106,8 +106,9 @@ def campaign_lead_payload(
     campaign built this way could not contain a POC by construction, even for the
     organizations where Grant had already verified one.
 
-    A person Lead is built only from a `verified` contact — a name and role read
-    verbatim off the organization's own page. `linkedin_only` is deliberately
+    A person Lead is built from a `verified` contact — a name and role read
+    verbatim off the organization's own page — or, failing that, a ZoomInfo
+    `vendor_licensed` one, labelled as such. `linkedin_only` is deliberately
     excluded here even though the single-record approval path accepts it: that path
     shows one named person on a card a human reads, while this one creates up to a
     hundred at a time, and an unverified identity written a hundred times is a
@@ -123,8 +124,8 @@ def campaign_lead_payload(
     entity = str(row["entity_name"] or "")
     entity_key = db.canonical_entity_key(entity).partition("|")[0]
 
-    def rank(contact: sqlite3.Row) -> tuple[int, int]:
-        """Higher sorts better: a title Monarch sells to, then the fresher row.
+    def rank(contact: sqlite3.Row) -> tuple[int, int, int]:
+        """Higher sorts better: page-verified, a title Monarch sells to, fresher.
 
         `contacts_for_lead` returns oldest id first, so taking the first verified
         row meant a 2019 import beat a contact found this morning. This is the same
@@ -133,13 +134,21 @@ def campaign_lead_payload(
         """
         title = str(contact["title"] or "").strip().lower()
         relevant = any(word in title for word in DECISION_MAKER_TITLES)
-        return (1 if relevant else 0, int(contact["id"]))
+        verified = 1 if db.contact_is_page_verified(contact) else 0
+        return (verified, 1 if relevant else 0, int(contact["id"]))
 
+    # ZOOMINFO CONTACTS COUNT TOO (Chase, 2026-09-22: "use fire crawl if we need to
+    # or … zoom info"). Paid-for vendor contacts were excluded, so a campaign built
+    # after `fill-contacts` still produced nameless Leads. They are real licensed
+    # records, not guesses; the Description says "Supplied by ZoomInfo … NOT
+    # verified", and a do-not-call person's phone was blanked at storage and is
+    # flagged first in that Description. A page-verified contact still wins.
     verified = sorted(
         (
             contact
             for contact in db.contacts_for_lead(conn, int(row["id"]))
             if db.contact_is_page_verified(contact)
+            or str(contact["contact_status"] or "") == "vendor_licensed"
         ),
         key=rank,
         reverse=True,
@@ -157,7 +166,11 @@ def campaign_lead_payload(
         title = str(payload.get("Title") or "").strip()
         return (
             payload,
-            f"Verified contact {name}"
+            (
+                f"Verified contact {name}"
+                if db.contact_is_page_verified(contact)
+                else f"ZoomInfo contact {name} (vendor data, not page-verified)"
+            )
             + (f", {title}" if title else ", role not verified")
             + f"; owner is {owner.name}.",
             name,
