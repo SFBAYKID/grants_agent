@@ -563,6 +563,8 @@ _SCHOOL_ANGLES = (
     "{entity} {state} staff directory",
     "{entity} {state} principal contact",
 )
+# Roles searched ON a verified official site, most valuable to Monarch first.
+_SITE_ROLES = ("technology director", "superintendent", "staff directory")
 _CITY_ANGLES = (
     "{entity} {state} city manager email",
     "{entity} {state} IT director email",
@@ -590,7 +592,11 @@ def _angles_for(entity: str) -> tuple[str, ...]:
 
 
 def find_contact(
-    entity: str, state: str, max_pages: int = 6, on_progress: Progress | None = None
+    entity: str,
+    state: str,
+    max_pages: int = 6,
+    on_progress: Progress | None = None,
+    official_site: str = "",
 ) -> ContactCandidate | None:
     """Full pipeline for one entity. Runs several title-targeted searches, scrapes the
     most promising pages, and returns the first VERIFIED contact (prefers higher-value
@@ -602,6 +608,12 @@ def find_contact(
                                contact (a truthful not_found),
       - SourceUnreachable   -> we never actually read a page (search/scrape/extract all
                                failed); the caller must record NOTHING, not not_found.
+
+    `official_site` is a website already VERIFIED as the organization's own (the
+    NCES-published district site). When given, the search starts on that site and
+    its pages count as official without the name-in-snippet test. On 2026-09-22
+    four Oregon districts returned only snippets that test rejected — so no page
+    was ever read — while NCES had published each district's website all along.
     """
     say = on_progress or _NOOP
     say("Searching for the contact")
@@ -610,8 +622,14 @@ def find_contact(
     reached_search = False  # at least one Firecrawl search returned without error
     pages_read = 0  # real (>=200 char) pages we actually scraped
     clean_extractions = 0  # extractions that completed (gave a definite yes/no)
-    official_domain = ""
-    for angle in _angles_for(entity):
+    known_domain = _host(official_site) if official_site else ""
+    official_domain = known_domain
+    site_angles = (
+        tuple(f"site:{known_domain} {role}" for role in _SITE_ROLES)
+        if known_domain
+        else ()
+    )
+    for angle in site_angles + _angles_for(entity):
         query = angle.format(entity=entity, state=state)
         try:
             results = _search(query, limit=4)
@@ -620,7 +638,10 @@ def find_contact(
         reached_search = True
         for r in results:
             url = r.get("url") or ""
-            if not url or url in seen_urls or not _looks_official(entity, state, r):
+            on_known_site = _same_site(_host(url), known_domain)
+            if not url or url in seen_urls:
+                continue
+            if not on_known_site and not _looks_official(entity, state, r):
                 continue
             candidate_domain = _host(url)
             if official_domain and not _same_site(candidate_domain, official_domain):
@@ -688,6 +709,34 @@ def names_match(requested: str, found: str) -> bool:
     return wanted[0][:1] == got[0][:1]
 
 
+# Words too common in organization names to tie a profile to one organization.
+_ORG_FILLER = frozenset(
+    "school schools district county city church congregation association club inc "
+    "incorporated the of and for center community foundation services service "
+    "united christian academy education educational public".split()
+)
+
+
+def _profile_names_org(entity: str, context: str, result: dict[str, Any]) -> bool:
+    """Whether a LinkedIn result's own text names every distinctive word of the org.
+
+    Distinctive = 3+ letters and not organization filler. Numbers ("SD 7") and
+    filler are ignored, so "Harrisburg School District 7" needs "harrisburg".
+    """
+    words = [
+        w
+        for w in re.findall(r"[a-z]+", entity.lower())
+        if len(w) >= 3 and w not in _ORG_FILLER
+    ]
+    if not words:
+        return False
+    text = " ".join(
+        [context, str(result.get("description") or ""), str(result.get("title") or "")]
+    ).lower()
+    squashed = re.sub(r"[^a-z]", "", text)
+    return all(re.search(rf"\b{w}\b", text) or w in squashed for w in words)
+
+
 def linkedin_person(
     entity: str,
     state: str,
@@ -741,6 +790,13 @@ def linkedin_person(
         # Only return parts[0] when it actually reads as a person (H2) — a title-led
         # card must fall through to the next result, never become a "person" Lead.
         if not (name and _looks_like_person_name(name)):
+            continue
+        # THE PROFILE MUST NAME THIS ORGANIZATION. Without this check the first
+        # human-shaped result won: on 2026-09-22 Asante got someone whose title read
+        # "ALABASTER CITY SCHOOL DISTRICT", and B'nai Brith Mens Camp (OR) got a camp
+        # director in Montreal. A person the result does not tie to the org is not
+        # evidence about the org.
+        if not _profile_names_org(entity, " ".join(parts[1:]), r):
             continue
         # A named request must be answered by that person or by nobody. Returning
         # the next plausible human would attribute a real stranger to the name the
