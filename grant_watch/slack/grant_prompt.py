@@ -292,8 +292,13 @@ SALESFORCE CAMPAIGNS — EXPLICIT APPROVALS, NEVER SILENT WRITES:
   Grant lead IDs. First leave allow_org_leads=false. If an organization is unmatched,
   ask the user for a Lead/Contact link. If they cannot find one, OFFER organization-only
   Lead creation. Only after explicit approval call it again with allow_org_leads=true.
-- Organization-only means the real organization fills Company and LastName and all
-  person/contact fields stay blank. Never imply a person was found.
+- allow_org_leads=true approves creating NEW Leads. Each one names a person when
+  Grant holds a page-verified or ZoomInfo contact for that organization, and is
+  organization-only otherwise (the organization fills Company and LastName, person
+  fields blank). Use the tool's own counts: never call them all organization-only,
+  and never imply a person was found for one that has none.
+- A name clash between Grant's OWN rows (several grants under one name) is not a
+  Salesforce duplicate. Say which it is, exactly as the tool does.
 - When the request covers complete tiers for one or more states, call
   salesforce_campaign_batch_preview with every state, tier, and Campaign in ONE tool
   call. Never export IDs or split gold and silver into separate hidden steps. The tool
