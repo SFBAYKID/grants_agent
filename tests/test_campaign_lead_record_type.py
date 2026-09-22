@@ -234,3 +234,14 @@ def test_a_page_verified_contact_still_beats_a_newer_zoominfo_one(
     _payload_, note, person = _payload(conn, lead_id)
     assert person == "Dana Reyes"
     assert note.startswith("Verified contact Dana Reyes")
+
+
+def test_the_card_never_calls_a_zoominfo_person_verified(tmp_path: Path) -> None:
+    """The live 2026-09-22 card said "26 for a verified named person" — all ZoomInfo."""
+    conn = db.connect(tmp_path / "t.db")
+    lead_id = _lead(conn, "OR7", "SHERIDAN SCHOOL DISTRICT", "OR")
+    _vendor(conn, lead_id, dnc=False)
+    preview = _prepare(conn, FakeGateway(), lead_id).preview
+    assert "create Lead for Pat Rivera (ZoomInfo)" in preview
+    assert "1 naming a person (1 from ZoomInfo" in preview
+    assert "verified named person" not in preview
