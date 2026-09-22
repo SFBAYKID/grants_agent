@@ -19,6 +19,10 @@ from urllib.parse import urlparse
 from .. import db
 from ..entity_identity import confirmed_single_organizations
 from ..migrations_campaign_attempts import ATTEMPT_STATES
+from .salesforce_campaign_batch_text import (
+    GRANT_ROW_COLLISION_NOTE,
+    blocked_remedies,
+)
 from .salesforce_campaign_batch_models import (
     CampaignTargetRequest,
     PreparedCampaignBatch,
@@ -653,7 +657,7 @@ def _prepare_campaign_batch(
                 resolution_state, ref, note = (
                     "ambiguous",
                     None,
-                    "Multiple Grant rows share only a name/state identity.",
+                    GRANT_ROW_COLLISION_NOTE,
                 )
             else:
                 lookup_key = db.canonical_entity_key(
@@ -758,31 +762,9 @@ def _prepare_campaign_batch(
     )
     lines = [_target_summary(target) for target in targets]
     if blocked and not allow_resolved_only:
-        counts: dict[str, int] = defaultdict(int)
-        for item in pending:
-            counts[str(item["resolution_state"])] += 1
-        # Name the exact remedy for each reason. "Resolve exact records" told a rep
-        # nothing about WHICH lever clears WHICH organization, and Grant relayed the
-        # refusal as Salesforce's ("Salesforce didn't hand back a confirmation
-        # button") when it is this function's own policy.
-        remedies: list[str] = []
-        if counts["missing"]:
-            remedies.append(
-                f"{counts['missing']} have no Salesforce record at all — approve "
-                "organization-only Leads so I can create them"
-            )
-        if counts["ambiguous"]:
-            remedies.append(
-                f"{counts['ambiguous']} match more than one Salesforce record — "
-                "you can tell me to leave those out, or fix them in Salesforce; "
-                "Grant never picks between duplicates"
-            )
-        if counts["account_only"]:
-            remedies.append(
-                f"{counts['account_only']} exist only as an Account, which cannot be "
-                "a Campaign Member — you can tell me to leave those out, or add a "
-                "Lead/Contact in Salesforce"
-            )
+        # Each reason names its own remedy and its true count; see
+        # salesforce_campaign_batch_text for the two false sentences this replaced.
+        remedies = blocked_remedies(conn, pending)
         summary = (
             f"Grant has not created any confirmation button yet, because "
             f"{len(pending)} organization(s) still need a decision from you. "

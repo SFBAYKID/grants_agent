@@ -259,8 +259,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "description": "Prepare, but DO NOT execute, an exact preview for adding a "
         "frozen list of Grant lead IDs to a human-confirmed Campaign. "
         "First try existing Leads/Contacts. Set allow_org_leads=true "
-        "only after the user explicitly approves creating organization-only "
-        "Leads for unmatched organizations.",
+        "only after the user explicitly approves creating new Leads for "
+        "unmatched organizations (named where Grant has a contact, "
+        "organization-only otherwise).",
         "input_schema": {
             "type": "object",
             "properties": {
