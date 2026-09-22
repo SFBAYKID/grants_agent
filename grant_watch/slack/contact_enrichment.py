@@ -113,6 +113,7 @@ def enrich_lead_contact(
             str(lead["entity_name"]),
             str(lead["state"] or ""),
             on_progress=on_progress,
+            official_site=_verified_nces_website(lead),
         )
         if candidate is None:
             return _fallback_contact(conn, lead, lead_id, on_progress)
@@ -191,6 +192,16 @@ def enrich_lead_contact(
         return _recall_prior_outcome(conn, lead, lead_id) or ContactOutcome(
             "needs_operator_retry"
         )
+
+
+def _verified_nces_website(lead: sqlite3.Row) -> str:
+    """The NCES-published district website, only when its status is `verified`."""
+    keys = lead.keys()
+    if "nces_website" not in keys or "nces_website_status" not in keys:
+        return ""
+    if str(lead["nces_website_status"] or "") != "verified":
+        return ""
+    return str(lead["nces_website"] or "")
 
 
 def _best_linkedin_contact(rows: list[sqlite3.Row]) -> sqlite3.Row | None:

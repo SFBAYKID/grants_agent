@@ -55,7 +55,9 @@ def test_a_recovered_source_is_read_again(
     lead_id = _lead(conn)
     attempts: list[str] = []
 
-    def flaky(entity: str, state: str, on_progress: object = None) -> object:
+    def flaky(
+        entity: str, state: str, on_progress: object = None, official_site: str = ""
+    ) -> object:
         """Fail the first call the way a 429 or a timeout does, then succeed."""
         attempts.append(entity)
         if len(attempts) == 1:
@@ -106,7 +108,9 @@ def test_a_genuinely_indeterminate_attempt_is_still_held(
     lead_id = _lead(conn)
     calls: list[int] = []
 
-    def boom(entity: str, state: str, on_progress: object = None) -> object:
+    def boom(
+        entity: str, state: str, on_progress: object = None, official_site: str = ""
+    ) -> object:
         """Fail in a way that could have reached a paid provider."""
         calls.append(1)
         raise RuntimeError("provider connection dropped mid-request")

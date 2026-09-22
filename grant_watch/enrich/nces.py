@@ -143,17 +143,64 @@ def parse_districts(
     return districts
 
 
+# Award data writes an education service district out in full or abbreviated
+# ("LANE EDUCATION SERVICE DISTRICT", "GRANT COUNTY EDU SVC DIST"); NCES says "ESD".
+_ESD_RE = re.compile(r"\b(?:education|edu)\s+(?:service|svc)\s+(?:district|dist)\b")
+
+
+def _loose_key(name: str) -> str:
+    """A second, looser key: ESD spelled one way, joint/county letters off numbers.
+
+    Oregon's award rows say "HARRISBURG SCHOOL DISTRICT 7" and "CENTRAL LINN SCHOOL
+    DISTRICT 552C"; NCES says "Harrisburg SD 7J" and "Central Linn SD 552". The
+    trailing letters are joint-district designations, not a different number.
+    """
+    text = _ESD_RE.sub(" esd ", name.lower())
+    tokens = normalize_name(text).split()
+    return " ".join(re.sub(r"^(\d+)[a-z]+$", r"\1", token) for token in tokens)
+
+
+def _without_number(key: str) -> str:
+    """The key with its district-number tokens removed ("sheridan 48" -> "sheridan")."""
+    return " ".join(token for token in key.split() if not token[:1].isdigit())
+
+
 def match_district(
     entity_name: str, districts: list[NCESDistrict]
 ) -> NCESDistrict | None:
-    """Return only a unique exact normalized-name match; ambiguity is no match."""
+    """Return one UNIQUE match, trying stricter keys first; ambiguity is no match.
+
+    1. Exact normalized name.
+    2. The loose key (ESD spelling, joint-district letters) on both sides.
+    3. Only when the award name says "district" and carries NO district number:
+       the NCES name with its number dropped ("SHERIDAN SCHOOL DISTRICT" -> "Sheridan SD 48J"). An award
+       name that states a number must match that number.
+    Every tier requires exactly one candidate across the whole state, so two
+    districts that share a place name bind neither. On 2026-09-22 only 5 of 16
+    Oregon award districts matched exactly; the rest differed only in these ways.
+    """
     key = normalize_name(entity_name)
     if not key:
         return None
-    matches = [
-        district for district in districts if normalize_name(district.name) == key
+    loose = _loose_key(entity_name)
+    tiers = [
+        lambda district: normalize_name(district.name) == key,
+        lambda district: _loose_key(district.name) == loose,
     ]
-    return matches[0] if len(matches) == 1 else None
+    # Tier 3 needs the award to NAME a district: a private "Sheridan School" must
+    # never bind to the public "Sheridan SD 48J".
+    says_district = re.search(r"\b(district|dist|esd|sd)\b", entity_name.lower())
+    if says_district and loose == _without_number(loose):
+        tiers.append(
+            lambda district: _without_number(_loose_key(district.name)) == loose
+        )
+    for tier in tiers:
+        matches = [district for district in districts if tier(district)]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            return None
+    return None
 
 
 def _safe_published_website(value: str) -> str:
