@@ -426,8 +426,9 @@ def prepare_membership(
             proposed_lead, note, person_name = campaign_lead_payload(
                 conn, row, requester, action_seed, organization_owner, gateway
             )
-            if person_name:
-                created_people[key] = person_name
+            if person_name:  # the card must say a ZoomInfo person is vendor data
+                vendor = " (ZoomInfo)" if note.startswith("ZoomInfo") else ""
+                created_people[key] = person_name + vendor
             plan = MemberPlan(
                 int(row["id"]),
                 key,
@@ -560,7 +561,9 @@ def prepare_membership(
         counted.append(
             f"    - {creating} new Leads, created first then added"
             + (
-                f" — {with_person} for a verified named person, "
+                f" — {with_person} naming a person ("
+                f"{sum(n.endswith('(ZoomInfo)') for n in created_people.values())} "
+                "from ZoomInfo, not checked against their own site), "
                 f"{creating - with_person} organization-only with no contact name"
                 if with_person
                 else ", all organization-only with no contact name"
