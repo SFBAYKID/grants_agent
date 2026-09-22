@@ -17,6 +17,7 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 from .. import db
+from ..entity_identity import confirmed_single_organizations
 from ..migrations_campaign_attempts import ATTEMPT_STATES
 from .salesforce_campaign_batch_models import (
     CampaignTargetRequest,
@@ -143,6 +144,7 @@ def _selection_rows(
 
 def _group_rows(rows: list[sqlite3.Row]) -> list[dict[str, object]]:
     """Aggregate every source row and tier under one authoritative organization."""
+    confirmed = confirmed_single_organizations()
     by_name_state: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for row in rows:
         key = db.canonical_entity_key(str(row["entity_name"]), str(row["state"] or ""))
@@ -173,7 +175,10 @@ def _group_rows(rows: list[sqlite3.Row]) -> list[dict[str, object]]:
                 # neighboring NCES entity. Preserve it separately and fail closed.
                 grouped[f"unbound:{fallback_key}"] = (unmatched, True)
         else:
-            grouped[fallback_key] = (members, len(members) > 1)
+            # A human-confirmed single organization is not a collision; see
+            # entity_identity for why this is a reviewed list and not a rule.
+            collision = len(members) > 1 and fallback_key not in confirmed
+            grouped[fallback_key] = (members, collision)
     organizations: list[dict[str, object]] = []
     for key in sorted(grouped):
         members, collision = grouped[key]

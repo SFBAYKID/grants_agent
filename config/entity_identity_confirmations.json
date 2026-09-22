@@ -1,0 +1,130 @@
+{
+  "_comment": "Canonical name|STATE keys a person confirmed are ONE organization despite several Grant rows sharing only a name and state (read by grant_watch/entity_identity.py). The 2026-09-22 Oregon set: 25 of the 26 excluded from Kerry's GRANTS batch, confirmed by Chase in Claude Code on 2026-09-22 choosing 'Merge, skip Chabad'. Evidence at the time: no two rows shared a Sub-Award ID; 12 were several subawards under one prime, 14 the same name winning again in later cycles. CHABAD CENTER FOR JEWISH LIFE is deliberately ABSENT: identically named Chabad centres exist in several Oregon cities and nothing stored separates them. Add an entry only on a human's confirmation, with who and when.",
+  "confirmations": [
+    {
+      "canonical_entity_key": "arch cape falcon cove beach community club inc|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "b nai brith mens camp association|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "boys and girls clubs of bend|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "boys girls club of salem marion polk counties inc|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "central christian school|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "chabad of hillsboro oregon inc|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "chabad of northeast portland|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "congregation beth israel|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "congregation kesser israel|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "congregation neveh shalom|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "evergreen aviation and space museum and the captain michael king smith educational institute|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "grande ronde hospital inc|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "harrisburg school district 7|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "lake health district|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "linfield university|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "oregon museum of science and industry|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "planned parenthood of the columbia willamette inc|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "portland jewish academy inc|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "salem jewish congregation|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "santiam memorial hospital|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "st mary s academy the dalles|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "sutherlin family church|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "temple beth israel of eugene|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "wallowa band nez perce trail interpretive center inc|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    },
+    {
+      "canonical_entity_key": "willamette university|OR",
+      "confirmed_by": "Chase",
+      "confirmed_on": "2026-09-22"
+    }
+  ]
+}

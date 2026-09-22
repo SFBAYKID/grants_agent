@@ -75,6 +75,10 @@ class FakeGateway:
             state="CA",
         )
 
+    def lead_record_type_id(self, developer_name: str) -> str:
+        """Resolve the production Verkada Lead record type id."""
+        return "0122M000000viFyQAI" if developer_name == "Verkada" else ""
+
     def find_people(
         self, entity_name: str, _state: str
     ) -> list[campaigns.SalesforceRecordRef]:
@@ -122,12 +126,19 @@ class FakeGateway:
     def create_leads(
         self, payloads: list[dict[str, object]]
     ) -> list[gateway_mod.CreateResult]:
-        """Return one unique Salesforce Lead ID per approved org payload."""
+        """Return one unique Salesforce Lead ID per approved org payload.
+
+        Refuses a payload without RecordTypeId as production does: the writer's
+        default Lead type is Master, which Salesforce rejects."""
         self.calls.append("create_leads")
         self.created_lead_payloads.extend(payloads)
         return [
             gateway_mod.CreateResult(True, f"00Q0000000000{index:02d}")
-            for index, _payload in enumerate(payloads, start=10)
+            if payload.get("RecordTypeId")
+            else gateway_mod.CreateResult(
+                False, "", "CANNOT_INSERT_UPDATE_ACTIVATE_ENTITY: record type missing"
+            )
+            for index, payload in enumerate(payloads, start=10)
         ]
 
     def create_members(

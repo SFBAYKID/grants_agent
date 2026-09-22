@@ -23,6 +23,7 @@ _ID_PREFIXES = {
     "User": "005",
     "Organization": "00D",
     "Note": "002",
+    "RecordType": "012",
 }
 
 

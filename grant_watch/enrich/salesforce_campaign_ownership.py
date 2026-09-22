@@ -1,4 +1,9 @@
-"""Requester ownership policy for organization-only Salesforce Leads."""
+"""Requester ownership and Lead shape for Leads a Campaign batch creates.
+
+Decides who owns a new Lead, which record type it carries, and whether it names a
+verified person or only the organization. Pure payload construction plus two
+read-only Salesforce lookups (the owning user and the record type id).
+"""
 
 from __future__ import annotations
 
@@ -10,6 +15,32 @@ from .salesforce_campaign_gateway import (
     SalesforceRecordRef,
     validate_record_id,
 )
+from .salesforce_contact_fields import LEAD_RECORD_TYPE
+
+# Salesforce's hard limit on Lead.LastName. Long organization names (Catholic
+# dioceses, museum foundations) exceeded it and failed with "data value too large".
+LAST_NAME_MAX = 80
+
+
+def required_lead_record_type(gateway: SalesforceCampaignGateway) -> str:
+    """Return the Verkada Lead record type id, or raise if it cannot be resolved.
+
+    WHY THIS FAILS CLOSED. Omitting RecordTypeId used to be safe because the
+    creating user's default was Verkada. Since the writer became the integration
+    user, whose default is Master, an omitted type fails every create with "record
+    type missing for: Lead" — 29 Leads on 2026-08-27 and 52 on 2026-09-22, after a
+    rep had already approved them. Refusing at PREVIEW time tells the rep before
+    they approve anything instead of after.
+    """
+    record_type_id = gateway.lead_record_type_id(LEAD_RECORD_TYPE)
+    if not record_type_id:
+        raise ValueError(
+            f"Salesforce did not return the {LEAD_RECORD_TYPE} Lead record type for "
+            "Grant's integration user, so new Leads cannot be created (retrying may "
+            "help if Salesforce was briefly unreachable)"
+        )
+    validate_record_id(record_type_id, "RecordType")
+    return record_type_id
 
 
 def organization_lead_payload(
@@ -17,16 +48,22 @@ def organization_lead_payload(
     requester: str,
     action_id: str,
     owner: SalesforceRecordRef,
+    record_type_id: str,
 ) -> dict[str, object]:
-    """Build an honest organization-only Lead owned by the requesting Salesforce rep."""
+    """Build an honest organization-only Lead owned by the requesting Salesforce rep.
+
+    LastName is the organization cut to Salesforce's 80-character limit; Company
+    keeps the full name, so nothing is lost and the readback still matches.
+    """
     validate_record_id(owner.record_id, "User")
     entity = str(row["entity_name"] or "").strip()
     from .salesforce_contact_records import grant_summary, organization_fields
 
     payload: dict[str, object] = {
         "Company": entity,
-        "LastName": entity,
+        "LastName": entity[:LAST_NAME_MAX].rstrip(),
         "OwnerId": owner.record_id,
+        "RecordTypeId": record_type_id,
         "Status": "New",
         "LeadSource": "Other",
         "Description": (
@@ -54,6 +91,7 @@ def campaign_lead_payload(
     requester: str,
     action_id: str,
     owner: SalesforceRecordRef,
+    gateway: SalesforceCampaignGateway,
 ) -> tuple[dict[str, object], str, str]:
     """Build the best Lead this organization can honestly get, and say which it is.
 
@@ -68,8 +106,9 @@ def campaign_lead_payload(
     campaign built this way could not contain a POC by construction, even for the
     organizations where Grant had already verified one.
 
-    A person Lead is built only from a `verified` contact — a name and role read
-    verbatim off the organization's own page. `linkedin_only` is deliberately
+    A person Lead is built from a `verified` contact — a name and role read
+    verbatim off the organization's own page — or, failing that, a ZoomInfo
+    `vendor_licensed` one, labelled as such. `linkedin_only` is deliberately
     excluded here even though the single-record approval path accepts it: that path
     shows one named person on a card a human reads, while this one creates up to a
     hundred at a time, and an unverified identity written a hundred times is a
@@ -80,12 +119,13 @@ def campaign_lead_payload(
 
     from ..enrich.zoominfo_enrichment import DECISION_MAKER_TITLES
 
+    record_type_id = required_lead_record_type(gateway)
     row = db.get_lead(conn, int(row["id"])) or row
     entity = str(row["entity_name"] or "")
     entity_key = db.canonical_entity_key(entity).partition("|")[0]
 
-    def rank(contact: sqlite3.Row) -> tuple[int, int]:
-        """Higher sorts better: a title Monarch sells to, then the fresher row.
+    def rank(contact: sqlite3.Row) -> tuple[int, int, int]:
+        """Higher sorts better: page-verified, a title Monarch sells to, fresher.
 
         `contacts_for_lead` returns oldest id first, so taking the first verified
         row meant a 2019 import beat a contact found this morning. This is the same
@@ -94,13 +134,21 @@ def campaign_lead_payload(
         """
         title = str(contact["title"] or "").strip().lower()
         relevant = any(word in title for word in DECISION_MAKER_TITLES)
-        return (1 if relevant else 0, int(contact["id"]))
+        verified = 1 if db.contact_is_page_verified(contact) else 0
+        return (verified, 1 if relevant else 0, int(contact["id"]))
 
+    # ZOOMINFO CONTACTS COUNT TOO (Chase, 2026-09-22: "use fire crawl if we need to
+    # or … zoom info"). Paid-for vendor contacts were excluded, so a campaign built
+    # after `fill-contacts` still produced nameless Leads. They are real licensed
+    # records, not guesses; the Description says "Supplied by ZoomInfo … NOT
+    # verified", and a do-not-call person's phone was blanked at storage and is
+    # flagged first in that Description. A page-verified contact still wins.
     verified = sorted(
         (
             contact
             for contact in db.contacts_for_lead(conn, int(row["id"]))
             if db.contact_is_page_verified(contact)
+            or str(contact["contact_status"] or "") == "vendor_licensed"
         ),
         key=rank,
         reverse=True,
@@ -112,17 +160,23 @@ def campaign_lead_payload(
         # produce exactly the nameless hybrid this is here to stop producing.
         if not last or db.canonical_entity_key(name).partition("|")[0] == entity_key:
             continue
-        payload = contact_lead_payload(row, contact, requester, action_id, owner)
+        payload = contact_lead_payload(
+            row, contact, requester, action_id, owner, record_type_id
+        )
         title = str(payload.get("Title") or "").strip()
         return (
             payload,
-            f"Verified contact {name}"
+            (
+                f"Verified contact {name}"
+                if db.contact_is_page_verified(contact)
+                else f"ZoomInfo contact {name} (vendor data, not page-verified)"
+            )
             + (f", {title}" if title else ", role not verified")
             + f"; owner is {owner.name}.",
             name,
         )
     return (
-        organization_lead_payload(row, requester, action_id, owner),
+        organization_lead_payload(row, requester, action_id, owner, record_type_id),
         "No individual contact verified; organization name fills Company "
         f"and LastName; owner is {owner.name}.",
         "",

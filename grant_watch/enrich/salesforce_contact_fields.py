@@ -207,7 +207,9 @@ def _row_value(row: sqlite3.Row, column: str) -> str:
 
 
 # The Lead record type Grant's leads belong to (resolved by DeveloperName at
-# runtime; this is the org default and the correct type for these prospects).
+# runtime). It is NOT the writer's default: measured 2026-09-22, the integration
+# user's default Lead type is Master, which Salesforce rejects with "record type
+# missing for: Lead". Every Grant Lead create must therefore send it explicitly.
 LEAD_RECORD_TYPE = "Verkada"
 _SCHOOL_RE = re.compile(
     r"\b(school|schools|district|academy|isd|usd|elementary|k-?12|charter)\b",

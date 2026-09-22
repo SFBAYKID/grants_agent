@@ -30,7 +30,7 @@ from .salesforce_campaign_models import (
     MemberPlan,
     PreparedAction,
 )
-from .salesforce_campaign_ownership import requester_owner
+from .salesforce_campaign_ownership import required_lead_record_type, requester_owner
 from .salesforce_campaign_policy import (
     iso_timestamp,
     now_utc,
@@ -534,9 +534,9 @@ def prepare_contact_record(
     mode = "attach_existing" if target is not None else "new_lead"
     # Org address/phone/general email were gathered during find_contact and read
     # from the lead row here; prepare performs no network scraping of its own.
-    record_type_id = (
-        gateway.lead_record_type_id(LEAD_RECORD_TYPE) if target is None else ""
-    )
+    # Resolved only for a new Lead; an unresolvable type refuses here, at preview,
+    # rather than after the rep has approved a create Salesforce will reject.
+    record_type_id = required_lead_record_type(gateway) if target is None else ""
     lead_payload = (
         None
         if target is not None
